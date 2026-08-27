@@ -14,10 +14,19 @@ import { getDatabase } from '../../db/index.js';
 
 export const GATEWAY_TOKEN_PREFIX = 'plum_gw_';
 
+/**
+ * `read` may only issue safe HTTP methods; `write` is the previous behaviour,
+ * i.e. everything the owning user can do. Anything finer would have to mirror
+ * the whole route table and drift out of sync with it — the same trap the
+ * gateway avoids by reusing the user's endpoints in the first place.
+ */
+export type GatewayScope = 'read' | 'write';
+
 export interface GatewayTokenRow {
   id: string;
   name: string;
   tokenPrefix: string;
+  scope: GatewayScope;
   revoked: boolean;
   lastUsedAt: string | null;
   createdAt: string;
@@ -29,7 +38,8 @@ function hashToken(token: string): string {
 
 export function createGatewayToken(
   userId: string,
-  name: string
+  name: string,
+  scope: GatewayScope = 'write'
 ): { token: string; row: GatewayTokenRow } {
   const secret = randomBytes(32).toString('base64url');
   const token = `${GATEWAY_TOKEN_PREFIX}${secret}`;
@@ -39,10 +49,10 @@ export function createGatewayToken(
 
   getDatabase()
     .prepare(
-      `INSERT INTO gateway_tokens (id, user_id, name, token_hash, token_prefix)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO gateway_tokens (id, user_id, name, token_hash, token_prefix, scope)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
-    .run(id, userId, name.trim() || 'gateway', hashToken(token), tokenPrefix);
+    .run(id, userId, name.trim() || 'gateway', hashToken(token), tokenPrefix, scope);
 
   return {
     token,
@@ -50,6 +60,7 @@ export function createGatewayToken(
       id,
       name: name.trim() || 'gateway',
       tokenPrefix,
+      scope,
       revoked: false,
       lastUsedAt: null,
       createdAt: new Date().toISOString(),
@@ -60,7 +71,7 @@ export function createGatewayToken(
 export function listGatewayTokens(userId: string): GatewayTokenRow[] {
   const rows = getDatabase()
     .prepare(
-      `SELECT id, name, token_prefix AS tokenPrefix, revoked,
+      `SELECT id, name, token_prefix AS tokenPrefix, scope, revoked,
               last_used_at AS lastUsedAt, created_at AS createdAt
          FROM gateway_tokens WHERE user_id = ? ORDER BY created_at DESC`
     )
@@ -80,15 +91,21 @@ export function revokeGatewayToken(userId: string, id: string): boolean {
  * stored hash: the lookup is by hash anyway, but a plain string equality here
  * would leak timing on the hash itself.
  */
-export function resolveGatewayToken(token: string): string | null {
+export interface ResolvedGatewayToken {
+  userId: string;
+  scope: GatewayScope;
+}
+
+export function resolveGatewayToken(token: string): ResolvedGatewayToken | null {
   if (!token.startsWith(GATEWAY_TOKEN_PREFIX)) return null;
 
   const presented = hashToken(token);
   const row = getDatabase()
     .prepare(
-      'SELECT id, user_id AS userId, token_hash AS tokenHash FROM gateway_tokens WHERE token_hash = ? AND revoked = 0'
+      `SELECT id, user_id AS userId, token_hash AS tokenHash, scope
+         FROM gateway_tokens WHERE token_hash = ? AND revoked = 0`
     )
-    .get(presented) as { id: string; userId: string; tokenHash: string } | undefined;
+    .get(presented) as { id: string; userId: string; tokenHash: string; scope: string } | undefined;
   if (!row) return null;
 
   const a = Buffer.from(row.tokenHash, 'hex');
@@ -96,7 +113,9 @@ export function resolveGatewayToken(token: string): string | null {
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
 
   touchLastUsed(row.id);
-  return row.userId;
+  // Anything unrecognised is treated as read-only: a corrupt value must not
+  // widen a token's rights.
+  return { userId: row.userId, scope: row.scope === 'write' ? 'write' : 'read' };
 }
 
 const lastUsedWrites = new Map<string, number>();

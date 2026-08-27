@@ -10,6 +10,7 @@ interface GatewayToken {
   id: string;
   name: string;
   tokenPrefix: string;
+  scope: 'read' | 'write';
   revoked: boolean;
   lastUsedAt: string | null;
   createdAt: string;
@@ -23,6 +24,9 @@ interface GatewayToken {
 export function GatewayTokensPanel() {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
+  // Read-only has to be chosen deliberately: defaulting to it would break a
+  // supervisor that needs to act, and the server keeps 'write' as its default.
+  const [readOnly, setReadOnly] = useState(false);
   const [issued, setIssued] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -38,7 +42,7 @@ export function GatewayTokensPanel() {
     mutationFn: async () => {
       const response = await api.post<ApiResponse<GatewayToken & { token: string }>>(
         '/api/gateway/tokens',
-        { name: name.trim() || 'gateway' }
+        { name: name.trim() || 'gateway', scope: readOnly ? 'read' : 'write' }
       );
       return response.data.data;
     },
@@ -87,6 +91,16 @@ export function GatewayTokensPanel() {
         </Button>
       </form>
 
+      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={readOnly}
+          onChange={(event) => setReadOnly(event.target.checked)}
+          className="h-3.5 w-3.5 accent-primary"
+        />
+        Read-only — the token may query everything but cannot change anything.
+      </label>
+
       {issued && (
         <div className="rounded-lg border border-primary/40 bg-primary/5 p-3">
           <p className="text-xs text-muted-foreground">
@@ -123,7 +137,7 @@ export function GatewayTokensPanel() {
               <span className="min-w-0">
                 <span className="block truncate text-sm">{token.name}</span>
                 <span className="block text-xs text-muted-foreground">
-                  {token.tokenPrefix}… ·{' '}
+                  {token.tokenPrefix}… · {token.scope === 'read' ? 'read-only' : 'full access'} ·{' '}
                   {token.lastUsedAt ? `last used ${token.lastUsedAt}` : 'never used'}
                 </span>
               </span>

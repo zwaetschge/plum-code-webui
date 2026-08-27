@@ -29,6 +29,9 @@ const router = Router();
 
 const createTokenSchema = z.object({
   name: z.string().min(1).max(80),
+  // Defaults to the historical behaviour so existing callers keep working;
+  // read-only has to be asked for.
+  scope: z.enum(['read', 'write']).optional().default('write'),
 });
 
 /** A gateway must not mint credentials — that turns read access into persistence. */
@@ -51,7 +54,7 @@ router.post('/tokens', requireAuth, (req: Request, res: Response) => {
     throw new AppError('A token name is required', 400, 'VALIDATION_ERROR');
   }
   const userId = (req as AuthenticatedRequest).userId;
-  const { token, row } = createGatewayToken(userId, parsed.data.name);
+  const { token, row } = createGatewayToken(userId, parsed.data.name, parsed.data.scope);
   // The only time the secret is ever returned.
   res.json({ success: true, data: { ...row, token } });
 });

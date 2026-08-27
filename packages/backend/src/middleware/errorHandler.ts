@@ -1,6 +1,9 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import type { ApiError } from '@plum-code-webui/shared';
 import { randomUUID } from 'crypto';
+import { createLogger, withRequestContext } from '../utils/logger.js';
+
+const log = createLogger('http');
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -38,10 +41,12 @@ export const requestIdMiddleware: RequestHandler = (req, res, next) => {
   const id = incoming && /^[A-Za-z0-9._-]{1,128}$/.test(incoming) ? incoming : randomUUID();
   req.id = id;
   res.setHeader('X-Request-Id', id);
-  next();
+  // Everything downstream runs inside this context, so any logger call made
+  // while handling the request is correlated without being handed the id.
+  withRequestContext({ requestId: id }, () => next());
 };
 
-interface ErrorLogContext {
+interface ErrorLogContext extends Record<string, unknown> {
   requestId: string;
   method: string;
   path: string;
@@ -69,9 +74,9 @@ export function errorHandler(
   };
 
   if (statusCode >= 500) {
-    console.error(`[ERROR ${requestId}]`, context, err.stack || err.message);
+    log.error(err.message, { ...context, stack: err.stack });
   } else {
-    console.warn(`[WARN ${requestId}]`, context, err.message);
+    log.warn(err.message, context);
   }
 
   const errorResponse: ApiError & { requestId: string } = {

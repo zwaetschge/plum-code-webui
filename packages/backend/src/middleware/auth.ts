@@ -4,11 +4,17 @@ import { config } from '../config.js';
 import { getDatabase } from '../db/index.js';
 import { AppError } from './errorHandler.js';
 import { GATEWAY_TOKEN_PREFIX, resolveGatewayToken } from '../services/gateway/tokens.js';
+import type { GatewayScope } from '../services/gateway/tokens.js';
+
+/** Methods that cannot change server state, per RFC 9110. */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export interface AuthenticatedRequest extends Request {
   userId: string;
   /** True when the caller authenticated with a gateway token, not a session. */
   viaGateway?: boolean;
+  /** Present only for gateway-authenticated requests. */
+  gatewayScope?: GatewayScope;
 }
 
 function getUserRoleStatus(userId: string): { role: string; status: string } | null {
@@ -87,13 +93,21 @@ export function resolveAuthenticatedUserId(req: Request): string | null {
     // the user's capabilities through the user's endpoints, instead of a
     // parallel API that drifts out of sync with what the UI can do.
     if (token.startsWith(GATEWAY_TOKEN_PREFIX)) {
-      const gatewayUserId = resolveGatewayToken(token);
-      if (!gatewayUserId) {
+      const resolved = resolveGatewayToken(token);
+      if (!resolved) {
         throw new AppError('Invalid gateway token', 401, 'INVALID_TOKEN');
       }
-      enforceUserLifecycle(gatewayUserId);
+      enforceUserLifecycle(resolved.userId);
       (req as AuthenticatedRequest).viaGateway = true;
-      return gatewayUserId;
+      (req as AuthenticatedRequest).gatewayScope = resolved.scope;
+
+      // Enforced here rather than per route: a read-only token has to stay
+      // read-only on every endpoint, including ones added later. Safe methods
+      // are the boundary — GET, HEAD and OPTIONS cannot change state.
+      if (resolved.scope === 'read' && !SAFE_METHODS.has(req.method.toUpperCase())) {
+        throw new AppError('This gateway token is read-only', 403, 'GATEWAY_TOKEN_READ_ONLY');
+      }
+      return resolved.userId;
     }
 
     let userId: string;

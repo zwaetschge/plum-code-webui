@@ -1518,6 +1518,42 @@ function getClaudePermissionFlags(mode: SessionMode): string[] {
  * the directory probe, which answers "is the harness installed" — not "can this
  * account actually run a turn".
  */
+/**
+ * Installed-and-authenticated status for every configured harness.
+ *
+ * Cached: `/health/ready` can be polled by Docker every few seconds, and each
+ * probe otherwise walks the filesystem once per provider. A logged-out harness
+ * is not an emergency, so 30 seconds of staleness is fine.
+ */
+let providerStatusCache: { at: number; value: Record<string, ProviderRuntimeStatus> } | null = null;
+const PROVIDER_STATUS_TTL_MS = 30_000;
+
+export interface ProviderRuntimeStatus {
+  installed: boolean;
+  authenticated: boolean;
+}
+
+export async function getProviderStatuses(): Promise<Record<string, ProviderRuntimeStatus>> {
+  const now = Date.now();
+  if (providerStatusCache && now - providerStatusCache.at < PROVIDER_STATUS_TTL_MS) {
+    return providerStatusCache.value;
+  }
+
+  const value: Record<string, ProviderRuntimeStatus> = {};
+  for (const provider of Object.keys(CLI_PROVIDERS) as CLIProvider[]) {
+    const command = CLI_PROVIDERS[provider].command;
+    value[provider] = {
+      installed: !!findCliBinary(command),
+      // Per-user harnesses (Pi, OpenCode) report false here; their credentials
+      // are per account, and this endpoint has no user.
+      authenticated: await isProviderAvailable(provider).catch(() => false),
+    };
+  }
+
+  providerStatusCache = { at: now, value };
+  return value;
+}
+
 export async function isProviderAvailable(
   provider: CLIProvider,
   userId?: string
