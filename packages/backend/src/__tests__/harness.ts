@@ -33,6 +33,8 @@ export interface TestServer {
   /** Without credentials, for checking that a route is actually guarded. */
   anonymous(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }>;
   userId: string;
+  /** Server stdout+stderr so far — a 500 says nothing without it. */
+  logs(): string;
   stop(): Promise<void>;
 }
 
@@ -157,6 +159,7 @@ export async function startTestServer(): Promise<TestServer> {
     url,
     dataDir,
     userId,
+    logs: () => serverLog,
     request: (method, route, body) => call(method, route, body, true),
     anonymous: (method, route, body) => call(method, route, body, false),
     async stop() {

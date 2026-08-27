@@ -126,7 +126,11 @@ router.post('/', async (req: Request, res: Response) => {
     const messages = db
       .prepare(
         `
-      SELECT id, role, content, tool_calls, tool_results, is_partial, is_interrupted, cost_usd, model, created_at
+      -- Only columns that exist. The list used to name tool_calls, tool_results,
+      -- is_partial, is_interrupted, cost_usd and model, none of which are on this
+      -- table, so every attempt to create a checkpoint failed with "no such
+      -- column: tool_calls" and surfaced as a 500.
+      SELECT id, role, content, chat_id, created_at
       FROM messages
       WHERE session_id = ?
       ORDER BY created_at ASC
