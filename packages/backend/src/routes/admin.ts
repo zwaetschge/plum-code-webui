@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { getDatabase } from '../db/index.js';
@@ -7,11 +7,51 @@ import { AppError } from '../middleware/errorHandler.js';
 import { auditFromRequest } from '../utils/auditLog.js';
 import { revokeUserHttpSessions } from '../services/SqliteSessionStore.js';
 import { disconnectUserSockets } from '../websocket/index.js';
+import { createBackup, listBackups } from '../services/backup.js';
+import { config } from '../config.js';
+import { timingSafeEqual } from 'crypto';
 
 const router = Router();
 
 // Every admin route is gated by both requireAuth and requireAdmin.
+/**
+ * The only supported way to back this database up. Outside processes must not
+ * open the live file — see services/backup.ts for what that did on 2026-08-26.
+ *
+ * Reachable two ways: an admin session, or the shared hook secret that spawned
+ * CLI subprocesses already use. The maintenance script has no browser session,
+ * and without the second path it could no longer take a backup at all.
+ */
+function backupCallerAllowed(req: Request): boolean {
+  if ((req as AuthenticatedRequest).userId) return true;
+  const provided = req.header('x-webui-hook-secret') || '';
+  const expected = config.hookSecret;
+  if (!expected || !provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+router.post('/backup', (req: Request, res: Response) => {
+  if (!backupCallerAllowed(req)) {
+    throw new AppError('Admin session or hook secret required', 401, 'AUTH_REQUIRED');
+  }
+  const result = createBackup();
+  if (!result.verified) {
+    throw new AppError(
+      `Backup verification failed: ${result.detail ?? 'unknown'}`,
+      500,
+      'BACKUP_UNVERIFIED'
+    );
+  }
+  res.json({ success: true, data: result });
+});
+
 router.use(requireAuth, requireAdmin);
+
+router.get('/backups', (_req: Request, res: Response) => {
+  res.json({ success: true, data: listBackups() });
+});
 
 // ─── Users ──────────────────────────────────────────────────────────────────
 

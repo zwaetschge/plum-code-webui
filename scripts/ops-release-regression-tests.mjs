@@ -348,6 +348,10 @@ async function testMaintenance(tempDir) {
     '14',
     '--session-retention-days',
     '30',
+    // Backups are the server's job now: it owns the only connection to the live
+    // database, and this script asks for one over the API. Retention is what is
+    // under test here, so it runs without that round trip.
+    '--skip-backup',
     '--now=2026-07-14T12:00:00.000Z',
   ]);
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -365,15 +369,16 @@ async function testMaintenance(tempDir) {
     assert.ok((await stat(file)).isFile(), `${file} should be retained`);
   }
 
-  const backups = (await readdir(backupDir)).filter((name) =>
-    name.startsWith('claude-webui-2026-07-14T12-00-00-000Z')
+  // The script must never open the live database itself — that second connection
+  // is what truncated it on 2026-08-26. Assert the source stayed untouched
+  // instead of asserting that this script produced a copy.
+  const sourceDatabase = path.join(dataDir, 'claude-webui.db');
+  const sourceBefore = await stat(sourceDatabase);
+  assert.ok(sourceBefore.isFile(), 'the source database must still be there');
+  assert.ok(
+    !(await readdir(dataDir)).some((name) => name.endsWith('.db-shm')),
+    'a shared-memory file would mean something opened the database'
   );
-  assert.equal(backups.length, 1);
-  const generatedBackup = path.join(backupDir, backups[0]);
-  assert.equal((await stat(generatedBackup)).mode & 0o777, 0o600);
-  const copiedDatabase = new Database(generatedBackup, { readonly: true });
-  assert.equal(copiedDatabase.prepare('SELECT value FROM regression').pluck().get(), 'ok');
-  copiedDatabase.close();
 
   await writeFile(files.oldLog, 'old again\n');
   await setAge(files.oldLog, '2026-01-01T00:00:00.000Z');

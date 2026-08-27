@@ -209,41 +209,58 @@ async function removeFiles(files, dryRun, label) {
   }
 }
 
-function assertHealthyDatabase(databasePath) {
-  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+/**
+ * Verification only ever touches a finished backup file — never the live
+ * database. Opening the running database from this script is what caused the
+ * 2026-08-26 corruption: a second connection negotiating locks with the server
+ * across two views of the same file (/mnt/cache directly and /mnt/user through
+ * FUSE) truncated the main file mid-checkpoint.
+ */
+function assertHealthyBackup(backupPath) {
+  const database = new Database(backupPath, { readonly: true, fileMustExist: true });
   try {
     const result = database.pragma('quick_check', { simple: true });
-    if (result !== 'ok')
-      throw new Error(`SQLite quick_check failed for ${databasePath}: ${result}`);
+    if (result !== 'ok') throw new Error(`SQLite quick_check failed for ${backupPath}: ${result}`);
   } finally {
     database.close();
   }
 }
 
-function backupName(now) {
-  return `claude-webui-${now.toISOString().replaceAll(':', '-').replaceAll('.', '-')}.db`;
-}
-
+/**
+ * Backups are taken by the server, through the connection it already holds.
+ * This script asks for one over the API and then validates the resulting file.
+ */
 async function createBackup(dataDir, now, dryRun) {
-  const sourcePath = path.join(dataDir, 'claude-webui.db');
-  assertHealthyDatabase(sourcePath);
-  const backupDir = path.join(dataDir, 'backups');
-  const destinationPath = path.join(backupDir, backupName(now));
+  const baseUrl = process.env.PLUM_MAINTENANCE_URL || 'http://127.0.0.1:3001';
+  // The same shared secret spawned CLI subprocesses use; the script has no
+  // browser session, and the server is the only process allowed to open the file.
+  const hookSecret = process.env.WEBUI_HOOK_SECRET || '';
+  const token = process.env.PLUM_MAINTENANCE_TOKEN || '';
 
   if (dryRun) {
-    process.stdout.write(`would create validated SQLite backup: ${destinationPath}\n`);
-    return destinationPath;
+    process.stdout.write(`would ask ${baseUrl} for an in-process backup\n`);
+    return null;
   }
 
-  await mkdir(backupDir, { recursive: true, mode: 0o700 });
-  const database = new Database(sourcePath, { readonly: true, fileMustExist: true });
-  try {
-    await database.backup(destinationPath);
-  } finally {
-    database.close();
+  const response = await fetch(`${baseUrl}/api/admin/backup`, {
+    method: 'POST',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(hookSecret ? { 'X-Webui-Hook-Secret': hookSecret } : {}),
+    },
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Backup request failed with ${response.status}. The server owns the database; ` +
+        'this script must not open it directly.'
+    );
   }
-  await chmod(destinationPath, 0o600);
-  assertHealthyDatabase(destinationPath);
+  const payload = await response.json();
+  const destinationPath = payload?.data?.path;
+  if (!destinationPath) throw new Error('Backup response contained no path');
+
+  await chmod(destinationPath, 0o600).catch(() => {});
+  assertHealthyBackup(destinationPath);
   process.stdout.write(`created validated SQLite backup: ${destinationPath}\n`);
   return destinationPath;
 }

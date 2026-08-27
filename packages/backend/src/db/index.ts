@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import { nanoid } from 'nanoid';
+import { runMigration } from './migrations.js';
 import {
   estimateModelCost,
   LLM_PRICING_RATE_CARD_VERSION,
@@ -1314,20 +1315,38 @@ function runMigrations(db: Database.Database): void {
     console.error('[migrations] Failed to drop legacy tables:', err);
   }
 
-  // Create trusted devices table (for Electron desktop app auth)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS trusted_devices (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      device_name TEXT NOT NULL,
-      fingerprint_hash TEXT NOT NULL UNIQUE,
-      platform TEXT,
-      last_seen_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_trusted_devices_user_id ON trusted_devices(user_id);
-    CREATE INDEX IF NOT EXISTS idx_trusted_devices_fingerprint ON trusted_devices(fingerprint_hash);
-  `);
+  // Migration: drop the tables of features whose HTTP surface had no caller in
+  // either client and has now been removed.
+  // - trusted_devices: routes/devices.ts (desktop device pairing), never called.
+  // - automation_tokens + session_goals: routes/automation.ts, superseded by the
+  //   control gateway. The visible /goal command is a Codex native command and
+  //   never touched these tables.
+  // - orchestration_*: leftovers of the orchestration manager / task router that
+  //   were removed earlier; no code has referenced them since.
+  runMigration(db, '2026-08-23-drop-removed-feature-tables', (database) => {
+    for (const table of [
+      'trusted_devices',
+      'automation_tokens',
+      'session_goals',
+      'orchestration_tasks',
+      'orchestration_workers',
+      'orchestration_sessions',
+    ]) {
+      // Loud rather than silent: an operator whose deployment did use one of
+      // these should see what went away.
+      try {
+        const row = database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as
+          | { count: number }
+          | undefined;
+        if (row?.count) {
+          console.warn(`[migrations] Dropping ${table} with ${row.count} row(s)`);
+        }
+      } catch {
+        // Table absent on a fresh database; nothing to report.
+      }
+      database.exec(`DROP TABLE IF EXISTS ${table};`);
+    }
+  });
 
   // Migration: Add password_hash column to users table for multi-user basic auth
   try {
@@ -1391,43 +1410,7 @@ function runMigrations(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
   `);
 
-  // Automation API tokens let a CLI session or supervisor bot act on behalf of a
-  // user without receiving the user's browser cookie/JWT. Store only token hashes.
   db.exec(`
-    CREATE TABLE IF NOT EXISTS automation_tokens (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      token_hash TEXT NOT NULL UNIQUE,
-      token_prefix TEXT NOT NULL,
-      scopes_json TEXT NOT NULL,
-      expires_at DATETIME,
-      revoked_at DATETIME,
-      last_used_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_automation_tokens_user_id ON automation_tokens(user_id);
-    CREATE INDEX IF NOT EXISTS idx_automation_tokens_hash ON automation_tokens(token_hash);
-    CREATE INDEX IF NOT EXISTS idx_automation_tokens_revoked ON automation_tokens(revoked_at);
-
-    CREATE TABLE IF NOT EXISTS session_goals (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-      created_by_token_id TEXT REFERENCES automation_tokens(id) ON DELETE SET NULL,
-      title TEXT NOT NULL,
-      instructions TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
-      priority INTEGER NOT NULL DEFAULT 0,
-      metadata_json TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_session_goals_session_id ON session_goals(session_id);
-    CREATE INDEX IF NOT EXISTS idx_session_goals_status ON session_goals(status);
-    CREATE INDEX IF NOT EXISTS idx_session_goals_created ON session_goals(created_at DESC);
-
     CREATE TABLE IF NOT EXISTS session_peer_links (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1477,6 +1460,10 @@ function runMigrations(db: Database.Database): void {
       token_hash TEXT NOT NULL UNIQUE,
       token_prefix TEXT NOT NULL,
       revoked INTEGER NOT NULL DEFAULT 0,
+      -- 'read' or 'write'. Existing rows predate scopes and were minted with the
+      -- owner's full rights, so they default to write rather than being silently
+      -- downgraded to read-only under a supervisor that depends on them.
+      scope TEXT NOT NULL DEFAULT 'write',
       last_used_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -1540,6 +1527,21 @@ function runMigrations(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_discord_outbox_user_created ON discord_outbox(user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_discord_outbox_session_created ON discord_outbox(session_id, created_at DESC);
   `);
+
+  // Databases created before scopes existed: keep those tokens on full rights
+  // rather than silently downgrading a supervisor that depends on them.
+  try {
+    const gatewayColumns = new Set(
+      (db.prepare('PRAGMA table_info(gateway_tokens)').all() as Array<{ name: string }>).map(
+        (column) => column.name
+      )
+    );
+    if (!gatewayColumns.has('scope')) {
+      db.exec(`ALTER TABLE gateway_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT 'write'`);
+    }
+  } catch (err) {
+    console.error('[migrations] Failed to add gateway_tokens.scope:', err);
+  }
 
   // Bootstrap: promote SEED_ADMIN_EMAIL to admin role, or promote the first existing user
   // if no admin exists yet. Runs on every start so a fresh deploy with an env change takes

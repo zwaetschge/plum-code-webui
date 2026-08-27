@@ -46,7 +46,6 @@ import settingsRoutes from './routes/settings.js';
 import mcpRoutes from './routes/mcp.js';
 import claudeRoutes from './routes/claude.js';
 import claudeConfigRoutes from './routes/claude-config.js';
-import claudeSettingsRoutes from './routes/claude-settings.js';
 import permissionsRoutes from './routes/permissions.js';
 import usageRoutes from './routes/usage.js';
 import cliToolsRoutes from './routes/cli-tools.js';
@@ -65,8 +64,6 @@ import opencodeRoutes from './routes/opencode.js';
 import setupRoutes from './routes/setup.js';
 import gatewayRoutes from './routes/gateway.js';
 import memoriesRoutes from './routes/memories.js';
-import taskRoutes from './routes/tasks.js';
-import devicesRoutes from './routes/devices.js';
 import androidRoutes from './routes/android.js';
 import appRoutes from './routes/app.js';
 import workspaceRoutes from './routes/workspace.js';
@@ -74,17 +71,17 @@ import transcribeRoutes from './routes/transcribe.js';
 import previewRoutes from './routes/preview.js';
 import adminRoutes from './routes/admin.js';
 import comfyuiRoutes from './routes/comfyui.js';
-import automationRoutes from './routes/automation.js';
 import oracleRoutes from './routes/oracle.js';
 import dockerRoutes from './routes/docker.js';
 import watchdogRoutes from './routes/watchdogs.js';
 import sessionMeshRoutes from './routes/session-mesh.js';
-import { initTaskManager } from './services/tasks/index.js';
 import discordRoutes from './routes/discord.js';
 import homeAssistantRoutes from './routes/home-assistant.js';
 import { initDiscordOutboxWorker } from './services/discord/index.js';
 import { attachNotificationIo } from './services/notifications/notificationCenter.js';
 import { buildReadinessReport } from './services/readiness.js';
+import { getProviderStatuses } from './services/cli-providers.js';
+import { startBackupSchedule } from './services/backup.js';
 import { SqliteSessionStore } from './services/SqliteSessionStore.js';
 import { initUsageLimitHistoryCollector } from './services/usage-limit-history-collector.js';
 import { cleanupExpiredChatUploads } from './services/chatUploads.js';
@@ -230,7 +227,6 @@ async function main() {
   attachNotificationIo(io);
 
   // Initialize task delegation system
-  initTaskManager();
   initDiscordOutboxWorker();
 
   // Preview vhost — must run BEFORE any other middleware so helmet/CORS/body-parsers
@@ -337,8 +333,11 @@ async function main() {
   app.get('/health/live', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
-  app.get('/health/ready', (_req, res) => {
-    const report = buildReadinessReport(frontendPath);
+  app.get('/health/ready', async (_req, res) => {
+    // Provider status is attached for visibility only; a signed-out harness
+    // must never make the container look unhealthy.
+    const providers = await getProviderStatuses().catch(() => undefined);
+    const report = buildReadinessReport(frontendPath, providers);
     res.status(report.status === 'ready' ? 200 : 503).json(report);
   });
 
@@ -353,7 +352,6 @@ async function main() {
   app.use('/api/mcp-servers', mcpRoutes);
   app.use('/api/claude', claudeRoutes);
   app.use('/api/claude-config', claudeConfigRoutes);
-  app.use('/api/claude-settings', claudeSettingsRoutes);
   app.use('/api/permissions', permissionsRoutes);
   app.use('/api/usage', usageRoutes);
   app.use('/api/cli-tools', cliToolsRoutes);
@@ -372,8 +370,6 @@ async function main() {
   app.use('/api/codex', codexRoutes);
   app.use('/api/opencode', opencodeRoutes);
   app.use('/api/memories', memoriesRoutes);
-  app.use('/api/tasks', taskRoutes);
-  app.use('/api/devices', devicesRoutes);
   app.use('/api/android', androidRoutes);
   app.use('/api/app', appRoutes);
   app.use('/api/workspace', workspaceRoutes);
@@ -381,7 +377,6 @@ async function main() {
   app.use('/api/preview', previewRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/comfyui', comfyuiRoutes);
-  app.use('/api/automation', automationRoutes);
   app.use('/api/docker', dockerRoutes);
   app.use('/api/watchdogs', watchdogRoutes);
   app.use('/api/discord', discordRoutes);
@@ -508,6 +503,9 @@ async function main() {
     console.log(`Server running on http://${config.host}:${config.port}`);
     console.log(`Frontend URL: ${config.frontendUrl}`);
     initUsageLimitHistoryCollector();
+    // In-process, over the connection this server already owns. See
+    // services/backup.ts for why a second connection is what corrupts the file.
+    startBackupSchedule();
   });
 
   registerGracefulShutdown(httpServer, io);
