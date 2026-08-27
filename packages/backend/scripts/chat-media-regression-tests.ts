@@ -328,17 +328,26 @@ try {
   assert.ok(mediaRoute, 'missing durable chat media route');
   assert.equal(mediaRoute.stack[0]?.handle.name, 'requireAuth');
 
-  const foreignRouteError = await new Promise<{ statusCode?: number; code?: string }>((resolve) => {
-    const handler = mediaRoute.stack.at(-1)!.handle;
-    handler(
-      {
-        params: { id: 'session-a', mediaId: first[0]!.id },
-        userId: 'user-b',
-      },
-      {},
-      resolve
-    );
-  });
+  // Called directly rather than through the router, so the rejection has to be
+  // caught here: Express 5 forwards it to the error middleware, but only when it
+  // is the one doing the calling. `next` is still honoured, so both paths are
+  // accepted.
+  const foreignRouteError = await new Promise<{ statusCode?: number; code?: string }>(
+    (resolve, reject) => {
+      const handler = mediaRoute.stack.at(-1)!.handle;
+      const result = handler(
+        {
+          params: { id: 'session-a', mediaId: first[0]!.id },
+          userId: 'user-b',
+        },
+        {},
+        resolve
+      );
+      if (result && typeof (result as Promise<unknown>).catch === 'function') {
+        (result as Promise<unknown>).then(() => undefined, resolve).catch(reject);
+      }
+    }
+  );
   assert.equal(foreignRouteError.statusCode, 404);
   assert.equal(foreignRouteError.code, 'NOT_FOUND');
 

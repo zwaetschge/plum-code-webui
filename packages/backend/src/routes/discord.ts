@@ -6,7 +6,7 @@ import type {
   DiscordTestResult,
 } from '@plum-code-webui/shared';
 import { requireAdmin, requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { AppError } from '../middleware/errorHandler.js';
 import { auditFromRequest } from '../utils/auditLog.js';
 import {
   discordIntegrationService,
@@ -83,39 +83,36 @@ router.put('/settings', async (req, res) => {
   res.json({ success: true, data: settings });
 });
 
-router.post(
-  '/test',
-  asyncHandler(async (req, res) => {
-    const settings = await discordIntegrationService.getSettings();
-    if (!settings.configured) {
-      throw new AppError(
-        settings.transport === 'bot'
-          ? 'Discord bot token or channel ID is not configured'
-          : 'Discord webhook URL is not configured',
-        400,
-        'DISCORD_NOT_CONFIGURED'
-      );
-    }
+router.post('/test', async (req, res) => {
+  const settings = await discordIntegrationService.getSettings();
+  if (!settings.configured) {
+    throw new AppError(
+      settings.transport === 'bot'
+        ? 'Discord bot token or channel ID is not configured'
+        : 'Discord webhook URL is not configured',
+      400,
+      'DISCORD_NOT_CONFIGURED'
+    );
+  }
 
-    const item = await discordNotifier.queueTest(authUserId(req));
-    if (!item) {
-      throw new AppError('Discord test message could not be queued', 500, 'DISCORD_QUEUE_FAILED');
-    }
-    const result = await discordOutboxWorker.processNow(item.id, { ignoreEnabled: true });
-    const response: DiscordTestResult = {
-      queued: true,
-      sent: result.sent,
-      outboxId: item.id,
-      error: result.error,
-    };
-    await auditFromRequest(req, 'discord.test.sent', {
-      resourceType: 'discord_outbox',
-      resourceId: item.id,
-      metadata: { sent: result.sent, error: result.error },
-    });
-    res.json({ success: true, data: response });
-  })
-);
+  const item = await discordNotifier.queueTest(authUserId(req));
+  if (!item) {
+    throw new AppError('Discord test message could not be queued', 500, 'DISCORD_QUEUE_FAILED');
+  }
+  const result = await discordOutboxWorker.processNow(item.id, { ignoreEnabled: true });
+  const response: DiscordTestResult = {
+    queued: true,
+    sent: result.sent,
+    outboxId: item.id,
+    error: result.error,
+  };
+  await auditFromRequest(req, 'discord.test.sent', {
+    resourceType: 'discord_outbox',
+    resourceId: item.id,
+    metadata: { sent: result.sent, error: result.error },
+  });
+  res.json({ success: true, data: response });
+});
 
 router.get('/outbox', async (req, res) => {
   const parsed = outboxQuerySchema.safeParse(req.query);

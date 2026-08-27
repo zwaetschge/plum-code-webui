@@ -1,4 +1,4 @@
-import type { Request, Response, NextFunction, RequestHandler } from 'express';
+import type { Request, RequestHandler, Response, NextFunction } from 'express';
 import type { ApiError } from '@plum-code-webui/shared';
 import { randomUUID } from 'crypto';
 import { createLogger, withRequestContext } from '../utils/logger.js';
@@ -10,26 +10,6 @@ declare module 'express-serve-static-core' {
     id?: string;
   }
 }
-
-/**
- * Forwards a rejected handler to the error middleware.
- *
- * The previous form was `await Promise.resolve(await fn(...)).catch(next)`, and
- * the inner `await` is the bug: it throws before `.catch(next)` is attached, so
- * the wrapper re-threw into a caller that had nothing to catch it. It worked
- * only for a handler that resolved.
- *
- * Most routes do not need this — [installAsyncErrorHandling] patches the router
- * so every handler is covered, including the ones nobody remembered to wrap.
- * This stays for the handlers that name it explicitly.
- */
-export const asyncHandler = (
-  fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>
-): RequestHandler => {
-  return (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-};
 
 export class AppError extends Error {
   statusCode: number;

@@ -1,7 +1,7 @@
 import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { AppError } from '../middleware/errorHandler.js';
 import { auditFromRequest } from '../utils/auditLog.js';
 import { peerService } from '../services/session-mesh/PeerService.js';
 
@@ -67,33 +67,30 @@ router.get('/sessions/:id/delegations', async (req, res) => {
   res.json({ success: true, data: await peerService.listDelegations(req.params.id!, userId) });
 });
 
-router.post(
-  '/sessions/:id/delegations',
-  asyncHandler(async (req, res) => {
-    const parsed = createDelegationSchema.safeParse(req.body);
-    if (!parsed.success) {
-      throw new AppError('Invalid delegation payload', 400, 'VALIDATION_ERROR');
-    }
-    const userId = authUserId(req);
-    const delegation = await peerService.createDelegation({
-      fromSessionId: req.params.id!,
+router.post('/sessions/:id/delegations', async (req, res) => {
+  const parsed = createDelegationSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError('Invalid delegation payload', 400, 'VALIDATION_ERROR');
+  }
+  const userId = authUserId(req);
+  const delegation = await peerService.createDelegation({
+    fromSessionId: req.params.id!,
+    toSessionId: parsed.data.toSessionId,
+    userId,
+    content: parsed.data.content,
+    kind: parsed.data.kind,
+  });
+  await auditFromRequest(req, 'session_mesh.delegation_created', {
+    resourceType: 'session_delegation',
+    resourceId: delegation.id,
+    metadata: {
+      fromSessionId: req.params.id,
       toSessionId: parsed.data.toSessionId,
-      userId,
-      content: parsed.data.content,
-      kind: parsed.data.kind,
-    });
-    await auditFromRequest(req, 'session_mesh.delegation_created', {
-      resourceType: 'session_delegation',
-      resourceId: delegation.id,
-      metadata: {
-        fromSessionId: req.params.id,
-        toSessionId: parsed.data.toSessionId,
-        status: delegation.status,
-      },
-    });
-    res.status(202).json({ success: true, data: delegation });
-  })
-);
+      status: delegation.status,
+    },
+  });
+  res.status(202).json({ success: true, data: delegation });
+});
 
 router.post('/delegations/:id/cancel', async (req, res) => {
   const userId = authUserId(req);

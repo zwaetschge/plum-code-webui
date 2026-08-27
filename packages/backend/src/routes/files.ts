@@ -5,7 +5,7 @@ import path from 'path';
 import os from 'os';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { AppError } from '../middleware/errorHandler.js';
 import { config } from '../config.js';
 import { sanitizeFilename, ALLOWED_UPLOAD_MIME_TYPES } from '../utils/sanitize.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
@@ -105,55 +105,51 @@ const upload = multer({
 const router = Router();
 
 // Get home directory and common paths
-router.get(
-  '/home',
-  requireAuth,
-  asyncHandler(async (_req, res) => {
-    const homeDir = os.homedir();
+router.get('/home', requireAuth, async (_req, res) => {
+  const homeDir = os.homedir();
 
-    // Check for common directory names (English and German variants)
-    const possiblePaths = [
-      { name: 'Home', paths: [homeDir] },
-      {
-        name: 'Documents',
-        paths: [path.join(homeDir, 'Documents'), path.join(homeDir, 'Dokumente')],
-      },
-      { name: 'Projects', paths: [path.join(homeDir, 'Projects'), path.join(homeDir, 'Projekte')] },
-      {
-        name: 'Desktop',
-        paths: [path.join(homeDir, 'Desktop'), path.join(homeDir, 'Schreibtisch')],
-      },
-      { name: 'Downloads', paths: [path.join(homeDir, 'Downloads')] },
-    ];
+  // Check for common directory names (English and German variants)
+  const possiblePaths = [
+    { name: 'Home', paths: [homeDir] },
+    {
+      name: 'Documents',
+      paths: [path.join(homeDir, 'Documents'), path.join(homeDir, 'Dokumente')],
+    },
+    { name: 'Projects', paths: [path.join(homeDir, 'Projects'), path.join(homeDir, 'Projekte')] },
+    {
+      name: 'Desktop',
+      paths: [path.join(homeDir, 'Desktop'), path.join(homeDir, 'Schreibtisch')],
+    },
+    { name: 'Downloads', paths: [path.join(homeDir, 'Downloads')] },
+  ];
 
-    const commonPaths: { name: string; path: string }[] = [];
+  const commonPaths: { name: string; path: string }[] = [];
 
-    for (const item of possiblePaths) {
-      // Find the first path that exists
-      for (const p of item.paths) {
-        try {
-          await fs.access(p);
-          // Path exists, check if it's allowed
-          if (isAllowedBasePath(p)) {
-            commonPaths.push({ name: item.name, path: p });
-            break; // Found one, move to next item
-          }
-        } catch {
-          // Path doesn't exist, try next
+  for (const item of possiblePaths) {
+    // Find the first path that exists
+    for (const p of item.paths) {
+      try {
+        await fs.access(p);
+        // Path exists, check if it's allowed
+        if (isAllowedBasePath(p)) {
+          commonPaths.push({ name: item.name, path: p });
+          break; // Found one, move to next item
         }
+      } catch {
+        // Path doesn't exist, try next
       }
     }
+  }
 
-    res.json({
-      success: true,
-      data: {
-        homeDir,
-        allowedPaths: config.allowedBasePaths,
-        commonPaths,
-      },
-    });
-  })
-);
+  res.json({
+    success: true,
+    data: {
+      homeDir,
+      allowedPaths: config.allowedBasePaths,
+      commonPaths,
+    },
+  });
+});
 
 // Validate path is within allowed directories
 function validatePath(filePath: string): string {
@@ -172,225 +168,205 @@ function getExtension(filename: string): string | undefined {
 }
 
 // List directory contents
-router.get(
-  '/',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const dirPath = req.query.path as string;
+router.get('/', requireAuth, async (req, res) => {
+  const dirPath = req.query.path as string;
 
-    if (!dirPath) {
-      throw new AppError('Path is required', 400, 'MISSING_PATH');
-    }
+  if (!dirPath) {
+    throw new AppError('Path is required', 400, 'MISSING_PATH');
+  }
 
-    const resolvedPath = validatePath(dirPath);
+  const resolvedPath = validatePath(dirPath);
 
-    try {
-      const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
+  try {
+    const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
 
-      const files = await Promise.all(
-        entries.map(async (entry): Promise<FileInfo | null> => {
-          const fullPath = path.join(resolvedPath, entry.name);
-          try {
-            const stats = await fs.stat(fullPath);
-            return {
-              name: entry.name,
-              path: fullPath,
-              type: entry.isDirectory() ? 'directory' : 'file',
-              size: stats.size,
-              modifiedAt: stats.mtime.toISOString(),
-              extension: entry.isFile() ? getExtension(entry.name) : undefined,
-            };
-          } catch {
-            // Skip files we can't stat (permission denied, etc.)
-            return null;
-          }
-        })
-      );
-
-      // Filter out null entries (files we couldn't stat)
-      const validFiles = files.filter((f): f is FileInfo => f !== null);
-
-      // Sort: directories first, then by name
-      validFiles.sort((a, b) => {
-        if (a.type !== b.type) {
-          return a.type === 'directory' ? -1 : 1;
+    const files = await Promise.all(
+      entries.map(async (entry): Promise<FileInfo | null> => {
+        const fullPath = path.join(resolvedPath, entry.name);
+        try {
+          const stats = await fs.stat(fullPath);
+          return {
+            name: entry.name,
+            path: fullPath,
+            type: entry.isDirectory() ? 'directory' : 'file',
+            size: stats.size,
+            modifiedAt: stats.mtime.toISOString(),
+            extension: entry.isFile() ? getExtension(entry.name) : undefined,
+          };
+        } catch {
+          // Skip files we can't stat (permission denied, etc.)
+          return null;
         }
-        return a.name.localeCompare(b.name);
-      });
+      })
+    );
 
-      const result: DirectoryContents = {
-        path: resolvedPath,
-        files: validFiles,
-      };
+    // Filter out null entries (files we couldn't stat)
+    const validFiles = files.filter((f): f is FileInfo => f !== null);
 
-      res.json({ success: true, data: result });
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new AppError('Directory not found', 404, 'NOT_FOUND');
+    // Sort: directories first, then by name
+    validFiles.sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === 'directory' ? -1 : 1;
       }
-      if ((err as NodeJS.ErrnoException).code === 'ENOTDIR') {
-        throw new AppError('Path is not a directory', 400, 'NOT_DIRECTORY');
-      }
-      if ((err as NodeJS.ErrnoException).code === 'EACCES') {
-        throw new AppError('Permission denied', 403, 'PERMISSION_DENIED');
-      }
-      throw err;
+      return a.name.localeCompare(b.name);
+    });
+
+    const result: DirectoryContents = {
+      path: resolvedPath,
+      files: validFiles,
+    };
+
+    res.json({ success: true, data: result });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AppError('Directory not found', 404, 'NOT_FOUND');
     }
-  })
-);
+    if ((err as NodeJS.ErrnoException).code === 'ENOTDIR') {
+      throw new AppError('Path is not a directory', 400, 'NOT_DIRECTORY');
+    }
+    if ((err as NodeJS.ErrnoException).code === 'EACCES') {
+      throw new AppError('Permission denied', 403, 'PERMISSION_DENIED');
+    }
+    throw err;
+  }
+});
 
 // Get file content
-router.get(
-  '/content',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const filePath = req.query.path as string;
+router.get('/content', requireAuth, async (req, res) => {
+  const filePath = req.query.path as string;
 
-    if (!filePath) {
-      throw new AppError('Path is required', 400, 'MISSING_PATH');
+  if (!filePath) {
+    throw new AppError('Path is required', 400, 'MISSING_PATH');
+  }
+
+  const resolvedPath = validatePath(filePath);
+
+  try {
+    const stats = await fs.stat(resolvedPath);
+
+    if (stats.isDirectory()) {
+      throw new AppError('Path is a directory', 400, 'IS_DIRECTORY');
     }
 
-    const resolvedPath = validatePath(filePath);
+    // Limit file size (e.g., 1MB)
+    if (stats.size > 1024 * 1024) {
+      throw new AppError('File too large', 400, 'FILE_TOO_LARGE');
+    }
 
+    const content = await fs.readFile(resolvedPath, 'utf-8');
+
+    res.json({
+      success: true,
+      data: {
+        path: resolvedPath,
+        content,
+        size: stats.size,
+        modifiedAt: stats.mtime.toISOString(),
+      },
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AppError('File not found', 404, 'NOT_FOUND');
+    }
+    throw err;
+  }
+});
+
+// Create directory
+router.post('/mkdir', requireAuth, async (req, res) => {
+  const { path: dirPath } = req.body;
+
+  if (!dirPath) {
+    throw new AppError('Path is required', 400, 'MISSING_PATH');
+  }
+
+  const resolvedPath = validatePath(dirPath);
+
+  try {
+    await fs.mkdir(resolvedPath, { recursive: true });
+    res.json({ success: true, data: { path: resolvedPath } });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new AppError('Directory already exists', 409, 'ALREADY_EXISTS');
+    }
+    throw err;
+  }
+});
+
+// Save file content
+router.put('/content', requireAuth, async (req, res) => {
+  const { path: filePath, content } = req.body;
+
+  if (!filePath) {
+    throw new AppError('Path is required', 400, 'MISSING_PATH');
+  }
+
+  if (content === undefined) {
+    throw new AppError('Content is required', 400, 'MISSING_CONTENT');
+  }
+
+  const resolvedPath = validatePath(filePath);
+
+  try {
+    // Check if the path is a file (not a directory)
     try {
       const stats = await fs.stat(resolvedPath);
-
       if (stats.isDirectory()) {
         throw new AppError('Path is a directory', 400, 'IS_DIRECTORY');
       }
-
-      // Limit file size (e.g., 1MB)
-      if (stats.size > 1024 * 1024) {
-        throw new AppError('File too large', 400, 'FILE_TOO_LARGE');
-      }
-
-      const content = await fs.readFile(resolvedPath, 'utf-8');
-
-      res.json({
-        success: true,
-        data: {
-          path: resolvedPath,
-          content,
-          size: stats.size,
-          modifiedAt: stats.mtime.toISOString(),
-        },
-      });
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new AppError('File not found', 404, 'NOT_FOUND');
+      // File doesn't exist - that's okay, we'll create it
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw err;
       }
-      throw err;
-    }
-  })
-);
-
-// Create directory
-router.post(
-  '/mkdir',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const { path: dirPath } = req.body;
-
-    if (!dirPath) {
-      throw new AppError('Path is required', 400, 'MISSING_PATH');
     }
 
-    const resolvedPath = validatePath(dirPath);
+    await fs.writeFile(resolvedPath, content, 'utf-8');
+    const stats = await fs.stat(resolvedPath);
 
-    try {
-      await fs.mkdir(resolvedPath, { recursive: true });
-      res.json({ success: true, data: { path: resolvedPath } });
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
-        throw new AppError('Directory already exists', 409, 'ALREADY_EXISTS');
-      }
-      throw err;
+    res.json({
+      success: true,
+      data: {
+        path: resolvedPath,
+        size: stats.size,
+        modifiedAt: stats.mtime.toISOString(),
+      },
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EACCES') {
+      throw new AppError('Permission denied', 403, 'PERMISSION_DENIED');
     }
-  })
-);
-
-// Save file content
-router.put(
-  '/content',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const { path: filePath, content } = req.body;
-
-    if (!filePath) {
-      throw new AppError('Path is required', 400, 'MISSING_PATH');
-    }
-
-    if (content === undefined) {
-      throw new AppError('Content is required', 400, 'MISSING_CONTENT');
-    }
-
-    const resolvedPath = validatePath(filePath);
-
-    try {
-      // Check if the path is a file (not a directory)
-      try {
-        const stats = await fs.stat(resolvedPath);
-        if (stats.isDirectory()) {
-          throw new AppError('Path is a directory', 400, 'IS_DIRECTORY');
-        }
-      } catch (err) {
-        // File doesn't exist - that's okay, we'll create it
-        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw err;
-        }
-      }
-
-      await fs.writeFile(resolvedPath, content, 'utf-8');
-      const stats = await fs.stat(resolvedPath);
-
-      res.json({
-        success: true,
-        data: {
-          path: resolvedPath,
-          size: stats.size,
-          modifiedAt: stats.mtime.toISOString(),
-        },
-      });
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'EACCES') {
-        throw new AppError('Permission denied', 403, 'PERMISSION_DENIED');
-      }
-      throw err;
-    }
-  })
-);
+    throw err;
+  }
+});
 
 // Delete file or directory
-router.delete(
-  '/',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const filePath = req.query.path as string;
+router.delete('/', requireAuth, async (req, res) => {
+  const filePath = req.query.path as string;
 
-    if (!filePath) {
-      throw new AppError('Path is required', 400, 'MISSING_PATH');
+  if (!filePath) {
+    throw new AppError('Path is required', 400, 'MISSING_PATH');
+  }
+
+  const resolvedPath = validatePath(filePath);
+
+  try {
+    const stats = await fs.stat(resolvedPath);
+
+    if (stats.isDirectory()) {
+      await fs.rm(resolvedPath, { recursive: true });
+    } else {
+      await fs.unlink(resolvedPath);
     }
 
-    const resolvedPath = validatePath(filePath);
-
-    try {
-      const stats = await fs.stat(resolvedPath);
-
-      if (stats.isDirectory()) {
-        await fs.rm(resolvedPath, { recursive: true });
-      } else {
-        await fs.unlink(resolvedPath);
-      }
-
-      res.json({ success: true });
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new AppError('File or directory not found', 404, 'NOT_FOUND');
-      }
-      throw err;
+    res.json({ success: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AppError('File or directory not found', 404, 'NOT_FOUND');
     }
-  })
-);
+    throw err;
+  }
+});
 
 // Upload files (with rate limiting)
 router.post('/upload', requireAuth, rateLimiters.upload, (req, res) => {
@@ -436,274 +412,262 @@ router.post('/upload', requireAuth, rateLimiters.upload, (req, res) => {
 });
 
 // Preview file (CSV, XLSX with data extraction)
-router.get(
-  '/preview',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const filePath = req.query.path as string;
-    const maxRows = parseInt(req.query.maxRows as string) || 100;
+router.get('/preview', requireAuth, async (req, res) => {
+  const filePath = req.query.path as string;
+  const maxRows = parseInt(req.query.maxRows as string) || 100;
 
-    if (!filePath) {
-      throw new AppError('Path is required', 400, 'MISSING_PATH');
+  if (!filePath) {
+    throw new AppError('Path is required', 400, 'MISSING_PATH');
+  }
+
+  const resolvedPath = validatePath(filePath);
+  const ext = path.extname(resolvedPath).toLowerCase();
+
+  try {
+    const stats = await fs.stat(resolvedPath);
+
+    if (stats.isDirectory()) {
+      throw new AppError('Path is a directory', 400, 'IS_DIRECTORY');
     }
 
-    const resolvedPath = validatePath(filePath);
-    const ext = path.extname(resolvedPath).toLowerCase();
-
-    try {
-      const stats = await fs.stat(resolvedPath);
-
-      if (stats.isDirectory()) {
-        throw new AppError('Path is a directory', 400, 'IS_DIRECTORY');
-      }
-
-      // Handle different file types
-      if (ext === '.csv') {
-        // Limit file size for CSV (5MB)
-        if (stats.size > 5 * 1024 * 1024) {
-          throw new AppError('File too large for preview', 400, 'FILE_TOO_LARGE');
-        }
-
-        const content = await fs.readFile(resolvedPath, 'utf-8');
-        const parsed = parseCSV(content);
-
-        return res.json({
-          success: true,
-          data: {
-            type: 'csv',
-            path: resolvedPath,
-            headers: parsed.headers,
-            rows: parsed.rows.slice(0, maxRows),
-            totalRows: parsed.rows.length,
-            truncated: parsed.rows.length > maxRows,
-          },
-        });
-      }
-
-      if (ext === '.xlsx' || ext === '.xls') {
-        // exceljs replaces xlsx (CVE-2023-30533 / prototype pollution). .xls (legacy BIFF)
-        // is not supported by exceljs — reject early with a clear message.
-        if (ext === '.xls') {
-          throw new AppError(
-            'Legacy .xls files are not supported. Re-save as .xlsx.',
-            415,
-            'UNSUPPORTED_FORMAT'
-          );
-        }
-        try {
-          const ExcelJS = await import('exceljs');
-          const workbook = new ExcelJS.Workbook();
-          await workbook.xlsx.readFile(resolvedPath);
-
-          const sheets: Record<string, { headers: string[]; rows: string[][]; totalRows: number }> =
-            {};
-          const sheetNames: string[] = [];
-
-          workbook.eachSheet((sheet) => {
-            sheetNames.push(sheet.name);
-
-            const allRows: string[][] = [];
-            sheet.eachRow({ includeEmpty: false }, (row) => {
-              const values = row.values as unknown[];
-              // ExcelJS row.values is 1-indexed with index 0 undefined — drop it.
-              const cells = Array.isArray(values) ? values.slice(1) : [];
-              allRows.push(cells.map((c) => (c == null ? '' : String(c))));
-            });
-
-            const headers = allRows[0] ?? [];
-            const dataRows = allRows.slice(1, maxRows + 1);
-
-            sheets[sheet.name] = {
-              headers,
-              rows: dataRows,
-              totalRows: Math.max(allRows.length - 1, 0),
-            };
-          });
-
-          return res.json({
-            success: true,
-            data: {
-              type: 'xlsx',
-              path: resolvedPath,
-              sheets,
-              sheetNames,
-            },
-          });
-        } catch (err) {
-          if (err instanceof AppError) throw err;
-          throw new AppError('Failed to parse Excel file', 400, 'PARSE_ERROR');
-        }
-      }
-
-      if (ext === '.json') {
-        // Limit file size (2MB)
-        if (stats.size > 2 * 1024 * 1024) {
-          throw new AppError('File too large for preview', 400, 'FILE_TOO_LARGE');
-        }
-
-        const content = await fs.readFile(resolvedPath, 'utf-8');
-        try {
-          const parsed = JSON.parse(content);
-          return res.json({
-            success: true,
-            data: {
-              type: 'json',
-              path: resolvedPath,
-              content: parsed,
-              size: stats.size,
-            },
-          });
-        } catch {
-          throw new AppError('Invalid JSON file', 400, 'PARSE_ERROR');
-        }
-      }
-
-      // For other text files, return raw content
-      if (stats.size > 1024 * 1024) {
+    // Handle different file types
+    if (ext === '.csv') {
+      // Limit file size for CSV (5MB)
+      if (stats.size > 5 * 1024 * 1024) {
         throw new AppError('File too large for preview', 400, 'FILE_TOO_LARGE');
       }
 
       const content = await fs.readFile(resolvedPath, 'utf-8');
+      const parsed = parseCSV(content);
+
       return res.json({
         success: true,
         data: {
-          type: 'text',
+          type: 'csv',
           path: resolvedPath,
-          content,
-          size: stats.size,
+          headers: parsed.headers,
+          rows: parsed.rows.slice(0, maxRows),
+          totalRows: parsed.rows.length,
+          truncated: parsed.rows.length > maxRows,
         },
       });
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new AppError('File not found', 404, 'NOT_FOUND');
-      }
-      throw err;
     }
-  })
-);
+
+    if (ext === '.xlsx' || ext === '.xls') {
+      // exceljs replaces xlsx (CVE-2023-30533 / prototype pollution). .xls (legacy BIFF)
+      // is not supported by exceljs — reject early with a clear message.
+      if (ext === '.xls') {
+        throw new AppError(
+          'Legacy .xls files are not supported. Re-save as .xlsx.',
+          415,
+          'UNSUPPORTED_FORMAT'
+        );
+      }
+      try {
+        const ExcelJS = await import('exceljs');
+        const workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(resolvedPath);
+
+        const sheets: Record<string, { headers: string[]; rows: string[][]; totalRows: number }> =
+          {};
+        const sheetNames: string[] = [];
+
+        workbook.eachSheet((sheet) => {
+          sheetNames.push(sheet.name);
+
+          const allRows: string[][] = [];
+          sheet.eachRow({ includeEmpty: false }, (row) => {
+            const values = row.values as unknown[];
+            // ExcelJS row.values is 1-indexed with index 0 undefined — drop it.
+            const cells = Array.isArray(values) ? values.slice(1) : [];
+            allRows.push(cells.map((c) => (c == null ? '' : String(c))));
+          });
+
+          const headers = allRows[0] ?? [];
+          const dataRows = allRows.slice(1, maxRows + 1);
+
+          sheets[sheet.name] = {
+            headers,
+            rows: dataRows,
+            totalRows: Math.max(allRows.length - 1, 0),
+          };
+        });
+
+        return res.json({
+          success: true,
+          data: {
+            type: 'xlsx',
+            path: resolvedPath,
+            sheets,
+            sheetNames,
+          },
+        });
+      } catch (err) {
+        if (err instanceof AppError) throw err;
+        throw new AppError('Failed to parse Excel file', 400, 'PARSE_ERROR');
+      }
+    }
+
+    if (ext === '.json') {
+      // Limit file size (2MB)
+      if (stats.size > 2 * 1024 * 1024) {
+        throw new AppError('File too large for preview', 400, 'FILE_TOO_LARGE');
+      }
+
+      const content = await fs.readFile(resolvedPath, 'utf-8');
+      try {
+        const parsed = JSON.parse(content);
+        return res.json({
+          success: true,
+          data: {
+            type: 'json',
+            path: resolvedPath,
+            content: parsed,
+            size: stats.size,
+          },
+        });
+      } catch {
+        throw new AppError('Invalid JSON file', 400, 'PARSE_ERROR');
+      }
+    }
+
+    // For other text files, return raw content
+    if (stats.size > 1024 * 1024) {
+      throw new AppError('File too large for preview', 400, 'FILE_TOO_LARGE');
+    }
+
+    const content = await fs.readFile(resolvedPath, 'utf-8');
+    return res.json({
+      success: true,
+      data: {
+        type: 'text',
+        path: resolvedPath,
+        content,
+        size: stats.size,
+      },
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AppError('File not found', 404, 'NOT_FOUND');
+    }
+    throw err;
+  }
+});
 
 // Download file as attachment
-router.get(
-  '/download',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const filePath = req.query.path as string;
+router.get('/download', requireAuth, async (req, res) => {
+  const filePath = req.query.path as string;
 
-    if (!filePath) {
-      throw new AppError('Path is required', 400, 'MISSING_PATH');
+  if (!filePath) {
+    throw new AppError('Path is required', 400, 'MISSING_PATH');
+  }
+
+  const resolvedPath = validatePath(filePath);
+
+  try {
+    const stats = await fs.stat(resolvedPath);
+
+    if (stats.isDirectory()) {
+      throw new AppError('Path is a directory', 400, 'IS_DIRECTORY');
     }
 
-    const resolvedPath = validatePath(filePath);
+    const filename = path.basename(resolvedPath).replace(/[\r\n"]/g, '');
+    const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_') || 'download';
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+    );
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', stats.size);
 
-    try {
-      const stats = await fs.stat(resolvedPath);
-
-      if (stats.isDirectory()) {
-        throw new AppError('Path is a directory', 400, 'IS_DIRECTORY');
-      }
-
-      const filename = path.basename(resolvedPath).replace(/[\r\n"]/g, '');
-      const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_') || 'download';
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`
-      );
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Content-Length', stats.size);
-
-      const stream = createReadStream(resolvedPath);
-      stream.pipe(res);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new AppError('File not found', 404, 'NOT_FOUND');
-      }
-      throw err;
+    const stream = createReadStream(resolvedPath);
+    stream.pipe(res);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AppError('File not found', 404, 'NOT_FOUND');
     }
-  })
-);
+    throw err;
+  }
+});
 
 // Get file as binary (for PDFs, images, etc.)
-router.get(
-  '/binary',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const filePath = req.query.path as string;
+router.get('/binary', requireAuth, async (req, res) => {
+  const filePath = req.query.path as string;
 
-    if (!filePath) {
-      throw new AppError('Path is required', 400, 'MISSING_PATH');
+  if (!filePath) {
+    throw new AppError('Path is required', 400, 'MISSING_PATH');
+  }
+
+  const resolvedPath = validatePath(filePath);
+  const ext = path.extname(resolvedPath).toLowerCase();
+
+  try {
+    const stats = await fs.stat(resolvedPath);
+
+    if (stats.isDirectory()) {
+      throw new AppError('Path is a directory', 400, 'IS_DIRECTORY');
     }
 
-    const resolvedPath = validatePath(filePath);
-    const ext = path.extname(resolvedPath).toLowerCase();
-
-    try {
-      const stats = await fs.stat(resolvedPath);
-
-      if (stats.isDirectory()) {
-        throw new AppError('Path is a directory', 400, 'IS_DIRECTORY');
-      }
-
-      // Limit file size (20MB for binary files)
-      if (stats.size > 20 * 1024 * 1024) {
-        throw new AppError('File too large', 400, 'FILE_TOO_LARGE');
-      }
-
-      // Set appropriate content type
-      const contentTypes: Record<string, string> = {
-        '.html': 'text/html; charset=utf-8',
-        '.htm': 'text/html; charset=utf-8',
-        '.css': 'text/css; charset=utf-8',
-        '.js': 'text/javascript; charset=utf-8',
-        '.mjs': 'text/javascript; charset=utf-8',
-        '.cjs': 'text/javascript; charset=utf-8',
-        '.json': 'application/json; charset=utf-8',
-        '.map': 'application/json; charset=utf-8',
-        '.txt': 'text/plain; charset=utf-8',
-        '.xml': 'application/xml; charset=utf-8',
-        '.pdf': 'application/pdf',
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.gif': 'image/gif',
-        '.webp': 'image/webp',
-        '.svg': 'image/svg+xml',
-        '.ico': 'image/x-icon',
-        '.bmp': 'image/bmp',
-        '.mp4': 'video/mp4',
-        '.webm': 'video/webm',
-        '.mov': 'video/quicktime',
-        '.m4v': 'video/x-m4v',
-        '.ogv': 'video/ogg',
-        '.mp3': 'audio/mpeg',
-        '.wav': 'audio/wav',
-        '.ogg': 'audio/ogg',
-        '.flac': 'audio/flac',
-        '.m4a': 'audio/mp4',
-        '.aac': 'audio/aac',
-        '.woff': 'font/woff',
-        '.woff2': 'font/woff2',
-        '.ttf': 'font/ttf',
-        '.otf': 'font/otf',
-        '.wasm': 'application/wasm',
-      };
-
-      const forcedDownload = applyUntrustedFileHeaders(res, resolvedPath);
-      if (!forcedDownload) {
-        const contentType = contentTypes[ext] || 'application/octet-stream';
-        res.setHeader('Content-Type', contentType);
-      }
-      res.setHeader('Content-Length', stats.size);
-
-      // Stream the file
-      const stream = createReadStream(resolvedPath);
-      stream.pipe(res);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new AppError('File not found', 404, 'NOT_FOUND');
-      }
-      throw err;
+    // Limit file size (20MB for binary files)
+    if (stats.size > 20 * 1024 * 1024) {
+      throw new AppError('File too large', 400, 'FILE_TOO_LARGE');
     }
-  })
-);
+
+    // Set appropriate content type
+    const contentTypes: Record<string, string> = {
+      '.html': 'text/html; charset=utf-8',
+      '.htm': 'text/html; charset=utf-8',
+      '.css': 'text/css; charset=utf-8',
+      '.js': 'text/javascript; charset=utf-8',
+      '.mjs': 'text/javascript; charset=utf-8',
+      '.cjs': 'text/javascript; charset=utf-8',
+      '.json': 'application/json; charset=utf-8',
+      '.map': 'application/json; charset=utf-8',
+      '.txt': 'text/plain; charset=utf-8',
+      '.xml': 'application/xml; charset=utf-8',
+      '.pdf': 'application/pdf',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+      '.ico': 'image/x-icon',
+      '.bmp': 'image/bmp',
+      '.mp4': 'video/mp4',
+      '.webm': 'video/webm',
+      '.mov': 'video/quicktime',
+      '.m4v': 'video/x-m4v',
+      '.ogv': 'video/ogg',
+      '.mp3': 'audio/mpeg',
+      '.wav': 'audio/wav',
+      '.ogg': 'audio/ogg',
+      '.flac': 'audio/flac',
+      '.m4a': 'audio/mp4',
+      '.aac': 'audio/aac',
+      '.woff': 'font/woff',
+      '.woff2': 'font/woff2',
+      '.ttf': 'font/ttf',
+      '.otf': 'font/otf',
+      '.wasm': 'application/wasm',
+    };
+
+    const forcedDownload = applyUntrustedFileHeaders(res, resolvedPath);
+    if (!forcedDownload) {
+      const contentType = contentTypes[ext] || 'application/octet-stream';
+      res.setHeader('Content-Type', contentType);
+    }
+    res.setHeader('Content-Length', stats.size);
+
+    // Stream the file
+    const stream = createReadStream(resolvedPath);
+    stream.pipe(res);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AppError('File not found', 404, 'NOT_FOUND');
+    }
+    throw err;
+  }
+});
 
 export default router;

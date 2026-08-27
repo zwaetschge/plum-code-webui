@@ -6,7 +6,7 @@ import http from 'http';
 import path from 'path';
 import { config } from '../config.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { AppError } from '../middleware/errorHandler.js';
 import { redactSensitiveText } from '../utils/sanitize.js';
 import { buildRestrictedChildEnv } from '../utils/childProcessEnv.js';
 import {
@@ -552,214 +552,198 @@ router.get('/config', requireAuth, (_req, res) => {
   });
 });
 
-router.get(
-  '/static-file',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const rawProjectPath = typeof req.query.projectPath === 'string' ? req.query.projectPath : '';
-    const rawFilePath = typeof req.query.filePath === 'string' ? req.query.filePath : '';
-    const projectPath = rawProjectPath.trim() ? path.resolve(rawProjectPath) : '';
-    const filePath = rawFilePath.trim() ? path.resolve(rawFilePath) : '';
+router.get('/static-file', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const rawProjectPath = typeof req.query.projectPath === 'string' ? req.query.projectPath : '';
+  const rawFilePath = typeof req.query.filePath === 'string' ? req.query.filePath : '';
+  const projectPath = rawProjectPath.trim() ? path.resolve(rawProjectPath) : '';
+  const filePath = rawFilePath.trim() ? path.resolve(rawFilePath) : '';
 
-    if (!projectPath || !filePath) {
-      throw new AppError('Project path and file path are required', 400, 'VALIDATION_ERROR');
-    }
-    if (!isPathAllowed(projectPath)) {
-      throw new AppError('Project path is not allowed', 403, 'PROJECT_PATH_FORBIDDEN');
-    }
-    await assertProjectOwnedByUser(projectPath, userId);
-    if (!isSubpath(projectPath, filePath)) {
-      throw new AppError('File is outside the project path', 403, 'FILE_PATH_FORBIDDEN');
-    }
-    if (!isPathAllowed(filePath)) {
-      throw new AppError('File path is not allowed', 403, 'FILE_PATH_FORBIDDEN');
-    }
-    if (!isHtmlPreviewFile(filePath)) {
-      throw new AppError('Only HTML files can be opened in preview', 400, 'NOT_HTML_FILE');
-    }
+  if (!projectPath || !filePath) {
+    throw new AppError('Project path and file path are required', 400, 'VALIDATION_ERROR');
+  }
+  if (!isPathAllowed(projectPath)) {
+    throw new AppError('Project path is not allowed', 403, 'PROJECT_PATH_FORBIDDEN');
+  }
+  await assertProjectOwnedByUser(projectPath, userId);
+  if (!isSubpath(projectPath, filePath)) {
+    throw new AppError('File is outside the project path', 403, 'FILE_PATH_FORBIDDEN');
+  }
+  if (!isPathAllowed(filePath)) {
+    throw new AppError('File path is not allowed', 403, 'FILE_PATH_FORBIDDEN');
+  }
+  if (!isHtmlPreviewFile(filePath)) {
+    throw new AppError('Only HTML files can be opened in preview', 400, 'NOT_HTML_FILE');
+  }
 
-    let stats;
-    try {
-      stats = await fs.stat(filePath);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new AppError('File not found', 404, 'NOT_FOUND');
-      }
-      throw err;
+  let stats;
+  try {
+    stats = await fs.stat(filePath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AppError('File not found', 404, 'NOT_FOUND');
     }
+    throw err;
+  }
 
-    if (!stats.isFile()) {
-      throw new AppError('Path is not a file', 400, 'NOT_FILE');
-    }
+  if (!stats.isFile()) {
+    throw new AppError('Path is not a file', 400, 'NOT_FILE');
+  }
 
-    const relativePath = path.relative(projectPath, filePath).replace(/\\/g, '/');
-    res.json({
-      projectPath,
-      filePath,
-      relativePath,
-      name: path.basename(filePath),
-      urlPath: staticPreviewUrlPath(projectPath, relativePath),
-      size: stats.size,
-      modifiedAt: stats.mtime.toISOString(),
+  const relativePath = path.relative(projectPath, filePath).replace(/\\/g, '/');
+  res.json({
+    projectPath,
+    filePath,
+    relativePath,
+    name: path.basename(filePath),
+    urlPath: staticPreviewUrlPath(projectPath, relativePath),
+    size: stats.size,
+    modifiedAt: stats.mtime.toISOString(),
+  });
+});
+
+router.get('/ports', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const projectPath =
+    typeof req.query.projectPath === 'string' && req.query.projectPath.trim()
+      ? path.resolve(req.query.projectPath)
+      : null;
+  const savedPorts = parseSavedPorts(req.query.ports);
+  const candidateMap = new Map<number, PreviewCandidate>();
+
+  if (projectPath) await assertProjectOwnedByUser(projectPath, userId);
+  const hints = await projectHints(projectPath);
+  for (const candidate of hints.candidates) addCandidate(candidateMap, candidate);
+  for (const port of savedPorts) {
+    addCandidate(candidateMap, {
+      port,
+      name: `Port ${port}`,
+      icon: 'globe',
+      source: 'saved',
     });
-  })
-);
+  }
+  for (const candidate of COMMON_PORTS) addCandidate(candidateMap, candidate);
 
-router.get(
-  '/ports',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const projectPath =
-      typeof req.query.projectPath === 'string' && req.query.projectPath.trim()
-        ? path.resolve(req.query.projectPath)
-        : null;
-    const savedPorts = parseSavedPorts(req.query.ports);
-    const candidateMap = new Map<number, PreviewCandidate>();
-
-    if (projectPath) await assertProjectOwnedByUser(projectPath, userId);
-    const hints = await projectHints(projectPath);
-    for (const candidate of hints.candidates) addCandidate(candidateMap, candidate);
-    for (const port of savedPorts) {
-      addCandidate(candidateMap, {
-        port,
-        name: `Port ${port}`,
-        icon: 'globe',
-        source: 'saved',
-      });
+  const candidates = Array.from(candidateMap.values()).slice(0, 48);
+  const ports = await Promise.all(candidates.map(probeCandidate));
+  ports.sort((a, b) => {
+    if (a.reachable !== b.reachable) return a.reachable ? -1 : 1;
+    const sourceRank: Record<PreviewSource, number> = { project: 0, saved: 1, common: 2 };
+    if (sourceRank[a.source] !== sourceRank[b.source]) {
+      return sourceRank[a.source] - sourceRank[b.source];
     }
-    for (const candidate of COMMON_PORTS) addCandidate(candidateMap, candidate);
+    return a.port - b.port;
+  });
 
-    const candidates = Array.from(candidateMap.values()).slice(0, 48);
-    const ports = await Promise.all(candidates.map(probeCandidate));
-    ports.sort((a, b) => {
-      if (a.reachable !== b.reachable) return a.reachable ? -1 : 1;
-      const sourceRank: Record<PreviewSource, number> = { project: 0, saved: 1, common: 2 };
-      if (sourceRank[a.source] !== sourceRank[b.source]) {
-        return sourceRank[a.source] - sourceRank[b.source];
-      }
-      return a.port - b.port;
-    });
+  res.json({
+    projectPath,
+    scannedAt: new Date().toISOString(),
+    ports,
+    startCommands: attachStartCommandState(projectPath, userId, hints.startCommands),
+    artifacts: [],
+  });
+});
 
-    res.json({
-      projectPath,
-      scannedAt: new Date().toISOString(),
-      ports,
-      startCommands: attachStartCommandState(projectPath, userId, hints.startCommands),
-      artifacts: [],
-    });
-  })
-);
+router.post('/start', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const rawProjectPath = typeof req.body?.projectPath === 'string' ? req.body.projectPath : '';
+  const rawScript = typeof req.body?.script === 'string' ? req.body.script : '';
+  const projectPath = rawProjectPath.trim() ? path.resolve(rawProjectPath) : '';
+  const scriptName = rawScript.trim();
 
-router.post(
-  '/start',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const rawProjectPath = typeof req.body?.projectPath === 'string' ? req.body.projectPath : '';
-    const rawScript = typeof req.body?.script === 'string' ? req.body.script : '';
-    const projectPath = rawProjectPath.trim() ? path.resolve(rawProjectPath) : '';
-    const scriptName = rawScript.trim();
+  if (!projectPath || !scriptName) {
+    throw new AppError('Project path and script are required', 400, 'VALIDATION_ERROR');
+  }
+  await assertProjectOwnedByUser(projectPath, userId);
 
-    if (!projectPath || !scriptName) {
-      throw new AppError('Project path and script are required', 400, 'VALIDATION_ERROR');
+  const script = await resolveStartScript(projectPath, scriptName);
+  const key = processKey(projectPath, script.name);
+  const existing = previewProcesses.get(key);
+  if (existing?.status === 'starting' || existing?.status === 'running') {
+    if (existing.userId !== userId) {
+      throw new AppError('Preview process is unavailable', 409, 'PROCESS_UNAVAILABLE');
     }
-    await assertProjectOwnedByUser(projectPath, userId);
+    res.status(202).json(processState(existing));
+    return;
+  }
 
-    const script = await resolveStartScript(projectPath, scriptName);
-    const key = processKey(projectPath, script.name);
-    const existing = previewProcesses.get(key);
-    if (existing?.status === 'starting' || existing?.status === 'running') {
-      if (existing.userId !== userId) {
-        throw new AppError('Preview process is unavailable', 409, 'PROCESS_UNAVAILABLE');
-      }
-      res.status(202).json(processState(existing));
-      return;
-    }
+  const child = spawn(script.manager, script.args, {
+    cwd: projectPath,
+    env: {
+      ...buildRestrictedChildEnv(),
+      BROWSER: 'none',
+      FORCE_COLOR: '1',
+      PATH: previewProcessPath(),
+      TERM: 'xterm-256color',
+    },
+    shell: false,
+  });
 
-    const child = spawn(script.manager, script.args, {
-      cwd: projectPath,
-      env: {
-        ...buildRestrictedChildEnv(),
-        BROWSER: 'none',
-        FORCE_COLOR: '1',
-        PATH: previewProcessPath(),
-        TERM: 'xterm-256color',
-      },
-      shell: false,
-    });
+  const record: PreviewProcessRecord = {
+    userId,
+    projectPath,
+    scriptName: script.name,
+    command: script.command,
+    raw: script.raw,
+    child,
+    pid: child.pid ?? null,
+    status: 'starting',
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    exitCode: null,
+    signal: null,
+    error: null,
+    outputTail: '',
+  };
+  previewProcesses.set(key, record);
 
-    const record: PreviewProcessRecord = {
-      userId,
-      projectPath,
-      scriptName: script.name,
-      command: script.command,
-      raw: script.raw,
-      child,
-      pid: child.pid ?? null,
-      status: 'starting',
-      startedAt: new Date().toISOString(),
-      completedAt: null,
-      exitCode: null,
-      signal: null,
-      error: null,
-      outputTail: '',
-    };
-    previewProcesses.set(key, record);
+  child.stdout?.on('data', (chunk: Buffer) => appendProcessOutput(record, chunk));
+  child.stderr?.on('data', (chunk: Buffer) => appendProcessOutput(record, chunk));
+  child.on('spawn', () => {
+    record.pid = child.pid ?? null;
+    record.status = 'running';
+  });
+  child.on('error', (err) => {
+    record.status = 'error';
+    record.completedAt = new Date().toISOString();
+    record.error = err.message;
+  });
+  child.on('exit', (exitCode, signal) => {
+    record.status = exitCode === 0 ? 'exited' : 'error';
+    record.completedAt = new Date().toISOString();
+    record.exitCode = exitCode;
+    record.signal = signal;
+    if (exitCode && !record.error) record.error = `Process exited with code ${exitCode}`;
+  });
 
-    child.stdout?.on('data', (chunk: Buffer) => appendProcessOutput(record, chunk));
-    child.stderr?.on('data', (chunk: Buffer) => appendProcessOutput(record, chunk));
-    child.on('spawn', () => {
-      record.pid = child.pid ?? null;
-      record.status = 'running';
-    });
-    child.on('error', (err) => {
-      record.status = 'error';
-      record.completedAt = new Date().toISOString();
-      record.error = err.message;
-    });
-    child.on('exit', (exitCode, signal) => {
-      record.status = exitCode === 0 ? 'exited' : 'error';
-      record.completedAt = new Date().toISOString();
-      record.exitCode = exitCode;
-      record.signal = signal;
-      if (exitCode && !record.error) record.error = `Process exited with code ${exitCode}`;
-    });
+  res.status(202).json(processState(record));
+});
 
-    res.status(202).json(processState(record));
-  })
-);
+router.post('/stop', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const rawProjectPath = typeof req.body?.projectPath === 'string' ? req.body.projectPath : '';
+  const rawScript = typeof req.body?.script === 'string' ? req.body.script : '';
+  const projectPath = rawProjectPath.trim() ? path.resolve(rawProjectPath) : '';
+  const scriptName = rawScript.trim();
 
-router.post(
-  '/stop',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const rawProjectPath = typeof req.body?.projectPath === 'string' ? req.body.projectPath : '';
-    const rawScript = typeof req.body?.script === 'string' ? req.body.script : '';
-    const projectPath = rawProjectPath.trim() ? path.resolve(rawProjectPath) : '';
-    const scriptName = rawScript.trim();
+  if (!projectPath || !scriptName) {
+    throw new AppError('Project path and script are required', 400, 'VALIDATION_ERROR');
+  }
+  if (!isPathAllowed(projectPath)) {
+    throw new AppError('Project path is not allowed', 403, 'PROJECT_PATH_FORBIDDEN');
+  }
+  await assertProjectOwnedByUser(projectPath, userId);
 
-    if (!projectPath || !scriptName) {
-      throw new AppError('Project path and script are required', 400, 'VALIDATION_ERROR');
-    }
-    if (!isPathAllowed(projectPath)) {
-      throw new AppError('Project path is not allowed', 403, 'PROJECT_PATH_FORBIDDEN');
-    }
-    await assertProjectOwnedByUser(projectPath, userId);
+  const record = previewProcesses.get(processKey(projectPath, scriptName));
+  if (!record || record.userId !== userId) {
+    throw new AppError('Preview process not found', 404, 'PROCESS_NOT_FOUND');
+  }
 
-    const record = previewProcesses.get(processKey(projectPath, scriptName));
-    if (!record || record.userId !== userId) {
-      throw new AppError('Preview process not found', 404, 'PROCESS_NOT_FOUND');
-    }
+  if (record.status === 'starting' || record.status === 'running') {
+    record.child.kill('SIGTERM');
+  }
 
-    if (record.status === 'starting' || record.status === 'running') {
-      record.child.kill('SIGTERM');
-    }
-
-    res.json(processState(record));
-  })
-);
+  res.json(processState(record));
+});
 
 export default router;

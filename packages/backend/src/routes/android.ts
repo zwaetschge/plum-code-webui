@@ -2,7 +2,7 @@ import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { AppError } from '../middleware/errorHandler.js';
 
 const router = Router();
 
@@ -233,242 +233,190 @@ async function loadSnapshot(sessionId: string | undefined, userId: string) {
   };
 }
 
-router.get(
-  '/health',
-  requireAuth,
-  asyncHandler(async (_req, res) => {
-    const health = await builderRequest<unknown>('GET', '/api/health');
-    res.json({ success: true, data: health });
-  })
-);
+router.get('/health', requireAuth, async (_req, res) => {
+  const health = await builderRequest<unknown>('GET', '/api/health');
+  res.json({ success: true, data: health });
+});
 
-router.get(
-  '/emulator/status',
-  requireAuth,
-  asyncHandler(async (_req, res) => {
-    const status = await builderRequest<unknown>('GET', '/api/emulator/status');
-    res.json({ success: true, data: status });
-  })
-);
+router.get('/emulator/status', requireAuth, async (_req, res) => {
+  const status = await builderRequest<unknown>('GET', '/api/emulator/status');
+  res.json({ success: true, data: status });
+});
 
-router.post(
-  '/emulator/start',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const parsed = emulatorStartSchema.safeParse(req.body || {});
-    if (!parsed.success) {
-      throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+router.post('/emulator/start', requireAuth, async (req, res) => {
+  const parsed = emulatorStartSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+  }
+  const result = await builderRequest<unknown>('POST', '/api/emulator/start', parsed.data);
+  res.json({ success: true, data: result });
+});
+
+router.post('/emulator/stop', requireAuth, async (_req, res) => {
+  const result = await builderRequest<unknown>('POST', '/api/emulator/stop');
+  res.json({ success: true, data: result });
+});
+
+router.get('/devices/:serial/screenshot.png', requireAuth, async (req, res) => {
+  const serial = parsePathParam(serialSchema, req.params.serial, 'serial');
+  const screenshot = await builderBinaryRequest(
+    `/api/devices/${encodeURIComponent(serial)}/screenshot.png`
+  );
+  res.setHeader('Content-Type', screenshot.contentType);
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Length', String(screenshot.body.length));
+  res.end(screenshot.body);
+});
+
+router.get('/devices', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const parsed = devicesQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+  }
+
+  const data = await loadSnapshot(parsed.data.sessionId, userId);
+  res.json({ success: true, data });
+});
+
+router.post('/devices/reconnect-all', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const sessionId =
+    typeof req.query.sessionId === 'string' && req.query.sessionId.trim()
+      ? req.query.sessionId.trim()
+      : undefined;
+  if (sessionId) await requireSession(sessionId, userId);
+
+  const result = await builderRequest<unknown>('POST', '/api/devices/reconnect-all');
+  const devices = await loadSnapshot(sessionId, userId);
+  res.json({ success: true, data: { result, devices } });
+});
+
+router.post('/devices/pair', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const parsed = pairSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+  }
+
+  const {
+    sessionId,
+    host,
+    port,
+    pairingCode,
+    friendlyName,
+    connectAfterPair,
+    connectPort,
+    selectForSession,
+  } = parsed.data;
+  if (sessionId) await requireSession(sessionId, userId);
+
+  const pair = await builderRequest<unknown>('POST', '/api/devices/pair', {
+    host,
+    port,
+    pairingCode,
+    ...(friendlyName ? { friendlyName } : {}),
+  });
+
+  let connect: unknown | null = null;
+  let connectError: string | undefined;
+  let selectedSerial = readSerial(pair);
+
+  if (connectAfterPair) {
+    try {
+      connect = await builderRequest<unknown>('POST', '/api/devices/connect', {
+        host,
+        port: connectPort,
+        ...(friendlyName ? { friendlyName } : {}),
+      });
+      selectedSerial = readSerial(connect) || selectedSerial || `${host}:${connectPort}`;
+    } catch (error) {
+      connectError = error instanceof Error ? error.message : 'connect failed';
     }
-    const result = await builderRequest<unknown>('POST', '/api/emulator/start', parsed.data);
-    res.json({ success: true, data: result });
-  })
-);
+  }
 
-router.post(
-  '/emulator/stop',
-  requireAuth,
-  asyncHandler(async (_req, res) => {
-    const result = await builderRequest<unknown>('POST', '/api/emulator/stop');
-    res.json({ success: true, data: result });
-  })
-);
+  if (sessionId && selectForSession && selectedSerial) {
+    await bindSessionSerial(sessionId, userId, selectedSerial);
+  }
 
-router.get(
-  '/devices/:serial/screenshot.png',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const serial = parsePathParam(serialSchema, req.params.serial, 'serial');
-    const screenshot = await builderBinaryRequest(
-      `/api/devices/${encodeURIComponent(serial)}/screenshot.png`
-    );
-    res.setHeader('Content-Type', screenshot.contentType);
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Content-Length', String(screenshot.body.length));
-    res.end(screenshot.body);
-  })
-);
+  const devices = await loadSnapshot(sessionId, userId);
+  res.json({ success: true, data: { pair, connect, connectError, selectedSerial, devices } });
+});
 
-router.get(
-  '/devices',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const parsed = devicesQuerySchema.safeParse(req.query);
-    if (!parsed.success) {
-      throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+router.post('/devices/connect', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const parsed = connectSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+  }
+
+  const { sessionId, host, port, friendlyName, selectForSession, replaceSerial } = parsed.data;
+  if (sessionId) await requireSession(sessionId, userId);
+
+  const connect = await builderRequest<unknown>('POST', '/api/devices/connect', {
+    host,
+    port,
+    ...(friendlyName ? { friendlyName } : {}),
+  });
+  const selectedSerial = readSerial(connect) || `${host}:${port}`;
+
+  // Only after the new port answers, so a failed reconnect never loses the
+  // entry the user would need to try again.
+  let replacedSerial: string | undefined;
+  if (replaceSerial && replaceSerial !== selectedSerial) {
+    try {
+      await builderRequest<unknown>(
+        'DELETE',
+        `/api/devices/known/${encodeURIComponent(replaceSerial)}`
+      );
+      replacedSerial = replaceSerial;
+    } catch {
+      // The stale entry is cosmetic; a live connection matters more.
     }
+  }
 
-    const data = await loadSnapshot(parsed.data.sessionId, userId);
-    res.json({ success: true, data });
-  })
-);
+  if (sessionId && selectForSession) {
+    await bindSessionSerial(sessionId, userId, selectedSerial);
+  }
 
-router.post(
-  '/devices/reconnect-all',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const sessionId =
-      typeof req.query.sessionId === 'string' && req.query.sessionId.trim()
-        ? req.query.sessionId.trim()
-        : undefined;
-    if (sessionId) await requireSession(sessionId, userId);
+  const devices = await loadSnapshot(sessionId, userId);
+  res.json({ success: true, data: { connect, selectedSerial, replacedSerial, devices } });
+});
 
-    const result = await builderRequest<unknown>('POST', '/api/devices/reconnect-all');
-    const devices = await loadSnapshot(sessionId, userId);
-    res.json({ success: true, data: { result, devices } });
-  })
-);
+router.put('/sessions/:sessionId/device', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const sessionId = parsePathParam(sessionIdSchema, req.params.sessionId, 'session id');
+  const parsed = bindDeviceSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+  }
 
-router.post(
-  '/devices/pair',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const parsed = pairSchema.safeParse(req.body);
-    if (!parsed.success) {
-      throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
-    }
+  await bindSessionSerial(sessionId, userId, parsed.data.serial);
+  const devices = await loadSnapshot(sessionId, userId);
+  res.json({ success: true, data: devices });
+});
 
-    const {
-      sessionId,
-      host,
-      port,
-      pairingCode,
-      friendlyName,
-      connectAfterPair,
-      connectPort,
-      selectForSession,
-    } = parsed.data;
-    if (sessionId) await requireSession(sessionId, userId);
+router.delete('/sessions/:sessionId/device', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const sessionId = parsePathParam(sessionIdSchema, req.params.sessionId, 'session id');
+  await bindSessionSerial(sessionId, userId, null);
+  const devices = await loadSnapshot(sessionId, userId);
+  res.json({ success: true, data: devices });
+});
 
-    const pair = await builderRequest<unknown>('POST', '/api/devices/pair', {
-      host,
-      port,
-      pairingCode,
-      ...(friendlyName ? { friendlyName } : {}),
-    });
+router.post('/devices/:serial/disconnect', requireAuth, async (req, res) => {
+  const serial = parsePathParam(serialSchema, req.params.serial, 'serial');
+  const result = await builderRequest<unknown>('POST', '/api/devices/disconnect', { serial });
+  res.json({ success: true, data: result });
+});
 
-    let connect: unknown | null = null;
-    let connectError: string | undefined;
-    let selectedSerial = readSerial(pair);
-
-    if (connectAfterPair) {
-      try {
-        connect = await builderRequest<unknown>('POST', '/api/devices/connect', {
-          host,
-          port: connectPort,
-          ...(friendlyName ? { friendlyName } : {}),
-        });
-        selectedSerial = readSerial(connect) || selectedSerial || `${host}:${connectPort}`;
-      } catch (error) {
-        connectError = error instanceof Error ? error.message : 'connect failed';
-      }
-    }
-
-    if (sessionId && selectForSession && selectedSerial) {
-      await bindSessionSerial(sessionId, userId, selectedSerial);
-    }
-
-    const devices = await loadSnapshot(sessionId, userId);
-    res.json({ success: true, data: { pair, connect, connectError, selectedSerial, devices } });
-  })
-);
-
-router.post(
-  '/devices/connect',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const parsed = connectSchema.safeParse(req.body);
-    if (!parsed.success) {
-      throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
-    }
-
-    const { sessionId, host, port, friendlyName, selectForSession, replaceSerial } = parsed.data;
-    if (sessionId) await requireSession(sessionId, userId);
-
-    const connect = await builderRequest<unknown>('POST', '/api/devices/connect', {
-      host,
-      port,
-      ...(friendlyName ? { friendlyName } : {}),
-    });
-    const selectedSerial = readSerial(connect) || `${host}:${port}`;
-
-    // Only after the new port answers, so a failed reconnect never loses the
-    // entry the user would need to try again.
-    let replacedSerial: string | undefined;
-    if (replaceSerial && replaceSerial !== selectedSerial) {
-      try {
-        await builderRequest<unknown>(
-          'DELETE',
-          `/api/devices/known/${encodeURIComponent(replaceSerial)}`
-        );
-        replacedSerial = replaceSerial;
-      } catch {
-        // The stale entry is cosmetic; a live connection matters more.
-      }
-    }
-
-    if (sessionId && selectForSession) {
-      await bindSessionSerial(sessionId, userId, selectedSerial);
-    }
-
-    const devices = await loadSnapshot(sessionId, userId);
-    res.json({ success: true, data: { connect, selectedSerial, replacedSerial, devices } });
-  })
-);
-
-router.put(
-  '/sessions/:sessionId/device',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const sessionId = parsePathParam(sessionIdSchema, req.params.sessionId, 'session id');
-    const parsed = bindDeviceSchema.safeParse(req.body);
-    if (!parsed.success) {
-      throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
-    }
-
-    await bindSessionSerial(sessionId, userId, parsed.data.serial);
-    const devices = await loadSnapshot(sessionId, userId);
-    res.json({ success: true, data: devices });
-  })
-);
-
-router.delete(
-  '/sessions/:sessionId/device',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const sessionId = parsePathParam(sessionIdSchema, req.params.sessionId, 'session id');
-    await bindSessionSerial(sessionId, userId, null);
-    const devices = await loadSnapshot(sessionId, userId);
-    res.json({ success: true, data: devices });
-  })
-);
-
-router.post(
-  '/devices/:serial/disconnect',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const serial = parsePathParam(serialSchema, req.params.serial, 'serial');
-    const result = await builderRequest<unknown>('POST', '/api/devices/disconnect', { serial });
-    res.json({ success: true, data: result });
-  })
-);
-
-router.delete(
-  '/devices/:serial',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const serial = parsePathParam(serialSchema, req.params.serial, 'serial');
-    const result = await builderRequest<unknown>(
-      'DELETE',
-      `/api/devices/known/${encodeURIComponent(serial)}`
-    );
-    res.json({ success: true, data: result });
-  })
-);
+router.delete('/devices/:serial', requireAuth, async (req, res) => {
+  const serial = parsePathParam(serialSchema, req.params.serial, 'serial');
+  const result = await builderRequest<unknown>(
+    'DELETE',
+    `/api/devices/known/${encodeURIComponent(serial)}`
+  );
+  res.json({ success: true, data: result });
+});
 
 export default router;

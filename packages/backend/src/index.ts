@@ -1,9 +1,3 @@
-// First, and it has to stay first: it patches Express's router so a rejected
-// promise from an async handler reaches the error middleware instead of hanging
-// the request. The route modules below register their handlers when they are
-// imported, which happens before any statement in this file runs.
-import './middleware/asyncErrors.js';
-
 import express from 'express';
 import fs from 'fs';
 import { createServer } from 'http';
@@ -505,8 +499,13 @@ async function main() {
       '/service-worker.js',
     ];
 
-    // Handle SPA routing - serve index.html for all non-API routes
-    app.get('*', (req, res, next) => {
+    // Handle SPA routing - serve index.html for all non-API routes.
+    //
+    // `/{*splat}` rather than Express 4's `*`: path-to-regexp v8 rejects a bare
+    // wildcard, and the braces matter. `/*splat` alone does not match `/` —
+    // every deep link would work while the root 404s, which is the one route
+    // nobody would think to test.
+    app.get('/{*splat}', (req, res, next) => {
       // Skip API routes and backend auth routes
       if (
         req.path.startsWith('/api') ||

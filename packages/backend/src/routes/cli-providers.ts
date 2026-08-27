@@ -18,7 +18,7 @@ import {
   type CLIProvider,
   type CLIProviderConfig,
 } from '../services/cli-providers.js';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { AppError } from '../middleware/errorHandler.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
 import { CLI_UPDATE_PROVIDERS, runCliUpdates } from '../services/cli-updates.js';
 import {
@@ -311,70 +311,59 @@ router.get('/:id/models', requireAuth, async (req, res) => {
 // Admin-only: spawns `codex exec` (up to 30s, hits OpenAI API). Rate-limited to
 // 10/min per admin, with an in-flight lock in refreshCodexModelsCache so parallel
 // callers share one run.
-router.post(
-  '/refresh-models',
-  requireAuth,
-  requireAdmin,
-  rateLimiters.strict,
-  asyncHandler(async (req, res) => {
-    resetDiscovery();
-    const codexRefreshed = await refreshCodexModelsCache();
+router.post('/refresh-models', requireAuth, requireAdmin, rateLimiters.strict, async (req, res) => {
+  resetDiscovery();
+  const codexRefreshed = await refreshCodexModelsCache();
 
-    const labels = getModelDisplayLabels();
-    const userId = (req as AuthenticatedRequest).userId;
-    const zaiConfig = await getZaiApiConfigForUser(userId);
-    const zaiModelLabels = getClaudeApiModelLabels(zaiConfig);
-    const providers = await Promise.all(
-      Object.values(CLI_PROVIDERS).map(async (provider) => {
-        const models = await getProviderModelsForUser(provider.id, userId, zaiConfig);
-        const providerLabels: Record<string, string> = {};
-        for (const m of models) {
-          if (labels[m]) providerLabels[m] = labels[m];
-        }
-        if (provider.defaultModel && labels[provider.defaultModel]) {
-          providerLabels[provider.defaultModel] = labels[provider.defaultModel]!;
-        }
-        if (provider.id === 'zai' && zaiModelLabels) {
-          Object.assign(providerLabels, zaiModelLabels);
-        }
-        return { id: provider.id, models, modelLabels: providerLabels };
-      })
-    );
+  const labels = getModelDisplayLabels();
+  const userId = (req as AuthenticatedRequest).userId;
+  const zaiConfig = await getZaiApiConfigForUser(userId);
+  const zaiModelLabels = getClaudeApiModelLabels(zaiConfig);
+  const providers = await Promise.all(
+    Object.values(CLI_PROVIDERS).map(async (provider) => {
+      const models = await getProviderModelsForUser(provider.id, userId, zaiConfig);
+      const providerLabels: Record<string, string> = {};
+      for (const m of models) {
+        if (labels[m]) providerLabels[m] = labels[m];
+      }
+      if (provider.defaultModel && labels[provider.defaultModel]) {
+        providerLabels[provider.defaultModel] = labels[provider.defaultModel]!;
+      }
+      if (provider.id === 'zai' && zaiModelLabels) {
+        Object.assign(providerLabels, zaiModelLabels);
+      }
+      return { id: provider.id, models, modelLabels: providerLabels };
+    })
+  );
 
-    const response: ApiResponse<{ providers: typeof providers; codexCacheRefreshed: boolean }> = {
-      success: true,
-      data: { providers, codexCacheRefreshed: codexRefreshed },
-    };
-    res.json(response);
-  })
-);
+  const response: ApiResponse<{ providers: typeof providers; codexCacheRefreshed: boolean }> = {
+    success: true,
+    data: { providers, codexCacheRefreshed: codexRefreshed },
+  };
+  res.json(response);
+});
 
 // Admin-only: `npm install -g` spawns with a 5-minute timeout and a shared
 // in-flight lock, so any authed user could exhaust container resources or
 // stall concurrent updates. Restrict to admins.
-router.post(
-  '/update',
-  requireAuth,
-  requireAdmin,
-  asyncHandler(async (req, res) => {
-    const parsed = updateCliProvidersSchema.safeParse(req.body || {});
-    if (!parsed.success) {
-      throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
-    }
+router.post('/update', requireAuth, requireAdmin, async (req, res) => {
+  const parsed = updateCliProvidersSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+  }
 
-    const providers: CLIProvider[] | undefined = parsed.data.providers?.length
-      ? [...parsed.data.providers]
-      : undefined;
-    const updateResult = await runCliUpdates(providers);
-    if (updateResult.results.some((result) => result.status === 'updated')) {
-      resetDiscovery();
-    }
-    const response: ApiResponse<CliProviderUpdateResponse> = {
-      success: true,
-      data: updateResult,
-    };
-    res.json(response);
-  })
-);
+  const providers: CLIProvider[] | undefined = parsed.data.providers?.length
+    ? [...parsed.data.providers]
+    : undefined;
+  const updateResult = await runCliUpdates(providers);
+  if (updateResult.results.some((result) => result.status === 'updated')) {
+    resetDiscovery();
+  }
+  const response: ApiResponse<CliProviderUpdateResponse> = {
+    success: true,
+    data: updateResult,
+  };
+  res.json(response);
+});
 
 export default router;

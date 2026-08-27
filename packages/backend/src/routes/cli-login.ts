@@ -4,7 +4,7 @@ import { z } from 'zod';
 import * as pty from 'node-pty';
 import os from 'os';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { AppError } from '../middleware/errorHandler.js';
 import { CLI_PROVIDERS, type CLIProvider } from '../services/cli-providers.js';
 import fs from 'fs';
 import path from 'path';
@@ -174,7 +174,7 @@ function serializeLoginSession(session: LoginSession) {
 router.post(
   '/:provider/start',
   requireAuth,
-  await asyncHandler(async (req, res) => {
+  async (req, res) => {
     const userId = (req as AuthenticatedRequest).userId;
     const provider = (req.params.provider || '').toLowerCase() as CLIProvider;
 
@@ -334,7 +334,7 @@ router.post(
       success: true,
       data: serializeLoginSession(session),
     });
-  })
+  }
 );
 
 router.get('/:id', requireAuth, (req, res) => {
@@ -354,7 +354,7 @@ router.get('/:id', requireAuth, (req, res) => {
 router.post(
   '/:id/code',
   requireAuth,
-  asyncHandler(async (req, res) => {
+  async (req, res) => {
     const userId = (req as AuthenticatedRequest).userId;
     const session = loginSessions.get(req.params.id!);
 
@@ -389,7 +389,7 @@ router.post(
       success: true,
       data: serializeLoginSession(session),
     });
-  })
+  }
 );
 
 router.delete('/:id', requireAuth, (req, res) => {

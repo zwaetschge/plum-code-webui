@@ -7,14 +7,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const { useTestSchema, createTestSchema, dropTestSchema, databaseReachable } = await import(
-  './testing.js'
-);
+const { useTestSchema, createTestSchema, dropTestSchema, databaseReachable } =
+  await import('./testing.js');
 useTestSchema();
 
-const { hasMigrationRun, listAppliedMigrations, markMigrationApplied, runMigration } = await import(
-  './migrations.js'
-);
+const { hasMigrationRun, listAppliedMigrations, markMigrationApplied, runMigration } =
+  await import('./migrations.js');
 const { transaction: pgTransaction, get: pgGet } = await import('./pg.js');
 
 const reachable = await databaseReachable();
@@ -23,9 +21,7 @@ test.after(async () => {
   if (reachable) await dropTestSchema();
 });
 
-const options = reachable
-  ? {}
-  : { skip: 'no Postgres reachable (set PGHOST/PGPASSWORD to run)' };
+const options = reachable ? {} : { skip: 'no Postgres reachable (set PGHOST/PGPASSWORD to run)' };
 
 test('a migration runs once and is recorded', options, async () => {
   const migration = {

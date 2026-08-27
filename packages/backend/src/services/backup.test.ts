@@ -16,9 +16,8 @@ process.env.WEBUI_DATA_DIR = dataDir;
 process.env.SESSION_SECRET ||= 'x'.repeat(32);
 process.env.JWT_SECRET ||= 'y'.repeat(32);
 
-const { useTestSchema, createTestSchema, dropTestSchema, databaseReachable } = await import(
-  '../db/testing.js'
-);
+const { useTestSchema, createTestSchema, dropTestSchema, databaseReachable } =
+  await import('../db/testing.js');
 useTestSchema();
 
 const { createBackup, listBackups, pruneBackups } = await import('./backup.js');

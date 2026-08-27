@@ -13,7 +13,7 @@ import { createReadStream } from 'fs';
 import os from 'os';
 import multer from 'multer';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
-import { AppError, asyncHandler } from '../middleware/errorHandler.js';
+import { AppError } from '../middleware/errorHandler.js';
 import { config } from '../config.js';
 import { safeJsonParse } from '../utils/json.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
@@ -969,18 +969,15 @@ async function attachRuntimeAndTelemetry<T extends Record<string, unknown>>(
 }
 
 // List all sessions
-router.get(
-  '/',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
+router.get('/', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
 
-    // Sort by message activity (latest message wins) with updated_at as fallback for
-    // sessions that have no messages yet. Starred sessions always float to the top.
-    // `?archived=1` swaps the list over to the archive rather than mixing both.
-    const includeArchived = String(req.query.archived ?? '') === '1';
-    const sessions = (await pgAll(
-      `SELECT s.id, s.user_id as userId, s.name, s.working_directory as workingDirectory,
+  // Sort by message activity (latest message wins) with updated_at as fallback for
+  // sessions that have no messages yet. Starred sessions always float to the top.
+  // `?archived=1` swaps the list over to the archive rather than mixing both.
+  const includeArchived = String(req.query.archived ?? '') === '1';
+  const sessions = (await pgAll(
+    `SELECT s.id, s.user_id as userId, s.name, s.working_directory as workingDirectory,
 	              s.claude_session_id as claudeSessionId, s.status, s.last_message as lastMessage,
 	              ${sessionIconSelect('s')},
 	              s.starred, s.category, s.cli_provider as cliProvider, s.mode, s.surface,
@@ -1001,18 +998,17 @@ router.get(
        FROM sessions s
        WHERE s.user_id = ? AND COALESCE(s.archived, 0) = ?
        ORDER BY s.starred DESC, lastActivity DESC`,
-      userId,
-      includeArchived ? 1 : 0
-    )) as unknown as Array<Record<string, unknown>>;
+    userId,
+    includeArchived ? 1 : 0
+  )) as unknown as Array<Record<string, unknown>>;
 
-    const sessionsWithDescriptions = await Promise.all(sessions.map(attachProjectDescription));
-    const sessionsWithStarred = sessionsWithDescriptions.map((s) =>
-      attachRuntime({ ...s, starred: Boolean(s.starred) })
-    );
+  const sessionsWithDescriptions = await Promise.all(sessions.map(attachProjectDescription));
+  const sessionsWithStarred = sessionsWithDescriptions.map((s) =>
+    attachRuntime({ ...s, starred: Boolean(s.starred) })
+  );
 
-    res.json({ success: true, data: sessionsWithStarred });
-  })
-);
+  res.json({ success: true, data: sessionsWithStarred });
+});
 
 // Get session by ID
 router.get('/:id', requireAuth, async (req, res) => {
@@ -1038,7 +1034,7 @@ router.post(
   rateLimiters.sessionCreation,
   rateLimiters.upload,
   parseCreateSessionUpload,
-  asyncHandler(async (req, res) => {
+  async (req, res) => {
     const userId = (req as AuthenticatedRequest).userId;
     const parsed = createSessionSchema.safeParse(req.body);
 
@@ -1202,7 +1198,7 @@ router.post(
         }
       })();
     }
-  })
+  }
 );
 
 // Update session
@@ -1294,110 +1290,103 @@ router.patch('/:id/star', requireAuth, async (req, res) => {
  * actions the dashboards offer. Archiving is preferred over deleting: the
  * transcript and its usage history stay intact.
  */
-router.post(
-  '/bulk',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const parsed = z
-      .object({
-        ids: z.array(z.string().trim().min(1)).min(1).max(500),
-        action: z.enum(['archive', 'unarchive', 'delete', 'star', 'unstar', 'category']),
-        categoryId: z.string().trim().min(1).nullable().optional(),
-      })
-      .safeParse(req.body);
-    if (!parsed.success) throw new AppError('Invalid bulk request', 400, 'VALIDATION_ERROR');
+router.post('/bulk', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const parsed = z
+    .object({
+      ids: z.array(z.string().trim().min(1)).min(1).max(500),
+      action: z.enum(['archive', 'unarchive', 'delete', 'star', 'unstar', 'category']),
+      categoryId: z.string().trim().min(1).nullable().optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) throw new AppError('Invalid bulk request', 400, 'VALIDATION_ERROR');
 
-    const { ids, action, categoryId } = parsed.data;
-    const marks = ids.map(() => '?').join(',');
-    // Scope every statement by user_id so ids from another account are no-ops.
-    const owned = (await pgAll(
-      `SELECT id FROM sessions WHERE user_id = ? AND id IN (${marks})`,
-      userId,
-      ...ids
-    )) as unknown as Array<{ id: string }>;
-    const ownedIds = owned.map((row) => row.id);
-    if (ownedIds.length === 0) {
-      return res.json({ success: true, data: { affected: 0 } });
-    }
-    const ownedMarks = ownedIds.map(() => '?').join(',');
+  const { ids, action, categoryId } = parsed.data;
+  const marks = ids.map(() => '?').join(',');
+  // Scope every statement by user_id so ids from another account are no-ops.
+  const owned = (await pgAll(
+    `SELECT id FROM sessions WHERE user_id = ? AND id IN (${marks})`,
+    userId,
+    ...ids
+  )) as unknown as Array<{ id: string }>;
+  const ownedIds = owned.map((row) => row.id);
+  if (ownedIds.length === 0) {
+    return res.json({ success: true, data: { affected: 0 } });
+  }
+  const ownedMarks = ownedIds.map(() => '?').join(',');
 
-    let affected = 0;
-    if (action === 'delete') {
-      // Stop anything running before the row disappears underneath it.
-      const processManager = getProcessManager();
-      for (const id of ownedIds) {
-        if (processManager.isSessionRunning(id)) {
-          try {
-            await processManager.stopSession(id, userId);
-          } catch {
-            // Already gone — deletion proceeds regardless.
-          }
+  let affected = 0;
+  if (action === 'delete') {
+    // Stop anything running before the row disappears underneath it.
+    const processManager = getProcessManager();
+    for (const id of ownedIds) {
+      if (processManager.isSessionRunning(id)) {
+        try {
+          await processManager.stopSession(id, userId);
+        } catch {
+          // Already gone — deletion proceeds regardless.
         }
       }
-      affected = (
-        await pgRun(
-          `DELETE FROM sessions WHERE user_id = ? AND id IN (${ownedMarks})`,
-          userId,
-          ...ownedIds
-        )
-      ).changes;
-    } else if (action === 'category') {
-      affected = (
-        await pgRun(
-          `UPDATE sessions SET category = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE user_id = ? AND id IN (${ownedMarks})`,
-          categoryId ?? null,
-          userId,
-          ...ownedIds
-        )
-      ).changes;
-    } else {
-      const column = action === 'star' || action === 'unstar' ? 'starred' : 'archived';
-      const value = action === 'archive' || action === 'star' ? 1 : 0;
-      affected = (
-        await pgRun(
-          `UPDATE sessions SET ${column} = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE user_id = ? AND id IN (${ownedMarks})`,
-          value,
-          userId,
-          ...ownedIds
-        )
-      ).changes;
     }
+    affected = (
+      await pgRun(
+        `DELETE FROM sessions WHERE user_id = ? AND id IN (${ownedMarks})`,
+        userId,
+        ...ownedIds
+      )
+    ).changes;
+  } else if (action === 'category') {
+    affected = (
+      await pgRun(
+        `UPDATE sessions SET category = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE user_id = ? AND id IN (${ownedMarks})`,
+        categoryId ?? null,
+        userId,
+        ...ownedIds
+      )
+    ).changes;
+  } else {
+    const column = action === 'star' || action === 'unstar' ? 'starred' : 'archived';
+    const value = action === 'archive' || action === 'star' ? 1 : 0;
+    affected = (
+      await pgRun(
+        `UPDATE sessions SET ${column} = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE user_id = ? AND id IN (${ownedMarks})`,
+        value,
+        userId,
+        ...ownedIds
+      )
+    ).changes;
+  }
 
-    res.json({ success: true, data: { affected } });
-  })
-);
+  res.json({ success: true, data: { affected } });
+});
 
 // Update session CLI provider
-router.patch(
-  '/:id/provider',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const parsed = updateProviderSchema.safeParse(req.body);
+router.patch('/:id/provider', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const parsed = updateProviderSchema.safeParse(req.body);
 
-    if (!parsed.success) {
-      throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
-    }
+  if (!parsed.success) {
+    throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+  }
 
-    const existing = (await pgGet(
-      'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
-      req.params.id,
-      userId
-    )) as unknown as { id: string; cliProvider: string } | undefined;
+  const existing = (await pgGet(
+    'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  )) as unknown as { id: string; cliProvider: string } | undefined;
 
-    if (!existing) {
-      throw new AppError('Session not found', 404, 'NOT_FOUND');
-    }
+  if (!existing) {
+    throw new AppError('Session not found', 404, 'NOT_FOUND');
+  }
 
-    const { cliProvider } = parsed.data;
-    await assertProviderEnabled(userId, cliProvider);
+  const { cliProvider } = parsed.data;
+  await assertProviderEnabled(userId, cliProvider);
 
-    if (existing.cliProvider !== cliProvider) {
-      await pgRun(
-        `UPDATE sessions
+  if (existing.cliProvider !== cliProvider) {
+    await pgRun(
+      `UPDATE sessions
        SET cli_provider = ?,
            claude_session_id = NULL,
            cli_model = NULL,
@@ -1405,32 +1394,31 @@ router.patch(
            cli_service_tier = NULL,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
-        cliProvider,
-        req.params.id
-      );
+      cliProvider,
+      req.params.id
+    );
 
-      const processManager = getProcessManager();
-      if (processManager.isSessionRunning(req.params.id as string)) {
-        await processManager.restartSession(req.params.id as string, userId, {
-          preserveNativeContext: true,
-        });
-      }
+    const processManager = getProcessManager();
+    if (processManager.isSessionRunning(req.params.id as string)) {
+      await processManager.restartSession(req.params.id as string, userId, {
+        preserveNativeContext: true,
+      });
     }
+  }
 
-    const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
-      string,
-      unknown
-    >;
+  const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
+    string,
+    unknown
+  >;
 
-    res.json({
-      success: true,
-      data: await attachRuntimeAndTelemetry({
-        ...updatedSession,
-        starred: Boolean(updatedSession.starred),
-      }),
-    });
-  })
-);
+  res.json({
+    success: true,
+    data: await attachRuntimeAndTelemetry({
+      ...updatedSession,
+      starred: Boolean(updatedSession.starred),
+    }),
+  });
+});
 
 // ── Multi-chat threads inside one session ────────────────────────────────────
 // chat_id NULL on messages plus active_chat_id NULL on the session means the
@@ -1680,178 +1668,166 @@ router.delete('/:id/chats/:chatId', requireAuth, async (req, res) => {
 
 // Update the per-session model selection so different WebUI sessions can run
 // different provider/model pairs without changing any global provider default.
-router.patch(
-  '/:id/model',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const parsed = updateSessionModelSchema.safeParse(req.body);
+router.patch('/:id/model', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const parsed = updateSessionModelSchema.safeParse(req.body);
 
-    if (!parsed.success) {
-      throw new AppError('Invalid model', 400, 'VALIDATION_ERROR');
-    }
+  if (!parsed.success) {
+    throw new AppError('Invalid model', 400, 'VALIDATION_ERROR');
+  }
 
-    const session = (await pgGet(
-      'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
-      req.params.id,
-      userId
-    )) as unknown as { id: string; cliProvider: string } | undefined;
+  const session = (await pgGet(
+    'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  )) as unknown as { id: string; cliProvider: string } | undefined;
 
-    if (!session) {
-      throw new AppError('Session not found', 404, 'NOT_FOUND');
-    }
+  if (!session) {
+    throw new AppError('Session not found', 404, 'NOT_FOUND');
+  }
 
-    const model = parsed.data.model?.trim() || null;
-    await pgRun(
-      'UPDATE sessions SET cli_model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      model,
-      req.params.id
-    );
+  const model = parsed.data.model?.trim() || null;
+  await pgRun(
+    'UPDATE sessions SET cli_model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    model,
+    req.params.id
+  );
 
-    const processManager = getProcessManager();
-    if (processManager.isSessionRunning(req.params.id as string)) {
-      await processManager.restartSession(req.params.id as string, userId, {
-        preserveNativeContext: true,
-      });
-    }
-
-    const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
-      string,
-      unknown
-    >;
-
-    res.json({
-      success: true,
-      data: await attachRuntimeAndTelemetry({
-        ...updatedSession,
-        starred: Boolean(updatedSession.starred),
-      }),
+  const processManager = getProcessManager();
+  if (processManager.isSessionRunning(req.params.id as string)) {
+    await processManager.restartSession(req.params.id as string, userId, {
+      preserveNativeContext: true,
     });
-  })
-);
+  }
+
+  const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
+    string,
+    unknown
+  >;
+
+  res.json({
+    success: true,
+    data: await attachRuntimeAndTelemetry({
+      ...updatedSession,
+      starred: Boolean(updatedSession.starred),
+    }),
+  });
+});
 
 // Update the per-session reasoning/effort selection. This intentionally mirrors
 // the model route: the session row is the source of truth, not user-wide settings.
-router.patch(
-  '/:id/reasoning',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const parsed = updateSessionReasoningSchema.safeParse(req.body);
+router.patch('/:id/reasoning', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const parsed = updateSessionReasoningSchema.safeParse(req.body);
 
-    if (!parsed.success) {
-      throw new AppError('Invalid reasoning level', 400, 'VALIDATION_ERROR');
-    }
+  if (!parsed.success) {
+    throw new AppError('Invalid reasoning level', 400, 'VALIDATION_ERROR');
+  }
 
-    const session = (await pgGet(
-      'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
-      req.params.id,
-      userId
-    )) as unknown as { id: string; cliProvider: string } | undefined;
+  const session = (await pgGet(
+    'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  )) as unknown as { id: string; cliProvider: string } | undefined;
 
-    if (!session) {
-      throw new AppError('Session not found', 404, 'NOT_FOUND');
-    }
+  if (!session) {
+    throw new AppError('Session not found', 404, 'NOT_FOUND');
+  }
 
-    const reasoning = parsed.data.reasoning?.trim() || null;
-    if (session.cliProvider === 'codex' && reasoning?.toLowerCase() === 'fast') {
-      await pgRun(
-        `UPDATE sessions
+  const reasoning = parsed.data.reasoning?.trim() || null;
+  if (session.cliProvider === 'codex' && reasoning?.toLowerCase() === 'fast') {
+    await pgRun(
+      `UPDATE sessions
        SET cli_reasoning = NULL,
            cli_service_tier = 'fast',
            updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
-        req.params.id
-      );
-    } else {
-      await pgRun(
-        'UPDATE sessions SET cli_reasoning = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        reasoning,
-        req.params.id
-      );
-    }
+      req.params.id
+    );
+  } else {
+    await pgRun(
+      'UPDATE sessions SET cli_reasoning = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      reasoning,
+      req.params.id
+    );
+  }
 
-    const processManager = getProcessManager();
-    if (processManager.isSessionRunning(req.params.id as string)) {
-      await processManager.restartSession(req.params.id as string, userId, {
-        preserveNativeContext: true,
-      });
-    }
-
-    const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
-      string,
-      unknown
-    >;
-
-    res.json({
-      success: true,
-      data: await attachRuntimeAndTelemetry({
-        ...updatedSession,
-        starred: Boolean(updatedSession.starred),
-      }),
+  const processManager = getProcessManager();
+  if (processManager.isSessionRunning(req.params.id as string)) {
+    await processManager.restartSession(req.params.id as string, userId, {
+      preserveNativeContext: true,
     });
-  })
-);
+  }
+
+  const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
+    string,
+    unknown
+  >;
+
+  res.json({
+    success: true,
+    data: await attachRuntimeAndTelemetry({
+      ...updatedSession,
+      starred: Boolean(updatedSession.starred),
+    }),
+  });
+});
 
 // Update the per-session Codex service/profile tier. This is separate from
 // reasoning so `/fast` can be combined with xhigh effort.
-router.patch(
-  '/:id/service-tier',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const parsed = updateSessionServiceTierSchema.safeParse(req.body);
+router.patch('/:id/service-tier', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const parsed = updateSessionServiceTierSchema.safeParse(req.body);
 
-    if (!parsed.success) {
-      throw new AppError('Invalid service tier', 400, 'VALIDATION_ERROR');
-    }
+  if (!parsed.success) {
+    throw new AppError('Invalid service tier', 400, 'VALIDATION_ERROR');
+  }
 
-    const session = (await pgGet(
-      'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
-      req.params.id,
-      userId
-    )) as unknown as { id: string; cliProvider: string } | undefined;
+  const session = (await pgGet(
+    'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  )) as unknown as { id: string; cliProvider: string } | undefined;
 
-    if (!session) {
-      throw new AppError('Session not found', 404, 'NOT_FOUND');
-    }
+  if (!session) {
+    throw new AppError('Session not found', 404, 'NOT_FOUND');
+  }
 
-    const serviceTier = parsed.data.serviceTier || null;
-    if (serviceTier && session.cliProvider !== 'codex') {
-      throw new AppError(
-        'Service tier is only supported for Codex sessions',
-        400,
-        'VALIDATION_ERROR'
-      );
-    }
-
-    await pgRun(
-      'UPDATE sessions SET cli_service_tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      serviceTier,
-      req.params.id
+  const serviceTier = parsed.data.serviceTier || null;
+  if (serviceTier && session.cliProvider !== 'codex') {
+    throw new AppError(
+      'Service tier is only supported for Codex sessions',
+      400,
+      'VALIDATION_ERROR'
     );
+  }
 
-    const processManager = getProcessManager();
-    if (processManager.isSessionRunning(req.params.id as string)) {
-      await processManager.restartSession(req.params.id as string, userId, {
-        preserveNativeContext: true,
-      });
-    }
+  await pgRun(
+    'UPDATE sessions SET cli_service_tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    serviceTier,
+    req.params.id
+  );
 
-    const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
-      string,
-      unknown
-    >;
-
-    res.json({
-      success: true,
-      data: await attachRuntimeAndTelemetry({
-        ...updatedSession,
-        starred: Boolean(updatedSession.starred),
-      }),
+  const processManager = getProcessManager();
+  if (processManager.isSessionRunning(req.params.id as string)) {
+    await processManager.restartSession(req.params.id as string, userId, {
+      preserveNativeContext: true,
     });
-  })
-);
+  }
+
+  const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
+    string,
+    unknown
+  >;
+
+  res.json({
+    success: true,
+    data: await attachRuntimeAndTelemetry({
+      ...updatedSession,
+      starred: Boolean(updatedSession.starred),
+    }),
+  });
+});
 
 // Persist the session permission mode. Previously lived only in localStorage, so it
 // was lost when switching browser or device.
@@ -1913,153 +1889,146 @@ router.patch('/:id/surface', requireAuth, async (req, res) => {
 
 // Persist active style-library templates for the current session. These are not
 // normal skills; they are injected as session style context on each user turn.
-router.patch(
-  '/:id/styles',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const sessionId = req.params.id;
-    if (!sessionId) {
-      throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
-    }
+router.patch('/:id/styles', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const sessionId = req.params.id;
+  if (!sessionId) {
+    throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
+  }
 
-    const parsed = updateSessionStylesSchema.safeParse(req.body);
+  const parsed = updateSessionStylesSchema.safeParse(req.body);
 
-    if (!parsed.success) {
-      throw new AppError('Invalid style selection', 400, 'VALIDATION_ERROR');
-    }
+  if (!parsed.success) {
+    throw new AppError('Invalid style selection', 400, 'VALIDATION_ERROR');
+  }
 
-    const existing = (await pgGet(
-      'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
-      sessionId,
-      userId
-    )) as unknown as { id: string; cliProvider: string | null } | undefined;
+  const existing = (await pgGet(
+    'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  )) as unknown as { id: string; cliProvider: string | null } | undefined;
 
-    if (!existing) {
-      throw new AppError('Session not found', 404, 'NOT_FOUND');
-    }
+  if (!existing) {
+    throw new AppError('Session not found', 404, 'NOT_FOUND');
+  }
 
-    const configHome = resolveConfigHome(existing.cliProvider || 'codex');
-    const { designStyleSkill, writingStyleSkill } = parsed.data;
-    const updates: string[] = [];
-    const values: Array<string | null> = [];
+  const configHome = resolveConfigHome(existing.cliProvider || 'codex');
+  const { designStyleSkill, writingStyleSkill } = parsed.data;
+  const updates: string[] = [];
+  const values: Array<string | null> = [];
 
-    if (designStyleSkill !== undefined) {
-      if (designStyleSkill !== null) {
-        const style = await readSkillLibraryItem(configHome, designStyleSkill);
-        if (!style || style.libraryKind !== 'design') {
-          throw new AppError('UI style template not found', 400, 'INVALID_STYLE');
-        }
-      }
-      updates.push('design_style_skill = ?');
-      values.push(designStyleSkill);
-    }
-
-    if (writingStyleSkill !== undefined) {
-      if (writingStyleSkill !== null) {
-        const style = await readSkillLibraryItem(configHome, writingStyleSkill);
-        if (!style || style.libraryKind !== 'writing') {
-          throw new AppError('Writing style template not found', 400, 'INVALID_STYLE');
-        }
-      }
-      updates.push('writing_style_skill = ?');
-      values.push(writingStyleSkill);
-    }
-
-    if (updates.length > 0) {
-      updates.push('updated_at = CURRENT_TIMESTAMP');
-      values.push(sessionId);
-      await pgRun(`UPDATE sessions SET ${updates.join(', ')} WHERE id = ?`, ...values);
-    }
-
-    const updatedSession = (await selectSessionById(sessionId, userId)) as Record<string, unknown>;
-
-    res.json({
-      success: true,
-      data: await attachRuntimeAndTelemetry({
-        ...updatedSession,
-        starred: Boolean(updatedSession.starred),
-      }),
-    });
-  })
-);
-
-router.get(
-  '/:id/icon',
-  asyncHandler(async (req, res) => {
-    const userId = await validateToken(req, res);
-    if (!userId) return;
-
-    const row = (await pgGet(
-      'SELECT icon_path as iconPath FROM sessions WHERE id = ? AND user_id = ?',
-      req.params.id,
-      userId
-    )) as unknown as { iconPath: string | null } | undefined;
-
-    if (!row?.iconPath) {
-      throw new AppError('Session icon not found', 404, 'NOT_FOUND');
-    }
-
-    const iconPath = resolveSessionIconPath(row.iconPath);
-    await fs.access(iconPath);
-
-    const requestedSize = req.query.size;
-    const thumbnailSize = parseSessionIconThumbnailSize(requestedSize);
-    if (requestedSize !== undefined && thumbnailSize === null) {
-      throw new AppError('Unsupported session icon thumbnail size', 400, 'INVALID_ICON_SIZE');
-    }
-
-    let responsePath = iconPath;
-    let variant = 'original';
-    let thumbnailFallback = false;
-    if (thumbnailSize !== null) {
-      try {
-        responsePath = await ensureSessionIconThumbnail(iconPath, thumbnailSize);
-        variant = `thumbnail-${thumbnailSize}`;
-      } catch (error) {
-        thumbnailFallback = true;
-        variant = 'original-fallback';
-        console.warn(
-          `[sessions] Could not create ${thumbnailSize}px thumbnail for session ${req.params.id}; serving the original icon`,
-          error instanceof Error ? error.message : String(error)
-        );
+  if (designStyleSkill !== undefined) {
+    if (designStyleSkill !== null) {
+      const style = await readSkillLibraryItem(configHome, designStyleSkill);
+      if (!style || style.libraryKind !== 'design') {
+        throw new AppError('UI style template not found', 400, 'INVALID_STYLE');
       }
     }
+    updates.push('design_style_skill = ?');
+    values.push(designStyleSkill);
+  }
 
-    const ext = path.extname(responsePath).toLowerCase();
-    const contentType = ICON_MIME_BY_EXT[ext] || 'application/octet-stream';
-    const stat = await fs.stat(responsePath);
-    const etag = `W/"${stat.size.toString(16)}-${Math.trunc(stat.mtimeMs).toString(16)}"`;
-    const isVersioned = typeof req.query.v === 'string' && req.query.v.length > 0;
+  if (writingStyleSkill !== undefined) {
+    if (writingStyleSkill !== null) {
+      const style = await readSkillLibraryItem(configHome, writingStyleSkill);
+      if (!style || style.libraryKind !== 'writing') {
+        throw new AppError('Writing style template not found', 400, 'INVALID_STYLE');
+      }
+    }
+    updates.push('writing_style_skill = ?');
+    values.push(writingStyleSkill);
+  }
 
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Length', stat.size);
-    res.setHeader(
-      'Cache-Control',
-      sessionIconCacheControl({ versioned: isVersioned, thumbnailFallback })
-    );
-    res.setHeader('ETag', etag);
-    res.setHeader('Last-Modified', stat.mtime.toUTCString());
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Plum-Icon-Variant', variant);
-    if (req.fresh) {
-      res.status(304).end();
-      return;
+  if (updates.length > 0) {
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    values.push(sessionId);
+    await pgRun(`UPDATE sessions SET ${updates.join(', ')} WHERE id = ?`, ...values);
+  }
+
+  const updatedSession = (await selectSessionById(sessionId, userId)) as Record<string, unknown>;
+
+  res.json({
+    success: true,
+    data: await attachRuntimeAndTelemetry({
+      ...updatedSession,
+      starred: Boolean(updatedSession.starred),
+    }),
+  });
+});
+
+router.get('/:id/icon', async (req, res) => {
+  const userId = await validateToken(req, res);
+  if (!userId) return;
+
+  const row = (await pgGet(
+    'SELECT icon_path as iconPath FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  )) as unknown as { iconPath: string | null } | undefined;
+
+  if (!row?.iconPath) {
+    throw new AppError('Session icon not found', 404, 'NOT_FOUND');
+  }
+
+  const iconPath = resolveSessionIconPath(row.iconPath);
+  await fs.access(iconPath);
+
+  const requestedSize = req.query.size;
+  const thumbnailSize = parseSessionIconThumbnailSize(requestedSize);
+  if (requestedSize !== undefined && thumbnailSize === null) {
+    throw new AppError('Unsupported session icon thumbnail size', 400, 'INVALID_ICON_SIZE');
+  }
+
+  let responsePath = iconPath;
+  let variant = 'original';
+  let thumbnailFallback = false;
+  if (thumbnailSize !== null) {
+    try {
+      responsePath = await ensureSessionIconThumbnail(iconPath, thumbnailSize);
+      variant = `thumbnail-${thumbnailSize}`;
+    } catch (error) {
+      thumbnailFallback = true;
+      variant = 'original-fallback';
+      console.warn(
+        `[sessions] Could not create ${thumbnailSize}px thumbnail for session ${req.params.id}; serving the original icon`,
+        error instanceof Error ? error.message : String(error)
+      );
     }
-    if (req.method === 'HEAD') {
-      res.end();
-      return;
-    }
-    createReadStream(responsePath).pipe(res);
-  })
-);
+  }
+
+  const ext = path.extname(responsePath).toLowerCase();
+  const contentType = ICON_MIME_BY_EXT[ext] || 'application/octet-stream';
+  const stat = await fs.stat(responsePath);
+  const etag = `W/"${stat.size.toString(16)}-${Math.trunc(stat.mtimeMs).toString(16)}"`;
+  const isVersioned = typeof req.query.v === 'string' && req.query.v.length > 0;
+
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Length', stat.size);
+  res.setHeader(
+    'Cache-Control',
+    sessionIconCacheControl({ versioned: isVersioned, thumbnailFallback })
+  );
+  res.setHeader('ETag', etag);
+  res.setHeader('Last-Modified', stat.mtime.toUTCString());
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Plum-Icon-Variant', variant);
+  if (req.fresh) {
+    res.status(304).end();
+    return;
+  }
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
+  createReadStream(responsePath).pipe(res);
+});
 
 router.post(
   '/:id/icon/upload',
   requireAuth,
   rateLimiters.upload,
   iconUpload.single('icon'),
-  asyncHandler(async (req, res) => {
+  async (req, res) => {
     const userId = (req as AuthenticatedRequest).userId;
     const sessionId = req.params.id;
     if (!sessionId) throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
@@ -2081,125 +2050,112 @@ router.post(
       'upload'
     );
     res.json({ success: true, data: await attachRuntimeAndTelemetry(updatedSession) });
-  })
+  }
 );
 
-router.post(
-  '/:id/icon/project',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const sessionId = req.params.id;
-    if (!sessionId) throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
+router.post('/:id/icon/project', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const sessionId = req.params.id;
+  if (!sessionId) throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
 
-    const session = (await pgGet(
-      'SELECT id, working_directory as workingDirectory FROM sessions WHERE id = ? AND user_id = ?',
-      sessionId,
-      userId
-    )) as unknown as { id: string; workingDirectory: string } | undefined;
-    if (!session) throw new AppError('Session not found', 404, 'NOT_FOUND');
+  const session = (await pgGet(
+    'SELECT id, working_directory as workingDirectory FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  )) as unknown as { id: string; workingDirectory: string } | undefined;
+  if (!session) throw new AppError('Session not found', 404, 'NOT_FOUND');
 
-    const projectIcon = await readProjectIconCandidate(session.workingDirectory);
-    if (!projectIcon) {
-      throw new AppError('No project icon found in this workspace', 404, 'PROJECT_ICON_NOT_FOUND');
-    }
+  const projectIcon = await readProjectIconCandidate(session.workingDirectory);
+  if (!projectIcon) {
+    throw new AppError('No project icon found in this workspace', 404, 'PROJECT_ICON_NOT_FOUND');
+  }
 
-    const updatedSession = await storeSessionIcon(
-      sessionId,
-      userId,
-      projectIcon.buffer,
-      projectIcon.ext,
-      'project'
-    );
-    res.json({
-      success: true,
-      data: await attachRuntimeAndTelemetry(updatedSession),
-      meta: { sourcePath: projectIcon.path },
-    });
-  })
-);
+  const updatedSession = await storeSessionIcon(
+    sessionId,
+    userId,
+    projectIcon.buffer,
+    projectIcon.ext,
+    'project'
+  );
+  res.json({
+    success: true,
+    data: await attachRuntimeAndTelemetry(updatedSession),
+    meta: { sourcePath: projectIcon.path },
+  });
+});
 
-router.post(
-  '/:id/icon/generate',
-  requireAuth,
-  rateLimiters.imageGeneration,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const sessionId = req.params.id;
-    if (!sessionId) throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
+router.post('/:id/icon/generate', requireAuth, rateLimiters.imageGeneration, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const sessionId = req.params.id;
+  if (!sessionId) throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
 
-    const parsed = generateSessionIconSchema.safeParse(req.body ?? {});
-    if (!parsed.success) throw new AppError('Invalid icon prompt', 400, 'VALIDATION_ERROR');
+  const parsed = generateSessionIconSchema.safeParse(req.body ?? {});
+  if (!parsed.success) throw new AppError('Invalid icon prompt', 400, 'VALIDATION_ERROR');
 
-    const session = (await pgGet(
-      `SELECT id, name, working_directory as workingDirectory
+  const session = (await pgGet(
+    `SELECT id, name, working_directory as workingDirectory
          FROM sessions WHERE id = ? AND user_id = ?`,
-      sessionId,
-      userId
-    )) as unknown as { id: string; name: string; workingDirectory: string } | undefined;
-    if (!session) throw new AppError('Session not found', 404, 'NOT_FOUND');
+    sessionId,
+    userId
+  )) as unknown as { id: string; name: string; workingDirectory: string } | undefined;
+  if (!session) throw new AppError('Session not found', 404, 'NOT_FOUND');
 
-    const scanned = await scanProject(session.workingDirectory).catch(() => null);
-    const generatedIcon = await generateSessionIconImage({
-      sessionId,
-      session,
-      prompt: parsed.data.prompt,
-      project: scanned
-        ? {
-            framework: scanned.framework,
-            techStack: scanned.techStack,
-          }
-        : null,
-    });
-    const updatedSession = await storeSessionIcon(
-      sessionId,
-      userId,
-      generatedIcon.buffer,
-      generatedIcon.ext,
-      'generated'
-    );
-    res.json({
-      success: true,
-      data: await attachRuntimeAndTelemetry(updatedSession),
-      meta: { generator: 'codex-imagegen', prompt: generatedIcon.prompt },
-    });
-  })
-);
+  const scanned = await scanProject(session.workingDirectory).catch(() => null);
+  const generatedIcon = await generateSessionIconImage({
+    sessionId,
+    session,
+    prompt: parsed.data.prompt,
+    project: scanned
+      ? {
+          framework: scanned.framework,
+          techStack: scanned.techStack,
+        }
+      : null,
+  });
+  const updatedSession = await storeSessionIcon(
+    sessionId,
+    userId,
+    generatedIcon.buffer,
+    generatedIcon.ext,
+    'generated'
+  );
+  res.json({
+    success: true,
+    data: await attachRuntimeAndTelemetry(updatedSession),
+    meta: { generator: 'codex-imagegen', prompt: generatedIcon.prompt },
+  });
+});
 
-router.delete(
-  '/:id/icon',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const sessionId = req.params.id;
-    if (!sessionId) throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
+router.delete('/:id/icon', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const sessionId = req.params.id;
+  if (!sessionId) throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
 
-    const existing = await pgGet(
-      'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
-      sessionId,
-      userId
-    );
-    if (!existing) throw new AppError('Session not found', 404, 'NOT_FOUND');
+  const existing = await pgGet(
+    'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  );
+  if (!existing) throw new AppError('Session not found', 404, 'NOT_FOUND');
 
-    await removeExistingSessionIcons(sessionId);
-    await pgRun(
-      `UPDATE sessions
+  await removeExistingSessionIcons(sessionId);
+  await pgRun(
+    `UPDATE sessions
        SET icon_path = NULL, icon_source = NULL, updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND user_id = ?`,
-      sessionId,
-      userId
-    );
+    sessionId,
+    userId
+  );
 
-    const updatedSession = await selectSessionById(sessionId, userId);
-    res.json({
-      success: true,
-      data: await attachRuntimeAndTelemetry({
-        ...updatedSession,
-        starred: Boolean(updatedSession?.starred),
-      }),
-    });
-  })
-);
+  const updatedSession = await selectSessionById(sessionId, userId);
+  res.json({
+    success: true,
+    data: await attachRuntimeAndTelemetry({
+      ...updatedSession,
+      starred: Boolean(updatedSession?.starred),
+    }),
+  });
+});
 
 // Delete session
 router.delete('/:id', requireAuth, async (req, res) => {
@@ -2285,32 +2241,27 @@ function parseContentRange(
   return { start, end, total };
 }
 
-router.post(
-  '/:id/uploads',
-  requireAuth,
-  rateLimiters.upload,
-  asyncHandler(async (req, res) => {
-    const parsed = createChatUploadSchema.safeParse(req.body);
-    if (!parsed.success) throw new AppError('Invalid upload metadata', 400, 'VALIDATION_ERROR');
-    try {
-      const upload = await createChatUpload(
-        (req as AuthenticatedRequest).userId,
-        req.params.id as string,
-        parsed.data
-      );
-      res.status(201).json({ success: true, data: upload });
-    } catch (error) {
-      throwChatUploadError(error);
-    }
-  })
-);
+router.post('/:id/uploads', requireAuth, rateLimiters.upload, async (req, res) => {
+  const parsed = createChatUploadSchema.safeParse(req.body);
+  if (!parsed.success) throw new AppError('Invalid upload metadata', 400, 'VALIDATION_ERROR');
+  try {
+    const upload = await createChatUpload(
+      (req as AuthenticatedRequest).userId,
+      req.params.id as string,
+      parsed.data
+    );
+    res.status(201).json({ success: true, data: upload });
+  } catch (error) {
+    throwChatUploadError(error);
+  }
+});
 
 router.put(
   '/:id/uploads/:uploadId/chunks/:chunkIndex',
   requireAuth,
   rateLimiters.uploadChunk,
   raw({ type: 'application/octet-stream', limit: '4mb' }),
-  asyncHandler(async (req, res) => {
+  async (req, res) => {
     const index = z.coerce.number().int().min(0).max(99).safeParse(req.params.chunkIndex);
     const sha = req.header('x-chunk-sha256');
     if (!index.success || !Buffer.isBuffer(req.body)) {
@@ -2337,7 +2288,7 @@ router.put(
     } catch (error) {
       throwChatUploadError(error);
     }
-  })
+  }
 );
 
 router.get('/:id/uploads/:uploadId', requireAuth, async (req, res) => {
@@ -2353,22 +2304,18 @@ router.get('/:id/uploads/:uploadId', requireAuth, async (req, res) => {
   }
 });
 
-router.delete(
-  '/:id/uploads/:uploadId',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    try {
-      const upload = await cancelChatUpload(
-        (req as AuthenticatedRequest).userId,
-        req.params.id as string,
-        req.params.uploadId as string
-      );
-      res.json({ success: true, data: upload });
-    } catch (error) {
-      throwChatUploadError(error);
-    }
-  })
-);
+router.delete('/:id/uploads/:uploadId', requireAuth, async (req, res) => {
+  try {
+    const upload = await cancelChatUpload(
+      (req as AuthenticatedRequest).userId,
+      req.params.id as string,
+      req.params.uploadId as string
+    );
+    res.json({ success: true, data: upload });
+  } catch (error) {
+    throwChatUploadError(error);
+  }
+});
 
 const readStateQuerySchema = z.object({
   chatId: z.string().max(160).optional(),
@@ -2832,48 +2779,44 @@ async function validateToken(
 // Serve durable assistant/workspace media. Unlike the legacy filename routes,
 // lookup is by opaque media id and is bound to both session and authenticated
 // owner. Foreign users receive the same 404 as a missing object.
-router.get(
-  '/:id/media/:mediaId',
-  requireAuth,
-  asyncHandler(async (req, res, next) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const media = await resolveOwnedChatMedia({
-      sessionId: req.params.id as string,
-      mediaId: req.params.mediaId as string,
-      userId,
+router.get('/:id/media/:mediaId', requireAuth, async (req, res, next) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const media = await resolveOwnedChatMedia({
+    sessionId: req.params.id as string,
+    mediaId: req.params.mediaId as string,
+    userId,
+  });
+  if (!media) throw new AppError('Media not found', 404, 'NOT_FOUND');
+
+  const etag = `"sha256-${media.sha256}"`;
+  res.setHeader('ETag', etag);
+  res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+  res.setHeader('Content-Type', media.mimeType);
+  res.setHeader('Content-Length', String(media.byteSize));
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+
+  const safeName = media.filename.replace(/[\r\n"]/g, '') || 'attachment';
+  const asciiFallback = safeName.replace(/[^\x20-\x7e]/g, '_') || 'attachment';
+  const disposition = media.mimeType.startsWith('image/') ? 'inline' : 'attachment';
+  res.setHeader(
+    'Content-Disposition',
+    `${disposition}; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(safeName)}`
+  );
+
+  if (req.header('if-none-match') === etag) {
+    res.status(304).end();
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    res.sendFile(media.filePath, (error) => {
+      if (error) reject(error);
+      else resolve();
     });
-    if (!media) throw new AppError('Media not found', 404, 'NOT_FOUND');
-
-    const etag = `"sha256-${media.sha256}"`;
-    res.setHeader('ETag', etag);
-    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
-    res.setHeader('Content-Type', media.mimeType);
-    res.setHeader('Content-Length', String(media.byteSize));
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
-
-    const safeName = media.filename.replace(/[\r\n"]/g, '') || 'attachment';
-    const asciiFallback = safeName.replace(/[^\x20-\x7e]/g, '_') || 'attachment';
-    const disposition = media.mimeType.startsWith('image/') ? 'inline' : 'attachment';
-    res.setHeader(
-      'Content-Disposition',
-      `${disposition}; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(safeName)}`
-    );
-
-    if (req.header('if-none-match') === etag) {
-      res.status(304).end();
-      return;
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      res.sendFile(media.filePath, (error) => {
-        if (error) reject(error);
-        else resolve();
-      });
-    }).catch(next);
-  })
-);
+  }).catch(next);
+});
 
 // Serve session images (supports token in query param for browser image loading)
 router.get('/:id/images/:filename', async (req, res, next) => {
