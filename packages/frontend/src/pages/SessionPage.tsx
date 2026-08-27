@@ -49,6 +49,7 @@ import {
   SendHorizontal,
   Lightbulb,
   GitBranch,
+  GitPullRequest,
   History,
   StickyNote,
   MonitorPlay,
@@ -88,6 +89,7 @@ import { SessionStyleLibraryPanel } from '@/components/session/SessionStyleLibra
 import { CheckpointsPanel } from '@/components/session/CheckpointsPanel';
 import { ToolLogPanel } from '@/components/session/ToolLogPanel';
 import { GitPanel } from '@/components/git-panel';
+import { GitHubPanel } from '@/components/github/GitHubPanel';
 import { Notepad } from '@/components/notepad';
 import { WebPreview } from '@/components/preview';
 import { TaskWorkbenchHeader, TodoFloatingStrip } from '@/components/session/TaskWorkbench';
@@ -182,6 +184,7 @@ const DOCKED_PANEL_KEYS: WorkspaceSheetPanel[] = [
   'android',
   'browser',
   'git',
+  'github',
   'checkpoints',
   'notes',
   'preview',
@@ -3468,6 +3471,11 @@ export function SessionPage() {
       icon: <GitBranch className="h-3.5 w-3.5" />,
       badge: null,
     },
+    github: {
+      title: 'GitHub',
+      icon: <GitPullRequest className="h-3.5 w-3.5" />,
+      badge: null,
+    },
     checkpoints: {
       title: 'Checkpoints',
       icon: <History className="h-3.5 w-3.5" />,
@@ -3527,6 +3535,8 @@ export function SessionPage() {
       body = <OracleBrowserPanel sessionId={session.id} className="h-full" />;
     } else if (panel === 'git') {
       body = <GitPanel workingDirectory={session.workingDirectory} className="h-full" />;
+    } else if (panel === 'github') {
+      body = <GitHubPanel workingDirectory={session.workingDirectory} className="h-full" />;
     } else if (panel === 'checkpoints') {
       body = <CheckpointsPanel sessionId={session.id} className="h-full" />;
     } else if (panel === 'notes') {

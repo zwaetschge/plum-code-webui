@@ -272,6 +272,8 @@ fun DevToolsScreen(
                                 onClone = { cloneRepo = repo },
                             )
                         }
+
+                        item { GitHubCollabPanel(state = state, viewModel = viewModel) }
                     }
 
                     DevToolsTab.ORACLE -> item {

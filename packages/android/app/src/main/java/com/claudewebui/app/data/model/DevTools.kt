@@ -184,3 +184,99 @@ data class OracleKeyInput(
 
 @Serializable
 data class OracleTextInput(val text: String)
+
+// ── gh-backed collaboration surface ─────────────────────────────────────────
+// Mirrors the WebUI's GitHubPanel. Served by /api/github/{pulls,runs,issues,
+// releases}, which shell out to the deployment-wide authenticated gh CLI, so
+// none of this needs a per-user personal access token.
+
+@Serializable
+data class GitHubCheckRollup(
+    val state: String = "",
+    val total: Int = 0,
+    val failed: Int = 0,
+)
+
+@Serializable
+data class GitHubPullRequest(
+    val number: Int,
+    val title: String = "",
+    val state: String = "",
+    val isDraft: Boolean = false,
+    val author: String = "",
+    val headRefName: String = "",
+    val baseRefName: String = "",
+    val url: String = "",
+    val statusCheckRollup: GitHubCheckRollup? = null,
+)
+
+@Serializable
+data class GitHubWorkflowRun(
+    val databaseId: Long,
+    val name: String = "",
+    val displayTitle: String = "",
+    val status: String = "",
+    val conclusion: String? = null,
+    val headBranch: String = "",
+    val url: String = "",
+    val createdAt: String = "",
+)
+
+@Serializable
+data class GitHubIssue(
+    val number: Int,
+    val title: String = "",
+    val state: String = "",
+    val author: String = "",
+    val url: String = "",
+    val labels: List<String> = emptyList(),
+)
+
+@Serializable
+data class GitHubRelease(
+    val tagName: String = "",
+    val name: String = "",
+    val isDraft: Boolean = false,
+    val isLatest: Boolean = false,
+    val isPrerelease: Boolean = false,
+    val publishedAt: String? = null,
+)
+
+@Serializable
+data class GitHubRepoInfo(
+    val nameWithOwner: String = "",
+    val url: String = "",
+)
+
+@Serializable
+data class CreatePullRequestInput(
+    val workingDirectory: String,
+    val title: String,
+    val body: String? = null,
+    val base: String? = null,
+    val head: String? = null,
+    val draft: Boolean = false,
+)
+
+@Serializable
+data class CreateIssueInput(
+    val workingDirectory: String,
+    val title: String,
+    val body: String? = null,
+)
+
+@Serializable
+data class MergePullRequestInput(
+    val workingDirectory: String,
+    val method: String = "squash",
+    val deleteBranch: Boolean = false,
+)
+
+@Serializable
+data class RerunWorkflowInput(
+    val workingDirectory: String,
+    val failedOnly: Boolean = true,
+)
+
+@Serializable
+data class CreatedUrl(val url: String = "")

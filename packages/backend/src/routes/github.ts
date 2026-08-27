@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
-import { AppError } from '../middleware/errorHandler.js';
+import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { githubService } from '../services/github.js';
+import { githubCli } from '../services/githubCli.js';
 
 const router = Router();
 
@@ -152,5 +153,174 @@ router.get('/rate-limit', requireAuth, async (req, res) => {
 
   res.json({ success: true, data: status });
 });
+
+// ── gh-backed collaboration surface ──────────────────────────────────────────
+// Pull requests, CI, issues and releases go through the CLI rather than
+// Octokit: gh is authenticated once for the deployment, so these work without
+// each user first creating a personal access token.
+
+const workdirSchema = z.object({ workingDirectory: z.string().min(1) });
+const listQuerySchema = workdirSchema.extend({
+  state: z.enum(['open', 'closed', 'merged', 'all']).optional().default('open'),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  branch: z.string().max(255).optional(),
+});
+
+function parseQuery<T extends z.ZodTypeAny>(schema: T, value: unknown): z.infer<T> {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+  }
+  return parsed.data;
+}
+
+router.get(
+  '/cli/status',
+  requireAuth,
+  asyncHandler(async (_req, res) => {
+    res.json({ success: true, data: { available: await githubCli.isAvailable() } });
+  })
+);
+
+router.get(
+  '/cli/repo',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { workingDirectory } = parseQuery(workdirSchema, req.query);
+    res.json({ success: true, data: await githubCli.repoInfo(workingDirectory) });
+  })
+);
+
+router.get(
+  '/pulls',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { workingDirectory, state, limit } = parseQuery(listQuerySchema, req.query);
+    const data = await githubCli.listPullRequests(workingDirectory, state, limit);
+    res.json({ success: true, data });
+  })
+);
+
+router.post(
+  '/pulls',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = parseQuery(
+      workdirSchema.extend({
+        title: z.string().trim().min(1).max(255),
+        body: z.string().max(60_000).optional(),
+        base: z.string().max(255).optional(),
+        head: z.string().max(255).optional(),
+        draft: z.boolean().optional(),
+      }),
+      req.body
+    );
+    const { workingDirectory, ...input } = body;
+    res.json({ success: true, data: await githubCli.createPullRequest(workingDirectory, input) });
+  })
+);
+
+router.post(
+  '/pulls/:number/merge',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const prNumber = Number(req.params.number);
+    if (!Number.isInteger(prNumber) || prNumber < 1) {
+      throw new AppError('Invalid pull request number', 400, 'VALIDATION_ERROR');
+    }
+    const body = parseQuery(
+      workdirSchema.extend({
+        method: z.enum(['merge', 'squash', 'rebase']).optional().default('squash'),
+        deleteBranch: z.boolean().optional().default(false),
+      }),
+      req.body
+    );
+    const data = await githubCli.mergePullRequest(
+      body.workingDirectory,
+      prNumber,
+      body.method,
+      body.deleteBranch
+    );
+    res.json({ success: true, data });
+  })
+);
+
+router.get(
+  '/runs',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { workingDirectory, limit, branch } = parseQuery(listQuerySchema, req.query);
+    const data = await githubCli.listWorkflowRuns(workingDirectory, limit, branch);
+    res.json({ success: true, data });
+  })
+);
+
+router.post(
+  '/runs/:id/rerun',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const runId = Number(req.params.id);
+    if (!Number.isInteger(runId) || runId < 1) {
+      throw new AppError('Invalid run id', 400, 'VALIDATION_ERROR');
+    }
+    const body = parseQuery(
+      workdirSchema.extend({ failedOnly: z.boolean().optional().default(false) }),
+      req.body
+    );
+    const data = await githubCli.rerunWorkflow(body.workingDirectory, runId, body.failedOnly);
+    res.json({ success: true, data });
+  })
+);
+
+router.get(
+  '/runs/:id/failure-log',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const runId = Number(req.params.id);
+    if (!Number.isInteger(runId) || runId < 1) {
+      throw new AppError('Invalid run id', 400, 'VALIDATION_ERROR');
+    }
+    const { workingDirectory } = parseQuery(workdirSchema, req.query);
+    res.json({ success: true, data: await githubCli.runFailureLog(workingDirectory, runId) });
+  })
+);
+
+router.get(
+  '/issues',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { workingDirectory, state, limit } = parseQuery(listQuerySchema, req.query);
+    const data = await githubCli.listIssues(workingDirectory, state, limit);
+    res.json({ success: true, data });
+  })
+);
+
+router.post(
+  '/issues',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const body = parseQuery(
+      workdirSchema.extend({
+        title: z.string().trim().min(1).max(255),
+        body: z.string().max(60_000).optional(),
+      }),
+      req.body
+    );
+    const data = await githubCli.createIssue(body.workingDirectory, {
+      title: body.title,
+      body: body.body,
+    });
+    res.json({ success: true, data });
+  })
+);
+
+router.get(
+  '/releases',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { workingDirectory, limit } = parseQuery(listQuerySchema, req.query);
+    res.json({ success: true, data: await githubCli.listReleases(workingDirectory, limit) });
+  })
+);
 
 export default router;

@@ -7,7 +7,16 @@ import com.claudewebui.app.data.model.AndroidConnectInput
 import com.claudewebui.app.data.model.AndroidDeviceSnapshot
 import com.claudewebui.app.data.model.AndroidEmulatorStatus
 import com.claudewebui.app.data.model.AndroidPairInput
+import com.claudewebui.app.data.model.CreateIssueInput
+import com.claudewebui.app.data.model.CreatePullRequestInput
 import com.claudewebui.app.data.model.CreateRepoInput
+import com.claudewebui.app.data.model.GitHubIssue
+import com.claudewebui.app.data.model.GitHubPullRequest
+import com.claudewebui.app.data.model.GitHubRelease
+import com.claudewebui.app.data.model.GitHubRepoInfo
+import com.claudewebui.app.data.model.GitHubWorkflowRun
+import com.claudewebui.app.data.model.MergePullRequestInput
+import com.claudewebui.app.data.model.RerunWorkflowInput
 import com.claudewebui.app.data.model.GitHubRepo
 import com.claudewebui.app.data.model.GitHubTokenStatus
 import com.claudewebui.app.data.model.OracleBrowserState
@@ -33,6 +42,13 @@ data class DevToolsUiState(
     val repos: List<GitHubRepo> = emptyList(),
     val isLoadingGitHub: Boolean = false,
     val gitHubAction: String? = null,
+    // gh-backed collaboration data; see GitHubPanel in the WebUI
+    val repoInfo: GitHubRepoInfo? = null,
+    val pullRequests: List<GitHubPullRequest> = emptyList(),
+    val workflowRuns: List<GitHubWorkflowRun> = emptyList(),
+    val issues: List<GitHubIssue> = emptyList(),
+    val releases: List<GitHubRelease> = emptyList(),
+    val isLoadingCollab: Boolean = false,
     val oracle: OracleBrowserState? = null,
     val oracleFrame: ByteArray? = null,
     val isLoadingOracle: Boolean = false,
@@ -76,6 +92,9 @@ class DevToolsViewModel(
         // Devices are polled lazily — the builder bridge is often unreachable
         // and a failed probe on every DevTools open would be pure noise.
         if (tab == DevToolsTab.DEVICES && _uiState.value.deviceSnapshot == null) loadDevices()
+        // Same reasoning for gh: four subprocesses per open is worth paying only
+        // once the user actually looks at the GitHub tab.
+        if (tab == DevToolsTab.GITHUB && _uiState.value.repoInfo == null) loadCollaboration()
     }
 
     fun scanPorts() {
@@ -133,6 +152,91 @@ class DevToolsViewModel(
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * Pull requests, CI runs, issues and releases for this session's checkout.
+     * All four load together so switching tabs never shows a stale list.
+     */
+    fun loadCollaboration() {
+        if (workingDirectory.isBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingCollab = true, error = null) }
+            coroutineScope {
+                val repo = async { runCatching { api.getGitHubRepoInfo(workingDirectory).data }.getOrNull() }
+                val pulls = async { runCatching { api.getGitHubPullRequests(workingDirectory).data }.getOrNull() }
+                val runs = async { runCatching { api.getGitHubRuns(workingDirectory).data }.getOrNull() }
+                val issues = async { runCatching { api.getGitHubIssues(workingDirectory).data }.getOrNull() }
+                val releases = async { runCatching { api.getGitHubReleases(workingDirectory).data }.getOrNull() }
+                _uiState.update {
+                    it.copy(
+                        repoInfo = repo.await(),
+                        pullRequests = pulls.await().orEmpty(),
+                        workflowRuns = runs.await().orEmpty(),
+                        issues = issues.await().orEmpty(),
+                        releases = releases.await().orEmpty(),
+                        isLoadingCollab = false,
+                    )
+                }
+            }
+        }
+    }
+
+    fun createPullRequest(title: String, body: String) {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isEmpty() || workingDirectory.isBlank()) return
+        collabAction("Pull request created") {
+            api.createGitHubPullRequest(
+                CreatePullRequestInput(
+                    workingDirectory = workingDirectory,
+                    title = cleanTitle,
+                    body = body.trim().takeIf(String::isNotEmpty),
+                )
+            )
+        }
+    }
+
+    fun mergePullRequest(number: Int) {
+        if (workingDirectory.isBlank()) return
+        collabAction("Pull request merged") {
+            api.mergeGitHubPullRequest(number, MergePullRequestInput(workingDirectory))
+        }
+    }
+
+    fun rerunWorkflow(runId: Long) {
+        if (workingDirectory.isBlank()) return
+        collabAction("Re-run requested") {
+            api.rerunGitHubWorkflow(runId, RerunWorkflowInput(workingDirectory))
+        }
+    }
+
+    fun createIssue(title: String, body: String) {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isEmpty() || workingDirectory.isBlank()) return
+        collabAction("Issue created") {
+            api.createGitHubIssue(
+                CreateIssueInput(
+                    workingDirectory = workingDirectory,
+                    title = cleanTitle,
+                    body = body.trim().takeIf(String::isNotEmpty),
+                )
+            )
+        }
+    }
+
+    private fun collabAction(successNotice: String, block: suspend () -> Any?) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(gitHubAction = "Working…", error = null) }
+            val result = runCatching { block() }
+            _uiState.update {
+                it.copy(
+                    gitHubAction = null,
+                    notice = if (result.isSuccess) successNotice else it.notice,
+                    error = result.exceptionOrNull()?.message ?: it.error,
+                )
+            }
+            if (result.isSuccess) loadCollaboration()
         }
     }
 
@@ -371,8 +475,15 @@ class DevToolsViewModel(
         api.pairAndroidDevice(AndroidPairInput(sessionId, host, port, code))
     }
 
-    fun connectDevice(host: String, port: Int) = deviceAction("Device connected") {
-        api.connectAndroidDevice(AndroidConnectInput(sessionId, host, port))
+    fun connectDevice(
+        host: String,
+        port: Int,
+        friendlyName: String? = null,
+        replaceSerial: String? = null,
+    ) = deviceAction("Device connected") {
+        api.connectAndroidDevice(
+            AndroidConnectInput(sessionId, host, port, friendlyName, replaceSerial)
+        )
     }
 
     fun reconnectDevices() = deviceAction("Reconnect attempted") {

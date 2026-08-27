@@ -12,6 +12,7 @@ export type DockablePanel =
   | 'tools'
   | 'browser'
   | 'git'
+  | 'github'
   | 'checkpoints'
   | 'notes'
   | 'preview'
@@ -38,6 +39,7 @@ export const usePanelDockStore = create<PanelDockState>()(
         tools: false,
         browser: false,
         git: false,
+        github: false,
         checkpoints: false,
         notes: false,
         preview: false,
@@ -64,6 +66,7 @@ export const usePanelDockStore = create<PanelDockState>()(
             tools: false,
             browser: false,
             git: false,
+            github: false,
             checkpoints: false,
             notes: false,
             preview: false,
