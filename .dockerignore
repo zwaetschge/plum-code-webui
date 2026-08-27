@@ -7,6 +7,10 @@ node_modules
 .logs
 .pids
 data
+# The portable compose default puts the Postgres data directory here. It is
+# created by the database container as uid 70 with mode 0700, so leaving it in
+# the build context fails the build outright: `can't stat '/webui/postgres'`.
+/postgres
 /config
 /workspace
 /html previews
