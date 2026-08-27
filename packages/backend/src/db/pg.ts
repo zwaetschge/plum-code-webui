@@ -1,6 +1,7 @@
 import { Pool, type PoolClient } from 'pg';
 
 import { createLogger } from '../utils/logger.js';
+import { convertPlaceholders, translateDialect } from './dialect.js';
 
 const log = createLogger('pg');
 
@@ -73,48 +74,6 @@ export async function closePool(): Promise<void> {
   await current.end();
 }
 
-/**
- * Rewrites SQLite's `?` into Postgres's `$n`, leaving anything inside string
- * literals alone — `WHERE note = '?'` must not become `WHERE note = '$1'`.
- */
-export function convertPlaceholders(sql: string): string {
-  let out = '';
-  let index = 0;
-  let quote: string | null = null;
-
-  for (let i = 0; i < sql.length; i++) {
-    const char = sql[i]!;
-
-    if (quote) {
-      out += char;
-      // '' inside a single-quoted string is an escaped quote, not the end.
-      if (char === quote) {
-        if (quote === "'" && sql[i + 1] === "'") {
-          out += sql[++i]!;
-        } else {
-          quote = null;
-        }
-      }
-      continue;
-    }
-
-    if (char === "'" || char === '"') {
-      quote = char;
-      out += char;
-      continue;
-    }
-
-    if (char === '?') {
-      out += `$${++index}`;
-      continue;
-    }
-
-    out += char;
-  }
-
-  return out;
-}
-
 type Queryable = Pick<Pool, 'query'> | PoolClient;
 
 async function execute(
@@ -122,7 +81,7 @@ async function execute(
   sql: string,
   params: unknown[]
 ): Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }> {
-  return client.query(convertPlaceholders(sql), params);
+  return client.query(convertPlaceholders(translateDialect(sql)), params);
 }
 
 /** First row, or undefined — the shape `better-sqlite3`'s `.get()` returns. */
@@ -187,3 +146,5 @@ export async function transaction<T>(fn: (tx: TransactionScope) => Promise<T>): 
     client.release();
   }
 }
+
+export { convertPlaceholders, translateDialect } from './dialect.js';
