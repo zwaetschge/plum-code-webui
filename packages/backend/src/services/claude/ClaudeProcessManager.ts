@@ -4,7 +4,7 @@ import {
   run as pgRun,
   transaction as pgTransaction,
 } from '../../db/pg.js';
-import { modelRouter } from '../modelRouterInstance.js';
+import { modelRouter, userHasSubagentRouting } from '../modelRouterInstance.js';
 import type { Server } from 'socket.io';
 import type {
   ServerToClientEvents,
@@ -155,9 +155,10 @@ async function buildClaudeTransportEnv(
   );
 
   // Mixed subagents: a claude session gets its base URL pointed at the model
-  // router, so a subagent whose definition names a glm-* model runs on the
-  // user's Z.AI subscription while the main agent stays on the Claude one.
-  // Only when Z.AI is actually configured — without it the indirection would
+  // router, so a subagent whose definition names a routed model (glm-*, or
+  // anything the user configured under Settings -> Subagent upstreams) runs on
+  // that provider's subscription while the main agent stays on the Claude one.
+  // Only when at least one upstream exists — without one the indirection would
   // buy nothing — and never for zai sessions, whose base URL already is Z.AI.
   // MODEL_ROUTER_DISABLED=1 is the kill switch if the passthrough ever
   // misbehaves against a new CLI version.
@@ -165,7 +166,7 @@ async function buildClaudeTransportEnv(
     provider === 'claude' &&
     sessionId &&
     process.env.MODEL_ROUTER_DISABLED !== '1' &&
-    (await getZaiApiConfigForUser(userId))
+    (await userHasSubagentRouting(userId))
   ) {
     const token = modelRouter.registerSession(sessionId, userId);
     env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${config.port}/model-router/${token}`;

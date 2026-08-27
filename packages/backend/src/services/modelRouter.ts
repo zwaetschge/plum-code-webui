@@ -37,10 +37,18 @@ export interface RouterUpstreamConfig {
   authToken: string;
 }
 
+export interface ResolvedUpstream extends RouterUpstreamConfig {
+  /** The model id actually sent upstream (e.g. z-ai/glm-5.3 -> glm-5.3). */
+  model: string;
+  /** Booking slug for usage_history; 'zai' for the built-in, a label slug otherwise. */
+  provider: string;
+}
+
 export interface RouterUsageEvent {
   userId: string;
   sessionId: string;
   model: string;
+  provider: string;
   requestId: string;
   inputTokens: number;
   outputTokens: number;
@@ -59,9 +67,14 @@ export interface RoutedUsageTotals {
 export interface ModelRouterOptions {
   /** Overridable for tests; defaults to the real API. */
   anthropicBaseUrl?: string;
-  getZaiConfig(userId: string): Promise<RouterUpstreamConfig | null>;
-  /** Fired once per completed Z.AI request with the usage it reported. */
-  onZaiUsage?(event: RouterUsageEvent): void;
+  /**
+   * Decides where a model goes. null means Anthropic passthrough. Only called
+   * for models that are not obviously Anthropic's own (see isAnthropicModel),
+   * so the main agent's hot path never waits on it.
+   */
+  resolveUpstream(userId: string, model: string): Promise<ResolvedUpstream | null>;
+  /** Fired once per completed routed request with the usage it reported. */
+  onRoutedUsage?(event: RouterUsageEvent): void;
   onError?(message: string, error: unknown): void;
 }
 
@@ -88,6 +101,32 @@ export function isZaiModel(model: unknown): model is string {
 /** OpenCode spells these z-ai/glm-*; the Z.AI endpoint itself wants glm-*. */
 export function normalizeZaiModel(model: string): string {
   return model.replace(/^(z-ai|zai)\//i, '');
+}
+
+/**
+ * Models that are Anthropic's own beyond doubt: full claude-* ids and the three
+ * aliases the CLI resolves itself. For these the router skips upstream
+ * resolution entirely — the main agent's requests must never wait on a
+ * settings read.
+ */
+export function isAnthropicModel(model: unknown): boolean {
+  if (typeof model !== 'string') return true;
+  return /^claude-/i.test(model) || ['opus', 'sonnet', 'haiku'].includes(model.toLowerCase());
+}
+
+/**
+ * Matches a model id against an upstream's configured patterns: exact ids, or
+ * prefixes written with a trailing `*` (`kimi-*`). Case-insensitive, because
+ * model ids get hand-typed into agent frontmatter.
+ */
+export function matchUpstreamModel(patterns: string[], model: string): boolean {
+  const candidate = model.toLowerCase();
+  return patterns.some((pattern) => {
+    const normalized = pattern.toLowerCase();
+    return normalized.endsWith('*')
+      ? candidate.startsWith(normalized.slice(0, -1))
+      : candidate === normalized;
+  });
 }
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -286,20 +325,24 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
     upstreamPath: string,
     body: Buffer | null
   ): Promise<void> {
-    // Only a messages POST can name a GLM model; everything else the CLI does
-    // (auth pings, token counting, model listing) belongs to Anthropic.
-    let zaiModel: string | null = null;
+    // Only a messages POST can name a routable model; everything else the CLI
+    // does (auth pings, token counting, model listing) belongs to Anthropic.
+    // isAnthropicModel short-circuits the main agent's requests so they never
+    // wait on upstream resolution, which may read settings.
+    let resolved: ResolvedUpstream | null = null;
     let parsedBody: Record<string, unknown> | null = null;
     if (req.method === 'POST' && /^\/v1\/messages(\?|$)/.test(upstreamPath) && body) {
       try {
         parsedBody = JSON.parse(body.toString('utf8')) as Record<string, unknown>;
-        if (isZaiModel(parsedBody.model)) zaiModel = normalizeZaiModel(parsedBody.model);
+        if (typeof parsedBody.model === 'string' && !isAnthropicModel(parsedBody.model)) {
+          resolved = await options.resolveUpstream(session.userId, parsedBody.model).catch(() => null);
+        }
       } catch {
         // Unparseable body: let Anthropic produce the error the CLI expects.
       }
     }
 
-    if (!zaiModel) {
+    if (!resolved) {
       const headers: http.OutgoingHttpHeaders = { ...req.headers, host: anthropicBase.host };
       for (const header of HOP_BY_HOP) delete headers[header];
       delete headers['content-length'];
@@ -308,33 +351,27 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
       return;
     }
 
-    const zai = await options.getZaiConfig(session.userId).catch(() => null);
-    if (!zai) {
-      anthropicError(res, 400, 'invalid_request_error', `Model ${zaiModel} routes to Z.AI, but no Z.AI API is configured for this account`);
-      return;
-    }
-
-    // Minimal allowlist to Z.AI. The client's own authorization (the Claude
-    // OAuth bearer) must never reach a third party; accept-encoding is dropped
-    // so the usage tee can read the stream.
-    const zaiBase = new URL(zai.baseUrl);
+    // Minimal allowlist to the routed upstream. The client's own authorization
+    // (the Claude OAuth bearer) must never reach a third party; accept-encoding
+    // is dropped so the usage tee can read the stream.
+    const upstreamBase = new URL(resolved.baseUrl);
     const headers: http.OutgoingHttpHeaders = {
-      host: zaiBase.host,
+      host: upstreamBase.host,
       'content-type': req.headers['content-type'] ?? 'application/json',
       accept: req.headers.accept ?? 'application/json',
       'anthropic-version': req.headers['anthropic-version'] ?? '2023-06-01',
-      authorization: `Bearer ${zai.authToken}`,
+      authorization: `Bearer ${resolved.authToken}`,
     };
     if (req.headers['anthropic-beta']) headers['anthropic-beta'] = req.headers['anthropic-beta'];
 
     let outBody = body;
-    if (parsedBody && parsedBody.model !== zaiModel) {
-      outBody = Buffer.from(JSON.stringify({ ...parsedBody, model: zaiModel }));
+    if (parsedBody && parsedBody.model !== resolved.model) {
+      outBody = Buffer.from(JSON.stringify({ ...parsedBody, model: resolved.model }));
     }
     if (outBody) headers['content-length'] = String(outBody.length);
 
     const requestId = randomBytes(8).toString('hex');
-    forward(req, res, zaiBase, zaiBase.pathname.replace(/\/$/, '') + upstreamPath, headers, outBody, {
+    forward(req, res, upstreamBase, upstreamBase.pathname.replace(/\/$/, '') + upstreamPath, headers, outBody, {
       onBody: (text, contentType) => {
         const reported = extractZaiUsage(text, contentType);
         if (!reported) return;
@@ -351,10 +388,11 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
         totals.requests += 1;
         usage.set(session.sessionId, totals);
 
-        options.onZaiUsage?.({
+        options.onRoutedUsage?.({
           userId: session.userId,
           sessionId: session.sessionId,
-          model: zaiModel,
+          model: resolved.model,
+          provider: resolved.provider,
           requestId,
           inputTokens,
           outputTokens,

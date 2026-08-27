@@ -118,6 +118,7 @@ import { AdminAuditLogPage } from '@/pages/admin/AdminAuditLogPage';
 import { HomeAssistantSettingsCard } from '@/components/integrations/HomeAssistantSettingsCard';
 import { CliDeviceLoginDialog } from '@/components/settings/CliDeviceLoginDialog';
 import { GatewayTokensPanel } from '@/components/settings/GatewayTokensPanel';
+import { SubagentUpstreamsSection } from '@/components/settings/SubagentUpstreamsSection';
 import { ProviderLoginsPanel } from '@/components/settings/ProviderLoginsPanel';
 
 interface PluginInfo {
@@ -3229,6 +3230,7 @@ export function SettingsPage() {
                                   Z.AI Claude Code documentation
                                 </a>
                               </p>
+                              <SubagentUpstreamsSection />
                             </CardContent>
                           </Card>
                         </section>

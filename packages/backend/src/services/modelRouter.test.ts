@@ -20,7 +20,9 @@ import test from 'node:test';
 import {
   createModelRouter,
   extractZaiUsage,
+  isAnthropicModel,
   isZaiModel,
+  matchUpstreamModel,
   normalizeZaiModel,
   type RouterUsageEvent,
 } from './modelRouter.js';
@@ -95,6 +97,21 @@ test('model classification and normalization', () => {
   assert.equal(normalizeZaiModel('glm-5.3'), 'glm-5.3');
 });
 
+test('upstream matching: exact ids, wildcards, and the Anthropic short-circuit', () => {
+  assert.equal(matchUpstreamModel(['kimi-k2-0905'], 'kimi-k2-0905'), true);
+  assert.equal(matchUpstreamModel(['kimi-k2-0905'], 'kimi-k2'), false);
+  assert.equal(matchUpstreamModel(['kimi-*'], 'kimi-k2-0905'), true);
+  assert.equal(matchUpstreamModel(['KIMI-*'], 'kimi-k2'), true, 'patterns are case-insensitive');
+  assert.equal(matchUpstreamModel(['glm-*'], 'claude-sonnet-5'), false);
+
+  // The main agent's models never trigger upstream resolution at all — that
+  // keeps a settings read out of every hot-path request.
+  assert.equal(isAnthropicModel('claude-opus-5'), true);
+  assert.equal(isAnthropicModel('sonnet'), true);
+  assert.equal(isAnthropicModel('glm-5.3'), false);
+  assert.equal(isAnthropicModel('kimi-k2'), false);
+});
+
 test('usage extraction from stream and JSON bodies', () => {
   const sse = [
     'event: message_start',
@@ -136,9 +153,17 @@ test('routing, credential boundaries and usage accounting', async () => {
   const usageEvents: RouterUsageEvent[] = [];
   const router = createModelRouter({
     anthropicBaseUrl: anthropic.url,
-    getZaiConfig: async (userId) =>
-      userId === 'user-a' ? { baseUrl: zai.url + '/api/anthropic', authToken: 'zai-secret' } : null,
-    onZaiUsage: (event) => usageEvents.push(event),
+    resolveUpstream: async (userId, model) => {
+      if (userId !== 'user-a') return null;
+      if (!isZaiModel(model)) return null;
+      return {
+        baseUrl: zai.url + '/api/anthropic',
+        authToken: 'zai-secret',
+        model: normalizeZaiModel(model),
+        provider: 'zai',
+      };
+    },
+    onRoutedUsage: (event) => usageEvents.push(event),
   });
   const mounted = await mountRouter(router.handler);
   const token = router.registerSession('session-1', 'user-a');
@@ -223,13 +248,18 @@ test('routing, credential boundaries and usage accounting', async () => {
     // 7. A GLM request for a user without Z.AI config fails loudly instead of
     //    silently going to Anthropic on the wrong subscription.
     const tokenB = router.registerSession('session-2', 'user-without-zai');
+    // Without a matching upstream the request falls through to Anthropic —
+    // which rejects the unknown model itself. The router must not invent an
+    // opinion here: an unconfigured account behaves as if the router were
+    // absent.
+    const before2 = anthropic.seen.length;
     const noConfig = await fetch(`${mounted.url}/${tokenB}/v1/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
     });
-    assert.equal(noConfig.status, 400);
-    assert.match(await noConfig.text(), /no Z\.AI API is configured/);
+    assert.equal(noConfig.status, 200);
+    assert.equal(anthropic.seen.length, before2 + 1);
   } finally {
     await mounted.close();
     await anthropic.close();

@@ -89,7 +89,12 @@ export async function initDatabase(): Promise<void> {
 export interface UsageHistoryTurnInput {
   userId: string;
   sessionId: string;
-  provider: CLIProvider;
+  /**
+   * Usually a CLIProvider, but a routed subagent upstream books under its own
+   * label slug — the column is TEXT and the analytics label falls back to the
+   * model's family for providers it does not recognise.
+   */
+  provider: CLIProvider | (string & {});
   turnId: string;
   inputTokens: number;
   outputTokens: number;

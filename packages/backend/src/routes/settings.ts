@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import { getAppConfig, setAppConfig } from '../db/index.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { nanoid } from 'nanoid';
+
 import { safeEncrypt, safeDecrypt } from '../utils/encryption.js';
 import { safeJsonParse } from '../utils/json.js';
 import type {
@@ -975,9 +977,147 @@ function serializeZaiApiStatus(config: ZaiApiConfig | null) {
   };
 }
 
+/**
+ * User-defined subagent upstreams for the model router.
+ *
+ * Z.AI was the first of these and is built in; this list is the general case:
+ * any Anthropic-compatible endpoint, matched per request by model pattern. An
+ * agent whose frontmatter names one of the listed models runs on that upstream
+ * while the session's main agent stays on the Claude subscription.
+ *
+ * Stored in user_settings.settings_json like zaiApi, tokens encrypted the same
+ * way, and the token never travels back to a client — updates without a token
+ * keep the stored one, matched by entry id.
+ */
+export interface SubagentUpstream {
+  id: string;
+  label: string;
+  baseUrl: string;
+  authToken: string;
+  /** Exact model ids, or prefixes ending in `*` (e.g. `kimi-*`). */
+  models: string[];
+}
+
+const subagentUpstreamSchema = z.object({
+  id: z.string().min(1).max(64).optional(),
+  label: z.string().trim().min(1).max(40),
+  baseUrl: z.string().trim().url().max(300),
+  authToken: z.string().trim().min(1).max(500).optional(),
+  models: z.array(z.string().trim().min(1).max(80)).min(1).max(20),
+});
+
+const subagentUpstreamsSchema = z.array(subagentUpstreamSchema).max(10);
+
+export async function getSubagentUpstreamsForUser(userId: string): Promise<SubagentUpstream[]> {
+  const row = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
+  const settings = safeJsonParse<Record<string, unknown>>(row?.settings_json, {});
+  const raw = settings.subagentUpstreams;
+  if (!Array.isArray(raw)) return [];
+
+  const upstreams: SubagentUpstream[] = [];
+  for (const entry of raw as Array<Record<string, unknown>>) {
+    const authToken = safeDecrypt(typeof entry.authToken === 'string' ? entry.authToken : null);
+    if (!authToken || typeof entry.baseUrl !== 'string' || !Array.isArray(entry.models)) continue;
+    upstreams.push({
+      id: String(entry.id ?? ''),
+      label: String(entry.label ?? ''),
+      baseUrl: entry.baseUrl,
+      authToken,
+      models: (entry.models as unknown[]).map(String).filter(Boolean),
+    });
+  }
+  return upstreams;
+}
+
+function serializeSubagentUpstream(entry: SubagentUpstream) {
+  return {
+    id: entry.id,
+    label: entry.label,
+    baseUrl: entry.baseUrl,
+    hasAuthToken: true,
+    authTokenPreview: `${entry.authToken.substring(0, 6)}...${entry.authToken.slice(-4)}`,
+    models: entry.models,
+  };
+}
+
 // Z.AI runs through the Claude Code transport, but is a separate WebUI
 // provider. Its endpoint/token are never injected into Anthropic subscription
 // sessions.
+router.get('/subagent-upstreams', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const upstreams = await getSubagentUpstreamsForUser(userId);
+  res.json({ success: true, data: upstreams.map(serializeSubagentUpstream) });
+});
+
+router.put('/subagent-upstreams', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const parsed = subagentUpstreamsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError('Invalid subagent upstream configuration', 400, 'VALIDATION_ERROR');
+  }
+
+  const existing = await getSubagentUpstreamsForUser(userId);
+  const existingById = new Map(existing.map((entry) => [entry.id, entry]));
+
+  const stored = parsed.data.map((entry) => {
+    // A client never holds the token after saving, so an update without one
+    // means "keep what is stored" — same contract as the Z.AI settings.
+    const token = entry.authToken || (entry.id ? existingById.get(entry.id)?.authToken : undefined);
+    if (!token) {
+      throw new AppError(`Upstream "${entry.label}" is missing an API token`, 400, 'MISSING_API_TOKEN');
+    }
+    return {
+      id: entry.id || nanoid(),
+      label: entry.label,
+      baseUrl: entry.baseUrl.replace(/\/$/, ''),
+      authToken: safeEncrypt(token),
+      models: [...new Set(entry.models.map((model) => model.trim()).filter(Boolean))],
+    };
+  });
+
+  const row = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
+  const settings = safeJsonParse<Record<string, unknown>>(row?.settings_json, {});
+  settings.subagentUpstreams = stored;
+  await ensureSettingsRow(userId);
+  await pgRun(
+    'UPDATE user_settings SET settings_json = ? WHERE user_id = ?',
+    JSON.stringify(settings),
+    userId
+  );
+
+  res.json({
+    success: true,
+    data: (await getSubagentUpstreamsForUser(userId)).map(serializeSubagentUpstream),
+  });
+});
+
+/**
+ * The model groups the agent editors offer. One place, so the WebUI select and
+ * anything else rendering a picker cannot drift from what the router actually
+ * routes: the built-in Z.AI group appears only when Z.AI is configured, and
+ * each custom upstream contributes its exact (non-wildcard) model ids.
+ */
+router.get('/subagent-models', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const groups: Array<{ group: string; models: string[] }> = [];
+
+  if (await getZaiApiConfigForUser(userId)) {
+    groups.push({ group: 'Z.AI (GLM subscription)', models: ['glm-5.3', 'glm-5.1', 'glm-4.7'] });
+  }
+  for (const upstream of await getSubagentUpstreamsForUser(userId)) {
+    const models = upstream.models.filter((model) => !model.endsWith('*'));
+    if (models.length) groups.push({ group: upstream.label, models });
+  }
+
+  res.json({ success: true, data: groups });
+});
+
 router.get('/zai-api', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   res.json({ success: true, data: serializeZaiApiStatus(await getZaiApiConfigForUser(userId)) });
