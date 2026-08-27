@@ -455,7 +455,7 @@ router.get('/summary', async (req: Request, res: Response) => {
       FROM usage_history uh
       LEFT JOIN sessions s ON s.id = uh.session_id
       WHERE uh.user_id = ? ${sessionDateFilter.sql}
-      GROUP BY uh.session_id, uh.model
+      GROUP BY uh.session_id, s.name, uh.model
     `,
       authReq.userId,
       ...sessionDateFilter.params

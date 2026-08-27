@@ -123,15 +123,38 @@ function translateStrftimeFormat(format: string): string | null {
   return out;
 }
 
-/** `strftime('%Y-%m-%dT%H:%M:%fZ', created_at)` and `strftime('%s', col)`. */
+/**
+ * `strftime('%Y-%m-%dT%H:%M:%fZ', created_at)`, `strftime('%s', col)` and the
+ * three-argument form `strftime(fmt, col, '+120 minutes')` that the analytics
+ * timeline uses to bucket by the viewer's local day.
+ */
 function translateStrftime(args: string): string | null {
   const match = /^'([^']*)'\s*,\s*([\s\S]+)$/.exec(args.trim());
   if (!match) return null;
-  const [, format, column] = match;
+  const [, format, rest] = match;
+
+  // The third argument, when present, is a SQLite modifier. Splitting on the
+  // last top-level comma keeps a column expression containing one intact.
+  let column = rest!.trim();
+  let modifier: string | null = null;
+  let depth = 0;
+  for (let i = column.length - 1; i >= 0; i--) {
+    const char = column[i];
+    if (char === ')') depth++;
+    else if (char === '(') depth--;
+    else if (char === ',' && depth === 0) {
+      modifier = column.slice(i + 1).trim();
+      column = column.slice(0, i).trim();
+      break;
+    }
+  }
 
   // The columns are TEXT holding 'YYYY-MM-DD HH:MM:SS', so they need a cast
-  // before any date function will look at them.
-  const value = `(${column!.trim()})::timestamp`;
+  // before any date function will look at them. SQLite's modifier syntax —
+  // '+120 minutes' — is also valid interval input, whether it arrives as a
+  // literal or as a bound parameter, so it goes through the cast unparsed.
+  let value = `(${column})::timestamp`;
+  if (modifier) value = `(${value} + (${modifier})::interval)`;
 
   if (format === '%s') return `EXTRACT(EPOCH FROM ${value})`;
 

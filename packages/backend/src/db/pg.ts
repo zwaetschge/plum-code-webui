@@ -1,9 +1,27 @@
-import { Pool, type PoolClient } from 'pg';
+import { Pool, types, type PoolClient } from 'pg';
 
 import { createLogger } from '../utils/logger.js';
 import { convertPlaceholders, translateDialect } from './dialect.js';
 
 const log = createLogger('pg');
+
+/**
+ * BIGINT comes back as a number, not a string.
+ *
+ * `pg` returns int8 as a string because a Postgres BIGINT can hold values a
+ * JavaScript number cannot represent exactly. That default is right in general
+ * and wrong here: SQLite handed these columns back as numbers, so the code
+ * compares them (`revision > 0`), does arithmetic on them, and sends them
+ * straight to the clients, where the WebUI and the Android app both expect a
+ * number. Left as strings the failures are quiet — `"0" > 0` is false,
+ * `total + 1` is `"01"`, and a resume snapshot arrives with `revision: "0"`.
+ *
+ * Every BIGINT in this schema is a count, a token total, a byte size or an
+ * ordering key. The largest of them is `messages.seq`, which at the current
+ * rate of 99k rows reaches 2^53 in roughly ten billion years. IDs are TEXT and
+ * are unaffected.
+ */
+types.setTypeParser(types.builtins.INT8, (value) => Number(value));
 
 /**
  * Async data access for the migration off SQLite.

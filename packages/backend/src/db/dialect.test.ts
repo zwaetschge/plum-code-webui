@@ -301,3 +301,28 @@ describe('translateDialect: references back to an alias', () => {
     assert.equal(translateDialect(sql), sql);
   });
 });
+
+describe('translateDialect: strftime with a modifier', () => {
+  it('adds the third argument as an interval', () => {
+    // The analytics timeline buckets by the viewer's local day, passing
+    // '+120 minutes' as a bound parameter.
+    assert.equal(
+      translateDialect("SELECT strftime('%Y-%m-%d', created_at, ?) AS bucket FROM t"),
+      `SELECT to_char(((created_at)::timestamp + (?)::interval), 'YYYY-MM-DD') AS bucket FROM t`
+    );
+  });
+
+  it('splits on the last top-level comma, not one inside the column', () => {
+    assert.equal(
+      translateDialect("SELECT strftime('%Y-%m-%d', COALESCE(a, b), ?) FROM t"),
+      `SELECT to_char(((COALESCE(a, b))::timestamp + (?)::interval), 'YYYY-MM-DD') FROM t`
+    );
+  });
+
+  it('still handles the two-argument form', () => {
+    assert.equal(
+      translateDialect("SELECT strftime('%Y-%m-%d', created_at) FROM t"),
+      `SELECT to_char((created_at)::timestamp, 'YYYY-MM-DD') FROM t`
+    );
+  });
+});
