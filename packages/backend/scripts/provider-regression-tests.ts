@@ -102,7 +102,12 @@ import {
   updateSettingsSchema,
 } from '../src/routes/settings.js';
 import { upsertProxyUserInDatabase } from '../src/utils/proxyUser.js';
-import { migrateLegacyClaudeEndpointToZai } from '../src/db/index.js';
+
+import { createTestSchema, dropTestSchema, useTestSchema } from '../src/db/testing.js';
+
+useTestSchema();
+const { get: pgGet, run: pgRun } = await import('../src/db/pg.js');
+await createTestSchema();
 import { syncCodexConfig } from '../src/utils/codexConfigSync.js';
 import { resolveContextWindow } from '../src/utils/contextWindow.js';
 import { mapKimiUsage } from '../src/utils/kimiUsage.js';
@@ -508,7 +513,7 @@ function testUsageWindowNormalization() {
   assert.equal(overWindowUsage?.contextExceeded, false);
 }
 
-function testContextUsageIncludesAssistantOutput() {
+async function testContextUsageIncludesAssistantOutput() {
   const emitted: EmittedSocketEvent[] = [];
   const ioStub = {
     to: () => ({
@@ -539,7 +544,7 @@ function testContextUsageIncludesAssistantOutput() {
   harness.processes.set(sessionId, proc);
   harness.recordContextSnapshot = () => undefined;
 
-  harness.emitUsage(sessionId, proc);
+  await harness.emitUsage(sessionId, proc);
 
   const usageEvent = emitted.find((entry) => entry.event === 'session:usage');
   const usage = usageEvent?.data as
@@ -550,7 +555,7 @@ function testContextUsageIncludesAssistantOutput() {
   assert.equal(usage?.contextUsedPercent, 65);
 }
 
-function testCodexUsageUsesNormalizedContextWindow() {
+async function testCodexUsageUsesNormalizedContextWindow() {
   const emitted: EmittedSocketEvent[] = [];
   const ioStub = {
     to: () => ({
@@ -581,7 +586,7 @@ function testCodexUsageUsesNormalizedContextWindow() {
   harness.processes.set(sessionId, proc);
   harness.recordContextSnapshot = () => undefined;
 
-  harness.emitUsage(sessionId, proc);
+  await harness.emitUsage(sessionId, proc);
 
   const usageEvent = emitted.find((entry) => entry.event === 'session:usage');
   const usage = usageEvent?.data as
@@ -592,7 +597,7 @@ function testCodexUsageUsesNormalizedContextWindow() {
   assert.equal(usage?.contextUsedPercent, 1);
 }
 
-function testContextUsageCapsAtWindow() {
+async function testContextUsageCapsAtWindow() {
   const emitted: EmittedSocketEvent[] = [];
   const ioStub = {
     to: () => ({
@@ -624,7 +629,7 @@ function testContextUsageCapsAtWindow() {
   harness.processes.set(sessionId, proc);
   harness.recordContextSnapshot = () => undefined;
 
-  harness.emitUsage(sessionId, proc);
+  await harness.emitUsage(sessionId, proc);
 
   const usageEvent = emitted.find((entry) => entry.event === 'session:usage');
   const usage = usageEvent?.data as
@@ -642,7 +647,7 @@ function testContextUsageCapsAtWindow() {
   assert.equal(usage?.contextExceeded, false);
 }
 
-function testCodexFreshExecUsageDoesNotDelta() {
+async function testCodexFreshExecUsageDoesNotDelta() {
   const ioStub = {
     to: () => ({
       emit: () => undefined,
@@ -683,7 +688,7 @@ function testCodexFreshExecUsageDoesNotDelta() {
     subagentRuns: new Map(),
   });
 
-  const translated = managerPrivate.translateCodexMessage(sessionId, {
+  const translated = await managerPrivate.translateCodexMessage(sessionId, {
     type: 'turn.completed',
     usage: {
       input_tokens: 2_000,
@@ -698,7 +703,7 @@ function testCodexFreshExecUsageDoesNotDelta() {
   assert.equal(translated?.usage?.output_tokens, 125);
 }
 
-function testCodexUsageClampsEachLargeTurnField() {
+async function testCodexUsageClampsEachLargeTurnField() {
   const ioStub = {
     to: () => ({
       emit: () => undefined,
@@ -738,7 +743,7 @@ function testCodexUsageClampsEachLargeTurnField() {
     subagentRuns: new Map(),
   });
 
-  const translated = managerPrivate.translateCodexMessage(sessionId, {
+  const translated = await managerPrivate.translateCodexMessage(sessionId, {
     type: 'turn.completed',
     usage: {
       input_tokens: 24_000_000,
@@ -756,7 +761,7 @@ function testCodexUsageClampsEachLargeTurnField() {
   assert.equal(translated?.usage?.output_tokens, 500_000);
 }
 
-function testCodexContextEstimateDoesNotPinToWindow() {
+async function testCodexContextEstimateDoesNotPinToWindow() {
   const ioStub = {
     to: () => ({
       emit: () => undefined,
@@ -811,7 +816,7 @@ function testCodexContextEstimateDoesNotPinToWindow() {
 
   // Heavy agentic turn: billing counters far above the context window. The
   // old estimator fed them into the context meter and pinned it at 100%.
-  managerPrivate.translateCodexMessage(sessionId, {
+  await managerPrivate.translateCodexMessage(sessionId, {
     type: 'turn.completed',
     usage: {
       input_tokens: 3_200_000,
@@ -827,7 +832,7 @@ function testCodexContextEstimateDoesNotPinToWindow() {
   assert.equal(snapshot.contextUsedPercent, 21);
 }
 
-function testCodexUsageIncludesDescendantThreadDelta() {
+async function testCodexUsageIncludesDescendantThreadDelta() {
   const ioStub = {
     to: () => ({
       emit: () => undefined,
@@ -883,7 +888,7 @@ function testCodexUsageIncludesDescendantThreadDelta() {
     subagentRuns: new Map(),
   });
 
-  const translated = managerPrivate.translateCodexMessage(sessionId, {
+  const translated = await managerPrivate.translateCodexMessage(sessionId, {
     type: 'turn.completed',
     usage: {
       input_tokens: 2_000,
@@ -980,7 +985,7 @@ async function testCodexThreadStateReaderMatchesPrompt() {
   });
 
   try {
-    const state = readCodexThreadState(codexHome, {
+    const state = await readCodexThreadState(codexHome, {
       cwd: '/workspace/plum',
       sinceMs: Date.now() - 1_000,
       promptPrefix: prompt.slice(0, 80),
@@ -1069,7 +1074,7 @@ async function testCodexContextSnapshotReadsRolloutTokenCount() {
       'utf8'
     );
 
-    const snapshot = readLatestCodexContextSnapshot(codexHome, {
+    const snapshot = await readLatestCodexContextSnapshot(codexHome, {
       threadId,
       cwd: '/workspace/plum',
     });
@@ -1080,7 +1085,7 @@ async function testCodexContextSnapshotReadsRolloutTokenCount() {
     assert.equal(snapshot?.counters.output, 1_000);
     assert.equal(snapshot?.contextWindow, 256_000);
     assert.equal(snapshot?.recordedAt, '2026-06-17T20:22:00.000Z');
-    assert.deepEqual(readCodexThreadCumulativeUsage(codexHome, threadId), {
+    assert.deepEqual(await readCodexThreadCumulativeUsage(codexHome, threadId), {
       input: 9_000_000,
       cached: 8_500_000,
       output: 300_000,
@@ -1129,7 +1134,7 @@ async function testCodexContextSnapshotReadsOnlyBoundedTail() {
     assert.equal(tail?.truncated, true);
     assert.equal(tail?.bytesRead, CODEX_ROLLOUT_TAIL_MAX_BYTES);
 
-    const snapshot = readLatestCodexContextSnapshot(codexHome, {
+    const snapshot = await readLatestCodexContextSnapshot(codexHome, {
       threadId,
       cwd: '/workspace/plum',
     });
@@ -1257,17 +1262,17 @@ async function testCodexExecRootLookupSkipsSubagentsAndForeignExecs() {
 
   try {
     assert.equal(
-      findCodexExecRootThreadId(codexHome, {
+      await findCodexExecRootThreadId(codexHome, {
         cwd: '/workspace/plum-exec-root',
         sinceMs: execStartedAtMs,
       }),
       'exec-root'
     );
     assert.equal(
-      findCodexExecRootThreadId(codexHome, { cwd: '/nope', sinceMs: execStartedAtMs }),
+      await findCodexExecRootThreadId(codexHome, { cwd: '/nope', sinceMs: execStartedAtMs }),
       null
     );
-    assert.deepEqual(readCodexDescendantUsage(codexHome, 'exec-root'), {
+    assert.deepEqual(await readCodexDescendantUsage(codexHome, 'exec-root'), {
       input: 48_000,
       cached: 46_000,
       output: 400,
@@ -1340,7 +1345,7 @@ async function testCodexTurnCompletedRollsUpDescendantsWithoutKnownThreadId() {
   try {
     CLI_PROVIDERS.codex.credentialsPath = codexHome;
     managerPrivate.processes.set(sessionId, proc);
-    const translated = managerPrivate.translateCodexMessage(sessionId, {
+    const translated = await managerPrivate.translateCodexMessage(sessionId, {
       type: 'turn.completed',
       usage: {
         input_tokens: 99_000,
@@ -1401,7 +1406,7 @@ async function testCodexTurnFailedBooksUsageFromThreadState() {
   try {
     CLI_PROVIDERS.codex.credentialsPath = codexHome;
     managerPrivate.processes.set(sessionId, proc);
-    const translated = managerPrivate.translateCodexMessage(sessionId, {
+    const translated = await managerPrivate.translateCodexMessage(sessionId, {
       type: 'turn.failed',
       message: 'rate limit',
     });
@@ -1475,7 +1480,7 @@ async function testPiResumesTurnAfterThresholdCompaction() {
   const sessionId = 'session-pi-compact-resume';
   const { managerPrivate, proc, written } = makePiManagerFixture(sessionId);
 
-  managerPrivate.translatePiMessage(sessionId, {
+  await managerPrivate.translatePiMessage(sessionId, {
     type: 'compaction_end',
     reason: 'threshold',
     aborted: false,
@@ -1497,7 +1502,7 @@ async function testPiDoesNotResumeWhenPiWillRetry() {
   const sessionId = 'session-pi-compact-will-retry';
   const { managerPrivate, written } = makePiManagerFixture(sessionId);
 
-  managerPrivate.translatePiMessage(sessionId, {
+  await managerPrivate.translatePiMessage(sessionId, {
     type: 'compaction_end',
     reason: 'overflow',
     aborted: false,
@@ -1513,13 +1518,13 @@ async function testPiProgressCancelsScheduledCompactionResume() {
   const sessionId = 'session-pi-compact-progress';
   const { managerPrivate, written } = makePiManagerFixture(sessionId);
 
-  managerPrivate.translatePiMessage(sessionId, {
+  await managerPrivate.translatePiMessage(sessionId, {
     type: 'compaction_end',
     reason: 'threshold',
     aborted: false,
     willRetry: false,
   });
-  managerPrivate.translatePiMessage(sessionId, {
+  await managerPrivate.translatePiMessage(sessionId, {
     type: 'message_start',
     message: { role: 'assistant' },
   });
@@ -1533,7 +1538,7 @@ async function testPiManualCompactWithoutTurnDoesNotResume() {
   const sessionId = 'session-pi-compact-manual';
   const { managerPrivate, written } = makePiManagerFixture(sessionId, { piTurnInFlight: false });
 
-  managerPrivate.translatePiMessage(sessionId, {
+  await managerPrivate.translatePiMessage(sessionId, {
     type: 'compaction_end',
     reason: 'manual',
     aborted: false,
@@ -1613,7 +1618,7 @@ async function testCodexSubagentDetailStripsInheritedHistory() {
   );
 
   try {
-    const detail = readCodexDescendantUsageDetail(codexHome, 'detail-root');
+    const detail = await readCodexDescendantUsageDetail(codexHome, 'detail-root');
     assert.equal(detail.length, 1);
     assert.equal(detail[0].threadId, childId);
     assert.equal(detail[0].parentThreadId, 'detail-root');
@@ -1621,7 +1626,7 @@ async function testCodexSubagentDetailStripsInheritedHistory() {
     assert.equal(detail[0].model, 'gpt-5.6-terra');
     assert.deepEqual(detail[0].usage, { input: 2_000, cached: 1_000, output: 200 });
     // The aggregate helper must stay consistent with the detail it sums.
-    assert.deepEqual(readCodexDescendantUsage(codexHome, 'detail-root'), {
+    assert.deepEqual(await readCodexDescendantUsage(codexHome, 'detail-root'), {
       input: 2_000,
       cached: 1_000,
       output: 200,
@@ -1720,7 +1725,7 @@ async function testCodexDescendantUsageReadsRecursiveRolloutTotals() {
     });
     db.close();
 
-    assert.deepEqual(readCodexDescendantUsage(codexHome, 'root-thread'), {
+    assert.deepEqual(await readCodexDescendantUsage(codexHome, 'root-thread'), {
       input: 12_600,
       cached: 10_500,
       output: 1_300,
@@ -1797,7 +1802,7 @@ async function testCodexContextFallbackUsesThreadState() {
   try {
     CLI_PROVIDERS.codex.credentialsPath = codexHome;
     managerPrivate.processes.set(sessionId, proc);
-    managerPrivate.translateCodexMessage(sessionId, {
+    await managerPrivate.translateCodexMessage(sessionId, {
       type: 'turn.completed',
       usage: {
         input_tokens: 348_027,
@@ -1884,7 +1889,7 @@ async function testCodexContextFallbackCapsThreadStateAtWindow() {
 
   try {
     CLI_PROVIDERS.codex.credentialsPath = codexHome;
-    managerPrivate.translateCodexMessage(sessionId, {
+    await managerPrivate.translateCodexMessage(sessionId, {
       type: 'turn.completed',
       usage: {
         input_tokens: 348_027,
@@ -1912,7 +1917,7 @@ async function testCodexContextFallbackCapsThreadStateAtWindow() {
   }
 }
 
-function testCodexCompactEventRetainsCompactedContext() {
+async function testCodexCompactEventRetainsCompactedContext() {
   const emitted: EmittedSocketEvent[] = [];
   const ioStub = {
     to: () => ({
@@ -1961,7 +1966,7 @@ function testCodexCompactEventRetainsCompactedContext() {
     lastActivityAt: Date.now(),
   });
 
-  managerPrivate.translateCodexMessage(sessionId, {
+  await managerPrivate.translateCodexMessage(sessionId, {
     type: 'context.compacted',
     usage: {
       input_tokens: 40_000,
@@ -1969,7 +1974,7 @@ function testCodexCompactEventRetainsCompactedContext() {
       output_tokens: 2_000,
     },
   });
-  managerPrivate.translateCodexMessage(sessionId, {
+  await managerPrivate.translateCodexMessage(sessionId, {
     type: 'turn.completed',
     usage: {
       input_tokens: 309_100,
@@ -1999,7 +2004,7 @@ function testCodexCompactEventRetainsCompactedContext() {
   assert.equal(latest?.contextExceeded, false);
 }
 
-function testCodexImplicitCompactDetectedFromContextDrop() {
+async function testCodexImplicitCompactDetectedFromContextDrop() {
   const emitted: EmittedSocketEvent[] = [];
   const compactEvents: unknown[] = [];
   const ioStub = {
@@ -2051,14 +2056,14 @@ function testCodexImplicitCompactDetectedFromContextDrop() {
     lastActivityAt: Date.now(),
   });
 
-  managerPrivate.translateCodexMessage(sessionId, {
+  await managerPrivate.translateCodexMessage(sessionId, {
     type: 'turn_context',
     summary: 'auto',
     model: 'gpt-5.5',
   });
   assert.equal(compactEvents.length, 0);
 
-  managerPrivate.translateCodexMessage(sessionId, {
+  await managerPrivate.translateCodexMessage(sessionId, {
     type: 'token_count',
     info: {
       model_context_window: 256_000,
@@ -2071,7 +2076,7 @@ function testCodexImplicitCompactDetectedFromContextDrop() {
   });
   assert.equal(compactEvents.length, 0);
 
-  managerPrivate.translateCodexMessage(sessionId, {
+  await managerPrivate.translateCodexMessage(sessionId, {
     type: 'token_count',
     info: {
       model_context_window: 256_000,
@@ -2104,7 +2109,7 @@ function testCodexImplicitCompactDetectedFromContextDrop() {
   assert.equal(latest?.contextUsedPercent, 29);
 }
 
-function testCodexImplicitCompactDetectedFromMidWindowReset() {
+async function testCodexImplicitCompactDetectedFromMidWindowReset() {
   const emitted: EmittedSocketEvent[] = [];
   const compactEvents: unknown[] = [];
   const ioStub = {
@@ -2156,7 +2161,7 @@ function testCodexImplicitCompactDetectedFromMidWindowReset() {
     lastActivityAt: Date.now(),
   });
 
-  managerPrivate.translateCodexMessage(sessionId, {
+  await managerPrivate.translateCodexMessage(sessionId, {
     type: 'token_count',
     info: {
       model_context_window: 256_000,
@@ -2169,7 +2174,7 @@ function testCodexImplicitCompactDetectedFromMidWindowReset() {
   });
   assert.equal(compactEvents.length, 0);
 
-  managerPrivate.translateCodexMessage(sessionId, {
+  await managerPrivate.translateCodexMessage(sessionId, {
     type: 'token_count',
     info: {
       model_context_window: 256_000,
@@ -3043,21 +3048,21 @@ async function testCodexImageGenerationEventQueuesOnlyManagedOutput() {
   try {
     await fs.writeFile(managedPath, png);
     await fs.writeFile(outsidePath, png);
-    managerPrivate.translateCodexMessage(
+    await managerPrivate.translateCodexMessage(
       sessionId,
       imageEvent('failed', managedPath, 'exec-failed')
     );
-    managerPrivate.translateCodexMessage(
+    await managerPrivate.translateCodexMessage(
       sessionId,
       imageEvent('completed', outsidePath, 'exec-outside')
     );
     assert.equal((proc.pendingChatMedia as unknown[]).length, 0);
 
-    managerPrivate.translateCodexMessage(
+    await managerPrivate.translateCodexMessage(
       sessionId,
       imageEvent('completed', managedPath, 'exec-managed')
     );
-    managerPrivate.translateCodexMessage(
+    await managerPrivate.translateCodexMessage(
       sessionId,
       imageEvent('completed', managedPath, 'exec-managed')
     );
@@ -3071,11 +3076,11 @@ async function testCodexImageGenerationEventQueuesOnlyManagedOutput() {
       'exec-managed'
     );
 
-    managerPrivate.translateCodexMessage(sessionId, {
+    await managerPrivate.translateCodexMessage(sessionId, {
       type: 'item.completed',
       item: { id: 'image-input', type: 'imageView', path: managedPath },
     });
-    managerPrivate.translateCodexMessage(sessionId, {
+    await managerPrivate.translateCodexMessage(sessionId, {
       type: 'custom_tool_call_output',
       output: [{ type: 'input_image', image_url: 'data:image/png;base64,redacted' }],
     });
@@ -3606,71 +3611,6 @@ function testClaudeAndZaiProcessEnvironmentsAreIsolated() {
     true
   );
   assert.equal(updateSettingsSchema.safeParse({ enabledCliProviders: [] }).success, false);
-}
-
-function testLegacyClaudeEndpointMigrationSeparatesZai() {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE user_settings (user_id TEXT PRIMARY KEY, settings_json TEXT);
-    CREATE TABLE sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT,
-      cli_provider TEXT,
-      updated_at TEXT
-    );
-    CREATE TABLE usage_history (
-      id INTEGER PRIMARY KEY,
-      provider TEXT,
-      model TEXT
-    );
-  `);
-  db.prepare('INSERT INTO user_settings (user_id, settings_json) VALUES (?, ?)').run(
-    'user-zai',
-    JSON.stringify({
-      claudeApi: { baseUrl: 'https://api.z.ai/api/anthropic', authToken: 'encrypted' },
-      enabledCliProviders: ['codex', 'claude'],
-    })
-  );
-  db.prepare(
-    "INSERT INTO sessions (id, user_id, cli_provider) VALUES ('legacy-zai', 'user-zai', 'claude')"
-  ).run();
-  db.prepare("INSERT INTO usage_history (provider, model) VALUES ('claude', 'glm-5.2')").run();
-
-  assert.deepEqual(migrateLegacyClaudeEndpointToZai(db), {
-    settings: 1,
-    sessions: 1,
-    usage: 1,
-  });
-  const migratedSettings = JSON.parse(
-    (
-      db
-        .prepare(
-          "SELECT settings_json as settingsJson FROM user_settings WHERE user_id = 'user-zai'"
-        )
-        .get() as { settingsJson: string }
-    ).settingsJson
-  ) as Record<string, unknown>;
-  assert.equal(migratedSettings.claudeApi, undefined);
-  assert.ok(migratedSettings.zaiApi);
-  assert.deepEqual(migratedSettings.enabledCliProviders, ['codex', 'claude', 'zai']);
-  assert.equal(
-    (
-      db.prepare("SELECT cli_provider as provider FROM sessions WHERE id = 'legacy-zai'").get() as {
-        provider: string;
-      }
-    ).provider,
-    'zai'
-  );
-  assert.equal(
-    (db.prepare('SELECT provider FROM usage_history').get() as { provider: string }).provider,
-    'zai'
-  );
-  assert.deepEqual(migrateLegacyClaudeEndpointToZai(db), {
-    settings: 0,
-    sessions: 0,
-    usage: 0,
-  });
-  db.close();
 }
 
 function testDeviceAppearanceSettingsAreNotAccountPersisted() {
@@ -4206,74 +4146,38 @@ function testOpenCodeStallErrorDescribesLastToolWithoutSecrets() {
   assert.match(message, /API_TOKEN=<redacted>/);
 }
 
-function testProxyUserAdoptsLegacySharedCliUser() {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE users (
-      id TEXT PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      name TEXT,
-      avatar_url TEXT,
-      provider TEXT NOT NULL,
-      provider_id TEXT NOT NULL,
-      role TEXT DEFAULT 'user',
-      status TEXT DEFAULT 'active',
-      last_login_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(provider, provider_id)
-    );
-
-    CREATE TABLE user_settings (
-      user_id TEXT PRIMARY KEY,
-      theme TEXT DEFAULT 'dark',
-      default_working_dir TEXT,
-      allowed_tools TEXT,
-      custom_system_prompt TEXT,
-      settings_json TEXT
-    );
-
-    CREATE TABLE sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      name TEXT NOT NULL
-    );
-
-    CREATE TABLE usage_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      session_id TEXT NOT NULL,
-      input_tokens INTEGER NOT NULL DEFAULT 0
-    );
-  `);
-
-  db.prepare(
+/**
+ * A single shared `cli` account predates per-user proxy identities. The first
+ * proxy login adopts it rather than creating a second user, so the sessions,
+ * settings and usage history that account already owns stay attached to it.
+ */
+async function testProxyUserAdoptsLegacySharedCliUser() {
+  await pgRun(
     `INSERT INTO users (id, email, name, provider, provider_id, role)
      VALUES ('legacy-user', 'codex-user@local', 'Codex User', 'cli', 'local-cli', 'admin')`
-  ).run();
-  db.prepare(
+  );
+  await pgRun(
     `INSERT INTO user_settings (user_id, theme, default_working_dir, allowed_tools, settings_json)
      VALUES ('legacy-user', 'system', '/mnt/user/AI/plum-code', '["Bash"]', '{"uiProvider":"plum"}')`
-  ).run();
-  db.prepare(
-    `INSERT INTO sessions (id, user_id, name) VALUES ('session-1', 'legacy-user', 'Chat')`
-  ).run();
-  db.prepare(
+  );
+  await pgRun(
+    `INSERT INTO sessions (id, user_id, name, working_directory)
+     VALUES ('session-1', 'legacy-user', 'Chat', '/tmp')`
+  );
+  await pgRun(
     `INSERT INTO usage_history (user_id, session_id, input_tokens)
      VALUES ('legacy-user', 'session-1', 123)`
-  ).run();
+  );
 
-  const user = upsertProxyUserInDatabase(db, 'Valentin@Example.COM', 'Valentin', null);
+  const user = await upsertProxyUserInDatabase('Valentin@Example.COM', 'Valentin', null);
 
   assert.equal(user.id, 'legacy-user');
   assert.equal(user.email, 'valentin@example.com');
   assert.equal(user.provider, 'proxy');
   assert.equal(user.providerId, 'valentin@example.com');
-  assert.equal(db.prepare(`SELECT COUNT(*) as count FROM users`).get().count, 1);
+  assert.equal(((await pgGet('SELECT COUNT(*) as count FROM users')) as { count: number }).count, 1);
   assert.deepEqual(
-    db
-      .prepare(`SELECT email, provider, provider_id, role FROM users WHERE id = 'legacy-user'`)
-      .get(),
+    await pgGet(`SELECT email, provider, provider_id, role FROM users WHERE id = 'legacy-user'`),
     {
       email: 'valentin@example.com',
       provider: 'proxy',
@@ -4282,16 +4186,24 @@ function testProxyUserAdoptsLegacySharedCliUser() {
     }
   );
   assert.equal(
-    db.prepare(`SELECT default_working_dir FROM user_settings WHERE user_id = 'legacy-user'`).get()
-      .default_working_dir,
+    (
+      (await pgGet(
+        `SELECT default_working_dir FROM user_settings WHERE user_id = 'legacy-user'`
+      )) as { default_working_dir: string }
+    ).default_working_dir,
     '/mnt/user/AI/plum-code'
   );
   assert.equal(
-    db.prepare(`SELECT user_id FROM sessions WHERE id = 'session-1'`).get().user_id,
+    ((await pgGet(`SELECT user_id FROM sessions WHERE id = 'session-1'`)) as { user_id: string })
+      .user_id,
     'legacy-user'
   );
   assert.equal(
-    db.prepare(`SELECT user_id FROM usage_history WHERE session_id = 'session-1'`).get().user_id,
+    (
+      (await pgGet(`SELECT user_id FROM usage_history WHERE session_id = 'session-1'`)) as {
+        user_id: string;
+      }
+    ).user_id,
     'legacy-user'
   );
 }
@@ -5563,13 +5475,13 @@ testProviderTurnUsageAggregation();
 testZaiAccountUsageShape();
 testContextWindowFallbacks();
 testUsageWindowNormalization();
-testContextUsageIncludesAssistantOutput();
-testCodexUsageUsesNormalizedContextWindow();
-testContextUsageCapsAtWindow();
-testCodexFreshExecUsageDoesNotDelta();
-testCodexUsageClampsEachLargeTurnField();
-testCodexContextEstimateDoesNotPinToWindow();
-testCodexUsageIncludesDescendantThreadDelta();
+await testContextUsageIncludesAssistantOutput();
+await testCodexUsageUsesNormalizedContextWindow();
+await testContextUsageCapsAtWindow();
+await testCodexFreshExecUsageDoesNotDelta();
+await testCodexUsageClampsEachLargeTurnField();
+await testCodexContextEstimateDoesNotPinToWindow();
+await testCodexUsageIncludesDescendantThreadDelta();
 await testCodexThreadStateReaderMatchesPrompt();
 await testCodexContextSnapshotReadsRolloutTokenCount();
 await testCodexContextSnapshotReadsOnlyBoundedTail();
@@ -5584,9 +5496,9 @@ await testPiProgressCancelsScheduledCompactionResume();
 await testPiManualCompactWithoutTurnDoesNotResume();
 await testCodexContextFallbackUsesThreadState();
 await testCodexContextFallbackCapsThreadStateAtWindow();
-testCodexCompactEventRetainsCompactedContext();
-testCodexImplicitCompactDetectedFromContextDrop();
-testCodexImplicitCompactDetectedFromMidWindowReset();
+await testCodexCompactEventRetainsCompactedContext();
+await testCodexImplicitCompactDetectedFromContextDrop();
+await testCodexImplicitCompactDetectedFromMidWindowReset();
 testProviderCapabilities();
 testClaudeCurrentModelCatalog();
 testCodexFastTierArgs();
@@ -5632,7 +5544,6 @@ await testKimiNativeTurnUsageLedger();
 testPerTurnModeChangesDoNotRestartActiveChildren();
 testClaudeApiEnvironmentMapping();
 testClaudeAndZaiProcessEnvironmentsAreIsolated();
-testLegacyClaudeEndpointMigrationSeparatesZai();
 testClaudeAndZaiProcessEnvironmentsAreIsolated();
 testDeviceAppearanceSettingsAreNotAccountPersisted();
 testMemoryDirectoryRejectsWorkingDirectoriesOutsideAllowedBases();
@@ -5653,7 +5564,7 @@ testOpenCodePollingIsBoundedToCurrentTurn();
 testOpenCodeServerUsesProcessGroupsOnPosix();
 await testOpenCodePollingSerializesAndAbortsRequests();
 testOpenCodeStallErrorDescribesLastToolWithoutSecrets();
-testProxyUserAdoptsLegacySharedCliUser();
+await testProxyUserAdoptsLegacySharedCliUser();
 testCodexSessionIdExtraction();
 testDisconnectedSessionStaysRunning();
 await testOpenCodeRestartCleanupAbortsAndUnsubscribesRemoteTurn();
@@ -5674,6 +5585,8 @@ testCodexCliUpdaterTracksLatest();
 testClaudeCliUpdaterPromotesAndExecutesNativeBinary();
 testPiUpdaterIncludesHarnessAndMcpBridge();
 testPricingTable();
+
+await dropTestSchema();
 
 console.log('provider regression tests passed');
 process.exit(0);

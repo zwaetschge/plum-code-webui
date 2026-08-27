@@ -26,7 +26,7 @@ async function ensureUserSettings(userId: string): Promise<void> {
   );
 }
 
-async function upsertProxyUserInDatabase(
+export async function upsertProxyUserInDatabase(
   email: string,
   name?: string | null,
   username?: string | null

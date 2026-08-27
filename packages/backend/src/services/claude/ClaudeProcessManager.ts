@@ -803,7 +803,7 @@ function dropCodexStateDatabase(dbPath: string): void {
   }
 }
 
-async function readCodexThreadState(
+export async function readCodexThreadState(
   codexHome: string,
   opts: {
     threadId?: string | null;
@@ -978,7 +978,7 @@ function readLatestCodexRolloutTotalUsage(rolloutPath: string): CodexUsageCounte
   return null;
 }
 
-async function readCodexThreadCumulativeUsage(
+export async function readCodexThreadCumulativeUsage(
   codexHome: string,
   threadId: string | null | undefined
 ): Promise<CodexUsageCounters | undefined> {
@@ -1104,7 +1104,7 @@ export interface CodexDescendantThreadUsage {
  * strips that replayed prefix — without it a deep tree multiplies the parent's
  * tokens by its number of children.
  */
-async function readCodexDescendantUsageDetail(
+export async function readCodexDescendantUsageDetail(
   codexHome: string,
   rootThreadId: string
 ): Promise<CodexDescendantThreadUsage[]> {
@@ -1194,7 +1194,7 @@ async function readCodexDescendantUsageDetail(
   }
 }
 
-async function readCodexDescendantUsage(
+export async function readCodexDescendantUsage(
   codexHome: string,
   rootThreadId: string
 ): Promise<CodexUsageCounters> {
@@ -1215,7 +1215,7 @@ async function readCodexDescendantUsage(
  * can land on a leaf and then find no children — which silently drops the entire
  * subagent bill. Skip anything carrying a `thread_spawn.parent_thread_id`.
  */
-async function findCodexExecRootThreadId(
+export async function findCodexExecRootThreadId(
   codexHome: string,
   opts: { cwd?: string | null; sinceMs?: number | null }
 ): Promise<string | null> {

@@ -20,7 +20,9 @@ assert.match(
 );
 assert.match(
   messageRoute,
-  /ORDER BY rowid DESC LIMIT \?/,
+  /ORDER BY seq DESC LIMIT \?/,
+  // `seq` is the BIGSERIAL that replaced SQLite's rowid as the insertion-order
+  // key; the point of the assertion is unchanged.
   'the endpoint should fetch the newest bounded window efficiently'
 );
 assert.match(
@@ -31,7 +33,7 @@ assert.match(
 assert.match(messageRoute, /around: z\.string[^]*?anchorIndex/, 'history supports jump windows');
 assert.match(
   messageRoute,
-  /after: z\.string[^]*?before, after, around[^]*?rowid > \?[^]*?ORDER BY rowid ASC LIMIT \?/,
+  /after: z\.string[^]*?before, after, around[^]*?seq > \?[^]*?ORDER BY seq ASC LIMIT \?/,
   'history supports a bounded forward cursor that is exclusive with other cursor modes'
 );
 assert.match(
@@ -41,7 +43,7 @@ assert.match(
 );
 assert.match(
   messageRoute,
-  /snapshot: getMessageHistorySnapshot[^]*?readState: getSessionReadState/,
+  /snapshot: await getMessageHistorySnapshot[^]*?readState: await getSessionReadState/,
   'rows include an atomic snapshot and read-state contract'
 );
 assert.match(
@@ -67,7 +69,9 @@ assert.match(
 );
 assert.match(
   searchRoutes,
-  /substr\(snippet\([\s\S]*?2000\)[\s\S]*?substr\(content,[\s\S]*?1600\)/,
+  // ts_headline replaced FTS5's snippet(); both sides of the fallback stay
+  // bounded, which is what keeps a 200k-character message out of a result list.
+  /substr\([\s\S]*?ts_headline\([\s\S]*?2000[\s\S]*?substr\(content,[\s\S]*?1600\)/,
   'search returns bounded, match-centred previews rather than full messages'
 );
 

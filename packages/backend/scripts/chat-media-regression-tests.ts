@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'plum-chat-media-'));
 const dataDirectory = path.join(root, 'data');
@@ -21,7 +20,10 @@ process.env.SESSION_SECRET = 'chat-media-session-secret-000000000000000000';
 process.env.JWT_SECRET = 'chat-media-jwt-secret-000000000000000000000';
 process.env.ENCRYPTION_KEY = 'chat-media-encryption-key-0000000000000000';
 
-const { initDatabase, migrateMessageMediaUserSource } = await import('../src/db/index.js');
+const { useTestSchema, createTestSchema, dropTestSchema } = await import(
+  '../src/db/testing.js'
+);
+useTestSchema();
 const {
   MAX_CHAT_MEDIA_BYTES,
   chatMediaStorageDirectory,
@@ -31,7 +33,8 @@ const {
   resolveOwnedChatMedia,
 } = await import('../src/services/chatMedia.js');
 
-const database = initDatabase();
+await createTestSchema();
+const { all: pgAll, get: pgGet, run: pgRun } = await import('../src/db/pg.js');
 
 function pngBytes(label = 'one'): Buffer {
   return Buffer.concat([
@@ -50,76 +53,14 @@ assert.equal(detectChatMediaMime(gif), 'image/gif');
 assert.equal(detectChatMediaMime(webp), 'image/webp');
 assert.equal(detectChatMediaMime(Buffer.from('<svg><script/></svg>')), null);
 
-const legacyDatabase = new Database(':memory:');
-legacyDatabase.pragma('foreign_keys = ON');
-legacyDatabase.exec(`
-  CREATE TABLE users (id TEXT PRIMARY KEY);
-  CREATE TABLE sessions (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE
-  );
-  CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE
-  );
-  CREATE TABLE message_media (
-    id TEXT PRIMARY KEY,
-    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    storage_key TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    mime_type TEXT NOT NULL,
-    byte_size INTEGER NOT NULL CHECK (byte_size > 0 AND byte_size <= 26214400),
-    sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
-    alt_text TEXT,
-    source TEXT NOT NULL CHECK (source IN ('provider', 'workspace', 'comfyui')),
-    source_id TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(message_id, sha256)
-  );
-  INSERT INTO users (id) VALUES ('legacy-user');
-  INSERT INTO sessions (id, user_id) VALUES ('legacy-session', 'legacy-user');
-  INSERT INTO messages (id, session_id) VALUES ('legacy-message', 'legacy-session');
-  INSERT INTO message_media (
-    id, message_id, session_id, user_id, storage_key, filename,
-    mime_type, byte_size, sha256, source
-  ) VALUES (
-    'legacy-media', 'legacy-message', 'legacy-session', 'legacy-user',
-    '00000000-0000-4000-8000-000000000000.png', 'legacy.png',
-    'image/png', 1, '${'0'.repeat(64)}', 'provider'
-  );
-`);
-assert.equal(migrateMessageMediaUserSource(legacyDatabase), true);
-assert.equal(
-  (legacyDatabase.prepare('SELECT COUNT(*) AS count FROM message_media').get() as { count: number })
-    .count,
-  1,
-  'constraint migration must preserve existing media'
-);
-legacyDatabase
-  .prepare(
-    `INSERT INTO message_media (
-       id, message_id, session_id, user_id, storage_key, filename,
-       mime_type, byte_size, sha256, source
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-  .run(
-    'legacy-user-media',
-    'legacy-message',
-    'legacy-session',
-    'legacy-user',
-    '00000000-0000-4000-8000-000000000001.bin',
-    'notes.txt',
-    'text/plain',
-    1,
-    '1'.repeat(64),
-    'user'
-  );
-assert.equal(migrateMessageMediaUserSource(legacyDatabase), false, 'migration must be idempotent');
-legacyDatabase.close();
+// The block that used to stand here migrated `message_media.source` in place,
+// re-creating the table to widen a CHECK constraint. That migration ran once on
+// every existing SQLite database and its result is part of the Postgres
+// baseline, so there is nothing left for it to do and nothing to assert.
+// What it was guarding — that a widened constraint does not drop existing rows —
+// is now the schema's problem rather than a step's.
 
-database.exec(`
+await pgRun(`
   INSERT INTO users (id, email, name, provider, provider_id, role, status)
   VALUES
     ('user-a', 'a@example.test', 'A', 'test', 'a', 'admin', 'active'),
@@ -185,12 +126,10 @@ try {
   });
   assert.equal(second.length, 1);
 
-  const storedRows = database
-    .prepare(
-      `SELECT message_id AS messageId, storage_key AS storageKey, sha256
+  const storedRows = (await pgAll(
+    `SELECT message_id AS messageId, storage_key AS storageKey, sha256
        FROM message_media ORDER BY message_id`
-    )
-    .all() as Array<{ messageId: string; storageKey: string; sha256: string }>;
+  )) as Array<{ messageId: string; storageKey: string; sha256: string }>;
   assert.equal(storedRows.length, 2);
   assert.equal(
     storedRows[0]?.storageKey,
@@ -202,7 +141,7 @@ try {
   );
   assert.equal(storedFiles.filter((name) => !name.startsWith('.')).length, 1);
 
-  const grouped = loadMessageMedia(['message-a1', 'message-a2']);
+  const grouped = await loadMessageMedia(['message-a1', 'message-a2']);
   assert.equal(grouped.get('message-a1')?.length, 1);
   assert.equal(grouped.get('message-a2')?.length, 1);
   assert.equal(grouped.get('message-a1')?.[0]?.altText, 'Tuya QR code');
@@ -351,27 +290,26 @@ try {
     /does not belong/
   );
 
-  assert.throws(
+  // The trigger, not the route: a direct writer must not be able to bind media
+  // to a session and user the message does not belong to.
+  await assert.rejects(
     () =>
-      database
-        .prepare(
-          `INSERT INTO message_media (
-             id, message_id, session_id, user_id, storage_key, filename,
-             mime_type, byte_size, sha256, source
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          'invalid-owner',
-          'message-a1',
-          'session-b',
-          'user-b',
-          '00000000-0000-4000-8000-000000000000.png',
-          'bad.png',
-          'image/png',
-          1,
-          '0'.repeat(64),
-          'provider'
-        ),
+      pgRun(
+        `INSERT INTO message_media (
+           id, message_id, session_id, user_id, storage_key, filename,
+           mime_type, byte_size, sha256, source
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        'invalid-owner',
+        'message-a1',
+        'session-b',
+        'user-b',
+        '00000000-0000-4000-8000-000000000000.png',
+        'bad.png',
+        'image/png',
+        1,
+        '0'.repeat(64),
+        'provider'
+      ),
     /ownership mismatch/
   );
 
@@ -409,7 +347,8 @@ try {
   )?.route;
   assert.ok(messagesRoute, 'missing messages route');
   let messagesResponse: unknown;
-  messagesRoute.stack.at(-1)!.handle(
+  // The handler is async now, so its json() call lands a microtask later.
+  await messagesRoute.stack.at(-1)!.handle(
     { params: { id: 'session-a' }, query: { limit: '500' }, userId: 'user-a' },
     {
       json: (body: unknown) => {
@@ -431,12 +370,13 @@ try {
     /storageKey|filePath|workspace|chat-media/
   );
 
-  database.prepare('DELETE FROM messages WHERE id = ?').run('message-a1');
+  await pgRun('DELETE FROM messages WHERE id = ?', 'message-a1');
   assert.equal(
     (
-      database
-        .prepare('SELECT COUNT(*) AS count FROM message_media WHERE message_id = ?')
-        .get('message-a1') as { count: number }
+      (await pgGet(
+        'SELECT COUNT(*) AS count FROM message_media WHERE message_id = ?',
+        'message-a1'
+      )) as { count: number }
     ).count,
     0,
     'message deletion must cascade to media metadata'
@@ -444,6 +384,6 @@ try {
 
   console.log('chat media regression tests passed');
 } finally {
-  database.close();
+  await dropTestSchema();
   await fs.rm(root, { recursive: true, force: true });
 }

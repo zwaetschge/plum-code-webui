@@ -1,59 +1,85 @@
-import Database from 'better-sqlite3';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+/**
+ * Applies the schema to a throwaway Postgres schema and checks it holds.
+ *
+ * Under SQLite this copied a database, ran the migrations over it and asked for
+ * `quick_check` and `foreign_key_check`. The Postgres equivalents of those two
+ * are different questions:
+ *
+ * - **Does it apply twice?** schema.sql runs on every boot, so a statement that
+ *   is not idempotent breaks the *second* start, not the first. That is exactly
+ *   what happened with `ALTER TABLE ... ADD CONSTRAINT`, which has no
+ *   IF NOT EXISTS and failed on the first foreign key. Applying twice here
+ *   catches the next one before a deployment does.
+ * - **Are the constraints real?** Postgres will not let a NOT VALID constraint
+ *   masquerade as an enforced one, so the check is that none are left in that
+ *   state, plus that every trigger the invariants depend on exists. Those
+ *   triggers lived only in boot-time code once, and their absence was silent.
+ *
+ * Usage: tsx scripts/migration-dry-run.ts
+ */
 
-function readSourceArgument(): string | null {
-  const index = process.argv.indexOf('--source');
-  if (index === -1) return null;
+import assert from 'node:assert/strict';
 
-  const value = process.argv[index + 1];
-  if (!value) throw new Error('--source requires a SQLite database path');
-  return path.resolve(value);
+process.env.NODE_ENV = 'test';
+process.env.SESSION_SECRET ||= 'migration-dry-run-session-secret-0000000000000000';
+process.env.JWT_SECRET ||= 'migration-dry-run-jwt-secret-0000000000000000000';
+process.env.ENCRYPTION_KEY ||= 'migration-dry-run-encryption-key-000000000000';
+
+const { useTestSchema, createTestSchema, dropTestSchema, databaseReachable } = await import(
+  '../src/db/testing.js'
+);
+useTestSchema();
+
+const { all: pgAll } = await import('../src/db/pg.js');
+
+if (!(await databaseReachable())) {
+  console.log('Migration dry-run skipped: no Postgres reachable');
+  process.exit(0);
 }
 
-const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'plum-migration-'));
-const targetDatabase = path.join(temporaryDirectory, 'claude-webui.db');
-
 try {
-  const sourceDatabase = readSourceArgument();
-  if (sourceDatabase) {
-    if (!fs.existsSync(sourceDatabase)) {
-      throw new Error(`source database does not exist: ${sourceDatabase}`);
-    }
+  await createTestSchema();
+  // Twice. The whole point.
+  await createTestSchema();
 
-    const source = new Database(sourceDatabase, { readonly: true, fileMustExist: true });
-    try {
-      await source.backup(targetDatabase);
-    } finally {
-      source.close();
-    }
-  }
+  const invalid = (await pgAll(
+    `SELECT conname FROM pg_constraint c
+       JOIN pg_namespace n ON n.oid = c.connamespace
+      WHERE n.nspname = current_schema() AND NOT c.convalidated`
+  )) as Array<{ conname: string }>;
+  assert.deepEqual(
+    invalid.map((row) => row.conname),
+    [],
+    'a constraint left NOT VALID is not enforced for the rows already there'
+  );
 
-  process.env.NODE_ENV = 'test';
-  process.env.SESSION_SECRET ||= 'migration-dry-run-session-secret-0000000000000000';
-  process.env.JWT_SECRET ||= 'migration-dry-run-jwt-secret-0000000000000000000';
-  process.env.ENCRYPTION_KEY ||= 'migration-dry-run-encryption-key-000000000000';
-  process.env.WEBUI_DATA_DIR = temporaryDirectory;
-  process.env.WEBUI_SUPPRESS_BOOTSTRAP_CREDENTIAL_LOG = '1';
+  const expectedTriggers = [
+    'trg_message_media_validate_ownership',
+    'trg_session_reads_validate',
+    'trg_messages_snapshot_insert',
+    'trg_messages_snapshot_update',
+    'trg_messages_snapshot_delete',
+    'trg_messages_cancel_consumed_uploads',
+    'trg_session_categories_after_delete',
+  ];
+  const triggers = (await pgAll(
+    `SELECT tgname FROM pg_trigger t
+       JOIN pg_class c ON c.oid = t.tgrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = current_schema() AND NOT t.tgisinternal
+      ORDER BY tgname`
+  )) as Array<{ tgname: string }>;
+  const present = new Set(triggers.map((row) => row.tgname));
+  const missing = expectedTriggers.filter((name) => !present.has(name));
+  assert.deepEqual(missing, [], 'invariants enforced by triggers must survive a fresh schema');
 
-  const { getDatabasePath, initDatabase } = await import('../src/db/index.js');
-  const migrated = initDatabase();
-  try {
-    const quickCheck = migrated.pragma('quick_check') as Array<{ quick_check: string }>;
-    if (quickCheck.length !== 1 || quickCheck[0]?.quick_check !== 'ok') {
-      throw new Error(`SQLite quick_check failed: ${JSON.stringify(quickCheck)}`);
-    }
-
-    const foreignKeyErrors = migrated.pragma('foreign_key_check') as unknown[];
-    if (foreignKeyErrors.length > 0) {
-      throw new Error(`foreign_key_check failed with ${foreignKeyErrors.length} row(s)`);
-    }
-
-    console.log(`Migration dry-run passed: ${getDatabasePath()}`);
-  } finally {
-    migrated.close();
-  }
+  const tables = (await pgAll(
+    `SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema = current_schema()`
+  )) as Array<{ count: number }>;
+  console.log(
+    `Migration dry-run passed: ${tables[0]?.count} tables, ` +
+      `${expectedTriggers.length} triggers, all constraints validated`
+  );
 } finally {
-  fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  await dropTestSchema();
 }

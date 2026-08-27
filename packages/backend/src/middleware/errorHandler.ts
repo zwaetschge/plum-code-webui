@@ -11,12 +11,23 @@ declare module 'express-serve-static-core' {
   }
 }
 
-// Wrap async route handlers to properly catch errors
+/**
+ * Forwards a rejected handler to the error middleware.
+ *
+ * The previous form was `await Promise.resolve(await fn(...)).catch(next)`, and
+ * the inner `await` is the bug: it throws before `.catch(next)` is attached, so
+ * the wrapper re-threw into a caller that had nothing to catch it. It worked
+ * only for a handler that resolved.
+ *
+ * Most routes do not need this — [installAsyncErrorHandling] patches the router
+ * so every handler is covered, including the ones nobody remembered to wrap.
+ * This stays for the handlers that name it explicitly.
+ */
 export const asyncHandler = (
   fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>
 ): RequestHandler => {
-  return async (req, res, next) => {
-    await Promise.resolve(await fn(req, res, next)).catch(next);
+  return (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
   };
 };
 
