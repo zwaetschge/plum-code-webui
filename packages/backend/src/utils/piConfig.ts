@@ -205,12 +205,12 @@ export function buildPiModelCatalog(
   };
 }
 
-function buildPiProvidersForUser(userId: string): {
+async function buildPiProvidersForUser(userId: string): Promise<{
   storedProviders: OpenCodeProvider[];
   piProviders: Record<string, unknown>;
   models: string[];
-} {
-  const storedProviders = readOpenCodeProvidersForUser(userId).filter(
+}> {
+  const storedProviders = (await readOpenCodeProvidersForUser(userId)).filter(
     (provider) => provider.enabled
   );
   const resolved = buildPiModelCatalog(
@@ -221,8 +221,8 @@ function buildPiProvidersForUser(userId: string): {
   return { storedProviders, ...resolved };
 }
 
-export function getPiModelsForUser(userId: string): string[] {
-  const models = buildPiProvidersForUser(userId).models;
+export async function getPiModelsForUser(userId: string): Promise<string[]> {
+  const models = (await buildPiProvidersForUser(userId)).models;
   // Extension-provided models are not in the registry, so append them when the
   // extension ships in this image. The user still has to /login antigravity.
   if (!hasPiAntigravityExtension()) return models;
@@ -385,19 +385,19 @@ export function hasPiAntigravityExtension(): boolean {
   return resolvePiExtensionPaths().some((entry) => entry.includes('pi-antigravity'));
 }
 
-export function syncPiConfig(userId: string): PiConfigSyncResult {
+export async function syncPiConfig(userId: string): Promise<PiConfigSyncResult> {
   const agentDir = path.join(PI_ROOT, safeUserSegment(userId), 'agent');
   fs.mkdirSync(agentDir, { recursive: true });
 
   const tenantPaths = resolveOpenCodeTenantPaths(userId);
   ensureOpenCodeTenantDirectories(tenantPaths);
-  syncProviderLinks({
+  await syncProviderLinks({
     quiet: true,
     userId,
     opencodeConfigPath: path.join(tenantPaths.configDir, 'opencode.json'),
     opencodeAgentsDir: path.join(tenantPaths.configDir, 'agents'),
   });
-  const { storedProviders, piProviders, models } = buildPiProvidersForUser(userId);
+  const { storedProviders, piProviders, models } = await buildPiProvidersForUser(userId);
 
   writeJsonIfChanged(path.join(agentDir, 'models.json'), { providers: piProviders });
 

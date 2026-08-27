@@ -1,7 +1,7 @@
+import { get as pgGet } from '../db/pg.js';
 import fs from 'fs';
 import path from 'path';
 
-import { getDatabase } from '../db/index.js';
 import { resolveConfigHome } from '../utils/configPaths.js';
 
 export interface ReadinessCheck {
@@ -79,58 +79,26 @@ function checkFrontendBundle(frontendPath: string): ReadinessCheck {
 /**
  * `SELECT 1` was worthless here: it is answered without touching a single table,
  * so readiness reported a healthy database for hours while `SELECT count(*) FROM
- * messages` failed with SQLITE_CORRUPT. The check now reads real pages from the
- * two tables that matter, and periodically runs SQLite's own structural check.
+ * messages` failed with SQLITE_CORRUPT. The check reads real rows from the two
+ * tables that matter.
  *
- * quick_check walks the whole b-tree, which is far too slow for a probe Docker
- * fires every few seconds, so it runs at most once every [QUICK_CHECK_INTERVAL_MS]
- * and its last verdict is cached in between.
+ * On Postgres the structural half of the old check is gone, and that is
+ * correct rather than a gap: `quick_check` existed because a single-file
+ * embedded database can be truncated underneath a running process. Postgres
+ * detects that class of damage itself and refuses the query, which the reads
+ * below surface anyway. What readiness has to answer is "can this process serve
+ * requests", so the probe checks the connection pool and the two hot tables.
  */
-const QUICK_CHECK_INTERVAL_MS = 15 * 60_000;
-let lastQuickCheck: { at: number; ok: boolean; detail?: string } | null = null;
-
-function runQuickCheck(db: ReturnType<typeof getDatabase>): { ok: boolean; detail?: string } {
-  const now = Date.now();
-  if (lastQuickCheck && now - lastQuickCheck.at < QUICK_CHECK_INTERVAL_MS) {
-    return { ok: lastQuickCheck.ok, detail: lastQuickCheck.detail };
-  }
-  try {
-    const row = db.prepare('PRAGMA quick_check(1)').get() as { quick_check?: string } | undefined;
-    const verdict = row?.quick_check ?? 'no result';
-    const ok = verdict === 'ok';
-    lastQuickCheck = { at: now, ok, detail: ok ? undefined : verdict.slice(0, 200) };
-  } catch (error) {
-    lastQuickCheck = {
-      at: now,
-      ok: false,
-      detail: error instanceof Error ? error.message.slice(0, 200) : 'quick_check failed',
-    };
-  }
-  return { ok: lastQuickCheck.ok, detail: lastQuickCheck.detail };
-}
-
-function checkDatabase(): ReadinessCheck {
-  let db: ReturnType<typeof getDatabase>;
-  try {
-    db = getDatabase();
-  } catch {
-    return { ok: false, detail: 'database is not open' };
-  }
-
-  // Real reads, not a constant: these are the tables whose pages actually get
-  // written, and the ones that were unreadable while readiness said "ok".
+async function checkDatabase(): Promise<ReadinessCheck> {
   for (const table of ['sessions', 'messages']) {
     try {
-      db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get();
+      await pgGet(`SELECT COUNT(*) AS c FROM ${table}`);
     } catch (error) {
+      // `pg` puts the SQLSTATE on `code`; 57P01/08006 mean the server or the
+      // connection went away, 42P01 means the schema is not there at all.
       const code = error instanceof Error && 'code' in error ? String(error.code) : 'read failed';
       return { ok: false, detail: `${table}: ${code}` };
     }
-  }
-
-  const structural = runQuickCheck(db);
-  if (!structural.ok) {
-    return { ok: false, detail: `quick_check: ${structural.detail ?? 'failed'}` };
   }
 
   return { ok: true };
@@ -141,13 +109,13 @@ function checkDatabase(): ReadinessCheck {
  * optional integrations are not dependencies of the WebUI control plane and
  * must not flap the container when one of them is offline.
  */
-export function buildReadinessReport(
+export async function buildReadinessReport(
   frontendPath?: string,
   providers?: Record<string, ProviderStatus>
-): ReadinessReport {
+): Promise<ReadinessReport> {
   const checks: Record<string, ReadinessCheck> = {};
 
-  checks.database = checkDatabase();
+  checks.database = await checkDatabase();
 
   const dataDirectory = process.env.WEBUI_DATA_DIR
     ? path.resolve(process.env.WEBUI_DATA_DIR)

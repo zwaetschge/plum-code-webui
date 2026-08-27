@@ -1,9 +1,10 @@
+import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { getAppConfig, getDatabase, setAppConfig } from '../db/index.js';
+import { getAppConfig, setAppConfig } from '../db/index.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
 import { AppError } from '../middleware/errorHandler.js';
@@ -64,10 +65,10 @@ router.post('/login', rateLimiters.strict, async (req, res) => {
   // Multi-user lookup: match by email OR name, then verify password.
   // When the user doesn't exist, still run bcrypt against a dummy hash so the
   // response time doesn't reveal whether the username was valid.
-  const lookup = findUserForBasicAuth(username);
+  const lookup = await findUserForBasicAuth(username);
   if (!lookup) {
     bcrypt.compareSync(password, TIMING_SAFE_DUMMY_HASH);
-    auditFromRequest(req, 'auth.login.failure', {
+    await auditFromRequest(req, 'auth.login.failure', {
       metadata: { method: 'basic', username, reason: 'user_not_found' },
     });
     throw new AppError('Invalid credentials', 401, 'INVALID_CREDENTIALS');
@@ -75,7 +76,7 @@ router.post('/login', rateLimiters.strict, async (req, res) => {
 
   const passwordValid = bcrypt.compareSync(password, lookup.passwordHash);
   if (!passwordValid) {
-    auditFromRequest(req, 'auth.login.failure', {
+    await auditFromRequest(req, 'auth.login.failure', {
       resourceType: 'user',
       resourceId: lookup.user.id,
       metadata: { method: 'basic', username, reason: 'bad_password' },
@@ -88,7 +89,7 @@ router.post('/login', rateLimiters.strict, async (req, res) => {
   // user the operator hasn't removed yet), enforce the allowlist as the
   // single source of truth so revoking access is just an env-var change.
   if (!isEmailAllowed(user.email)) {
-    auditFromRequest(req, 'auth.login.failure', {
+    await auditFromRequest(req, 'auth.login.failure', {
       resourceType: 'user',
       resourceId: user.id,
       metadata: { method: 'basic', username, reason: 'email_not_allowed' },
@@ -96,7 +97,7 @@ router.post('/login', rateLimiters.strict, async (req, res) => {
     throw new AppError('Account not permitted on this instance', 403, 'EMAIL_NOT_ALLOWED');
   }
 
-  stampLogin(user.id, 'basic', req);
+  await stampLogin(user.id, 'basic', req);
   const token = generateUserToken(user.id, { basicAuth: true, expiresIn: '30d' });
 
   // Also establish a Passport session so cookie-only requests (e.g. <img> tags
@@ -151,10 +152,10 @@ router.post('/logout', (_req, res) => {
 });
 
 // Get current credentials info (not the actual password)
-router.get('/credentials', requireAuth, (req, res) => {
+router.get('/credentials', requireAuth, async (req, res) => {
   const userId = (req as unknown as { userId: string }).userId;
-  const db = getDatabase();
-  const row = db.prepare('SELECT name FROM users WHERE id = ?').get(userId) as
+
+  const row = (await pgGet('SELECT name FROM users WHERE id = ?', userId)) as unknown as
     | { name: string | null }
     | undefined;
   const enabled = getAppConfig('basic_auth_enabled');
@@ -169,7 +170,7 @@ router.get('/credentials', requireAuth, (req, res) => {
 });
 
 // Change credentials for the currently authenticated user
-router.put('/credentials', requireAuth, (req, res) => {
+router.put('/credentials', requireAuth, async (req, res) => {
   const parsed = changeCredentialsSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -178,11 +179,11 @@ router.put('/credentials', requireAuth, (req, res) => {
 
   const { currentPassword, newUsername, newPassword } = parsed.data;
   const userId = (req as unknown as { userId: string }).userId;
-  const db = getDatabase();
 
-  const userRow = db.prepare('SELECT name, password_hash FROM users WHERE id = ?').get(userId) as
-    | { name: string | null; password_hash: string | null }
-    | undefined;
+  const userRow = (await pgGet(
+    'SELECT name, password_hash FROM users WHERE id = ?',
+    userId
+  )) as unknown as { name: string | null; password_hash: string | null } | undefined;
 
   if (!userRow || !userRow.password_hash) {
     throw new AppError('User has no password set', 500, 'AUTH_NOT_CONFIGURED');
@@ -194,7 +195,8 @@ router.put('/credentials', requireAuth, (req, res) => {
   }
 
   if (newUsername) {
-    db.prepare('UPDATE users SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+    await pgRun(
+      'UPDATE users SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       newUsername,
       userId
     );
@@ -206,15 +208,17 @@ router.put('/credentials', requireAuth, (req, res) => {
 
   if (newPassword) {
     const hashedPassword = bcrypt.hashSync(newPassword, 10);
-    db.prepare(
-      'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-    ).run(hashedPassword, userId);
+    await pgRun(
+      'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      hashedPassword,
+      userId
+    );
     if (getAppConfig('basic_auth_username') === (newUsername || userRow.name)) {
       setAppConfig('basic_auth_password', hashedPassword);
     }
   }
 
-  const updatedRow = db.prepare('SELECT name FROM users WHERE id = ?').get(userId) as
+  const updatedRow = (await pgGet('SELECT name FROM users WHERE id = ?', userId)) as unknown as
     | { name: string | null }
     | undefined;
 

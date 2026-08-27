@@ -1,3 +1,4 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../../db/pg.js';
 import fs from 'fs';
 import path from 'path';
 import { nanoid } from 'nanoid';
@@ -9,7 +10,6 @@ import type {
   DockerContainerStats,
   WatchdogAutonomyLevel,
 } from '@plum-code-webui/shared';
-import { getDatabase } from '../../db/index.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { safeJsonParse } from '../../utils/json.js';
 import { dockerHost } from '../docker/index.js';
@@ -116,10 +116,9 @@ function deriveIncident(input: {
 }
 
 export class WatchdogService {
-  list(userId: string): ContainerWatchdog[] {
-    const rows = getDatabase()
-      .prepare(
-        `SELECT w.id, w.user_id as userId, w.container_id as containerId,
+  async list(userId: string): Promise<ContainerWatchdog[]> {
+    const rows = (await pgAll(
+      `SELECT w.id, w.user_id as userId, w.container_id as containerId,
                 w.container_name as containerName, w.session_id as sessionId,
                 w.enabled, w.autonomy_level as autonomyLevel,
                 strftime('%Y-%m-%dT%H:%M:%fZ', w.last_snapshot_at) as lastSnapshotAt,
@@ -131,16 +130,15 @@ export class WatchdogService {
          FROM container_watchdogs w
          JOIN sessions s ON s.id = w.session_id
          WHERE w.user_id = ?
-         ORDER BY w.enabled DESC, w.updated_at DESC`
-      )
-      .all(userId) as Array<Record<string, unknown>>;
+         ORDER BY w.enabled DESC, w.updated_at DESC`,
+      userId
+    )) as unknown as Array<Record<string, unknown>>;
     return rows.map(rowToWatchdog);
   }
 
-  get(id: string, userId: string): ContainerWatchdog {
-    const row = getDatabase()
-      .prepare(
-        `SELECT w.id, w.user_id as userId, w.container_id as containerId,
+  async get(id: string, userId: string): Promise<ContainerWatchdog> {
+    const row = (await pgGet(
+      `SELECT w.id, w.user_id as userId, w.container_id as containerId,
                 w.container_name as containerName, w.session_id as sessionId,
                 w.enabled, w.autonomy_level as autonomyLevel,
                 strftime('%Y-%m-%dT%H:%M:%fZ', w.last_snapshot_at) as lastSnapshotAt,
@@ -151,28 +149,31 @@ export class WatchdogService {
                 s.name as sessionName, s.cli_provider as sessionProvider
          FROM container_watchdogs w
          JOIN sessions s ON s.id = w.session_id
-         WHERE w.id = ? AND w.user_id = ?`
-      )
-      .get(id, userId) as Record<string, unknown> | undefined;
+         WHERE w.id = ? AND w.user_id = ?`,
+      id,
+      userId
+    )) as unknown as Record<string, unknown> | undefined;
     if (!row) throw new AppError('Watchdog not found', 404, 'NOT_FOUND');
     return rowToWatchdog(row);
   }
 
   async create(userId: string, containerId: string): Promise<ContainerWatchdog> {
     const detail = await dockerHost.inspectContainer(containerId);
-    const db = getDatabase();
-    const existing = db
-      .prepare(
-        `SELECT id FROM container_watchdogs
-         WHERE user_id = ? AND container_id = ?`
-      )
-      .get(userId, detail.id) as { id: string } | undefined;
+
+    const existing = (await pgGet(
+      `SELECT id FROM container_watchdogs
+         WHERE user_id = ? AND container_id = ?`,
+      userId,
+      detail.id
+    )) as unknown as { id: string } | undefined;
     if (existing) {
-      db.prepare(
+      await pgRun(
         `UPDATE container_watchdogs
          SET enabled = 1, container_name = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?`
-      ).run(detail.name, existing.id);
+         WHERE id = ?`,
+        detail.name,
+        existing.id
+      );
       return this.get(existing.id, userId);
     }
 
@@ -192,19 +193,30 @@ export class WatchdogService {
       role: 'docker-container-watchdog',
     };
 
-    db.prepare(
+    await pgRun(
       `INSERT INTO sessions
         (id, user_id, name, working_directory, status, last_message, cli_provider,
          cli_model, mode, surface, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'stopped', ?, 'codex', NULL, 'planning', 'task',
-               CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
-    ).run(sessionId, userId, sessionName, workspace, `Assigned to Docker container ${detail.name}`);
+               CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      sessionId,
+      userId,
+      sessionName,
+      workspace,
+      `Assigned to Docker container ${detail.name}`
+    );
 
-    db.prepare(
+    await pgRun(
       `INSERT INTO container_watchdogs
         (id, user_id, container_id, container_name, session_id, autonomy_level, metadata_json)
-       VALUES (?, ?, ?, ?, ?, 'observe', ?)`
-    ).run(watchdogId, userId, detail.id, detail.name, sessionId, JSON.stringify(metadata));
+       VALUES (?, ?, ?, ?, ?, 'observe', ?)`,
+      watchdogId,
+      userId,
+      detail.id,
+      detail.name,
+      sessionId,
+      JSON.stringify(metadata)
+    );
 
     return this.get(watchdogId, userId);
   }
@@ -216,7 +228,7 @@ export class WatchdogService {
   ): Promise<ContainerHealthSnapshot> {
     let watchdog: ContainerWatchdog | null = null;
     if (watchdogId) {
-      watchdog = this.get(watchdogId, userId);
+      watchdog = await this.get(watchdogId, userId);
       containerId = watchdog.containerId;
     }
     const detail = await dockerHost.inspectContainer(containerId);
@@ -228,15 +240,14 @@ export class WatchdogService {
     const summary = summarizeSnapshot({ detail, stats, logs });
     const previousSnapshot =
       watchdog &&
-      (getDatabase()
-        .prepare(
-          `SELECT restart_count as restartCount
+      ((await pgGet(
+        `SELECT restart_count as restartCount
            FROM container_health_snapshots
            WHERE watchdog_id = ?
            ORDER BY created_at DESC
-           LIMIT 1`
-        )
-        .get(watchdog.id) as { restartCount: number | null } | undefined);
+           LIMIT 1`,
+        watchdog.id
+      )) as unknown as { restartCount: number | null } | undefined);
     const id = nanoid();
     const evidence = {
       detail,
@@ -244,54 +255,50 @@ export class WatchdogService {
       logs: logs ? { ...logs, lines: logs.lines.slice(-40) } : null,
     };
 
-    getDatabase()
-      .prepare(
-        `INSERT INTO container_health_snapshots
+    await pgRun(
+      `INSERT INTO container_health_snapshots
           (id, watchdog_id, container_id, state, health, restart_count,
            cpu_percent, memory_bytes, memory_limit_bytes, summary, evidence_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        id,
-        watchdog?.id ?? null,
-        detail.id,
-        detail.state,
-        detail.health,
-        detail.restartCount ?? null,
-        statsNumbers.cpuPercent,
-        statsNumbers.memoryBytes,
-        statsNumbers.memoryLimitBytes,
-        summary,
-        JSON.stringify(evidence)
-      );
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      watchdog?.id ?? null,
+      detail.id,
+      detail.state,
+      detail.health,
+      detail.restartCount ?? null,
+      statsNumbers.cpuPercent,
+      statsNumbers.memoryBytes,
+      statsNumbers.memoryLimitBytes,
+      summary,
+      JSON.stringify(evidence)
+    );
 
     if (watchdog) {
-      getDatabase()
-        .prepare(
-          `UPDATE container_watchdogs
+      await pgRun(
+        `UPDATE container_watchdogs
            SET last_snapshot_at = CURRENT_TIMESTAMP,
                container_name = ?,
                updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?`
-        )
-        .run(detail.name, watchdog.id);
+           WHERE id = ?`,
+        detail.name,
+        watchdog.id
+      );
 
       const incident = deriveIncident({
         detail,
         previousRestartCount: previousSnapshot ? previousSnapshot.restartCount : null,
       });
       if (incident) {
-        homeAssistantStatusLights.notifySession(watchdog.sessionId, 'problem');
-        getDatabase()
-          .prepare(
-            `UPDATE container_watchdogs
+        await homeAssistantStatusLights.notifySession(watchdog.sessionId, 'problem');
+        await pgRun(
+          `UPDATE container_watchdogs
              SET last_incident_at = CURRENT_TIMESTAMP,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = ?`
-          )
-          .run(watchdog.id);
+             WHERE id = ?`,
+          watchdog.id
+        );
 
-        discordNotifier.queueAlert({
+        await discordNotifier.queueAlert({
           eventType: 'watchdog.incident',
           severity: incident.severity,
           title: `Docker watchdog: ${detail.name}`,
@@ -316,17 +323,16 @@ export class WatchdogService {
       }
     }
 
-    const created = getDatabase()
-      .prepare(
-        `SELECT id, watchdog_id as watchdogId, container_id as containerId,
+    const created = (await pgGet(
+      `SELECT id, watchdog_id as watchdogId, container_id as containerId,
                 state, health, restart_count as restartCount,
                 cpu_percent as cpuPercent, memory_bytes as memoryBytes,
                 memory_limit_bytes as memoryLimitBytes, summary, evidence_json as evidenceJson,
                 strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt
          FROM container_health_snapshots
-         WHERE id = ?`
-      )
-      .get(id) as Record<string, unknown>;
+         WHERE id = ?`,
+      id
+    )) as unknown as Record<string, unknown>;
 
     return {
       id: created.id as string,
@@ -350,7 +356,7 @@ export class WatchdogService {
   }
 
   async consult(watchdogId: string, userId: string, question: string) {
-    const watchdog = this.get(watchdogId, userId);
+    const watchdog = await this.get(watchdogId, userId);
     const snapshot = await this.snapshot(watchdog.id, userId, watchdog.containerId);
     const prompt = [
       'You are the assigned Docker container watchdog for this container.',

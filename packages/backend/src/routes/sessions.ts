@@ -1,3 +1,9 @@
+import {
+  get as pgGet,
+  all as pgAll,
+  run as pgRun,
+  transaction as pgTransaction,
+} from '../db/pg.js';
 import { Router, raw, type NextFunction, type Request, type Response } from 'express';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
@@ -7,7 +13,6 @@ import { createReadStream } from 'fs';
 import os from 'os';
 import multer from 'multer';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
-import { getDatabase } from '../db/index.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { config } from '../config.js';
 import { safeJsonParse } from '../utils/json.js';
@@ -251,15 +256,15 @@ function validateWorkingDirectory(dir: string): boolean {
   return isAllowedBasePath(dir);
 }
 
-function assertProviderEnabled(userId: string, provider: CLIProvider): void {
-  if (!getEnabledCliProvidersForUser(userId).includes(provider)) {
+async function assertProviderEnabled(userId: string, provider: CLIProvider): Promise<void> {
+  if (!(await getEnabledCliProvidersForUser(userId)).includes(provider)) {
     throw new AppError(
       `${CLI_PROVIDERS[provider].name} is disabled in Settings`,
       409,
       'PROVIDER_DISABLED'
     );
   }
-  if (provider === 'zai' && !getZaiApiConfigForUser(userId)) {
+  if (provider === 'zai' && !(await getZaiApiConfigForUser(userId))) {
     throw new AppError(
       'Configure Z.AI in Settings before starting a Z.AI session',
       409,
@@ -396,20 +401,20 @@ async function removeExistingSessionIcons(sessionId: string): Promise<void> {
   await Promise.all(
     entries
       .filter((entry) => entry.startsWith(`${sessionId}-`))
-      .map((entry) => fs.unlink(path.join(SESSION_ICON_DIR, entry)).catch(() => undefined))
+      .map(
+        async (entry) => await fs.unlink(path.join(SESSION_ICON_DIR, entry)).catch(() => undefined)
+      )
   );
 }
 
-function selectSessionById(
-  db: ReturnType<typeof getDatabase>,
+async function selectSessionById(
   sessionId: string,
   userId?: string
-): Record<string, unknown> | undefined {
+): Promise<Record<string, unknown> | undefined> {
   const whereUser = userId ? 'AND s.user_id = ?' : '';
   const params = userId ? [sessionId, userId] : [sessionId];
-  return db
-    .prepare(
-      `SELECT s.id, s.user_id as userId, s.name, s.working_directory as workingDirectory,
+  return (await pgGet(
+    `SELECT s.id, s.user_id as userId, s.name, s.working_directory as workingDirectory,
               s.claude_session_id as claudeSessionId, s.status, s.last_message as lastMessage,
               ${sessionIconSelect('s')},
               s.starred, s.category, s.cli_provider as cliProvider, s.mode, s.surface,
@@ -424,13 +429,12 @@ function selectSessionById(
               COALESCE(s.archived, 0) as archived,
               strftime('%Y-%m-%dT%H:%M:%fZ', s.created_at) as createdAt,
               strftime('%Y-%m-%dT%H:%M:%fZ', s.updated_at) as updatedAt
-       FROM sessions s WHERE s.id = ? ${whereUser}`
-    )
-    .get(...params) as Record<string, unknown> | undefined;
+       FROM sessions s WHERE s.id = ? ${whereUser}`,
+    ...params
+  )) as unknown as Record<string, unknown> | undefined;
 }
 
 async function storeSessionIcon(
-  db: ReturnType<typeof getDatabase>,
   sessionId: string,
   userId: string,
   buffer: Buffer,
@@ -446,12 +450,16 @@ async function storeSessionIcon(
   const filename = `${sessionId}-${nanoid(10)}${ext}`;
   const iconPath = path.join(SESSION_ICON_DIR, filename);
   await fs.writeFile(iconPath, buffer);
-  db.prepare(
+  await pgRun(
     `UPDATE sessions
      SET icon_path = ?, icon_source = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ? AND user_id = ?`
-  ).run(iconPath, source, sessionId, userId);
-  const updated = selectSessionById(db, sessionId, userId);
+     WHERE id = ? AND user_id = ?`,
+    iconPath,
+    source,
+    sessionId,
+    userId
+  );
+  const updated = await selectSessionById(sessionId, userId);
   if (!updated) throw new AppError('Session not found', 404, 'NOT_FOUND');
   return { ...updated, starred: Boolean(updated.starred) };
 }
@@ -724,7 +732,7 @@ interface SessionTelemetry {
   compactEvents: number;
 }
 
-function getSessionTelemetrySnapshot(
+async function getSessionTelemetrySnapshot(
   session: {
     id: string;
     userId: string;
@@ -734,19 +742,18 @@ function getSessionTelemetrySnapshot(
     workingDirectory?: string | null;
   },
   runtime?: { model: string | null; usage?: SessionUsageSnapshot | null } | null
-): SessionTelemetry {
-  const db = getDatabase();
-  const counts = db
-    .prepare(
-      `
+): Promise<SessionTelemetry> {
+  const counts = (await pgAll(
+    `
       SELECT event_type as eventType, COUNT(*) as count
       FROM session_events
       WHERE session_id = ? AND user_id = ?
         AND event_type IN ('context_snapshot', 'compact')
       GROUP BY event_type
-    `
-    )
-    .all(session.id, session.userId) as Array<{ eventType: string; count: number }>;
+    `,
+    session.id,
+    session.userId
+  )) as unknown as Array<{ eventType: string; count: number }>;
 
   let contextSnapshots = 0;
   let compactEvents = 0;
@@ -758,9 +765,8 @@ function getSessionTelemetrySnapshot(
     }
   }
 
-  const latestContext = db
-    .prepare(
-      `
+  const latestContext = (await pgGet(
+    `
       SELECT
         session_id as sessionId,
         input_tokens as inputTokens,
@@ -778,9 +784,10 @@ function getSessionTelemetrySnapshot(
       WHERE session_id = ? AND user_id = ? AND event_type = 'context_snapshot'
       ORDER BY created_at DESC, rowid DESC
       LIMIT 1
-    `
-    )
-    .get(session.id, session.userId) as
+    `,
+    session.id,
+    session.userId
+  )) as unknown as
     | {
         sessionId: string;
         inputTokens: number;
@@ -818,7 +825,7 @@ function getSessionTelemetrySnapshot(
   const codexHome = CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir());
   const codexContext =
     session.cliProvider === 'codex'
-      ? readLatestCodexContextSnapshot(codexHome, {
+      ? await readLatestCodexContextSnapshot(codexHome, {
           threadId: session.claudeSessionId,
           cwd: session.workingDirectory,
         })
@@ -920,9 +927,9 @@ function getSessionTelemetrySnapshot(
   return { usage, contextSnapshots, compactEvents };
 }
 
-function attachRuntimeAndTelemetry<T extends Record<string, unknown>>(
+async function attachRuntimeAndTelemetry<T extends Record<string, unknown>>(
   session: T
-): T & { runtime: unknown; telemetry: SessionTelemetry | null } {
+): Promise<T & { runtime: unknown; telemetry: SessionTelemetry | null }> {
   const id = typeof session.id === 'string' ? session.id : '';
   const runtime = id ? getProcessManager().getSessionRuntimeSnapshot(id) : null;
   const telemetry =
@@ -930,7 +937,7 @@ function attachRuntimeAndTelemetry<T extends Record<string, unknown>>(
     typeof session.userId === 'string' &&
     session.userId &&
     typeof session.cliProvider === 'string'
-      ? getSessionTelemetrySnapshot(
+      ? await getSessionTelemetrySnapshot(
           {
             id,
             userId: session.userId,
@@ -957,15 +964,13 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const userId = (req as AuthenticatedRequest).userId;
-    const db = getDatabase();
 
     // Sort by message activity (latest message wins) with updated_at as fallback for
     // sessions that have no messages yet. Starred sessions always float to the top.
     // `?archived=1` swaps the list over to the archive rather than mixing both.
     const includeArchived = String(req.query.archived ?? '') === '1';
-    const sessions = db
-      .prepare(
-        `SELECT s.id, s.user_id as userId, s.name, s.working_directory as workingDirectory,
+    const sessions = (await pgAll(
+      `SELECT s.id, s.user_id as userId, s.name, s.working_directory as workingDirectory,
 	              s.claude_session_id as claudeSessionId, s.status, s.last_message as lastMessage,
 	              ${sessionIconSelect('s')},
 	              s.starred, s.category, s.cli_provider as cliProvider, s.mode, s.surface,
@@ -985,9 +990,10 @@ router.get(
               )) as lastActivity
        FROM sessions s
        WHERE s.user_id = ? AND COALESCE(s.archived, 0) = ?
-       ORDER BY s.starred DESC, lastActivity DESC`
-      )
-      .all(userId, includeArchived ? 1 : 0) as Array<Record<string, unknown>>;
+       ORDER BY s.starred DESC, lastActivity DESC`,
+      userId,
+      includeArchived ? 1 : 0
+    )) as unknown as Array<Record<string, unknown>>;
 
     const sessionsWithDescriptions = await Promise.all(sessions.map(attachProjectDescription));
     const sessionsWithStarred = sessionsWithDescriptions.map((s) =>
@@ -999,14 +1005,13 @@ router.get(
 );
 
 // Get session by ID
-router.get('/:id', requireAuth, (req, res) => {
+router.get('/:id', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
-  const rawSession = selectSessionById(db, req.params.id as string, userId);
+  const rawSession = await selectSessionById(req.params.id as string, userId);
 
   const session = rawSession
-    ? attachRuntimeAndTelemetry({ ...rawSession, starred: Boolean(rawSession.starred) })
+    ? await attachRuntimeAndTelemetry({ ...rawSession, starred: Boolean(rawSession.starred) })
     : null;
 
   if (!session) {
@@ -1042,8 +1047,7 @@ router.post(
       surface,
       initialMessage,
     } = parsed.data;
-    assertProviderEnabled(userId, cliProvider);
-    const db = getDatabase();
+    await assertProviderEnabled(userId, cliProvider);
     let storedReasoning = cliReasoning?.trim() || null;
     let storedServiceTier = cliProvider === 'codex' ? cliServiceTier || null : null;
 
@@ -1076,11 +1080,10 @@ router.post(
       }
     } else {
       // No folder specified - create subfolder based on session name (original behavior)
-      const settings = db
-        .prepare(
-          'SELECT default_working_dir as defaultWorkingDir FROM user_settings WHERE user_id = ?'
-        )
-        .get(userId) as { defaultWorkingDir: string | null } | undefined;
+      const settings = (await pgGet(
+        'SELECT default_working_dir as defaultWorkingDir FROM user_settings WHERE user_id = ?',
+        userId
+      )) as unknown as { defaultWorkingDir: string | null } | undefined;
 
       const defaultWorkingDir = settings?.defaultWorkingDir;
 
@@ -1114,7 +1117,7 @@ router.post(
 
     const sessionId = nanoid();
 
-    db.prepare(
+    await pgRun(
       `INSERT INTO sessions (
        id,
        user_id,
@@ -1127,8 +1130,7 @@ router.post(
        cli_reasoning,
        cli_service_tier
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       sessionId,
       userId,
       name,
@@ -1141,7 +1143,7 @@ router.post(
       storedServiceTier
     );
 
-    let newSession = selectSessionById(db, sessionId, userId) as Record<string, unknown>;
+    let newSession = (await selectSessionById(sessionId, userId)) as Record<string, unknown>;
     const projectIcon = await readProjectIconCandidate(workingDirectory).catch((err) => {
       console.warn(
         '[Sessions] Failed to scan project icon:',
@@ -1152,7 +1154,6 @@ router.post(
     if (projectIcon) {
       try {
         newSession = await storeSessionIcon(
-          db,
           sessionId,
           userId,
           projectIcon.buffer,
@@ -1169,7 +1170,10 @@ router.post(
 
     res.status(201).json({
       success: true,
-      data: attachRuntimeAndTelemetry({ ...newSession, starred: Boolean(newSession.starred) }),
+      data: await attachRuntimeAndTelemetry({
+        ...newSession,
+        starred: Boolean(newSession.starred),
+      }),
     });
 
     if (initialMessage) {
@@ -1192,7 +1196,7 @@ router.post(
 );
 
 // Update session
-router.put('/:id', requireAuth, (req, res) => {
+router.put('/:id', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = updateSessionSchema.safeParse(req.body);
 
@@ -1200,10 +1204,11 @@ router.put('/:id', requireAuth, (req, res) => {
     throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
   }
 
-  const db = getDatabase();
-  const existing = db
-    .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId);
+  const existing = await pgGet(
+    'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  );
 
   if (!existing) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
@@ -1231,17 +1236,17 @@ router.put('/:id', requireAuth, (req, res) => {
   if (updates.length > 0) {
     updates.push('updated_at = CURRENT_TIMESTAMP');
     values.push(req.params.id);
-    db.prepare(`UPDATE sessions SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    await pgRun(`UPDATE sessions SET ${updates.join(', ')} WHERE id = ?`, ...values);
   }
 
-  const updatedSession = selectSessionById(db, req.params.id as string, userId) as Record<
+  const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
     string,
     unknown
   >;
 
   res.json({
     success: true,
-    data: attachRuntimeAndTelemetry({
+    data: await attachRuntimeAndTelemetry({
       ...updatedSession,
       starred: Boolean(updatedSession.starred),
     }),
@@ -1249,14 +1254,15 @@ router.put('/:id', requireAuth, (req, res) => {
 });
 
 // Toggle session starred status
-router.patch('/:id/star', requireAuth, (req, res) => {
+router.patch('/:id/star', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
   // Verify session ownership
-  const session = db
-    .prepare('SELECT id, starred FROM sessions WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId) as { id: string; starred: number } | undefined;
+  const session = (await pgGet(
+    'SELECT id, starred FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  )) as unknown as { id: string; starred: number } | undefined;
 
   if (!session) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
@@ -1264,7 +1270,8 @@ router.patch('/:id/star', requireAuth, (req, res) => {
 
   // Toggle starred status
   const newStarred = session.starred ? 0 : 1;
-  db.prepare('UPDATE sessions SET starred = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+  await pgRun(
+    'UPDATE sessions SET starred = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     newStarred,
     req.params.id
   );
@@ -1292,12 +1299,13 @@ router.post(
     if (!parsed.success) throw new AppError('Invalid bulk request', 400, 'VALIDATION_ERROR');
 
     const { ids, action, categoryId } = parsed.data;
-    const db = getDatabase();
     const marks = ids.map(() => '?').join(',');
     // Scope every statement by user_id so ids from another account are no-ops.
-    const owned = db
-      .prepare(`SELECT id FROM sessions WHERE user_id = ? AND id IN (${marks})`)
-      .all(userId, ...ids) as Array<{ id: string }>;
+    const owned = (await pgAll(
+      `SELECT id FROM sessions WHERE user_id = ? AND id IN (${marks})`,
+      userId,
+      ...ids
+    )) as unknown as Array<{ id: string }>;
     const ownedIds = owned.map((row) => row.id);
     if (ownedIds.length === 0) {
       return res.json({ success: true, data: { affected: 0 } });
@@ -1311,31 +1319,41 @@ router.post(
       for (const id of ownedIds) {
         if (processManager.isSessionRunning(id)) {
           try {
-            processManager.stopSession(id, userId);
+            await processManager.stopSession(id, userId);
           } catch {
             // Already gone — deletion proceeds regardless.
           }
         }
       }
-      affected = db
-        .prepare(`DELETE FROM sessions WHERE user_id = ? AND id IN (${ownedMarks})`)
-        .run(userId, ...ownedIds).changes;
-    } else if (action === 'category') {
-      affected = db
-        .prepare(
-          `UPDATE sessions SET category = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE user_id = ? AND id IN (${ownedMarks})`
+      affected = (
+        await pgRun(
+          `DELETE FROM sessions WHERE user_id = ? AND id IN (${ownedMarks})`,
+          userId,
+          ...ownedIds
         )
-        .run(categoryId ?? null, userId, ...ownedIds).changes;
+      ).changes;
+    } else if (action === 'category') {
+      affected = (
+        await pgRun(
+          `UPDATE sessions SET category = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE user_id = ? AND id IN (${ownedMarks})`,
+          categoryId ?? null,
+          userId,
+          ...ownedIds
+        )
+      ).changes;
     } else {
       const column = action === 'star' || action === 'unstar' ? 'starred' : 'archived';
       const value = action === 'archive' || action === 'star' ? 1 : 0;
-      affected = db
-        .prepare(
+      affected = (
+        await pgRun(
           `UPDATE sessions SET ${column} = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE user_id = ? AND id IN (${ownedMarks})`
+           WHERE user_id = ? AND id IN (${ownedMarks})`,
+          value,
+          userId,
+          ...ownedIds
         )
-        .run(value, userId, ...ownedIds).changes;
+      ).changes;
     }
 
     res.json({ success: true, data: { affected } });
@@ -1354,20 +1372,21 @@ router.patch(
       throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
     }
 
-    const db = getDatabase();
-    const existing = db
-      .prepare('SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?')
-      .get(req.params.id, userId) as { id: string; cliProvider: string } | undefined;
+    const existing = (await pgGet(
+      'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+      req.params.id,
+      userId
+    )) as unknown as { id: string; cliProvider: string } | undefined;
 
     if (!existing) {
       throw new AppError('Session not found', 404, 'NOT_FOUND');
     }
 
     const { cliProvider } = parsed.data;
-    assertProviderEnabled(userId, cliProvider);
+    await assertProviderEnabled(userId, cliProvider);
 
     if (existing.cliProvider !== cliProvider) {
-      db.prepare(
+      await pgRun(
         `UPDATE sessions
        SET cli_provider = ?,
            claude_session_id = NULL,
@@ -1375,8 +1394,10 @@ router.patch(
            cli_reasoning = NULL,
            cli_service_tier = NULL,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-      ).run(cliProvider, req.params.id);
+       WHERE id = ?`,
+        cliProvider,
+        req.params.id
+      );
 
       const processManager = getProcessManager();
       if (processManager.isSessionRunning(req.params.id as string)) {
@@ -1386,14 +1407,14 @@ router.patch(
       }
     }
 
-    const updatedSession = selectSessionById(db, req.params.id as string, userId) as Record<
+    const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
       string,
       unknown
     >;
 
     res.json({
       success: true,
-      data: attachRuntimeAndTelemetry({
+      data: await attachRuntimeAndTelemetry({
         ...updatedSession,
         starred: Boolean(updatedSession.starred),
       }),
@@ -1414,28 +1435,27 @@ const renameChatSchema = z.object({
   title: z.string().trim().min(1).max(100),
 });
 
-function requireOwnedSession(db: ReturnType<typeof getDatabase>, id: string, userId: string) {
-  const session = db
-    .prepare(
-      `SELECT id, active_chat_id as activeChatId, claude_session_id as claudeSessionId
-       FROM sessions WHERE id = ? AND user_id = ?`
-    )
-    .get(id, userId) as
+async function requireOwnedSession(id: string, userId: string) {
+  const session = (await pgGet(
+    `SELECT id, active_chat_id as activeChatId, claude_session_id as claudeSessionId
+       FROM sessions WHERE id = ? AND user_id = ?`,
+    id,
+    userId
+  )) as unknown as
     | { id: string; activeChatId: string | null; claudeSessionId: string | null }
     | undefined;
   if (!session) throw new AppError('Session not found', 404, 'NOT_FOUND');
   return session;
 }
 
-function listSessionChats(db: ReturnType<typeof getDatabase>, sessionId: string) {
-  return db
-    .prepare(
-      `SELECT id, title, provider_session_id as providerSessionId,
+async function listSessionChats(sessionId: string) {
+  return (await pgAll(
+    `SELECT id, title, provider_session_id as providerSessionId,
               strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt,
               strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) as updatedAt
-       FROM session_chats WHERE session_id = ? ORDER BY created_at ASC, rowid ASC`
-    )
-    .all(sessionId) as Array<{
+       FROM session_chats WHERE session_id = ? ORDER BY created_at ASC, rowid ASC`,
+    sessionId
+  )) as unknown as Array<{
     id: string;
     title: string;
     providerSessionId: string | null;
@@ -1444,12 +1464,8 @@ function listSessionChats(db: ReturnType<typeof getDatabase>, sessionId: string)
   }>;
 }
 
-function chatListPayload(
-  db: ReturnType<typeof getDatabase>,
-  sessionId: string,
-  activeChatId: string | null
-) {
-  const rows = listSessionChats(db, sessionId);
+async function chatListPayload(sessionId: string, activeChatId: string | null) {
+  const rows = await listSessionChats(sessionId);
   if (rows.length === 0) {
     // Legacy single-thread session: present the implicit main chat.
     return {
@@ -1464,174 +1480,192 @@ function chatListPayload(
 }
 
 /** Move the implicit NULL main thread into a real session_chats row. */
-function materializeMainChat(
-  db: ReturnType<typeof getDatabase>,
-  session: { id: string; activeChatId: string | null; claudeSessionId: string | null }
-): string {
+async function materializeMainChat(session: {
+  id: string;
+  activeChatId: string | null;
+  claudeSessionId: string | null;
+}): Promise<string> {
   if (session.activeChatId !== null) return session.activeChatId;
   const mainId = nanoid();
-  db.prepare(
-    'INSERT INTO session_chats (id, session_id, title, provider_session_id) VALUES (?, ?, ?, ?)'
-  ).run(mainId, session.id, 'Chat 1', session.claudeSessionId);
-  db.prepare('UPDATE messages SET chat_id = ? WHERE session_id = ? AND chat_id IS NULL').run(
+  await pgRun(
+    'INSERT INTO session_chats (id, session_id, title, provider_session_id) VALUES (?, ?, ?, ?)',
+    mainId,
+    session.id,
+    'Chat 1',
+    session.claudeSessionId
+  );
+  await pgRun(
+    'UPDATE messages SET chat_id = ? WHERE session_id = ? AND chat_id IS NULL',
     mainId,
     session.id
   );
-  db.prepare('UPDATE sessions SET active_chat_id = ? WHERE id = ?').run(mainId, session.id);
+  await pgRun('UPDATE sessions SET active_chat_id = ? WHERE id = ?', mainId, session.id);
   return mainId;
 }
 
 /** Persist the outgoing chat's provider-native session id before switching. */
-function stashActiveProviderSession(
-  db: ReturnType<typeof getDatabase>,
+async function stashActiveProviderSession(
   sessionId: string,
   activeChatId: string,
   claudeSessionId: string | null
 ) {
-  db.prepare(
-    'UPDATE session_chats SET provider_session_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?'
-  ).run(claudeSessionId, activeChatId, sessionId);
+  await pgRun(
+    'UPDATE session_chats SET provider_session_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?',
+    claudeSessionId,
+    activeChatId,
+    sessionId
+  );
 }
 
 // List chat threads of a session
-router.get('/:id/chats', requireAuth, (req, res) => {
+router.get('/:id/chats', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
-  const session = requireOwnedSession(db, req.params.id as string, userId);
-  res.json({ success: true, data: chatListPayload(db, session.id, session.activeChatId) });
+  const session = await requireOwnedSession(req.params.id as string, userId);
+  res.json({ success: true, data: await chatListPayload(session.id, session.activeChatId) });
 });
 
 // Create a new chat thread (fresh conversation context) and switch to it
-router.post('/:id/chats', requireAuth, (req, res) => {
+router.post('/:id/chats', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = createChatSchema.safeParse(req.body ?? {});
   if (!parsed.success) throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
 
-  const db = getDatabase();
-  const session = requireOwnedSession(db, req.params.id as string, userId);
+  const session = await requireOwnedSession(req.params.id as string, userId);
 
-  const currentActiveId = materializeMainChat(db, session);
+  const currentActiveId = await materializeMainChat(session);
   if (session.activeChatId !== null) {
-    stashActiveProviderSession(db, session.id, currentActiveId, session.claudeSessionId);
+    await stashActiveProviderSession(session.id, currentActiveId, session.claudeSessionId);
   }
 
   const chatCount = (
-    db.prepare('SELECT COUNT(*) as c FROM session_chats WHERE session_id = ?').get(session.id) as {
+    (await pgGet(
+      'SELECT COUNT(*) as c FROM session_chats WHERE session_id = ?',
+      session.id
+    )) as unknown as {
       c: number;
     }
   ).c;
   const chatId = nanoid();
   const title = parsed.data.title || `Chat ${chatCount + 1}`;
-  db.prepare('INSERT INTO session_chats (id, session_id, title) VALUES (?, ?, ?)').run(
+  await pgRun(
+    'INSERT INTO session_chats (id, session_id, title) VALUES (?, ?, ?)',
     chatId,
     session.id,
     title
   );
   // Fresh thread: no provider-native context to resume.
-  db.prepare(
+  await pgRun(
     `UPDATE sessions SET active_chat_id = ?, claude_session_id = NULL,
-       updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-  ).run(chatId, session.id);
+       updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    chatId,
+    session.id
+  );
 
   // The running CLI holds the old thread's context; stop it so the next turn
   // spawns clean. No-op when nothing is running.
   try {
-    getProcessManager().stopSession(session.id, userId);
+    await getProcessManager().stopSession(session.id, userId);
   } catch {
     /* not running */
   }
 
-  res.json({ success: true, data: chatListPayload(db, session.id, chatId) });
+  res.json({ success: true, data: await chatListPayload(session.id, chatId) });
 });
 
 // Switch to another chat thread
-router.post('/:id/chats/:chatId/activate', requireAuth, (req, res) => {
+router.post('/:id/chats/:chatId/activate', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
-  const session = requireOwnedSession(db, req.params.id as string, userId);
+  const session = await requireOwnedSession(req.params.id as string, userId);
   const targetId = req.params.chatId as string;
 
   if (targetId === 'main' && session.activeChatId === null) {
     // Already on the implicit main thread.
-    return res.json({ success: true, data: chatListPayload(db, session.id, null) });
+    return res.json({ success: true, data: await chatListPayload(session.id, null) });
   }
 
-  const target = db
-    .prepare(
-      'SELECT id, provider_session_id as providerSessionId FROM session_chats WHERE id = ? AND session_id = ?'
-    )
-    .get(targetId, session.id) as { id: string; providerSessionId: string | null } | undefined;
+  const target = (await pgGet(
+    'SELECT id, provider_session_id as providerSessionId FROM session_chats WHERE id = ? AND session_id = ?',
+    targetId,
+    session.id
+  )) as unknown as { id: string; providerSessionId: string | null } | undefined;
   if (!target) throw new AppError('Chat not found', 404, 'NOT_FOUND');
 
   if (session.activeChatId === target.id) {
-    return res.json({ success: true, data: chatListPayload(db, session.id, target.id) });
+    return res.json({ success: true, data: await chatListPayload(session.id, target.id) });
   }
 
-  const currentActiveId = materializeMainChat(db, session);
-  stashActiveProviderSession(db, session.id, currentActiveId, session.claudeSessionId);
+  const currentActiveId = await materializeMainChat(session);
+  await stashActiveProviderSession(session.id, currentActiveId, session.claudeSessionId);
 
-  db.prepare(
+  await pgRun(
     `UPDATE sessions SET active_chat_id = ?, claude_session_id = ?,
-       updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-  ).run(target.id, target.providerSessionId, session.id);
+       updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    target.id,
+    target.providerSessionId,
+    session.id
+  );
 
   try {
-    getProcessManager().stopSession(session.id, userId);
+    await getProcessManager().stopSession(session.id, userId);
   } catch {
     /* not running */
   }
 
-  res.json({ success: true, data: chatListPayload(db, session.id, target.id) });
+  res.json({ success: true, data: await chatListPayload(session.id, target.id) });
 });
 
 // Rename a chat thread
-router.patch('/:id/chats/:chatId', requireAuth, (req, res) => {
+router.patch('/:id/chats/:chatId', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = renameChatSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
 
-  const db = getDatabase();
-  const session = requireOwnedSession(db, req.params.id as string, userId);
-  const result = db
-    .prepare(
-      'UPDATE session_chats SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?'
-    )
-    .run(parsed.data.title, req.params.chatId, session.id);
+  const session = await requireOwnedSession(req.params.id as string, userId);
+  const result = await pgRun(
+    'UPDATE session_chats SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND session_id = ?',
+    parsed.data.title,
+    req.params.chatId,
+    session.id
+  );
   if (result.changes === 0) throw new AppError('Chat not found', 404, 'NOT_FOUND');
-  res.json({ success: true, data: chatListPayload(db, session.id, session.activeChatId) });
+  res.json({ success: true, data: await chatListPayload(session.id, session.activeChatId) });
 });
 
 // Delete a chat thread and its messages
-router.delete('/:id/chats/:chatId', requireAuth, (req, res) => {
+router.delete('/:id/chats/:chatId', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
-  const session = requireOwnedSession(db, req.params.id as string, userId);
+  const session = await requireOwnedSession(req.params.id as string, userId);
   const targetId = req.params.chatId as string;
 
-  const target = db
-    .prepare('SELECT id FROM session_chats WHERE id = ? AND session_id = ?')
-    .get(targetId, session.id) as { id: string } | undefined;
+  const target = (await pgGet(
+    'SELECT id FROM session_chats WHERE id = ? AND session_id = ?',
+    targetId,
+    session.id
+  )) as unknown as { id: string } | undefined;
   if (!target) throw new AppError('Chat not found', 404, 'NOT_FOUND');
 
-  db.prepare('DELETE FROM messages WHERE session_id = ? AND chat_id = ?').run(session.id, targetId);
-  db.prepare('DELETE FROM session_chats WHERE id = ?').run(targetId);
+  await pgRun('DELETE FROM messages WHERE session_id = ? AND chat_id = ?', session.id, targetId);
+  await pgRun('DELETE FROM session_chats WHERE id = ?', targetId);
 
   if (session.activeChatId === targetId) {
     // Fall back to the oldest remaining thread (or the empty implicit main).
-    const next = listSessionChats(db, session.id)[0] ?? null;
-    db.prepare(
+    const next = (await listSessionChats(session.id))[0] ?? null;
+    await pgRun(
       `UPDATE sessions SET active_chat_id = ?, claude_session_id = ?,
-         updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-    ).run(next?.id ?? null, next?.providerSessionId ?? null, session.id);
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      next?.id ?? null,
+      next?.providerSessionId ?? null,
+      session.id
+    );
     try {
-      getProcessManager().stopSession(session.id, userId);
+      await getProcessManager().stopSession(session.id, userId);
     } catch {
       /* not running */
     }
   }
 
-  const updated = requireOwnedSession(db, session.id, userId);
-  res.json({ success: true, data: chatListPayload(db, session.id, updated.activeChatId) });
+  const updated = await requireOwnedSession(session.id, userId);
+  res.json({ success: true, data: await chatListPayload(session.id, updated.activeChatId) });
 });
 
 // Update the per-session model selection so different WebUI sessions can run
@@ -1647,19 +1681,22 @@ router.patch(
       throw new AppError('Invalid model', 400, 'VALIDATION_ERROR');
     }
 
-    const db = getDatabase();
-    const session = db
-      .prepare('SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?')
-      .get(req.params.id, userId) as { id: string; cliProvider: string } | undefined;
+    const session = (await pgGet(
+      'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+      req.params.id,
+      userId
+    )) as unknown as { id: string; cliProvider: string } | undefined;
 
     if (!session) {
       throw new AppError('Session not found', 404, 'NOT_FOUND');
     }
 
     const model = parsed.data.model?.trim() || null;
-    db.prepare(
-      'UPDATE sessions SET cli_model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-    ).run(model, req.params.id);
+    await pgRun(
+      'UPDATE sessions SET cli_model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      model,
+      req.params.id
+    );
 
     const processManager = getProcessManager();
     if (processManager.isSessionRunning(req.params.id as string)) {
@@ -1668,14 +1705,14 @@ router.patch(
       });
     }
 
-    const updatedSession = selectSessionById(db, req.params.id as string, userId) as Record<
+    const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
       string,
       unknown
     >;
 
     res.json({
       success: true,
-      data: attachRuntimeAndTelemetry({
+      data: await attachRuntimeAndTelemetry({
         ...updatedSession,
         starred: Boolean(updatedSession.starred),
       }),
@@ -1696,10 +1733,11 @@ router.patch(
       throw new AppError('Invalid reasoning level', 400, 'VALIDATION_ERROR');
     }
 
-    const db = getDatabase();
-    const session = db
-      .prepare('SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?')
-      .get(req.params.id, userId) as { id: string; cliProvider: string } | undefined;
+    const session = (await pgGet(
+      'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+      req.params.id,
+      userId
+    )) as unknown as { id: string; cliProvider: string } | undefined;
 
     if (!session) {
       throw new AppError('Session not found', 404, 'NOT_FOUND');
@@ -1707,17 +1745,20 @@ router.patch(
 
     const reasoning = parsed.data.reasoning?.trim() || null;
     if (session.cliProvider === 'codex' && reasoning?.toLowerCase() === 'fast') {
-      db.prepare(
+      await pgRun(
         `UPDATE sessions
        SET cli_reasoning = NULL,
            cli_service_tier = 'fast',
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-      ).run(req.params.id);
+       WHERE id = ?`,
+        req.params.id
+      );
     } else {
-      db.prepare(
-        'UPDATE sessions SET cli_reasoning = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-      ).run(reasoning, req.params.id);
+      await pgRun(
+        'UPDATE sessions SET cli_reasoning = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        reasoning,
+        req.params.id
+      );
     }
 
     const processManager = getProcessManager();
@@ -1727,14 +1768,14 @@ router.patch(
       });
     }
 
-    const updatedSession = selectSessionById(db, req.params.id as string, userId) as Record<
+    const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
       string,
       unknown
     >;
 
     res.json({
       success: true,
-      data: attachRuntimeAndTelemetry({
+      data: await attachRuntimeAndTelemetry({
         ...updatedSession,
         starred: Boolean(updatedSession.starred),
       }),
@@ -1755,10 +1796,11 @@ router.patch(
       throw new AppError('Invalid service tier', 400, 'VALIDATION_ERROR');
     }
 
-    const db = getDatabase();
-    const session = db
-      .prepare('SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?')
-      .get(req.params.id, userId) as { id: string; cliProvider: string } | undefined;
+    const session = (await pgGet(
+      'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+      req.params.id,
+      userId
+    )) as unknown as { id: string; cliProvider: string } | undefined;
 
     if (!session) {
       throw new AppError('Session not found', 404, 'NOT_FOUND');
@@ -1773,9 +1815,11 @@ router.patch(
       );
     }
 
-    db.prepare(
-      'UPDATE sessions SET cli_service_tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-    ).run(serviceTier, req.params.id);
+    await pgRun(
+      'UPDATE sessions SET cli_service_tier = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      serviceTier,
+      req.params.id
+    );
 
     const processManager = getProcessManager();
     if (processManager.isSessionRunning(req.params.id as string)) {
@@ -1784,14 +1828,14 @@ router.patch(
       });
     }
 
-    const updatedSession = selectSessionById(db, req.params.id as string, userId) as Record<
+    const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
       string,
       unknown
     >;
 
     res.json({
       success: true,
-      data: attachRuntimeAndTelemetry({
+      data: await attachRuntimeAndTelemetry({
         ...updatedSession,
         starred: Boolean(updatedSession.starred),
       }),
@@ -1801,7 +1845,7 @@ router.patch(
 
 // Persist the session permission mode. Previously lived only in localStorage, so it
 // was lost when switching browser or device.
-router.patch('/:id/mode', requireAuth, (req, res) => {
+router.patch('/:id/mode', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = updateModeSchema.safeParse(req.body);
 
@@ -1809,16 +1853,18 @@ router.patch('/:id/mode', requireAuth, (req, res) => {
     throw new AppError('Invalid mode', 400, 'VALIDATION_ERROR');
   }
 
-  const db = getDatabase();
-  const existing = db
-    .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId);
+  const existing = await pgGet(
+    'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  );
 
   if (!existing) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
   }
 
-  db.prepare('UPDATE sessions SET mode = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+  await pgRun(
+    'UPDATE sessions SET mode = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     parsed.data.mode,
     req.params.id
   );
@@ -1828,7 +1874,7 @@ router.patch('/:id/mode', requireAuth, (req, res) => {
 
 // Persist the visible session surface. This switches between the technical code
 // workbench and the quieter task/messenger presentation over the same runtime.
-router.patch('/:id/surface', requireAuth, (req, res) => {
+router.patch('/:id/surface', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = updateSurfaceSchema.safeParse(req.body);
 
@@ -1836,16 +1882,18 @@ router.patch('/:id/surface', requireAuth, (req, res) => {
     throw new AppError('Invalid surface', 400, 'VALIDATION_ERROR');
   }
 
-  const db = getDatabase();
-  const existing = db
-    .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId);
+  const existing = await pgGet(
+    'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  );
 
   if (!existing) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
   }
 
-  db.prepare('UPDATE sessions SET surface = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+  await pgRun(
+    'UPDATE sessions SET surface = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     parsed.data.surface,
     req.params.id
   );
@@ -1871,10 +1919,11 @@ router.patch(
       throw new AppError('Invalid style selection', 400, 'VALIDATION_ERROR');
     }
 
-    const db = getDatabase();
-    const existing = db
-      .prepare('SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?')
-      .get(sessionId, userId) as { id: string; cliProvider: string | null } | undefined;
+    const existing = (await pgGet(
+      'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId
+    )) as unknown as { id: string; cliProvider: string | null } | undefined;
 
     if (!existing) {
       throw new AppError('Session not found', 404, 'NOT_FOUND');
@@ -1910,14 +1959,14 @@ router.patch(
     if (updates.length > 0) {
       updates.push('updated_at = CURRENT_TIMESTAMP');
       values.push(sessionId);
-      db.prepare(`UPDATE sessions SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+      await pgRun(`UPDATE sessions SET ${updates.join(', ')} WHERE id = ?`, ...values);
     }
 
-    const updatedSession = selectSessionById(db, sessionId, userId) as Record<string, unknown>;
+    const updatedSession = (await selectSessionById(sessionId, userId)) as Record<string, unknown>;
 
     res.json({
       success: true,
-      data: attachRuntimeAndTelemetry({
+      data: await attachRuntimeAndTelemetry({
         ...updatedSession,
         starred: Boolean(updatedSession.starred),
       }),
@@ -1931,10 +1980,11 @@ router.get(
     const userId = await validateToken(req, res);
     if (!userId) return;
 
-    const db = getDatabase();
-    const row = db
-      .prepare('SELECT icon_path as iconPath FROM sessions WHERE id = ? AND user_id = ?')
-      .get(req.params.id, userId) as { iconPath: string | null } | undefined;
+    const row = (await pgGet(
+      'SELECT icon_path as iconPath FROM sessions WHERE id = ? AND user_id = ?',
+      req.params.id,
+      userId
+    )) as unknown as { iconPath: string | null } | undefined;
 
     if (!row?.iconPath) {
       throw new AppError('Session icon not found', 404, 'NOT_FOUND');
@@ -2005,22 +2055,22 @@ router.post(
     if (!sessionId) throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
     if (!req.file) throw new AppError('Icon file missing', 400, 'NO_FILE');
 
-    const db = getDatabase();
-    const existing = db
-      .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-      .get(sessionId, userId);
+    const existing = await pgGet(
+      'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId
+    );
     if (!existing) throw new AppError('Session not found', 404, 'NOT_FOUND');
 
     const ext = getIconExtension(req.file.originalname, req.file.mimetype);
     const updatedSession = await storeSessionIcon(
-      db,
       sessionId,
       userId,
       req.file.buffer,
       ext,
       'upload'
     );
-    res.json({ success: true, data: attachRuntimeAndTelemetry(updatedSession) });
+    res.json({ success: true, data: await attachRuntimeAndTelemetry(updatedSession) });
   })
 );
 
@@ -2032,12 +2082,11 @@ router.post(
     const sessionId = req.params.id;
     if (!sessionId) throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
 
-    const db = getDatabase();
-    const session = db
-      .prepare(
-        'SELECT id, working_directory as workingDirectory FROM sessions WHERE id = ? AND user_id = ?'
-      )
-      .get(sessionId, userId) as { id: string; workingDirectory: string } | undefined;
+    const session = (await pgGet(
+      'SELECT id, working_directory as workingDirectory FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId
+    )) as unknown as { id: string; workingDirectory: string } | undefined;
     if (!session) throw new AppError('Session not found', 404, 'NOT_FOUND');
 
     const projectIcon = await readProjectIconCandidate(session.workingDirectory);
@@ -2046,7 +2095,6 @@ router.post(
     }
 
     const updatedSession = await storeSessionIcon(
-      db,
       sessionId,
       userId,
       projectIcon.buffer,
@@ -2055,7 +2103,7 @@ router.post(
     );
     res.json({
       success: true,
-      data: attachRuntimeAndTelemetry(updatedSession),
+      data: await attachRuntimeAndTelemetry(updatedSession),
       meta: { sourcePath: projectIcon.path },
     });
   })
@@ -2073,13 +2121,12 @@ router.post(
     const parsed = generateSessionIconSchema.safeParse(req.body ?? {});
     if (!parsed.success) throw new AppError('Invalid icon prompt', 400, 'VALIDATION_ERROR');
 
-    const db = getDatabase();
-    const session = db
-      .prepare(
-        `SELECT id, name, working_directory as workingDirectory
-         FROM sessions WHERE id = ? AND user_id = ?`
-      )
-      .get(sessionId, userId) as { id: string; name: string; workingDirectory: string } | undefined;
+    const session = (await pgGet(
+      `SELECT id, name, working_directory as workingDirectory
+         FROM sessions WHERE id = ? AND user_id = ?`,
+      sessionId,
+      userId
+    )) as unknown as { id: string; name: string; workingDirectory: string } | undefined;
     if (!session) throw new AppError('Session not found', 404, 'NOT_FOUND');
 
     const scanned = await scanProject(session.workingDirectory).catch(() => null);
@@ -2095,7 +2142,6 @@ router.post(
         : null,
     });
     const updatedSession = await storeSessionIcon(
-      db,
       sessionId,
       userId,
       generatedIcon.buffer,
@@ -2104,7 +2150,7 @@ router.post(
     );
     res.json({
       success: true,
-      data: attachRuntimeAndTelemetry(updatedSession),
+      data: await attachRuntimeAndTelemetry(updatedSession),
       meta: { generator: 'codex-imagegen', prompt: generatedIcon.prompt },
     });
   })
@@ -2118,23 +2164,26 @@ router.delete(
     const sessionId = req.params.id;
     if (!sessionId) throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
 
-    const db = getDatabase();
-    const existing = db
-      .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-      .get(sessionId, userId);
+    const existing = await pgGet(
+      'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId
+    );
     if (!existing) throw new AppError('Session not found', 404, 'NOT_FOUND');
 
     await removeExistingSessionIcons(sessionId);
-    db.prepare(
+    await pgRun(
       `UPDATE sessions
        SET icon_path = NULL, icon_source = NULL, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND user_id = ?`
-    ).run(sessionId, userId);
+       WHERE id = ? AND user_id = ?`,
+      sessionId,
+      userId
+    );
 
-    const updatedSession = selectSessionById(db, sessionId, userId);
+    const updatedSession = await selectSessionById(sessionId, userId);
     res.json({
       success: true,
-      data: attachRuntimeAndTelemetry({
+      data: await attachRuntimeAndTelemetry({
         ...updatedSession,
         starred: Boolean(updatedSession?.starred),
       }),
@@ -2143,25 +2192,26 @@ router.delete(
 );
 
 // Delete session
-router.delete('/:id', requireAuth, (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const sessionId = req.params.id;
   if (!sessionId) {
     throw new AppError('Session id missing', 400, 'VALIDATION_ERROR');
   }
-  const db = getDatabase();
 
   // Stop any live CLI process before the row disappears, otherwise the
   // process keeps writing to a dead session_id (zombie).
   try {
-    getProcessManager().stopSession(sessionId, userId);
+    await getProcessManager().stopSession(sessionId, userId);
   } catch {
     // Not running or not owned — safe to ignore; ownership is re-checked by DELETE.
   }
 
-  const result = db
-    .prepare('DELETE FROM sessions WHERE id = ? AND user_id = ?')
-    .run(sessionId, userId);
+  const result = await pgRun(
+    'DELETE FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  );
 
   if (result.changes === 0) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
@@ -2280,9 +2330,9 @@ router.put(
   })
 );
 
-router.get('/:id/uploads/:uploadId', requireAuth, (req, res) => {
+router.get('/:id/uploads/:uploadId', requireAuth, async (req, res) => {
   try {
-    const upload = getChatUpload(
+    const upload = await getChatUpload(
       (req as AuthenticatedRequest).userId,
       req.params.id as string,
       req.params.uploadId as string
@@ -2318,11 +2368,11 @@ const readStateUpdateSchema = z.object({
   lastReadMessageId: z.string().max(160).nullable().optional(),
 });
 
-router.get('/:id/read-state', requireAuth, (req, res) => {
+router.get('/:id/read-state', requireAuth, async (req, res) => {
   const parsed = readStateQuerySchema.safeParse(req.query);
   if (!parsed.success) throw new AppError('Invalid read-state query', 400, 'VALIDATION_ERROR');
   try {
-    const readState = getSessionReadState(
+    const readState = await getSessionReadState(
       (req as AuthenticatedRequest).userId,
       req.params.id as string,
       parsed.data.chatId === '' ? null : parsed.data.chatId
@@ -2333,11 +2383,11 @@ router.get('/:id/read-state', requireAuth, (req, res) => {
   }
 });
 
-router.put('/:id/read-state', requireAuth, (req, res) => {
+router.put('/:id/read-state', requireAuth, async (req, res) => {
   const parsed = readStateUpdateSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError('Invalid read-state payload', 400, 'VALIDATION_ERROR');
   try {
-    const readState = setSessionReadState(
+    const readState = await setSessionReadState(
       (req as AuthenticatedRequest).userId,
       req.params.id as string,
       parsed.data
@@ -2358,9 +2408,8 @@ const messagesQuerySchema = z.object({
   chatId: z.string().max(160).optional(),
 });
 
-router.get('/:id/messages', requireAuth, (req, res) => {
+router.get('/:id/messages', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
   const parsed = messagesQuerySchema.safeParse(req.query);
   if (!parsed.success) throw new AppError('Invalid query', 400, 'VALIDATION_ERROR');
   const { limit, before, after, around, chatId: requestedChatId } = parsed.data;
@@ -2368,15 +2417,15 @@ router.get('/:id/messages', requireAuth, (req, res) => {
     throw new AppError('before, after and around are mutually exclusive', 400, 'VALIDATION_ERROR');
   }
 
-  const payload = db.transaction(() => {
+  const payload = await pgTransaction(async (tx) => {
     // One SQLite read transaction makes the rows, revision and newest id one
     // coherent snapshot even if another backend process is writing concurrently.
-    const session = db
-      .prepare(
-        `SELECT id, active_chat_id AS activeChatId
-           FROM sessions WHERE id = ? AND user_id = ?`
-      )
-      .get(req.params.id, userId) as { id: string; activeChatId: string | null } | undefined;
+    const session = (await tx.get(
+      `SELECT id, active_chat_id AS activeChatId
+           FROM sessions WHERE id = ? AND user_id = ?`,
+      req.params.id,
+      userId
+    )) as unknown as { id: string; activeChatId: string | null } | undefined;
     if (!session) throw new AppError('Session not found', 404, 'NOT_FOUND');
     const activeChatId =
       requestedChatId === undefined
@@ -2386,16 +2435,20 @@ router.get('/:id/messages', requireAuth, (req, res) => {
           : requestedChatId;
     if (
       activeChatId !== null &&
-      !db
-        .prepare(`SELECT 1 FROM session_chats WHERE id = ? AND session_id = ?`)
-        .get(activeChatId, req.params.id)
+      !(await tx.get(
+        `SELECT 1 FROM session_chats WHERE id = ? AND session_id = ?`,
+        activeChatId,
+        req.params.id
+      ))
     ) {
       throw new AppError('Chat not found in this session', 404, 'NOT_FOUND');
     }
     const total = (
-      db
-        .prepare('SELECT COUNT(*) AS count FROM messages WHERE session_id = ? AND chat_id IS ?')
-        .get(req.params.id, activeChatId) as { count: number }
+      (await tx.get(
+        'SELECT COUNT(*) AS count FROM messages WHERE session_id = ? AND chat_id IS ?',
+        req.params.id,
+        activeChatId
+      )) as unknown as { count: number }
     ).count;
     const baseSelect = `SELECT id, session_id AS sessionId, chat_id AS chatId, role, content,
                                client_message_id AS clientMessageId,
@@ -2409,41 +2462,46 @@ router.get('/:id/messages', requireAuth, (req, res) => {
     let requestedCursorRowId: number | null = null;
 
     if (around) {
-      const anchor = db
-        .prepare(
-          `SELECT rowid AS rid FROM messages
-            WHERE id = ? AND session_id = ? AND chat_id IS ?`
-        )
-        .get(around, req.params.id, activeChatId) as { rid: number } | undefined;
+      const anchor = (await tx.get(
+        `SELECT rowid AS rid FROM messages
+            WHERE id = ? AND session_id = ? AND chat_id IS ?`,
+        around,
+        req.params.id,
+        activeChatId
+      )) as unknown as { rid: number } | undefined;
       if (!anchor) {
         throw new AppError('Message not found in the active chat', 404, 'NOT_FOUND');
       }
       const ordinal = (
-        db
-          .prepare(
-            `SELECT COUNT(*) AS count FROM messages
-              WHERE session_id = ? AND chat_id IS ? AND rowid <= ?`
-          )
-          .get(req.params.id, activeChatId, anchor.rid) as { count: number }
+        (await tx.get(
+          `SELECT COUNT(*) AS count FROM messages
+              WHERE session_id = ? AND chat_id IS ? AND rowid <= ?`,
+          req.params.id,
+          activeChatId,
+          anchor.rid
+        )) as unknown as { count: number }
       ).count;
       const offset = Math.max(0, Math.min(ordinal - Math.ceil(limit / 2), total - limit));
-      ordered = db
-        .prepare(
-          `${baseSelect}
+      ordered = (await tx.all(
+        `${baseSelect}
             WHERE session_id = ? AND chat_id IS ?
-            ORDER BY rowid ASC LIMIT ? OFFSET ?`
-        )
-        .all(req.params.id, activeChatId, limit, offset) as HistoryRow[];
+            ORDER BY rowid ASC LIMIT ? OFFSET ?`,
+        req.params.id,
+        activeChatId,
+        limit,
+        offset
+      )) as unknown as HistoryRow[];
       anchorIndex = ordered.findIndex((row) => row.id === around);
     } else {
       let cursorRowId: number | null = null;
       if (before || after) {
-        const cursor = db
-          .prepare(
-            `SELECT rowid AS rid FROM messages
-              WHERE id = ? AND session_id = ? AND chat_id IS ?`
-          )
-          .get(before ?? after, req.params.id, activeChatId) as { rid: number } | undefined;
+        const cursor = (await tx.get(
+          `SELECT rowid AS rid FROM messages
+              WHERE id = ? AND session_id = ? AND chat_id IS ?`,
+          before ?? after,
+          req.params.id,
+          activeChatId
+        )) as unknown as { rid: number } | undefined;
         if (!cursor) {
           throw new AppError('Message cursor not found in the active chat', 400, 'INVALID_CURSOR');
         }
@@ -2451,30 +2509,35 @@ router.get('/:id/messages', requireAuth, (req, res) => {
         requestedCursorRowId = cursor.rid;
       }
       if (after && cursorRowId !== null) {
-        ordered = db
-          .prepare(
-            `${baseSelect}
+        ordered = (await tx.all(
+          `${baseSelect}
               WHERE session_id = ? AND chat_id IS ? AND rowid > ?
-              ORDER BY rowid ASC LIMIT ?`
-          )
-          .all(req.params.id, activeChatId, cursorRowId, limit) as HistoryRow[];
+              ORDER BY rowid ASC LIMIT ?`,
+          req.params.id,
+          activeChatId,
+          cursorRowId,
+          limit
+        )) as unknown as HistoryRow[];
       } else {
         const newestFirst = (
           cursorRowId === null
-            ? db
-                .prepare(
-                  `${baseSelect}
+            ? await tx.all(
+                `${baseSelect}
                     WHERE session_id = ? AND chat_id IS ?
-                    ORDER BY rowid DESC LIMIT ?`
-                )
-                .all(req.params.id, activeChatId, limit)
-            : db
-                .prepare(
-                  `${baseSelect}
+                    ORDER BY rowid DESC LIMIT ?`,
+                req.params.id,
+                activeChatId,
+                limit
+              )
+            : await tx.all(
+                `${baseSelect}
                     WHERE session_id = ? AND chat_id IS ? AND rowid < ?
-                    ORDER BY rowid DESC LIMIT ?`
-                )
-                .all(req.params.id, activeChatId, cursorRowId, limit)
+                    ORDER BY rowid DESC LIMIT ?`,
+                req.params.id,
+                activeChatId,
+                cursorRowId,
+                limit
+              )
         ) as HistoryRow[];
         ordered = newestFirst.reverse();
       }
@@ -2484,21 +2547,23 @@ router.get('/:id/messages', requireAuth, (req, res) => {
     const newestRid = ordered.at(-1)?.rid ?? requestedCursorRowId;
     const hasMoreBefore =
       oldestRid !== null &&
-      db
-        .prepare(
-          `SELECT 1 FROM messages
-            WHERE session_id = ? AND chat_id IS ? AND rowid < ? LIMIT 1`
-        )
-        .get(req.params.id, activeChatId, oldestRid) !== undefined;
+      (await tx.get(
+        `SELECT 1 FROM messages
+            WHERE session_id = ? AND chat_id IS ? AND rowid < ? LIMIT 1`,
+        req.params.id,
+        activeChatId,
+        oldestRid
+      )) !== undefined;
     const hasMoreAfter =
       newestRid !== null &&
-      db
-        .prepare(
-          `SELECT 1 FROM messages
-            WHERE session_id = ? AND chat_id IS ? AND rowid > ? LIMIT 1`
-        )
-        .get(req.params.id, activeChatId, newestRid) !== undefined;
-    const mediaByMessage = loadMessageMedia(ordered.map((row) => row.id));
+      (await tx.get(
+        `SELECT 1 FROM messages
+            WHERE session_id = ? AND chat_id IS ? AND rowid > ? LIMIT 1`,
+        req.params.id,
+        activeChatId,
+        newestRid
+      )) !== undefined;
+    const mediaByMessage = await loadMessageMedia(ordered.map((row) => row.id));
     const messages = ordered.map(({ rid: _rid, ...message }) => {
       const media = mediaByMessage.get(message.id);
       return media?.length ? { ...message, media } : message;
@@ -2506,8 +2571,8 @@ router.get('/:id/messages', requireAuth, (req, res) => {
     return {
       success: true,
       data: messages,
-      snapshot: getMessageHistorySnapshot(req.params.id as string, userId, activeChatId, db),
-      readState: getSessionReadState(userId, req.params.id as string, activeChatId, db),
+      snapshot: await getMessageHistorySnapshot(req.params.id as string, userId, activeChatId),
+      readState: await getSessionReadState(userId, req.params.id as string, activeChatId),
       pagination: {
         total,
         limit,
@@ -2519,7 +2584,7 @@ router.get('/:id/messages', requireAuth, (req, res) => {
         ...(around ? { aroundId: around, anchorIndex } : {}),
       },
     };
-  })();
+  });
 
   res.json(payload);
 });
@@ -2530,13 +2595,12 @@ const rewindSchema = z.object({
   messageId: z.string().min(1),
 });
 
-router.post('/:id/rewind', requireAuth, (req, res) => {
+router.post('/:id/rewind', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const sessionId = req.params.id;
   if (!sessionId) {
     throw new AppError('Session id required', 400, 'INVALID_PAYLOAD');
   }
-  const db = getDatabase();
 
   const parsed = rewindSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -2544,18 +2608,20 @@ router.post('/:id/rewind', requireAuth, (req, res) => {
   }
   const { messageId } = parsed.data;
 
-  const session = db
-    .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-    .get(sessionId, userId);
+  const session = await pgGet(
+    'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  );
   if (!session) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
   }
 
-  const target = db
-    .prepare(
-      'SELECT rowid as rid, created_at as createdAt FROM messages WHERE id = ? AND session_id = ?'
-    )
-    .get(messageId, sessionId) as { rid: number; createdAt: string } | undefined;
+  const target = (await pgGet(
+    'SELECT rowid as rid, created_at as createdAt FROM messages WHERE id = ? AND session_id = ?',
+    messageId,
+    sessionId
+  )) as unknown as { rid: number; createdAt: string } | undefined;
   if (!target) {
     throw new AppError('Message not found', 404, 'NOT_FOUND');
   }
@@ -2566,45 +2632,50 @@ router.post('/:id/rewind', requireAuth, (req, res) => {
   // transaction so a partial failure can't leave "claude_session_id set but messages gone".
   const pm = getProcessManager();
   try {
-    pm.stopSession(sessionId, userId);
+    await pm.stopSession(sessionId, userId);
   } catch {
     // Process not running or not owned by this user — safe to ignore.
   }
   pm.clearSessionBuffer(sessionId);
 
-  const result = db.transaction(() => {
-    const del = db
-      .prepare('DELETE FROM messages WHERE session_id = ? AND rowid >= ?')
-      .run(sessionId, target.rid);
-    db.prepare('DELETE FROM session_events WHERE session_id = ? AND created_at >= ?').run(
+  const result = await pgTransaction(async (tx) => {
+    const del = await tx.run(
+      'DELETE FROM messages WHERE session_id = ? AND rowid >= ?',
+      sessionId,
+      target.rid
+    );
+    await tx.run(
+      'DELETE FROM session_events WHERE session_id = ? AND created_at >= ?',
       sessionId,
       target.createdAt
     );
-    db.prepare(
-      'UPDATE sessions SET claude_session_id = NULL, status = ?, last_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-    ).run('stopped', sessionId);
+    await tx.run(
+      'UPDATE sessions SET claude_session_id = NULL, status = ?, last_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      'stopped',
+      sessionId
+    );
     return del.changes;
-  })();
+  });
 
-  const remaining = db
-    .prepare(
-      `SELECT id, session_id as sessionId, role, content,
+  const remaining = await pgAll(
+    `SELECT id, session_id as sessionId, role, content,
               strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt
-       FROM messages WHERE session_id = ? ORDER BY created_at ASC`
-    )
-    .all(sessionId);
+       FROM messages WHERE session_id = ? ORDER BY created_at ASC`,
+    sessionId
+  );
 
   res.json({ success: true, deletedCount: result, data: remaining });
 });
 
 // Get allowed directories for a session
-router.get('/:id/allowed-directories', requireAuth, (req, res) => {
+router.get('/:id/allowed-directories', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
-  const session = db
-    .prepare('SELECT allowed_directories FROM sessions WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId) as { allowed_directories: string | null } | undefined;
+  const session = (await pgGet(
+    'SELECT allowed_directories FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  )) as unknown as { allowed_directories: string | null } | undefined;
 
   if (!session) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
@@ -2640,11 +2711,11 @@ router.post('/:id/allowed-directories', requireAuth, async (req, res) => {
     throw err;
   }
 
-  const db = getDatabase();
-
-  const session = db
-    .prepare('SELECT allowed_directories FROM sessions WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId) as { allowed_directories: string | null } | undefined;
+  const session = (await pgGet(
+    'SELECT allowed_directories FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  )) as unknown as { allowed_directories: string | null } | undefined;
 
   if (!session) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
@@ -2664,15 +2735,17 @@ router.post('/:id/allowed-directories', requireAuth, async (req, res) => {
   // Add the new directory
   allowedDirectories.push(normalizedDir);
 
-  db.prepare(
-    'UPDATE sessions SET allowed_directories = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-  ).run(JSON.stringify(allowedDirectories), req.params.id);
+  await pgRun(
+    'UPDATE sessions SET allowed_directories = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    JSON.stringify(allowedDirectories),
+    req.params.id
+  );
 
   res.json({ success: true, data: allowedDirectories });
 });
 
 // Remove an allowed directory from a session
-router.delete('/:id/allowed-directories', requireAuth, (req, res) => {
+router.delete('/:id/allowed-directories', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const directory = req.query.directory as string | undefined;
 
@@ -2681,11 +2754,12 @@ router.delete('/:id/allowed-directories', requireAuth, (req, res) => {
   }
 
   const normalizedDir = path.resolve(directory);
-  const db = getDatabase();
 
-  const session = db
-    .prepare('SELECT allowed_directories FROM sessions WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId) as { allowed_directories: string | null } | undefined;
+  const session = (await pgGet(
+    'SELECT allowed_directories FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  )) as unknown as { allowed_directories: string | null } | undefined;
 
   if (!session) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
@@ -2696,9 +2770,11 @@ router.delete('/:id/allowed-directories', requireAuth, (req, res) => {
   // Remove the directory
   const newDirectories = allowedDirectories.filter((d) => d !== normalizedDir);
 
-  db.prepare(
-    'UPDATE sessions SET allowed_directories = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-  ).run(JSON.stringify(newDirectories), req.params.id);
+  await pgRun(
+    'UPDATE sessions SET allowed_directories = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    JSON.stringify(newDirectories),
+    req.params.id
+  );
 
   res.json({ success: true, data: newDirectories });
 });
@@ -2795,12 +2871,12 @@ router.get('/:id/images/:filename', async (req, res, next) => {
     const userId = await validateToken(req, res);
     if (!userId) return;
 
-    const db = getDatabase();
-
     // Verify session ownership and get working directory
-    const session = db
-      .prepare('SELECT working_directory FROM sessions WHERE id = ? AND user_id = ?')
-      .get(req.params.id, userId) as { working_directory: string } | undefined;
+    const session = (await pgGet(
+      'SELECT working_directory FROM sessions WHERE id = ? AND user_id = ?',
+      req.params.id,
+      userId
+    )) as unknown as { working_directory: string } | undefined;
 
     if (!session) {
       return res
@@ -2838,12 +2914,12 @@ router.get('/:id/attachments/:filename', async (req, res, next) => {
     const userId = await validateToken(req, res);
     if (!userId) return;
 
-    const db = getDatabase();
-
     // Verify session ownership and get working directory
-    const session = db
-      .prepare('SELECT working_directory FROM sessions WHERE id = ? AND user_id = ?')
-      .get(req.params.id, userId) as { working_directory: string } | undefined;
+    const session = (await pgGet(
+      'SELECT working_directory FROM sessions WHERE id = ? AND user_id = ?',
+      req.params.id,
+      userId
+    )) as unknown as { working_directory: string } | undefined;
 
     if (!session) {
       return res
@@ -2889,15 +2965,16 @@ router.get('/:id/attachments/:filename', async (req, res, next) => {
 });
 
 // Set session category
-router.patch('/:id/category', requireAuth, (req, res) => {
+router.patch('/:id/category', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const { categoryId } = req.body;
-  const db = getDatabase();
 
   // Verify session ownership
-  const session = db
-    .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId);
+  const session = await pgGet(
+    'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  );
 
   if (!session) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
@@ -2905,16 +2982,19 @@ router.patch('/:id/category', requireAuth, (req, res) => {
 
   // If categoryId is provided, verify it belongs to the user
   if (categoryId) {
-    const category = db
-      .prepare('SELECT id FROM session_categories WHERE id = ? AND user_id = ?')
-      .get(categoryId, userId);
+    const category = await pgGet(
+      'SELECT id FROM session_categories WHERE id = ? AND user_id = ?',
+      categoryId,
+      userId
+    );
 
     if (!category) {
       throw new AppError('Category not found', 404, 'CATEGORY_NOT_FOUND');
     }
   }
 
-  db.prepare('UPDATE sessions SET category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+  await pgRun(
+    'UPDATE sessions SET category = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     categoryId || null,
     req.params.id
   );
@@ -2940,11 +3020,11 @@ export function escapeMessageSearchLike(query: string): string {
 
 // FTS5 is created by the schema migration but only when the SQLite build supports it.
 // Fall back to LIKE so search still works on stripped-down builds.
-function ftsAvailable(db: ReturnType<typeof getDatabase>): boolean {
+async function ftsAvailable(): Promise<boolean> {
   try {
-    const row = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'`)
-      .get();
+    const row = await pgGet(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'`
+    );
     return !!row;
   } catch {
     return false;
@@ -2952,7 +3032,7 @@ function ftsAvailable(db: ReturnType<typeof getDatabase>): boolean {
 }
 
 // Search messages in a session
-router.get('/:id/messages/search', requireAuth, (req, res) => {
+router.get('/:id/messages/search', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const requestedLimit = Number(req.query.limit ?? 50);
@@ -2960,48 +3040,52 @@ router.get('/:id/messages/search', requireAuth, (req, res) => {
     100,
     Math.max(1, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 50)
   );
-  const db = getDatabase();
 
   if (query.length < 2 || query.length > 200) {
     throw new AppError('Query must be between 2 and 200 characters', 400, 'INVALID_QUERY');
   }
 
   // Verify session ownership
-  const session = db
-    .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId);
+  const session = await pgGet(
+    'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  );
 
   if (!session) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
   }
 
   const ftsExpr = buildFtsMatch(query);
-  const useFts = ftsExpr !== null && ftsAvailable(db);
+  const useFts = ftsExpr !== null && (await ftsAvailable());
 
   const messages = useFts
-    ? db
-        .prepare(
-          `SELECT m.id, m.session_id as sessionId, m.chat_id AS chatId, m.role,
+    ? await pgAll(
+        `SELECT m.id, m.session_id as sessionId, m.chat_id AS chatId, m.role,
                   substr(snippet(messages_fts, 0, '', '', ' … ', 64), 1, 2000) AS content,
                   strftime('%Y-%m-%dT%H:%M:%fZ', m.created_at) as createdAt
            FROM messages_fts f
            JOIN messages m ON m.rowid = f.rowid
            WHERE f.content MATCH ? AND m.session_id = ?
            ORDER BY m.created_at DESC
-           LIMIT ?`
-        )
-        .all(ftsExpr, req.params.id, limit)
-    : db
-        .prepare(
-          `SELECT id, session_id as sessionId, chat_id AS chatId, role,
+           LIMIT ?`,
+        ftsExpr,
+        req.params.id,
+        limit
+      )
+    : await pgAll(
+        `SELECT id, session_id as sessionId, chat_id AS chatId, role,
                   substr(content, max(1, instr(lower(content), lower(?)) - 400), 1600) AS content,
                   strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt
            FROM messages
            WHERE session_id = ? AND content LIKE ? ESCAPE '\\'
            ORDER BY created_at DESC, rowid DESC
-           LIMIT ?`
-        )
-        .all(query, req.params.id, `%${escapeMessageSearchLike(query)}%`, limit);
+           LIMIT ?`,
+        query,
+        req.params.id,
+        `%${escapeMessageSearchLike(query)}%`,
+        limit
+      );
 
   const data = (messages as Array<{ id: string; sessionId: string; chatId: string | null }>).map(
     (message) => ({
@@ -3017,7 +3101,7 @@ router.get('/:id/messages/search', requireAuth, (req, res) => {
 });
 
 // Search all messages across all sessions
-router.get('/messages/search', requireAuth, (req, res) => {
+router.get('/messages/search', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const requestedLimit = Number(req.query.limit ?? 50);
@@ -3025,19 +3109,17 @@ router.get('/messages/search', requireAuth, (req, res) => {
     100,
     Math.max(1, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 50)
   );
-  const db = getDatabase();
 
   if (query.length < 2 || query.length > 200) {
     throw new AppError('Query must be between 2 and 200 characters', 400, 'INVALID_QUERY');
   }
 
   const ftsExpr = buildFtsMatch(query);
-  const useFts = ftsExpr !== null && ftsAvailable(db);
+  const useFts = ftsExpr !== null && (await ftsAvailable());
 
   const messages = useFts
-    ? db
-        .prepare(
-          `SELECT m.id, m.session_id as sessionId, m.chat_id AS chatId, m.role,
+    ? await pgAll(
+        `SELECT m.id, m.session_id as sessionId, m.chat_id AS chatId, m.role,
                   substr(snippet(messages_fts, 0, '', '', ' … ', 64), 1, 2000) AS content,
                   strftime('%Y-%m-%dT%H:%M:%fZ', m.created_at) as createdAt,
                   s.name as sessionName
@@ -3046,12 +3128,13 @@ router.get('/messages/search', requireAuth, (req, res) => {
            JOIN sessions s ON m.session_id = s.id
            WHERE f.content MATCH ? AND s.user_id = ?
            ORDER BY m.created_at DESC
-           LIMIT ?`
-        )
-        .all(ftsExpr, userId, limit)
-    : db
-        .prepare(
-          `SELECT m.id, m.session_id as sessionId, m.chat_id AS chatId, m.role,
+           LIMIT ?`,
+        ftsExpr,
+        userId,
+        limit
+      )
+    : await pgAll(
+        `SELECT m.id, m.session_id as sessionId, m.chat_id AS chatId, m.role,
                   substr(m.content, max(1, instr(lower(m.content), lower(?)) - 400), 1600) AS content,
                   strftime('%Y-%m-%dT%H:%M:%fZ', m.created_at) as createdAt,
                   s.name as sessionName
@@ -3059,9 +3142,12 @@ router.get('/messages/search', requireAuth, (req, res) => {
            JOIN sessions s ON m.session_id = s.id
            WHERE s.user_id = ? AND m.content LIKE ? ESCAPE '\\'
            ORDER BY m.created_at DESC
-           LIMIT ?`
-        )
-        .all(query, userId, `%${escapeMessageSearchLike(query)}%`, limit);
+           LIMIT ?`,
+        query,
+        userId,
+        `%${escapeMessageSearchLike(query)}%`,
+        limit
+      );
 
   const data = (messages as Array<{ id: string; sessionId: string; chatId: string | null }>).map(
     (message) => ({
@@ -3081,17 +3167,16 @@ router.get('/messages/search', requireAuth, (req, res) => {
  * Whole transcript as Markdown. Served as a download so the browser saves a
  * file, and consumed verbatim by the Android share sheet.
  */
-router.get('/:id/export', requireAuth, (req: Request, res: Response) => {
+router.get('/:id/export', requireAuth, async (req: Request, res: Response) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
-  const session = db
-    .prepare(
-      `SELECT id, name, cli_provider AS cliProvider, cli_model AS cliModel,
+  const session = (await pgGet(
+    `SELECT id, name, cli_provider AS cliProvider, cli_model AS cliModel,
               working_directory AS workingDirectory,
               strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS createdAt
-         FROM sessions WHERE id = ? AND user_id = ?`
-    )
-    .get(req.params.id, userId) as
+         FROM sessions WHERE id = ? AND user_id = ?`,
+    req.params.id,
+    userId
+  )) as unknown as
     | {
         id: string;
         name: string;
@@ -3106,14 +3191,13 @@ router.get('/:id/export', requireAuth, (req: Request, res: Response) => {
   }
 
   const chatId = typeof req.query.chatId === 'string' ? req.query.chatId : null;
-  const rows = db
-    .prepare(
-      `SELECT role, content, strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS createdAt
+  const rows = (await pgAll(
+    `SELECT role, content, strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS createdAt
          FROM messages
         WHERE session_id = ?${chatId ? ' AND chat_id = ?' : ''}
-        ORDER BY created_at ASC, rowid ASC`
-    )
-    .all(...(chatId ? [session.id, chatId] : [session.id])) as Array<{
+        ORDER BY created_at ASC, rowid ASC`,
+    ...(chatId ? [session.id, chatId] : [session.id])
+  )) as unknown as Array<{
     role: string;
     content: string;
     createdAt: string;

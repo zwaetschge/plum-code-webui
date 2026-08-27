@@ -21,9 +21,9 @@ const consultWatchdogSchema = z.object({
   question: z.string().trim().min(1).max(20_000),
 });
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const userId = authUserId(req);
-  res.json({ success: true, data: watchdogService.list(userId) });
+  res.json({ success: true, data: await watchdogService.list(userId) });
 });
 
 router.post(
@@ -33,7 +33,7 @@ router.post(
     if (!parsed.success) throw new AppError('Invalid watchdog payload', 400, 'VALIDATION_ERROR');
     const userId = authUserId(req);
     const watchdog = await watchdogService.create(userId, parsed.data.containerId);
-    auditFromRequest(req, 'watchdog.created', {
+    await auditFromRequest(req, 'watchdog.created', {
       resourceType: 'container_watchdog',
       resourceId: watchdog.id,
       metadata: { containerId: watchdog.containerId, sessionId: watchdog.sessionId },
@@ -42,16 +42,16 @@ router.post(
   })
 );
 
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   const userId = authUserId(req);
-  res.json({ success: true, data: watchdogService.get(req.params.id!, userId) });
+  res.json({ success: true, data: await watchdogService.get(req.params.id!, userId) });
 });
 
 router.post(
   '/:id/snapshot',
   asyncHandler(async (req, res) => {
     const userId = authUserId(req);
-    const watchdog = watchdogService.get(req.params.id!, userId);
+    const watchdog = await watchdogService.get(req.params.id!, userId);
     const snapshot = await watchdogService.snapshot(watchdog.id, userId, watchdog.containerId);
     res.json({ success: true, data: snapshot });
   })
@@ -64,7 +64,7 @@ router.post(
     if (!parsed.success) throw new AppError('Invalid consult payload', 400, 'VALIDATION_ERROR');
     const userId = authUserId(req);
     const delegation = await watchdogService.consult(req.params.id!, userId, parsed.data.question);
-    auditFromRequest(req, 'watchdog.consulted', {
+    await auditFromRequest(req, 'watchdog.consulted', {
       resourceType: 'container_watchdog',
       resourceId: req.params.id,
       metadata: { delegationId: delegation.id },

@@ -32,11 +32,11 @@ import { syncProviderLinks } from '../utils/providerLinks.js';
 const router = Router();
 
 // Get all OpenCode providers for the current user
-router.get('/providers', requireAuth, (req, res) => {
+router.get('/providers', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   try {
     const catalog = getOpenCodeProviderCatalog();
-    const providers = readOpenCodeProvidersForUser(userId);
+    const providers = await readOpenCodeProvidersForUser(userId);
     const safeProviders = providers.map((provider) => maskOpenCodeProvider(provider, catalog));
     res.json({ success: true, data: safeProviders });
   } catch (error) {
@@ -69,7 +69,7 @@ const questionRejectSchema = z.object({
 });
 
 // Save or update an OpenCode provider
-router.put('/providers', requireAuth, (req, res) => {
+router.put('/providers', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   try {
     const result = upsertProviderSchema.safeParse(req.body);
@@ -87,7 +87,7 @@ router.put('/providers', requireAuth, (req, res) => {
     const catalogProvider = getOpenCodeProviderCatalog()[id];
     const finalBaseUrl = baseUrl && baseUrl.trim() !== '' ? baseUrl.trim() : catalogProvider?.api;
 
-    const providers = readOpenCodeProvidersForUser(userId);
+    const providers = await readOpenCodeProvidersForUser(userId);
     const now = new Date().toISOString();
     const existingIndex = providers.findIndex((p) => p.id === id);
     const encryptedKey = encryptOpenCodeProviderKey(apiKey);
@@ -124,7 +124,7 @@ router.put('/providers', requireAuth, (req, res) => {
       providers.push(stored);
     }
 
-    writeOpenCodeProvidersForUser(userId, providers);
+    await writeOpenCodeProvidersForUser(userId, providers);
     resetOpenCodeProviderCatalogCache();
     awaitRestartOpenCodeServer(userId);
 
@@ -141,12 +141,12 @@ router.put('/providers', requireAuth, (req, res) => {
 });
 
 // Delete an OpenCode provider
-router.delete('/providers/:id', requireAuth, (req, res) => {
+router.delete('/providers/:id', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const { id } = req.params;
   try {
-    const providers = readOpenCodeProvidersForUser(userId).filter((p) => p.id !== id);
-    writeOpenCodeProvidersForUser(userId, providers);
+    const providers = (await readOpenCodeProvidersForUser(userId)).filter((p) => p.id !== id);
+    await writeOpenCodeProvidersForUser(userId, providers);
     resetOpenCodeProviderCatalogCache();
     awaitRestartOpenCodeServer(userId);
     res.json({ success: true, data: { id } });
@@ -159,7 +159,7 @@ router.delete('/providers/:id', requireAuth, (req, res) => {
 });
 
 // Test an OpenCode provider connection
-router.post('/providers/:id/test', requireAuth, (req, res) => {
+router.post('/providers/:id/test', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const { id } = req.params;
   if (!id) {
@@ -168,7 +168,7 @@ router.post('/providers/:id/test', requireAuth, (req, res) => {
       .json({ success: false, error: { code: 'ERROR', message: 'Provider id required' } });
   }
   try {
-    const providers = readOpenCodeProvidersForUser(userId);
+    const providers = await readOpenCodeProvidersForUser(userId);
     const provider = providers.find((p) => p.id === id);
 
     if (!provider) {
@@ -179,7 +179,7 @@ router.post('/providers/:id/test', requireAuth, (req, res) => {
 
     const tenantPaths = resolveOpenCodeTenantPaths(userId);
     ensureOpenCodeTenantDirectories(tenantPaths);
-    syncProviderLinks({
+    await syncProviderLinks({
       quiet: true,
       userId,
       opencodeConfigPath: `${tenantPaths.configDir}/opencode.json`,
@@ -188,7 +188,7 @@ router.post('/providers/:id/test', requireAuth, (req, res) => {
     const commandEnv = buildOpenCodeCommandEnv();
     const env: NodeJS.ProcessEnv = {
       ...buildOpenCodeServerProcessEnv(commandEnv),
-      ...buildOpenCodeProviderCredentialEnv(userId),
+      ...(await buildOpenCodeProviderCredentialEnv(userId)),
       OPENCODE_CONFIG_DIR: tenantPaths.configDir,
       OPENCODE_DATA_DIR: tenantPaths.dataDir,
     };
@@ -273,10 +273,13 @@ function discoverProviders(): OpenCodeProviderCatalog {
 // Get available OpenCode providers and their models. The full provider surface
 // comes from OpenCode's models.dev cache; configured/custom providers from the
 // CLI are overlaid so local endpoints still appear.
-router.get('/available-providers', requireAuth, (req, res) => {
+router.get('/available-providers', requireAuth, async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).userId;
-    res.json({ success: true, data: overlayOpenCodeProviderStatus(discoverProviders(), userId) });
+    res.json({
+      success: true,
+      data: await overlayOpenCodeProviderStatus(discoverProviders(), userId),
+    });
   } catch (error) {
     console.error('Error fetching available providers:', error);
     res

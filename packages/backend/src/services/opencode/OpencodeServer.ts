@@ -603,23 +603,25 @@ export class OpencodeServer {
   async ensureStarted(userId?: string): Promise<string> {
     const effectiveUserId = this.resolveUserId(userId);
     if (this.tenantPaths) ensureOpenCodeTenantDirectories(this.tenantPaths);
-    const configSync = syncProviderLinks({
-      quiet: true,
-      userId: effectiveUserId,
-      opencodeConfigPath: this.tenantPaths
-        ? path.join(this.tenantPaths.configDir, 'opencode.json')
-        : undefined,
-      opencodeAgentsDir: this.tenantPaths
-        ? path.join(this.tenantPaths.configDir, 'agents')
-        : undefined,
-    }).opencodeConfig;
+    const configSync = (
+      await syncProviderLinks({
+        quiet: true,
+        userId: effectiveUserId,
+        opencodeConfigPath: this.tenantPaths
+          ? path.join(this.tenantPaths.configDir, 'opencode.json')
+          : undefined,
+        opencodeAgentsDir: this.tenantPaths
+          ? path.join(this.tenantPaths.configDir, 'agents')
+          : undefined,
+      })
+    ).opencodeConfig;
     if (this.baseUrl && this.proc && !this.proc.killed) {
       if (configSync.updated && effectiveUserId) {
         await this.restart(effectiveUserId);
         if (this.baseUrl) return this.baseUrl;
       }
       if (effectiveUserId) {
-        const nextFingerprint = getOpenCodeProviderCredentialFingerprint(effectiveUserId);
+        const nextFingerprint = await getOpenCodeProviderCredentialFingerprint(effectiveUserId);
         if (
           this.credentialOwnerUserId !== effectiveUserId ||
           this.credentialFingerprint !== nextFingerprint
@@ -640,19 +642,19 @@ export class OpencodeServer {
   }
 
   private startInternal(userId?: string): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<string>(async (resolve, reject) => {
       this.shuttingDown = false;
       this.sseConnected = false;
       this.sseReconnectDelayMs = 500;
       this.credentialOwnerUserId = userId || null;
-      this.credentialFingerprint = getOpenCodeProviderCredentialFingerprint(userId);
+      this.credentialFingerprint = await getOpenCodeProviderCredentialFingerprint(userId);
 
       if (this.tenantPaths) ensureOpenCodeTenantDirectories(this.tenantPaths);
       const commandEnv = buildOpenCodeCommandEnv();
       const env = {
         ...buildOpenCodeServerProcessEnv(commandEnv),
         ...buildIntegrationEnv(),
-        ...buildOpenCodeProviderCredentialEnv(userId),
+        ...(await buildOpenCodeProviderCredentialEnv(userId)),
         OPENCODE_CONFIG_DIR: this.tenantPaths?.configDir || commandEnv.OPENCODE_CONFIG_DIR || '',
         OPENCODE_DATA_DIR: this.tenantPaths?.dataDir || commandEnv.OPENCODE_DATA_DIR || '',
         WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
@@ -1882,7 +1884,7 @@ export class OpencodeServerRegistry {
       return null;
     }
     const server = this.servers.get(userId);
-    return server ? server.restart(userId) : null;
+    return server ? await server.restart(userId) : null;
   }
 
   async shutdown(userId?: string): Promise<void> {
@@ -1904,7 +1906,9 @@ export class OpencodeServerRegistry {
     const servers = [...this.servers.values()];
     this.servers.clear();
     this.sessionOwners.clear();
-    const results = await Promise.allSettled(servers.map((server) => server.shutdown()));
+    const results = await Promise.allSettled(
+      servers.map(async (server) => await server.shutdown())
+    );
     for (const result of results) {
       if (result.status === 'rejected') {
         console.warn('[OPENCODE-SERVER] tenant shutdown failed:', result.reason);

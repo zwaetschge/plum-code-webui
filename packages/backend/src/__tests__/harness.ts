@@ -160,8 +160,8 @@ export async function startTestServer(): Promise<TestServer> {
     dataDir,
     userId,
     logs: () => serverLog,
-    request: (method, route, body) => call(method, route, body, true),
-    anonymous: (method, route, body) => call(method, route, body, false),
+    request: async (method, route, body) => await call(method, route, body, true),
+    anonymous: async (method, route, body) => await call(method, route, body, false),
     async stop() {
       child.kill('SIGTERM');
       await new Promise((resolve) => {

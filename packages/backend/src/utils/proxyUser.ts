@@ -1,7 +1,6 @@
+import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { nanoid } from 'nanoid';
-import type Database from 'better-sqlite3';
 import type { User } from '@plum-code-webui/shared';
-import { getDatabase } from '../db/index.js';
 import { ensureBootstrapAdmin } from './adminBootstrap.js';
 
 const USER_SELECT = `
@@ -18,36 +17,40 @@ const USER_SELECT = `
   strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) as updatedAt
 `;
 
-function ensureUserSettings(db: Database.Database, userId: string): void {
-  db.prepare(
+async function ensureUserSettings(userId: string): Promise<void> {
+  await pgRun(
     `INSERT OR IGNORE INTO user_settings (user_id, theme, allowed_tools)
-     VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`
-  ).run(userId);
+     VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`,
+    userId
+  );
 }
 
-export function upsertProxyUserInDatabase(
-  db: Database.Database,
+async function upsertProxyUserInDatabase(
   email: string,
   name?: string | null,
   username?: string | null
-): User {
+): Promise<User> {
   const normalizedEmail = email.trim().toLowerCase();
   const fallbackName = normalizedEmail.split('@')[0] || normalizedEmail;
   const displayName = name?.trim() || username?.trim() || fallbackName;
   const providerId = normalizedEmail;
 
-  const existingProxyUser = db
-    .prepare(`SELECT ${USER_SELECT} FROM users WHERE provider = 'proxy' AND provider_id = ?`)
-    .get(providerId) as User | undefined;
+  const existingProxyUser = (await pgGet(
+    `SELECT ${USER_SELECT} FROM users WHERE provider = 'proxy' AND provider_id = ?`,
+    providerId
+  )) as unknown as User | undefined;
 
   if (existingProxyUser) {
-    db.prepare(
+    await pgRun(
       `UPDATE users
        SET email = ?, name = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(normalizedEmail, displayName, existingProxyUser.id);
-    ensureUserSettings(db, existingProxyUser.id);
-    ensureBootstrapAdmin(db, existingProxyUser.id, normalizedEmail);
+       WHERE id = ?`,
+      normalizedEmail,
+      displayName,
+      existingProxyUser.id
+    );
+    await ensureUserSettings(existingProxyUser.id);
+    await ensureBootstrapAdmin(existingProxyUser.id, normalizedEmail);
     return {
       ...existingProxyUser,
       email: normalizedEmail,
@@ -55,38 +58,43 @@ export function upsertProxyUserInDatabase(
     };
   }
 
-  const existingEmailUser = db
-    .prepare(`SELECT ${USER_SELECT} FROM users WHERE LOWER(email) = LOWER(?)`)
-    .get(normalizedEmail) as User | undefined;
+  const existingEmailUser = (await pgGet(
+    `SELECT ${USER_SELECT} FROM users WHERE LOWER(email) = LOWER(?)`,
+    normalizedEmail
+  )) as unknown as User | undefined;
 
   if (existingEmailUser) {
-    db.prepare(
+    await pgRun(
       `UPDATE users
        SET name = COALESCE(?, name), updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(displayName, existingEmailUser.id);
-    ensureUserSettings(db, existingEmailUser.id);
-    ensureBootstrapAdmin(db, existingEmailUser.id, normalizedEmail);
+       WHERE id = ?`,
+      displayName,
+      existingEmailUser.id
+    );
+    await ensureUserSettings(existingEmailUser.id);
+    await ensureBootstrapAdmin(existingEmailUser.id, normalizedEmail);
     return {
       ...existingEmailUser,
       name: displayName || existingEmailUser.name,
     };
   }
 
-  const legacySharedCliUser = db
-    .prepare(
-      `SELECT ${USER_SELECT} FROM users WHERE provider = 'cli' AND provider_id = 'local-cli'`
-    )
-    .get() as User | undefined;
+  const legacySharedCliUser = (await pgGet(
+    `SELECT ${USER_SELECT} FROM users WHERE provider = 'cli' AND provider_id = 'local-cli'`
+  )) as unknown as User | undefined;
 
   if (legacySharedCliUser) {
-    db.prepare(
+    await pgRun(
       `UPDATE users
        SET email = ?, name = ?, provider = 'proxy', provider_id = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(normalizedEmail, displayName, providerId, legacySharedCliUser.id);
-    ensureUserSettings(db, legacySharedCliUser.id);
-    ensureBootstrapAdmin(db, legacySharedCliUser.id, normalizedEmail);
+       WHERE id = ?`,
+      normalizedEmail,
+      displayName,
+      providerId,
+      legacySharedCliUser.id
+    );
+    await ensureUserSettings(legacySharedCliUser.id);
+    await ensureBootstrapAdmin(legacySharedCliUser.id, normalizedEmail);
     return {
       ...legacySharedCliUser,
       email: normalizedEmail,
@@ -97,16 +105,21 @@ export function upsertProxyUserInDatabase(
   }
 
   const userId = nanoid();
-  db.prepare(
+  await pgRun(
     `INSERT INTO users (id, email, name, avatar_url, provider, provider_id)
-     VALUES (?, ?, ?, NULL, 'proxy', ?)`
-  ).run(userId, normalizedEmail, displayName, providerId);
-  ensureUserSettings(db, userId);
-  ensureBootstrapAdmin(db, userId, normalizedEmail);
+     VALUES (?, ?, ?, NULL, 'proxy', ?)`,
+    userId,
+    normalizedEmail,
+    displayName,
+    providerId
+  );
+  await ensureUserSettings(userId);
+  await ensureBootstrapAdmin(userId, normalizedEmail);
 
-  const createdUser = db.prepare(`SELECT ${USER_SELECT} FROM users WHERE id = ?`).get(userId) as
-    | User
-    | undefined;
+  const createdUser = (await pgGet(
+    `SELECT ${USER_SELECT} FROM users WHERE id = ?`,
+    userId
+  )) as unknown as User | undefined;
 
   if (!createdUser) {
     throw new Error('Proxy user was not created');
@@ -119,6 +132,6 @@ export function upsertProxyUser(
   email: string,
   name?: string | null,
   username?: string | null
-): User {
-  return upsertProxyUserInDatabase(getDatabase(), email, name, username);
+): Promise<User> {
+  return upsertProxyUserInDatabase(email, name, username);
 }

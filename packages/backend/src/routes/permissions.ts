@@ -1,10 +1,10 @@
+import { get as pgGet } from '../db/pg.js';
 import { Router, Request, Response, NextFunction } from 'express';
 import { timingSafeEqual } from 'crypto';
 import { z } from 'zod';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { addPatternToSettings } from '../services/claudeSettings.js';
-import { getDatabase } from '../db/index.js';
 import { config } from '../config.js';
 import { opencodeServer } from '../services/opencode/OpencodeServer.js';
 import { auditFromRequest, recordAudit } from '../utils/auditLog.js';
@@ -134,10 +134,10 @@ router.post('/request', requireHookSecret, async (req: Request, res: Response) =
     return res.status(403).json({ success: false, error: 'Session identity mismatch' });
   }
 
-  const db = getDatabase();
-  const session = db
-    .prepare('SELECT user_id, cli_provider FROM sessions WHERE id = ?')
-    .get(sessionId) as { user_id: string; cli_provider: string | null } | undefined;
+  const session = (await pgGet(
+    'SELECT user_id, cli_provider FROM sessions WHERE id = ?',
+    sessionId
+  )) as unknown as { user_id: string; cli_provider: string | null } | undefined;
   if (!session) {
     return res.status(404).json({ success: false, error: 'Session not found' });
   }
@@ -156,7 +156,7 @@ router.post('/request', requireHookSecret, async (req: Request, res: Response) =
 
   pendingRequests.set(requestId, pendingRequest);
 
-  recordAudit({
+  await recordAudit({
     actorUserId: session.user_id,
     action: 'permission.request',
     resourceType: 'session',
@@ -183,11 +183,11 @@ router.post('/request', requireHookSecret, async (req: Request, res: Response) =
   // event that actually blocks the agent, so it has to reach whoever is not
   // currently looking at this session.
   const sessionName = (
-    db.prepare('SELECT name FROM sessions WHERE id = ?').get(sessionId) as
+    (await pgGet('SELECT name FROM sessions WHERE id = ?', sessionId)) as unknown as
       | { name: string }
       | undefined
   )?.name;
-  notify({
+  await notify({
     userId: session.user_id,
     sessionId,
     kind: 'approval',
@@ -278,20 +278,20 @@ router.post('/respond', requireAuth, async (req: Request, res: Response) => {
 
   const { sessionId, requestId, action, pattern } = parsed.data;
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
-  const session = db
-    .prepare(
-      `SELECT id, cli_provider, claude_session_id
-       FROM sessions WHERE id = ? AND user_id = ?`
-    )
-    .get(sessionId, userId) as
+
+  const session = (await pgGet(
+    `SELECT id, cli_provider, claude_session_id
+       FROM sessions WHERE id = ? AND user_id = ?`,
+    sessionId,
+    userId
+  )) as unknown as
     | { id: string; cli_provider: string | null; claude_session_id: string | null }
     | undefined;
   if (!session) {
     throw new AppError('Permission request not found or expired', 404, 'NOT_FOUND');
   }
   if (action === 'allow_global') {
-    const actor = db.prepare('SELECT role FROM users WHERE id = ?').get(userId) as
+    const actor = (await pgGet('SELECT role FROM users WHERE id = ?', userId)) as unknown as
       | { role: string }
       | undefined;
     if (actor?.role !== 'admin') {
@@ -320,8 +320,8 @@ router.post('/respond', requireAuth, async (req: Request, res: Response) => {
         userId
       );
       if (handled) {
-        resolveApprovalNotification(requestId);
-        auditFromRequest(req, 'permission.respond', {
+        await resolveApprovalNotification(requestId);
+        await auditFromRequest(req, 'permission.respond', {
           resourceType: 'permission_request',
           resourceId: requestId,
           metadata: {
@@ -364,9 +364,10 @@ router.post('/respond', requireAuth, async (req: Request, res: Response) => {
 
         if (scope === 'project') {
           // Get project path from session
-          const ownedSession = db
-            .prepare('SELECT working_directory FROM sessions WHERE id = ?')
-            .get(request.sessionId) as { working_directory: string } | undefined;
+          const ownedSession = (await pgGet(
+            'SELECT working_directory FROM sessions WHERE id = ?',
+            request.sessionId
+          )) as unknown as { working_directory: string } | undefined;
           projectPath = ownedSession?.working_directory;
         }
 
@@ -380,8 +381,8 @@ router.post('/respond', requireAuth, async (req: Request, res: Response) => {
   }
 
   console.log(`[PERMISSIONS] User responded to ${requestId}: ${action}`);
-  resolveApprovalNotification(requestId);
-  auditFromRequest(req, 'permission.respond', {
+  await resolveApprovalNotification(requestId);
+  await auditFromRequest(req, 'permission.respond', {
     resourceType: 'session',
     resourceId: request.sessionId,
     metadata: {
@@ -409,16 +410,18 @@ router.post('/respond', requireAuth, async (req: Request, res: Response) => {
  * Useful for frontend to check if there are outstanding requests.
  * Requires authentication.
  */
-router.get('/pending/:sessionId', requireAuth, (req: Request, res: Response) => {
+router.get('/pending/:sessionId', requireAuth, async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId;
   if (!sessionId) {
     return res.status(400).json({ success: false, error: 'Missing sessionId' });
   }
 
   const userId = (req as AuthenticatedRequest).userId;
-  const ownedSession = getDatabase()
-    .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-    .get(sessionId, userId);
+  const ownedSession = await pgGet(
+    'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  );
   if (!ownedSession) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
   }

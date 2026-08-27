@@ -1,3 +1,4 @@
+import { get as pgGet } from '../../db/pg.js';
 import type {
   HomeAssistantConnectionTest,
   HomeAssistantIntegrationSettings,
@@ -5,7 +6,7 @@ import type {
   HomeAssistantLightEntity,
   HomeAssistantStatus,
 } from '@plum-code-webui/shared';
-import { getAppConfig, getDatabase, setAppConfig } from '../../db/index.js';
+import { getAppConfig, setAppConfig } from '../../db/index.js';
 import { safeDecrypt, safeEncrypt } from '../../utils/encryption.js';
 
 const CONFIG_KEYS = {
@@ -43,7 +44,7 @@ interface AnimationPattern {
 
 interface ActiveAnimation {
   generation: number;
-  originalState: Promise<HomeAssistantState>;
+  originalState: HomeAssistantState;
 }
 
 export const HOME_ASSISTANT_STATUS_PATTERNS: Record<HomeAssistantStatus, AnimationPattern> = {
@@ -222,12 +223,13 @@ export class HomeAssistantStatusLightService {
     }
   }
 
-  notifySession(sessionId: string, status: HomeAssistantStatus): void {
+  async notifySession(sessionId: string, status: HomeAssistantStatus): Promise<void> {
     const settings = this.getSettings();
     if (!settings.enabled || !settings.configured) return;
-    const row = getDatabase()
-      .prepare('SELECT home_assistant_entity_id as entityId FROM sessions WHERE id = ?')
-      .get(sessionId) as { entityId: string | null } | undefined;
+    const row = (await pgGet(
+      'SELECT home_assistant_entity_id as entityId FROM sessions WHERE id = ?',
+      sessionId
+    )) as unknown as { entityId: string | null } | undefined;
     if (!row?.entityId) return;
     void this.animate(row.entityId, status).catch((error) => {
       console.warn(
@@ -242,11 +244,11 @@ export class HomeAssistantStatusLightService {
     userId: string,
     status: HomeAssistantStatus
   ): Promise<void> {
-    const row = getDatabase()
-      .prepare(
-        'SELECT home_assistant_entity_id as entityId FROM sessions WHERE id = ? AND user_id = ?'
-      )
-      .get(sessionId, userId) as { entityId: string | null } | undefined;
+    const row = (await pgGet(
+      'SELECT home_assistant_entity_id as entityId FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId
+    )) as unknown as { entityId: string | null } | undefined;
     if (!row) throw new Error('Session not found');
     if (!row.entityId) throw new Error('No Home Assistant light is assigned to this session');
     await this.startAnimation(row.entityId, status);
@@ -315,12 +317,10 @@ export class HomeAssistantStatusLightService {
     const connection = this.resolveConnection();
     const generation = ++this.generation;
     const existing = this.activeAnimations.get(entityId);
-    const active: ActiveAnimation = {
-      generation,
-      originalState: existing?.originalState || this.getState(connection, entityId),
-    };
+    const originalState = existing?.originalState ?? (await this.getState(connection, entityId));
+    const active: ActiveAnimation = { generation, originalState };
     this.activeAnimations.set(entityId, active);
-    const original = await active.originalState;
+    const original = active.originalState;
     if (!this.isCurrent(entityId, generation)) return;
     void this.runAnimation(connection, entityId, original, status, generation);
   }

@@ -1,6 +1,6 @@
+import { all as pgAll } from '../db/pg.js';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
-import { getDatabase } from '../db/index.js';
 
 const DEFAULT_POLL_MS = 15 * 60 * 1000;
 const MIN_POLL_MS = 60 * 1000;
@@ -27,9 +27,9 @@ export async function collectProviderLimitSnapshots(): Promise<{
   if (collectionRunning) return { users: 0, requests: 0, failures: 0 };
   collectionRunning = true;
   try {
-    const users = getDatabase()
-      .prepare(`SELECT id FROM users WHERE status = 'active' ORDER BY created_at ASC`)
-      .all() as Array<{ id: string }>;
+    const users = (await pgAll(
+      `SELECT id FROM users WHERE status = 'active' ORDER BY created_at ASC`
+    )) as unknown as Array<{ id: string }>;
     let requests = 0;
     let failures = 0;
 

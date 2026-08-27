@@ -25,8 +25,12 @@ export function isMobileGatewayPublicRequest(method: string, path: string): bool
  * that prefix. The gateway is intentionally stricter than the browser surface:
  * every route requires a Plum JWT unless it is an exact bootstrap endpoint.
  */
-export function mobileGatewayAuth(req: Request, res: Response, next: NextFunction): void {
+export async function mobileGatewayAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   if (req.get(MOBILE_GATEWAY_HEADER) !== '1') return next();
   if (isMobileGatewayPublicRequest(req.method, req.path)) return next();
-  requireAuth(req, res, next);
+  await requireAuth(req, res, next);
 }

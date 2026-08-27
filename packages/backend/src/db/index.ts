@@ -1,3 +1,4 @@
+import { run as pgRun } from './pg.js';
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
@@ -160,48 +161,40 @@ export function usageHistoryTurnExists(
 }
 
 /** Persist one provider turn exactly once. Returns false for a duplicate turn. */
-export function insertUsageHistoryTurn(
-  database: Database.Database,
-  input: UsageHistoryTurnInput
-): boolean {
+export async function insertUsageHistoryTurn(input: UsageHistoryTurnInput): Promise<boolean> {
   const createdAt = input.createdAt
     ? new Date(input.createdAt).toISOString().slice(0, 19).replace('T', ' ')
     : null;
-  const result = database
-    .prepare(
-      `
-      INSERT INTO usage_history (
-        user_id,
-        session_id,
-        provider,
-        turn_id,
-        input_tokens,
-        output_tokens,
-        cache_read_tokens,
-        cache_creation_tokens,
-        total_tokens,
-        cost_usd,
-        model,
-        created_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
-      ON CONFLICT(session_id, provider, turn_id) DO NOTHING
-    `
-    )
-    .run(
-      input.userId,
-      input.sessionId,
-      input.provider,
-      input.turnId,
-      input.inputTokens,
-      input.outputTokens,
-      input.cacheReadTokens,
-      input.cacheCreationTokens,
-      input.totalTokens,
-      input.costUsd,
-      input.model,
-      createdAt
-    );
+  const result = await pgRun(
+    `INSERT INTO usage_history (
+       user_id,
+       session_id,
+       provider,
+       turn_id,
+       input_tokens,
+       output_tokens,
+       cache_read_tokens,
+       cache_creation_tokens,
+       total_tokens,
+       cost_usd,
+       model,
+       created_at
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+     ON CONFLICT (session_id, provider, turn_id) DO NOTHING`,
+    input.userId,
+    input.sessionId,
+    input.provider,
+    input.turnId,
+    input.inputTokens,
+    input.outputTokens,
+    input.cacheReadTokens,
+    input.cacheCreationTokens,
+    input.totalTokens,
+    input.costUsd,
+    input.model,
+    createdAt
+  );
   return result.changes > 0;
 }
 
@@ -221,7 +214,7 @@ export function reconcileStaleRunningSessions(database: Database.Database): numb
  * tokens, under its native session directory. WebUI message ids are reused as
  * turn ids so this scan is safe to repeat and cannot duplicate live writes.
  */
-export function backfillKimiUsageHistory(database: Database.Database): number {
+export async function backfillKimiUsageHistory(database: Database.Database): Promise<number> {
   const kimiHome = (
     process.env.CLI_PROVIDER_KIMI_CREDENTIALS_PATH || path.join(os.homedir(), '.kimi-code')
   ).replace(/^~/, os.homedir());
@@ -302,7 +295,7 @@ export function backfillKimiUsageHistory(database: Database.Database): number {
           null
         ).cost;
         if (
-          insertUsageHistoryTurn(database, {
+          await insertUsageHistoryTurn({
             userId: session.userId,
             sessionId: session.id,
             provider: 'kimi',

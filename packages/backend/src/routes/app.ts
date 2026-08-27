@@ -114,7 +114,7 @@ const crashReportSchema = z.object({
   occurredAt: z.string().max(40).optional(),
 });
 
-router.post('/crash-report', requireAuth, (req: Request, res: Response) => {
+router.post('/crash-report', requireAuth, async (req: Request, res: Response) => {
   const parsed = crashReportSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new AppError('Invalid crash report', 400, 'VALIDATION_ERROR');
@@ -130,7 +130,7 @@ router.post('/crash-report', requireAuth, (req: Request, res: Response) => {
     reason: report.stackTrace.split('\n')[0],
   });
 
-  recordAudit({
+  await recordAudit({
     actorUserId: userId,
     action: 'client.crash',
     resourceType: report.platform,

@@ -1,7 +1,7 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import { getDatabase } from '../db/index.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import type { ApiResponse } from '@plum-code-webui/shared';
 
@@ -24,14 +24,12 @@ const updateNoteSchema = z.object({
   pinned: z.boolean().optional(),
 });
 
-function userOwnsSession(
-  db: ReturnType<typeof getDatabase>,
-  sessionId: string,
-  userId: string
-): boolean {
-  const row = db
-    .prepare(`SELECT 1 AS ok FROM sessions WHERE id = ? AND user_id = ?`)
-    .get(sessionId, userId) as { ok: number } | undefined;
+async function userOwnsSession(sessionId: string, userId: string): Promise<boolean> {
+  const row = (await pgGet(
+    `SELECT 1 AS ok FROM sessions WHERE id = ? AND user_id = ?`,
+    sessionId,
+    userId
+  )) as unknown as { ok: number } | undefined;
   return !!row;
 }
 
@@ -47,16 +45,14 @@ interface Note {
 }
 
 // Get all notes for user
-router.get('/', requireAuth, (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
 
   try {
-    const notes = db
-      .prepare(
-        `SELECT id, user_id, session_id, title, content, pinned, created_at, updated_at FROM notes WHERE user_id = ? ORDER BY pinned DESC, updated_at DESC`
-      )
-      .all(authReq.userId) as Note[];
+    const notes = (await pgAll(
+      `SELECT id, user_id, session_id, title, content, pinned, created_at, updated_at FROM notes WHERE user_id = ? ORDER BY pinned DESC, updated_at DESC`,
+      authReq.userId
+    )) as unknown as Note[];
 
     const response: ApiResponse<Note[]> = {
       success: true,
@@ -73,17 +69,17 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // Get notes for a specific session
-router.get('/session/:sessionId', requireAuth, (req, res) => {
+router.get('/session/:sessionId', requireAuth, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { sessionId } = req.params;
 
   try {
-    const notes = db
-      .prepare(
-        `SELECT id, user_id, session_id, title, content, pinned, created_at, updated_at FROM notes WHERE user_id = ? AND session_id = ? ORDER BY pinned DESC, updated_at DESC`
-      )
-      .all(authReq.userId, sessionId) as Note[];
+    const notes = (await pgAll(
+      `SELECT id, user_id, session_id, title, content, pinned, created_at, updated_at FROM notes WHERE user_id = ? AND session_id = ? ORDER BY pinned DESC, updated_at DESC`,
+      authReq.userId,
+      sessionId
+    )) as unknown as Note[];
 
     const response: ApiResponse<Note[]> = {
       success: true,
@@ -100,9 +96,8 @@ router.get('/session/:sessionId', requireAuth, (req, res) => {
 });
 
 // Create a new note
-router.post('/', requireAuth, (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
 
   const parsed = createNoteSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -117,7 +112,7 @@ router.post('/', requireAuth, (req, res) => {
   }
   const { title, content, sessionId, pinned } = parsed.data;
 
-  if (sessionId && !userOwnsSession(db, sessionId, authReq.userId)) {
+  if (sessionId && !(await userOwnsSession(sessionId, authReq.userId))) {
     const response: ApiResponse<null> = {
       success: false,
       error: { code: 'FORBIDDEN', message: 'Session not found or access denied' },
@@ -127,9 +122,8 @@ router.post('/', requireAuth, (req, res) => {
 
   try {
     const id = nanoid();
-    db.prepare(
-      `INSERT INTO notes (id, user_id, session_id, title, content, pinned) VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(
+    await pgRun(
+      `INSERT INTO notes (id, user_id, session_id, title, content, pinned) VALUES (?, ?, ?, ?, ?, ?)`,
       id,
       authReq.userId,
       sessionId || null,
@@ -138,11 +132,10 @@ router.post('/', requireAuth, (req, res) => {
       pinned ? 1 : 0
     );
 
-    const note = db
-      .prepare(
-        `SELECT id, user_id, session_id, title, content, pinned, created_at, updated_at FROM notes WHERE id = ?`
-      )
-      .get(id) as Note;
+    const note = (await pgGet(
+      `SELECT id, user_id, session_id, title, content, pinned, created_at, updated_at FROM notes WHERE id = ?`,
+      id
+    )) as unknown as Note;
 
     const response: ApiResponse<Note> = {
       success: true,
@@ -159,9 +152,9 @@ router.post('/', requireAuth, (req, res) => {
 });
 
 // Update a note
-router.patch('/:id', requireAuth, (req, res) => {
+router.patch('/:id', requireAuth, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { id } = req.params;
 
   const parsed = updateNoteSchema.safeParse(req.body);
@@ -179,11 +172,11 @@ router.patch('/:id', requireAuth, (req, res) => {
 
   try {
     // Check ownership
-    const existing = db
-      .prepare(
-        `SELECT id, user_id, session_id, title, content, pinned, created_at, updated_at FROM notes WHERE id = ? AND user_id = ?`
-      )
-      .get(id, authReq.userId) as Note | undefined;
+    const existing = (await pgGet(
+      `SELECT id, user_id, session_id, title, content, pinned, created_at, updated_at FROM notes WHERE id = ? AND user_id = ?`,
+      id,
+      authReq.userId
+    )) as unknown as Note | undefined;
 
     if (!existing) {
       const response: ApiResponse<null> = {
@@ -193,7 +186,7 @@ router.patch('/:id', requireAuth, (req, res) => {
       return res.status(404).json(response);
     }
 
-    if (sessionId && !userOwnsSession(db, sessionId, authReq.userId)) {
+    if (sessionId && !(await userOwnsSession(sessionId, authReq.userId))) {
       const response: ApiResponse<null> = {
         success: false,
         error: { code: 'FORBIDDEN', message: 'Session not found or access denied' },
@@ -223,13 +216,12 @@ router.patch('/:id', requireAuth, (req, res) => {
     }
 
     values.push(id as string);
-    db.prepare(`UPDATE notes SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    await pgRun(`UPDATE notes SET ${updates.join(', ')} WHERE id = ?`, ...values);
 
-    const note = db
-      .prepare(
-        `SELECT id, user_id, session_id, title, content, pinned, created_at, updated_at FROM notes WHERE id = ?`
-      )
-      .get(id) as Note;
+    const note = (await pgGet(
+      `SELECT id, user_id, session_id, title, content, pinned, created_at, updated_at FROM notes WHERE id = ?`,
+      id
+    )) as unknown as Note;
 
     const response: ApiResponse<Note> = {
       success: true,
@@ -246,15 +238,17 @@ router.patch('/:id', requireAuth, (req, res) => {
 });
 
 // Delete a note
-router.delete('/:id', requireAuth, (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { id } = req.params;
 
   try {
-    const result = db
-      .prepare(`DELETE FROM notes WHERE id = ? AND user_id = ?`)
-      .run(id, authReq.userId);
+    const result = await pgRun(
+      `DELETE FROM notes WHERE id = ? AND user_id = ?`,
+      id,
+      authReq.userId
+    );
 
     if (result.changes === 0) {
       const response: ApiResponse<null> = {

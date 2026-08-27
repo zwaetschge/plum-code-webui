@@ -126,15 +126,12 @@ async function execute(
 }
 
 /** First row, or undefined — the shape `better-sqlite3`'s `.get()` returns. */
-export async function get(
-  sql: string,
-  ...params: unknown[]
-): Promise<Record<string, unknown> | undefined> {
+export async function get(sql: string, ...params: unknown[]): Promise<any> {
   return (await execute(getPool(), sql, params)).rows[0];
 }
 
 /** All rows, like `.all()`. */
-export async function all(sql: string, ...params: unknown[]): Promise<Record<string, unknown>[]> {
+export async function all(sql: string, ...params: unknown[]): Promise<any[]> {
   return (await execute(getPool(), sql, params)).rows;
 }
 
@@ -154,8 +151,8 @@ export async function run(sql: string, ...params: unknown[]): Promise<{ changes:
  * shape matches what is there rather than adding a type dance around it.
  */
 export interface TransactionScope {
-  get(sql: string, ...params: unknown[]): Promise<Record<string, unknown> | undefined>;
-  all(sql: string, ...params: unknown[]): Promise<Record<string, unknown>[]>;
+  get(sql: string, ...params: unknown[]): Promise<any>;
+  all(sql: string, ...params: unknown[]): Promise<any[]>;
   run(sql: string, ...params: unknown[]): Promise<{ changes: number }>;
 }
 

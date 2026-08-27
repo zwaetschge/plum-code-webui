@@ -1,4 +1,4 @@
-import { getDatabase } from '../../db/index.js';
+import { get as pgGet, all as pgAll, run as pgRun } from '../../db/pg.js';
 import { discordIntegrationService } from './DiscordIntegrationService.js';
 
 const MAX_ATTEMPTS = 5;
@@ -86,16 +86,15 @@ export class DiscordOutboxWorker {
     if (this.processing) return 0;
     this.processing = true;
     try {
-      const rows = getDatabase()
-        .prepare(
-          `SELECT id
+      const rows = (await pgAll(
+        `SELECT id
            FROM discord_outbox
            WHERE status IN ('pending', 'failed')
              AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
            ORDER BY created_at ASC
-           LIMIT ?`
-        )
-        .all(Math.max(1, Math.min(25, limit))) as Array<{ id: string }>;
+           LIMIT ?`,
+        Math.max(1, Math.min(25, limit))
+      )) as unknown as Array<{ id: string }>;
       let sent = 0;
       for (const row of rows) {
         const result = await this.processNow(row.id);
@@ -111,20 +110,19 @@ export class DiscordOutboxWorker {
     id: string,
     options: { ignoreEnabled?: boolean } = {}
   ): Promise<DiscordSendResult> {
-    const db = getDatabase();
-    db.prepare(
+    await pgRun(
       `UPDATE discord_outbox
        SET status = 'sending', updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND status IN ('pending', 'failed', 'sending')`
-    ).run(id);
+       WHERE id = ? AND status IN ('pending', 'failed', 'sending')`,
+      id
+    );
 
-    const row = db
-      .prepare(
-        `SELECT id, payload_json as payloadJson, attempts
+    const row = (await pgGet(
+      `SELECT id, payload_json as payloadJson, attempts
          FROM discord_outbox
-         WHERE id = ?`
-      )
-      .get(id) as OutboxRow | undefined;
+         WHERE id = ?`,
+      id
+    )) as unknown as OutboxRow | undefined;
     if (!row) return { sent: false, error: 'Outbox item not found' };
 
     const runtime = discordIntegrationService.getRuntimeSettings();
@@ -133,11 +131,11 @@ export class DiscordOutboxWorker {
         runtime.transport === 'bot'
           ? 'Discord bot token or channel ID is not configured'
           : 'Discord webhook URL is not configured';
-      this.markDisabled(id, error);
+      await this.markDisabled(id, error);
       return { sent: false, error };
     }
     if (!runtime.enabled && !options.ignoreEnabled) {
-      this.markDisabled(id, 'Discord alerts are disabled');
+      await this.markDisabled(id, 'Discord alerts are disabled');
       return { sent: false, error: 'Discord alerts are disabled' };
     }
 
@@ -158,21 +156,22 @@ export class DiscordOutboxWorker {
       );
 
       if (response.ok) {
-        db.prepare(
+        await pgRun(
           `UPDATE discord_outbox
            SET status = 'sent',
                sent_at = CURRENT_TIMESTAMP,
                error = NULL,
                updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?`
-        ).run(id);
+           WHERE id = ?`,
+          id
+        );
         return { sent: true, error: null };
       }
 
       const body = await responseBody(response);
       if (response.status === 429) {
         const seconds = retryAfterSeconds(response, body);
-        this.markRetry(id, row.attempts + 1, seconds, formatDiscordError(response, body));
+        await this.markRetry(id, row.attempts + 1, seconds, formatDiscordError(response, body));
         return { sent: false, error: `Discord rate limited; retrying in ${seconds}s` };
       }
 
@@ -182,71 +181,79 @@ export class DiscordOutboxWorker {
           : formatDiscordError(response, body);
       if (response.status === 401 || response.status === 403) {
         discordIntegrationService.updateSettings({ enabled: false });
-        this.markDisabled(id, error);
+        await this.markDisabled(id, error);
         return { sent: false, error };
       }
 
       if (response.status >= 400 && response.status < 500) {
-        this.markFailed(id, row.attempts + 1, error);
+        await this.markFailed(id, row.attempts + 1, error);
         return { sent: false, error };
       }
 
       const attempts = row.attempts + 1;
       if (attempts >= MAX_ATTEMPTS) {
-        this.markFailed(id, attempts, error);
+        await this.markFailed(id, attempts, error);
       } else {
-        this.markRetry(id, attempts, retryDelaySeconds(attempts), error);
+        await this.markRetry(id, attempts, retryDelaySeconds(attempts), error);
       }
       return { sent: false, error };
     } catch (err) {
       const attempts = row.attempts + 1;
       const error = err instanceof Error ? err.message : String(err);
       if (attempts >= MAX_ATTEMPTS) {
-        this.markFailed(id, attempts, error);
+        await this.markFailed(id, attempts, error);
       } else {
-        this.markRetry(id, attempts, retryDelaySeconds(attempts), error);
+        await this.markRetry(id, attempts, retryDelaySeconds(attempts), error);
       }
       return { sent: false, error };
     }
   }
 
-  private markRetry(id: string, attempts: number, seconds: number, error: string): void {
-    getDatabase()
-      .prepare(
-        `UPDATE discord_outbox
+  private async markRetry(
+    id: string,
+    attempts: number,
+    seconds: number,
+    error: string
+  ): Promise<void> {
+    await pgRun(
+      `UPDATE discord_outbox
          SET status = 'pending',
              attempts = ?,
              next_attempt_at = datetime('now', ?),
              error = ?,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?`
-      )
-      .run(attempts, `+${Math.max(1, seconds)} seconds`, error.slice(0, 700), id);
+         WHERE id = ?`,
+      attempts,
+      `+${Math.max(1, seconds)} seconds`,
+      error.slice(0, 700),
+      id
+    );
   }
 
-  private markFailed(id: string, attempts: number, error: string): void {
-    getDatabase()
-      .prepare(
-        `UPDATE discord_outbox
+  private async markFailed(id: string, attempts: number, error: string): Promise<void> {
+    await pgRun(
+      `UPDATE discord_outbox
          SET status = 'failed',
              attempts = ?,
              error = ?,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?`
-      )
-      .run(attempts, error.slice(0, 700), id);
+         WHERE id = ?`,
+      attempts,
+      error.slice(0, 700),
+      id
+    );
   }
 
-  private markDisabled(id: string, error: string): void {
-    getDatabase()
-      .prepare(
-        `UPDATE discord_outbox
+  private async markDisabled(id: string, error: string): Promise<void> {
+    await pgRun(
+      `UPDATE discord_outbox
          SET status = 'disabled',
              error = ?,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?`
-      )
-      .run(error.slice(0, 700), id);
+         WHERE id = ?`,
+      error.slice(0, 700),
+      id
+    );
   }
 }
 

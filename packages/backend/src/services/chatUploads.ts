@@ -1,3 +1,9 @@
+import {
+  get as pgGet,
+  all as pgAll,
+  run as pgRun,
+  transaction as pgTransaction,
+} from '../db/pg.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,9 +13,8 @@ import type {
   CreateChatUploadInput,
   FileAttachmentData,
 } from '@plum-code-webui/shared';
-import type Database from 'better-sqlite3';
 
-import { getDatabase, getDatabasePath } from '../db/index.js';
+import { getDatabasePath } from '../db/index.js';
 import { MAX_CHAT_MEDIA_BYTES } from './chatMedia.js';
 
 const DEFAULT_CHUNK_BYTES = 1024 * 1024;
@@ -52,10 +57,6 @@ export class ChatUploadError extends Error {
   }
 }
 
-function uploadDatabase(database?: Database.Database): Database.Database {
-  return database ?? getDatabase();
-}
-
 function storageRoot(): string {
   return process.env.CHAT_UPLOAD_DIR
     ? path.resolve(process.env.CHAT_UPLOAD_DIR)
@@ -88,15 +89,13 @@ function safeFilename(value: string): string {
   return clean;
 }
 
-function readOwnedUpload(
+async function readOwnedUpload(
   userId: string,
   sessionId: string,
-  uploadId: string,
-  database?: Database.Database
-): UploadRow {
-  const row = uploadDatabase(database)
-    .prepare(
-      `SELECT id, user_id AS userId, session_id AS sessionId, filename,
+  uploadId: string
+): Promise<UploadRow> {
+  const row = (await pgGet(
+    `SELECT id, user_id AS userId, session_id AS sessionId, filename,
               mime_type AS mimeType, byte_size AS byteSize, sha256,
               chunk_size AS chunkSize, total_chunks AS totalChunks,
               received_bytes AS receivedBytes, status, error,
@@ -104,40 +103,41 @@ function readOwnedUpload(
               consumed_message_id AS consumedMessageId,
               expires_at AS expiresAt, created_at AS createdAt, updated_at AS updatedAt
          FROM chat_uploads
-        WHERE id = ? AND user_id = ? AND session_id = ?`
-    )
-    .get(uploadId, userId, sessionId) as UploadRow | undefined;
+        WHERE id = ? AND user_id = ? AND session_id = ?`,
+    uploadId,
+    userId,
+    sessionId
+  )) as unknown as UploadRow | undefined;
   if (!row) throw new ChatUploadError('Upload not found', 404, 'UPLOAD_NOT_FOUND');
   if (
     row.status !== 'cancelled' &&
     !row.consumedMessageId &&
     Date.parse(row.expiresAt) <= Date.now()
   ) {
-    const db = uploadDatabase(database);
-    db.transaction(() => {
-      db.prepare(`DELETE FROM chat_upload_chunks WHERE upload_id = ?`).run(row.id);
-      db.prepare(
+    await pgTransaction(async (tx) => {
+      await tx.run(`DELETE FROM chat_upload_chunks WHERE upload_id = ?`, row.id);
+      await tx.run(
         `UPDATE chat_uploads
             SET status = 'cancelled', received_bytes = 0,
                 error = 'Upload expired', updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?`
-      ).run(row.id);
-    })();
+          WHERE id = ?`,
+        row.id
+      );
+    });
     void rm(uploadDirectory(row.userId, row.id), { recursive: true, force: true });
     throw new ChatUploadError('Upload expired', 410, 'UPLOAD_EXPIRED');
   }
   return row;
 }
 
-function chunkIndexes(uploadId: string, database?: Database.Database): number[] {
+async function chunkIndexes(uploadId: string): Promise<number[]> {
   return (
-    uploadDatabase(database)
-      .prepare(
-        `SELECT chunk_index AS chunkIndex
+    (await pgAll(
+      `SELECT chunk_index AS chunkIndex
            FROM chat_upload_chunks
-          WHERE upload_id = ? ORDER BY chunk_index ASC`
-      )
-      .all(uploadId) as Array<{ chunkIndex: number }>
+          WHERE upload_id = ? ORDER BY chunk_index ASC`,
+      uploadId
+    )) as unknown as Array<{ chunkIndex: number }>
   ).map((row) => row.chunkIndex);
 }
 
@@ -179,10 +179,8 @@ function withUploadLock<T>(uploadId: string, action: () => Promise<T>): Promise<
 export async function createChatUpload(
   userId: string,
   sessionId: string,
-  input: CreateChatUploadInput,
-  database?: Database.Database
+  input: CreateChatUploadInput
 ): Promise<ChatUpload> {
-  const db = uploadDatabase(database);
   if (!Number.isSafeInteger(input.byteSize) || input.byteSize <= 0) {
     throw new ChatUploadError('byteSize must be a positive integer');
   }
@@ -190,9 +188,11 @@ export async function createChatUpload(
     throw new ChatUploadError('Upload exceeds 25 MB', 413, 'UPLOAD_TOO_LARGE');
   }
   if (!SHA256_PATTERN.test(input.sha256)) throw new ChatUploadError('sha256 is invalid');
-  const session = db
-    .prepare(`SELECT id FROM sessions WHERE id = ? AND user_id = ?`)
-    .get(sessionId, userId);
+  const session = await pgGet(
+    `SELECT id FROM sessions WHERE id = ? AND user_id = ?`,
+    sessionId,
+    userId
+  );
   if (!session) throw new ChatUploadError('Session not found', 404, 'SESSION_NOT_FOUND');
   const chunkSize = input.chunkSize ?? DEFAULT_CHUNK_BYTES;
   if (
@@ -211,12 +211,11 @@ export async function createChatUpload(
     throw new ChatUploadError('mimeType is invalid');
   }
   await mkdir(uploadDirectory(userId, id), { recursive: true, mode: 0o700 });
-  db.prepare(
+  await pgRun(
     `INSERT INTO chat_uploads (
        id, user_id, session_id, filename, mime_type, byte_size, sha256,
        chunk_size, total_chunks, expires_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     userId,
     sessionId,
@@ -228,21 +227,19 @@ export async function createChatUpload(
     Math.ceil(input.byteSize / chunkSize),
     expiresAt
   );
-  return getChatUpload(userId, sessionId, id, db);
+  return getChatUpload(userId, sessionId, id);
 }
 
-export function getChatUpload(
+export async function getChatUpload(
   userId: string,
   sessionId: string,
-  uploadId: string,
-  database?: Database.Database
-): ChatUpload {
-  const db = uploadDatabase(database);
-  const row = readOwnedUpload(userId, sessionId, uploadId, db);
-  return toPublicUpload(row, chunkIndexes(uploadId, db));
+  uploadId: string
+): Promise<ChatUpload> {
+  const row = await readOwnedUpload(userId, sessionId, uploadId);
+  return toPublicUpload(row, await chunkIndexes(uploadId));
 }
 
-async function assembleUpload(row: UploadRow, database: Database.Database): Promise<void> {
+async function assembleUpload(row: UploadRow): Promise<void> {
   const destination = completedPath(row);
   const temporary = `${destination}.${randomUUID()}.tmp`;
   const hash = createHash('sha256');
@@ -266,13 +263,13 @@ async function assembleUpload(row: UploadRow, database: Database.Database): Prom
   const actualHash = hash.digest('hex');
   if (assembledBytes !== row.byteSize || actualHash !== row.sha256) {
     await rm(temporary, { force: true });
-    database
-      .prepare(
-        `UPDATE chat_uploads
+    await pgRun(
+      `UPDATE chat_uploads
             SET status = 'failed', error = ?, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?`
-      )
-      .run('Assembled upload failed size or SHA-256 validation', row.id);
+          WHERE id = ?`,
+      'Assembled upload failed size or SHA-256 validation',
+      row.id
+    );
     throw new ChatUploadError(
       'Assembled upload failed size or SHA-256 validation',
       422,
@@ -280,14 +277,13 @@ async function assembleUpload(row: UploadRow, database: Database.Database): Prom
     );
   }
   await rename(temporary, destination);
-  database
-    .prepare(
-      `UPDATE chat_uploads
+  await pgRun(
+    `UPDATE chat_uploads
           SET status = 'complete', error = NULL, received_bytes = byte_size,
               updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`
-    )
-    .run(row.id);
+        WHERE id = ?`,
+    row.id
+  );
 }
 
 export async function putChatUploadChunk(
@@ -297,16 +293,14 @@ export async function putChatUploadChunk(
   chunkIndex: number,
   bytes: Buffer,
   declaredSha256?: string,
-  contentRange?: { start: number; end: number; total: number },
-  database?: Database.Database
+  contentRange?: { start: number; end: number; total: number }
 ): Promise<ChatUpload> {
   return withUploadLock(uploadId, async () => {
-    const db = uploadDatabase(database);
-    const row = readOwnedUpload(userId, sessionId, uploadId, db);
+    const row = await readOwnedUpload(userId, sessionId, uploadId);
     if (row.status === 'cancelled' || row.status === 'failed') {
       throw new ChatUploadError(`Upload is ${row.status}`, 409, 'UPLOAD_NOT_PENDING');
     }
-    if (row.status === 'complete') return getChatUpload(userId, sessionId, uploadId, db);
+    if (row.status === 'complete') return getChatUpload(userId, sessionId, uploadId);
     if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= row.totalChunks) {
       throw new ChatUploadError('Chunk index is outside upload range');
     }
@@ -327,12 +321,12 @@ export async function putChatUploadChunk(
     if (declaredSha256 && declaredSha256.toLowerCase() !== actualHash) {
       throw new ChatUploadError('Chunk SHA-256 does not match', 422, 'CHUNK_INTEGRITY_FAILED');
     }
-    const existing = db
-      .prepare(
-        `SELECT byte_size AS byteSize, sha256
-           FROM chat_upload_chunks WHERE upload_id = ? AND chunk_index = ?`
-      )
-      .get(uploadId, chunkIndex) as { byteSize: number; sha256: string } | undefined;
+    const existing = (await pgGet(
+      `SELECT byte_size AS byteSize, sha256
+           FROM chat_upload_chunks WHERE upload_id = ? AND chunk_index = ?`,
+      uploadId,
+      chunkIndex
+    )) as unknown as { byteSize: number; sha256: string } | undefined;
     if (existing) {
       if (existing.byteSize !== bytes.length || existing.sha256 !== actualHash) {
         throw new ChatUploadError(
@@ -341,7 +335,7 @@ export async function putChatUploadChunk(
           'CHUNK_CONFLICT'
         );
       }
-      return getChatUpload(userId, sessionId, uploadId, db);
+      return getChatUpload(userId, sessionId, uploadId);
     }
 
     const destination = chunkPath(row, chunkIndex);
@@ -349,49 +343,54 @@ export async function putChatUploadChunk(
     await writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 });
     await rename(temporary, destination);
     try {
-      db.transaction(() => {
-        db.prepare(
+      await pgTransaction(async (tx) => {
+        await tx.run(
           `INSERT INTO chat_upload_chunks (upload_id, chunk_index, byte_size, sha256)
-           VALUES (?, ?, ?, ?)`
-        ).run(uploadId, chunkIndex, bytes.length, actualHash);
-        db.prepare(
+           VALUES (?, ?, ?, ?)`,
+          uploadId,
+          chunkIndex,
+          bytes.length,
+          actualHash
+        );
+        await tx.run(
           `UPDATE chat_uploads
               SET received_bytes = received_bytes + ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?`
-        ).run(bytes.length, uploadId);
-      })();
+            WHERE id = ?`,
+          bytes.length,
+          uploadId
+        );
+      });
     } catch (error) {
       await rm(destination, { force: true });
       throw error;
     }
-    const afterChunk = readOwnedUpload(userId, sessionId, uploadId, db);
-    if (chunkIndexes(uploadId, db).length === row.totalChunks) await assembleUpload(afterChunk, db);
-    return getChatUpload(userId, sessionId, uploadId, db);
+    const afterChunk = await readOwnedUpload(userId, sessionId, uploadId);
+    if ((await chunkIndexes(uploadId)).length === row.totalChunks) await assembleUpload(afterChunk);
+    return getChatUpload(userId, sessionId, uploadId);
   });
 }
 
 export async function cancelChatUpload(
   userId: string,
   sessionId: string,
-  uploadId: string,
-  database?: Database.Database
+  uploadId: string
 ): Promise<ChatUpload> {
   return withUploadLock(uploadId, async () => {
-    const db = uploadDatabase(database);
-    const row = readOwnedUpload(userId, sessionId, uploadId, db);
+    const row = await readOwnedUpload(userId, sessionId, uploadId);
     if (row.consumedMessageId) {
       throw new ChatUploadError('Upload is already attached to a message', 409, 'UPLOAD_CONSUMED');
     }
-    db.transaction(() => {
-      db.prepare(`DELETE FROM chat_upload_chunks WHERE upload_id = ?`).run(uploadId);
-      db.prepare(
+    await pgTransaction(async (tx) => {
+      await tx.run(`DELETE FROM chat_upload_chunks WHERE upload_id = ?`, uploadId);
+      await tx.run(
         `UPDATE chat_uploads
             SET status = 'cancelled', received_bytes = 0, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?`
-      ).run(uploadId);
-    })();
+          WHERE id = ?`,
+        uploadId
+      );
+    });
     await rm(uploadDirectory(userId, uploadId), { recursive: true, force: true });
-    return getChatUpload(userId, sessionId, uploadId, db);
+    return getChatUpload(userId, sessionId, uploadId);
   });
 }
 
@@ -400,10 +399,8 @@ export async function resolveChatUploads(
   sessionId: string,
   uploadIds: string[],
   reservationId: string,
-  database?: Database.Database,
   additional: { fileCount?: number; byteSize?: number } = {}
 ): Promise<Array<FileAttachmentData & { uploadId: string }>> {
-  const db = uploadDatabase(database);
   const uniqueIds = [...new Set(uploadIds)];
   const additionalFiles = Math.max(0, additional.fileCount ?? 0);
   const additionalBytes = Math.max(0, additional.byteSize ?? 0);
@@ -425,11 +422,11 @@ export async function resolveChatUploads(
   if (!reservationId || reservationId.length > 160) {
     throw new ChatUploadError('A valid delivery id is required', 400, 'INVALID_DELIVERY_ID');
   }
-  const rows = db.transaction(() => {
+  const rows = await pgTransaction(async (tx) => {
     const validated: UploadRow[] = [];
     let totalBytes = additionalBytes;
     for (const uploadId of uniqueIds) {
-      const row = readOwnedUpload(userId, sessionId, uploadId, db);
+      const row = await readOwnedUpload(userId, sessionId, uploadId);
       if (row.status !== 'complete') {
         throw new ChatUploadError(`Upload ${uploadId} is not complete`, 409, 'UPLOAD_NOT_COMPLETE');
       }
@@ -444,22 +441,25 @@ export async function resolveChatUploads(
       if (totalBytes > MAX_CHAT_UPLOAD_TOTAL_BYTES) {
         throw new ChatUploadError('Combined uploads exceed 32 MiB', 413, 'UPLOAD_TOTAL_TOO_LARGE');
       }
-      const claimed = db
-        .prepare(
-          `UPDATE chat_uploads
+      const claimed = await tx.run(
+        `UPDATE chat_uploads
               SET reserved_delivery_id = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND user_id = ? AND session_id = ?
               AND consumed_message_id IS NULL
-              AND (reserved_delivery_id IS NULL OR reserved_delivery_id = ?)`
-        )
-        .run(reservationId, uploadId, userId, sessionId, reservationId);
+              AND (reserved_delivery_id IS NULL OR reserved_delivery_id = ?)`,
+        reservationId,
+        uploadId,
+        userId,
+        sessionId,
+        reservationId
+      );
       if (claimed.changes !== 1) {
         throw new ChatUploadError(`Upload ${uploadId} is already reserved`, 409, 'UPLOAD_RESERVED');
       }
       validated.push(row);
     }
     return validated;
-  })();
+  });
   const resolved: Array<FileAttachmentData & { uploadId: string }> = [];
   // Resolve sequentially so raw Buffers are not all resident at once. The
   // returned base64 strings are the only unavoidable aggregate allocation.
@@ -483,81 +483,85 @@ export async function resolveChatUploads(
   return resolved;
 }
 
-export function markChatUploadsConsumed(
+export async function markChatUploadsConsumed(
   userId: string,
   sessionId: string,
   uploadIds: string[],
   messageId: string,
-  reservationId: string,
-  database?: Database.Database
-): void {
-  const db = uploadDatabase(database);
-  const update = db.prepare(
-    `UPDATE chat_uploads
-        SET consumed_message_id = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND user_id = ? AND session_id = ?
-        AND status = 'complete' AND consumed_message_id IS NULL
-        AND reserved_delivery_id = ?`
-  );
-  db.transaction(() => {
+  reservationId: string
+): Promise<void> {
+  await pgTransaction(async (tx) => {
     for (const uploadId of [...new Set(uploadIds)]) {
-      if (update.run(messageId, uploadId, userId, sessionId, reservationId).changes !== 1) {
+      const linked = await tx.run(
+        `UPDATE chat_uploads
+            SET consumed_message_id = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND user_id = ? AND session_id = ?
+            AND status = 'complete' AND consumed_message_id IS NULL
+            AND reserved_delivery_id = ?`,
+        messageId,
+        uploadId,
+        userId,
+        sessionId,
+        reservationId
+      );
+      if (linked.changes !== 1) {
         throw new ChatUploadError(`Upload ${uploadId} could not be linked`, 409, 'UPLOAD_CONSUMED');
       }
     }
-  })();
+  });
   for (const uploadId of [...new Set(uploadIds)]) {
     void rm(uploadDirectory(userId, uploadId), { recursive: true, force: true });
   }
 }
 
-export function releaseChatUploadReservations(
+export async function releaseChatUploadReservations(
   userId: string,
   sessionId: string,
   uploadIds: string[],
-  reservationId: string,
-  database?: Database.Database
-): void {
-  const db = uploadDatabase(database);
-  const release = db.prepare(
-    `UPDATE chat_uploads
-        SET reserved_delivery_id = NULL, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND user_id = ? AND session_id = ?
-        AND reserved_delivery_id = ? AND consumed_message_id IS NULL`
-  );
-  db.transaction(() => {
+  reservationId: string
+): Promise<void> {
+  await pgTransaction(async (tx) => {
     for (const uploadId of [...new Set(uploadIds)]) {
-      release.run(uploadId, userId, sessionId, reservationId);
+      await tx.run(
+        `UPDATE chat_uploads
+            SET reserved_delivery_id = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND user_id = ? AND session_id = ?
+            AND reserved_delivery_id = ? AND consumed_message_id IS NULL`,
+        uploadId,
+        userId,
+        sessionId,
+        reservationId
+      );
     }
-  })();
+  });
 }
 
 /** Remove expired and DB-orphaned opaque upload directories. */
-export async function cleanupExpiredChatUploads(database?: Database.Database): Promise<number> {
-  const db = uploadDatabase(database);
-  const expired = db
-    .prepare(
-      `SELECT id, user_id AS userId
+export async function cleanupExpiredChatUploads(): Promise<number> {
+  const expired = (await pgAll(`SELECT id, user_id AS userId
          FROM chat_uploads
         WHERE consumed_message_id IS NULL
           AND status IN ('pending', 'complete', 'failed')
-          AND expires_at <= CURRENT_TIMESTAMP`
-    )
-    .all() as Array<{ id: string; userId: string }>;
-  db.transaction(() => {
+          AND expires_at <= CURRENT_TIMESTAMP`)) as unknown as Array<{
+    id: string;
+    userId: string;
+  }>;
+  await pgTransaction(async (tx) => {
     for (const upload of expired) {
-      db.prepare(`DELETE FROM chat_upload_chunks WHERE upload_id = ?`).run(upload.id);
-      db.prepare(
+      await tx.run(`DELETE FROM chat_upload_chunks WHERE upload_id = ?`, upload.id);
+      await tx.run(
         `UPDATE chat_uploads
             SET status = 'cancelled', received_bytes = 0, error = 'Upload expired',
                 reserved_delivery_id = NULL, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?`
-      ).run(upload.id);
+          WHERE id = ?`,
+        upload.id
+      );
     }
-  })();
+  });
   await Promise.all(
-    expired.map((upload) =>
-      rm(uploadDirectory(upload.userId, upload.id), { recursive: true, force: true })
+    expired.map(
+      async (upload) =>
+        await rm(uploadDirectory(upload.userId, upload.id), { recursive: true, force: true })
     )
   );
 
@@ -572,7 +576,7 @@ export async function cleanupExpiredChatUploads(database?: Database.Database): P
     const entries = await readdir(absoluteUserDirectory, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (!entry.isDirectory() || !/^[0-9a-f-]{36}$/i.test(entry.name)) continue;
-      if (db.prepare(`SELECT 1 FROM chat_uploads WHERE id = ?`).get(entry.name)) continue;
+      if (await pgGet(`SELECT 1 FROM chat_uploads WHERE id = ?`, entry.name)) continue;
       const orphanPath = path.join(absoluteUserDirectory, entry.name);
       const info = await lstat(orphanPath).catch(() => null);
       if (!info?.isDirectory() || info.isSymbolicLink()) continue;

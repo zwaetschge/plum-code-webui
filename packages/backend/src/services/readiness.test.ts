@@ -24,18 +24,18 @@ initDatabase();
 
 test.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
 
-test('a healthy database reports ready', () => {
-  const report = buildReadinessReport();
+test('a healthy database reports ready', async () => {
+  const report = await buildReadinessReport();
   assert.equal(report.checks.database?.ok, true, report.checks.database?.detail);
 });
 
-test('the check reads real tables, so SELECT 1 alone cannot satisfy it', () => {
+test('the check reads real tables, so SELECT 1 alone cannot satisfy it', async () => {
   // Renaming the table away is the cheapest stand-in for "its pages are gone":
   // SELECT 1 still succeeds, a real read does not.
   const db = getDatabase();
   db.exec('ALTER TABLE messages RENAME TO messages_hidden');
   try {
-    const report = buildReadinessReport();
+    const report = await buildReadinessReport();
     assert.equal(
       report.checks.database?.ok,
       false,

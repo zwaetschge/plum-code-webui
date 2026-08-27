@@ -29,43 +29,43 @@ getDatabase()
 
 test.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
 
-test('a write token resolves with write scope', () => {
-  const { token } = createGatewayToken(userId, 'supervisor', 'write');
+test('a write token resolves with write scope', async () => {
+  const { token } = await createGatewayToken(userId, 'supervisor', 'write');
   assert.deepEqual(resolveGatewayToken(token), { userId, scope: 'write' });
 });
 
-test('a read token resolves with read scope', () => {
-  const { token } = createGatewayToken(userId, 'monitor', 'read');
+test('a read token resolves with read scope', async () => {
+  const { token } = await createGatewayToken(userId, 'monitor', 'read');
   assert.deepEqual(resolveGatewayToken(token), { userId, scope: 'read' });
 });
 
-test('the default stays write, so existing callers are unaffected', () => {
-  const { token } = createGatewayToken(userId, 'legacy');
-  assert.equal(resolveGatewayToken(token)?.scope, 'write');
+test('the default stays write, so existing callers are unaffected', async () => {
+  const { token } = await createGatewayToken(userId, 'legacy');
+  await assert.equal((await resolveGatewayToken(token))?.scope, 'write');
 });
 
-test('an unrecognised stored scope fails closed to read', () => {
-  const { token, row } = createGatewayToken(userId, 'corrupt', 'write');
+test('an unrecognised stored scope fails closed to read', async () => {
+  const { token, row } = await createGatewayToken(userId, 'corrupt', 'write');
   getDatabase()
     .prepare('UPDATE gateway_tokens SET scope = ? WHERE id = ?')
     .run('superuser', row.id);
-  assert.equal(resolveGatewayToken(token)?.scope, 'read', 'must not widen rights');
+  await assert.equal((await resolveGatewayToken(token))?.scope, 'read', 'must not widen rights');
 });
 
-test('the scope is visible in the listing', () => {
-  const { row } = createGatewayToken(userId, 'listed', 'read');
-  const listed = listGatewayTokens(userId).find((entry) => entry.id === row.id);
+test('the scope is visible in the listing', async () => {
+  const { row } = await createGatewayToken(userId, 'listed', 'read');
+  const listed = (await listGatewayTokens(userId)).find((entry) => entry.id === row.id);
   assert.equal(listed?.scope, 'read');
 });
 
-test('a revoked token resolves to nothing regardless of scope', () => {
-  const { token, row } = createGatewayToken(userId, 'doomed', 'write');
+test('a revoked token resolves to nothing regardless of scope', async () => {
+  const { token, row } = await createGatewayToken(userId, 'doomed', 'write');
   revokeGatewayToken(userId, row.id);
   assert.equal(resolveGatewayToken(token), null);
 });
 
-test('a token secret is never stored verbatim', () => {
-  const { token } = createGatewayToken(userId, 'secret-check', 'read');
+test('a token secret is never stored verbatim', async () => {
+  const { token } = await createGatewayToken(userId, 'secret-check', 'read');
   const rows = getDatabase().prepare('SELECT token_hash FROM gateway_tokens').all() as Array<{
     token_hash: string;
   }>;

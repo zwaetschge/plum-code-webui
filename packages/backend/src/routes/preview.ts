@@ -1,3 +1,4 @@
+import { get as pgGet } from '../db/pg.js';
 import { Router } from 'express';
 import { spawn, type ChildProcess } from 'child_process';
 import fs from 'fs/promises';
@@ -7,7 +8,6 @@ import { config } from '../config.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { redactSensitiveText } from '../utils/sanitize.js';
-import { getDatabase } from '../db/index.js';
 import { buildRestrictedChildEnv } from '../utils/childProcessEnv.js';
 import {
   STATIC_INIT_PATH,
@@ -119,10 +119,12 @@ function isSubpath(parentPath: string, childPath: string): boolean {
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
 }
 
-function assertProjectOwnedByUser(projectPath: string, userId: string): void {
-  const owned = getDatabase()
-    .prepare('SELECT id FROM sessions WHERE user_id = ? AND working_directory = ? LIMIT 1')
-    .get(userId, path.resolve(projectPath));
+async function assertProjectOwnedByUser(projectPath: string, userId: string): Promise<void> {
+  const owned = await pgGet(
+    'SELECT id FROM sessions WHERE user_id = ? AND working_directory = ? LIMIT 1',
+    userId,
+    path.resolve(projectPath)
+  );
   if (!owned) throw new AppError('Project not found', 404, 'PROJECT_NOT_FOUND');
 }
 
@@ -566,7 +568,7 @@ router.get(
     if (!isPathAllowed(projectPath)) {
       throw new AppError('Project path is not allowed', 403, 'PROJECT_PATH_FORBIDDEN');
     }
-    assertProjectOwnedByUser(projectPath, userId);
+    await assertProjectOwnedByUser(projectPath, userId);
     if (!isSubpath(projectPath, filePath)) {
       throw new AppError('File is outside the project path', 403, 'FILE_PATH_FORBIDDEN');
     }
@@ -616,7 +618,7 @@ router.get(
     const savedPorts = parseSavedPorts(req.query.ports);
     const candidateMap = new Map<number, PreviewCandidate>();
 
-    if (projectPath) assertProjectOwnedByUser(projectPath, userId);
+    if (projectPath) await assertProjectOwnedByUser(projectPath, userId);
     const hints = await projectHints(projectPath);
     for (const candidate of hints.candidates) addCandidate(candidateMap, candidate);
     for (const port of savedPorts) {
@@ -663,7 +665,7 @@ router.post(
     if (!projectPath || !scriptName) {
       throw new AppError('Project path and script are required', 400, 'VALIDATION_ERROR');
     }
-    assertProjectOwnedByUser(projectPath, userId);
+    await assertProjectOwnedByUser(projectPath, userId);
 
     const script = await resolveStartScript(projectPath, scriptName);
     const key = processKey(projectPath, script.name);
@@ -745,7 +747,7 @@ router.post(
     if (!isPathAllowed(projectPath)) {
       throw new AppError('Project path is not allowed', 403, 'PROJECT_PATH_FORBIDDEN');
     }
-    assertProjectOwnedByUser(projectPath, userId);
+    await assertProjectOwnedByUser(projectPath, userId);
 
     const record = previewProcesses.get(processKey(projectPath, scriptName));
     if (!record || record.userId !== userId) {

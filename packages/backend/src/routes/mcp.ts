@@ -1,3 +1,4 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import { spawn } from 'child_process';
@@ -6,7 +7,6 @@ import os from 'os';
 import path from 'path';
 import { z } from 'zod';
 import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
-import { getDatabase } from '../db/index.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { redactSensitiveText } from '../utils/sanitize.js';
 import type { McpServer, McpServerType } from '@plum-code-webui/shared';
@@ -159,19 +159,17 @@ function parseMcpServer(row: Record<string, unknown>): McpServer {
   };
 }
 
-function getDatabaseMcpServers(userId: string): McpServer[] {
-  const db = getDatabase();
-  const rows = db
-    .prepare(
-      `SELECT id, user_id, name, type, command, args, url, env, enabled, created_at
-       FROM mcp_servers WHERE user_id = ? ORDER BY name`
-    )
-    .all(userId) as Record<string, unknown>[];
+async function getDatabaseMcpServers(userId: string): Promise<McpServer[]> {
+  const rows = (await pgAll(
+    `SELECT id, user_id, name, type, command, args, url, env, enabled, created_at
+       FROM mcp_servers WHERE user_id = ? ORDER BY name`,
+    userId
+  )) as unknown as Record<string, unknown>[];
 
   return rows.map(parseMcpServer);
 }
 
-function getMcpServerForRequest(serverId: string, userId: string): McpServer | null {
+async function getMcpServerForRequest(serverId: string, userId: string): Promise<McpServer | null> {
   const claudeSettingsName = decodeClaudeSettingsMcpId(serverId);
   if (claudeSettingsName) {
     const { servers, mtimeIso } = readClaudeSettingsMcpServers();
@@ -180,21 +178,20 @@ function getMcpServerForRequest(serverId: string, userId: string): McpServer | n
     return parseClaudeSettingsMcpServer(claudeSettingsName, server, userId, mtimeIso, true);
   }
 
-  const db = getDatabase();
-  const row = db
-    .prepare(
-      `SELECT id, user_id, name, type, command, args, url, env, enabled, created_at
-       FROM mcp_servers WHERE id = ? AND user_id = ?`
-    )
-    .get(serverId, userId) as Record<string, unknown> | undefined;
+  const row = (await pgGet(
+    `SELECT id, user_id, name, type, command, args, url, env, enabled, created_at
+       FROM mcp_servers WHERE id = ? AND user_id = ?`,
+    serverId,
+    userId
+  )) as unknown as Record<string, unknown> | undefined;
 
   return row ? parseMcpServer(row) : null;
 }
 
 // List MCP servers
-router.get('/', requireAuth, (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const dbServers = getDatabaseMcpServers(userId);
+  const dbServers = await getDatabaseMcpServers(userId);
   const { servers: claudeSettingsServers, mtimeIso } = readClaudeSettingsMcpServers();
   const globalServers = Object.entries(claudeSettingsServers)
     .map(([name, server]) => parseClaudeSettingsMcpServer(name, server, userId, mtimeIso))
@@ -210,13 +207,13 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // Get MCP server by ID
-router.get('/:id', requireAuth, (req, res) => {
+router.get('/:id', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const serverId = req.params.id;
   if (!serverId) {
     throw new AppError('Missing MCP server ID', 400, 'MISSING_ID');
   }
-  const server = getMcpServerForRequest(serverId, userId);
+  const server = await getMcpServerForRequest(serverId, userId);
 
   if (!server) {
     throw new AppError('MCP server not found', 404, 'NOT_FOUND');
@@ -227,7 +224,7 @@ router.get('/:id', requireAuth, (req, res) => {
 });
 
 // Create MCP server
-router.post('/', requireAuth, requireAdmin, (req, res) => {
+router.post('/', requireAuth, requireAdmin, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = createMcpServerSchema.safeParse(req.body);
 
@@ -245,13 +242,11 @@ router.post('/', requireAuth, requireAdmin, (req, res) => {
     throw new AppError('URL is required for SSE type', 400, 'MISSING_URL');
   }
 
-  const db = getDatabase();
   const serverId = nanoid();
 
-  db.prepare(
+  await pgRun(
     `INSERT INTO mcp_servers (id, user_id, name, type, command, args, url, env, enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     serverId,
     userId,
     name,
@@ -263,18 +258,17 @@ router.post('/', requireAuth, requireAdmin, (req, res) => {
     enabled !== false ? 1 : 0
   );
 
-  const row = db
-    .prepare(
-      `SELECT id, user_id, name, type, command, args, url, env, enabled, created_at
-       FROM mcp_servers WHERE id = ?`
-    )
-    .get(serverId) as Record<string, unknown>;
+  const row = (await pgGet(
+    `SELECT id, user_id, name, type, command, args, url, env, enabled, created_at
+       FROM mcp_servers WHERE id = ?`,
+    serverId
+  )) as unknown as Record<string, unknown>;
 
   res.status(201).json({ success: true, data: parseMcpServer(row) });
 });
 
 // Update MCP server
-router.put('/:id', requireAuth, requireAdmin, (req, res) => {
+router.put('/:id', requireAuth, requireAdmin, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = updateMcpServerSchema.safeParse(req.body);
 
@@ -282,10 +276,11 @@ router.put('/:id', requireAuth, requireAdmin, (req, res) => {
     throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
   }
 
-  const db = getDatabase();
-  const existing = db
-    .prepare('SELECT id FROM mcp_servers WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId);
+  const existing = await pgGet(
+    'SELECT id FROM mcp_servers WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  );
 
   if (!existing) {
     throw new AppError('MCP server not found', 404, 'NOT_FOUND');
@@ -327,21 +322,20 @@ router.put('/:id', requireAuth, requireAdmin, (req, res) => {
 
   if (updates.length > 0) {
     values.push(req.params.id);
-    db.prepare(`UPDATE mcp_servers SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    await pgRun(`UPDATE mcp_servers SET ${updates.join(', ')} WHERE id = ?`, ...values);
   }
 
-  const row = db
-    .prepare(
-      `SELECT id, user_id, name, type, command, args, url, env, enabled, created_at
-       FROM mcp_servers WHERE id = ?`
-    )
-    .get(req.params.id) as Record<string, unknown>;
+  const row = (await pgGet(
+    `SELECT id, user_id, name, type, command, args, url, env, enabled, created_at
+       FROM mcp_servers WHERE id = ?`,
+    req.params.id
+  )) as unknown as Record<string, unknown>;
 
   res.json({ success: true, data: parseMcpServer(row) });
 });
 
 // Delete MCP server
-router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const serverId = req.params.id;
   if (!serverId) {
@@ -355,11 +349,11 @@ router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
     );
   }
 
-  const db = getDatabase();
-
-  const result = db
-    .prepare('DELETE FROM mcp_servers WHERE id = ? AND user_id = ?')
-    .run(serverId, userId);
+  const result = await pgRun(
+    'DELETE FROM mcp_servers WHERE id = ? AND user_id = ?',
+    serverId,
+    userId
+  );
 
   if (result.changes === 0) {
     throw new AppError('MCP server not found', 404, 'NOT_FOUND');
@@ -375,7 +369,7 @@ router.post('/:id/test', requireAuth, requireAdmin, async (req, res) => {
   if (!serverId) {
     throw new AppError('Missing MCP server ID', 400, 'MISSING_ID');
   }
-  const server = getMcpServerForRequest(serverId, userId);
+  const server = await getMcpServerForRequest(serverId, userId);
 
   if (!server) {
     throw new AppError('MCP server not found', 404, 'NOT_FOUND');

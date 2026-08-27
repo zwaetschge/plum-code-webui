@@ -81,9 +81,9 @@ function readPiAntigravityState(userId: string): {
  */
 router.get('/status', requireAuth, async (req: Request, res: Response) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const enabled = new Set(getEnabledCliProvidersForUser(userId));
-  const zaiConfig = getZaiApiConfigForUser(userId);
-  const registryProviders = readOpenCodeProvidersForUser(userId);
+  const enabled = new Set(await getEnabledCliProvidersForUser(userId));
+  const zaiConfig = await getZaiApiConfigForUser(userId);
+  const registryProviders = await readOpenCodeProvidersForUser(userId);
   const configuredEndpoints = registryProviders.filter(
     (entry) => entry.enabled && entry.apiKey.trim().length > 0
   );
@@ -96,7 +96,7 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
 
       const models =
         provider.id === 'pi'
-          ? getPiModelsForUser(userId)
+          ? await getPiModelsForUser(userId)
           : provider.id === 'opencode'
             ? getCliModels('opencode')
             : (provider.models ?? []);

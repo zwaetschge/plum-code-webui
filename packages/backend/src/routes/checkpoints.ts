@@ -1,6 +1,11 @@
+import {
+  get as pgGet,
+  all as pgAll,
+  run as pgRun,
+  transaction as pgTransaction,
+} from '../db/pg.js';
 import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
-import { getDatabase } from '../db/index.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 
 const router = Router();
@@ -11,29 +16,29 @@ router.use(requireAuth);
 // Get all checkpoints for a session
 router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
   const { sessionId } = req.params;
 
   try {
     // Verify session belongs to user
-    const session = db
-      .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-      .get(sessionId, authReq.userId);
+    const session = await pgGet(
+      'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      authReq.userId
+    );
 
     if (!session) {
       return res.status(404).json({ success: false, error: { message: 'Session not found' } });
     }
 
-    const checkpoints = db
-      .prepare(
-        `
+    const checkpoints = await pgAll(
+      `
       SELECT id, session_id, name, description, message_count, created_at
       FROM session_checkpoints
       WHERE session_id = ?
       ORDER BY created_at DESC
-    `
-      )
-      .all(sessionId);
+    `,
+      sessionId
+    );
 
     res.json({ success: true, data: checkpoints });
   } catch (error) {
@@ -45,20 +50,18 @@ router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
 // Get a specific checkpoint
 router.get('/:checkpointId', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
   const { checkpointId } = req.params;
 
   try {
-    const checkpoint = db
-      .prepare(
-        `
+    const checkpoint = (await pgGet(
+      `
       SELECT c.*, s.user_id
       FROM session_checkpoints c
       JOIN sessions s ON s.id = c.session_id
       WHERE c.id = ?
-    `
-      )
-      .get(checkpointId) as
+    `,
+      checkpointId
+    )) as unknown as
       | {
           id: string;
           session_id: string;
@@ -103,7 +106,6 @@ router.get('/:checkpointId', async (req: Request, res: Response) => {
 // Create a checkpoint
 router.post('/', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
   const { sessionId, name, description } = req.body;
 
   if (!sessionId || !name) {
@@ -114,18 +116,19 @@ router.post('/', async (req: Request, res: Response) => {
 
   try {
     // Verify session belongs to user
-    const session = db
-      .prepare('SELECT id, working_directory FROM sessions WHERE id = ? AND user_id = ?')
-      .get(sessionId, authReq.userId) as { id: string; working_directory: string } | undefined;
+    const session = (await pgGet(
+      'SELECT id, working_directory FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      authReq.userId
+    )) as unknown as { id: string; working_directory: string } | undefined;
 
     if (!session) {
       return res.status(404).json({ success: false, error: { message: 'Session not found' } });
     }
 
     // Get current messages for the session
-    const messages = db
-      .prepare(
-        `
+    const messages = await pgAll(
+      `
       -- Only columns that exist. The list used to name tool_calls, tool_results,
       -- is_partial, is_interrupted, cost_usd and model, none of which are on this
       -- table, so every attempt to create a checkpoint failed with "no such
@@ -134,9 +137,9 @@ router.post('/', async (req: Request, res: Response) => {
       FROM messages
       WHERE session_id = ?
       ORDER BY created_at ASC
-    `
-      )
-      .all(sessionId);
+    `,
+      sessionId
+    );
 
     // Create snapshot data
     const snapshotData = {
@@ -147,12 +150,11 @@ router.post('/', async (req: Request, res: Response) => {
 
     const checkpointId = randomUUID();
 
-    db.prepare(
+    await pgRun(
       `
       INSERT INTO session_checkpoints (id, session_id, name, description, message_count, snapshot_data)
       VALUES (?, ?, ?, ?, ?, ?)
-    `
-    ).run(
+    `,
       checkpointId,
       sessionId,
       name,
@@ -161,15 +163,14 @@ router.post('/', async (req: Request, res: Response) => {
       JSON.stringify(snapshotData)
     );
 
-    const checkpoint = db
-      .prepare(
-        `
+    const checkpoint = await pgGet(
+      `
       SELECT id, session_id, name, description, message_count, created_at
       FROM session_checkpoints
       WHERE id = ?
-    `
-      )
-      .get(checkpointId);
+    `,
+      checkpointId
+    );
 
     res.json({ success: true, data: checkpoint });
   } catch (error) {
@@ -181,22 +182,20 @@ router.post('/', async (req: Request, res: Response) => {
 // Update a checkpoint (name/description only)
 router.put('/:checkpointId', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
   const { checkpointId } = req.params;
   const { name, description } = req.body;
 
   try {
     // Verify checkpoint belongs to user
-    const checkpoint = db
-      .prepare(
-        `
+    const checkpoint = (await pgGet(
+      `
       SELECT c.id, s.user_id
       FROM session_checkpoints c
       JOIN sessions s ON s.id = c.session_id
       WHERE c.id = ?
-    `
-      )
-      .get(checkpointId) as { id: string; user_id: string } | undefined;
+    `,
+      checkpointId
+    )) as unknown as { id: string; user_id: string } | undefined;
 
     if (!checkpoint) {
       return res.status(404).json({ success: false, error: { message: 'Checkpoint not found' } });
@@ -206,23 +205,25 @@ router.put('/:checkpointId', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: { message: 'Access denied' } });
     }
 
-    db.prepare(
+    await pgRun(
       `
       UPDATE session_checkpoints
       SET name = COALESCE(?, name), description = ?
       WHERE id = ?
-    `
-    ).run(name, description || null, checkpointId);
+    `,
+      name,
+      description || null,
+      checkpointId
+    );
 
-    const updated = db
-      .prepare(
-        `
+    const updated = await pgGet(
+      `
       SELECT id, session_id, name, description, message_count, created_at
       FROM session_checkpoints
       WHERE id = ?
-    `
-      )
-      .get(checkpointId);
+    `,
+      checkpointId
+    );
 
     res.json({ success: true, data: updated });
   } catch (error) {
@@ -234,21 +235,19 @@ router.put('/:checkpointId', async (req: Request, res: Response) => {
 // Delete a checkpoint
 router.delete('/:checkpointId', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
   const { checkpointId } = req.params;
 
   try {
     // Verify checkpoint belongs to user
-    const checkpoint = db
-      .prepare(
-        `
+    const checkpoint = (await pgGet(
+      `
       SELECT c.id, s.user_id
       FROM session_checkpoints c
       JOIN sessions s ON s.id = c.session_id
       WHERE c.id = ?
-    `
-      )
-      .get(checkpointId) as { id: string; user_id: string } | undefined;
+    `,
+      checkpointId
+    )) as unknown as { id: string; user_id: string } | undefined;
 
     if (!checkpoint) {
       return res.status(404).json({ success: false, error: { message: 'Checkpoint not found' } });
@@ -258,7 +257,7 @@ router.delete('/:checkpointId', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: { message: 'Access denied' } });
     }
 
-    db.prepare('DELETE FROM session_checkpoints WHERE id = ?').run(checkpointId);
+    await pgRun('DELETE FROM session_checkpoints WHERE id = ?', checkpointId);
 
     res.json({ success: true });
   } catch (error) {
@@ -270,21 +269,19 @@ router.delete('/:checkpointId', async (req: Request, res: Response) => {
 // Restore a checkpoint (replaces session messages with checkpoint state)
 router.post('/:checkpointId/restore', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
   const { checkpointId } = req.params;
 
   try {
     // Get checkpoint with user verification
-    const checkpoint = db
-      .prepare(
-        `
+    const checkpoint = (await pgGet(
+      `
       SELECT c.*, s.user_id
       FROM session_checkpoints c
       JOIN sessions s ON s.id = c.session_id
       WHERE c.id = ?
-    `
-      )
-      .get(checkpointId) as
+    `,
+      checkpointId
+    )) as unknown as
       | { id: string; session_id: string; snapshot_data: string; user_id: string }
       | undefined;
 
@@ -298,19 +295,14 @@ router.post('/:checkpointId/restore', async (req: Request, res: Response) => {
 
     const snapshotData = JSON.parse(checkpoint.snapshot_data);
 
-    // Begin transaction
-    const transaction = db.transaction(() => {
-      // Delete current messages
-      db.prepare('DELETE FROM messages WHERE session_id = ?').run(checkpoint.session_id);
-
-      // Restore messages from snapshot
-      const insertStmt = db.prepare(`
-        INSERT INTO messages (id, session_id, role, content, tool_calls, tool_results, is_partial, is_interrupted, cost_usd, model, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
+    await pgTransaction(async (tx) => {
+      await tx.run('DELETE FROM messages WHERE session_id = ?', checkpoint.session_id);
 
       for (const msg of snapshotData.messages) {
-        insertStmt.run(
+        await tx.run(
+          `INSERT INTO messages (id, session_id, role, content, tool_calls, tool_results,
+                                 is_partial, is_interrupted, cost_usd, model, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           msg.id,
           checkpoint.session_id,
           msg.role,
@@ -325,8 +317,6 @@ router.post('/:checkpointId/restore', async (req: Request, res: Response) => {
         );
       }
     });
-
-    transaction();
 
     res.json({
       success: true,
@@ -344,21 +334,19 @@ router.post('/:checkpointId/restore', async (req: Request, res: Response) => {
 // Compare two checkpoints
 router.get('/compare/:checkpoint1/:checkpoint2', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
   const { checkpoint1, checkpoint2 } = req.params;
 
   try {
     // Get both checkpoints
-    const cp1 = db
-      .prepare(
-        `
+    const cp1 = (await pgGet(
+      `
       SELECT c.*, s.user_id
       FROM session_checkpoints c
       JOIN sessions s ON s.id = c.session_id
       WHERE c.id = ?
-    `
-      )
-      .get(checkpoint1) as
+    `,
+      checkpoint1
+    )) as unknown as
       | {
           snapshot_data: string;
           user_id: string;
@@ -368,16 +356,15 @@ router.get('/compare/:checkpoint1/:checkpoint2', async (req: Request, res: Respo
         }
       | undefined;
 
-    const cp2 = db
-      .prepare(
-        `
+    const cp2 = (await pgGet(
+      `
       SELECT c.*, s.user_id
       FROM session_checkpoints c
       JOIN sessions s ON s.id = c.session_id
       WHERE c.id = ?
-    `
-      )
-      .get(checkpoint2) as
+    `,
+      checkpoint2
+    )) as unknown as
       | {
           snapshot_data: string;
           user_id: string;

@@ -1,6 +1,7 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
+import { getDatabase } from '../db/index.js';
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
-import { getDatabase } from '../db/index.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import type { ApiResponse } from '@plum-code-webui/shared';
 
@@ -17,16 +18,14 @@ interface Category {
 }
 
 // Get all categories for user
-router.get('/', requireAuth, (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
 
   try {
-    const categories = db
-      .prepare(
-        `SELECT id, user_id, name, color, icon, sort_order, created_at FROM session_categories WHERE user_id = ? ORDER BY sort_order ASC, name ASC`
-      )
-      .all(authReq.userId) as Category[];
+    const categories = (await pgAll(
+      `SELECT id, user_id, name, color, icon, sort_order, created_at FROM session_categories WHERE user_id = ? ORDER BY sort_order ASC, name ASC`,
+      authReq.userId
+    )) as unknown as Category[];
 
     const response: ApiResponse<Category[]> = {
       success: true,
@@ -43,9 +42,9 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // Create a new category
-router.post('/', requireAuth, (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { name, color, icon } = req.body;
 
   if (!name) {
@@ -60,19 +59,25 @@ router.post('/', requireAuth, (req, res) => {
     const id = nanoid();
 
     // Get max sort_order
-    const maxOrder = db
-      .prepare(`SELECT MAX(sort_order) as max FROM session_categories WHERE user_id = ?`)
-      .get(authReq.userId) as { max: number | null };
+    const maxOrder = (await pgGet(
+      `SELECT MAX(sort_order) as max FROM session_categories WHERE user_id = ?`,
+      authReq.userId
+    )) as unknown as { max: number | null };
 
-    db.prepare(
-      `INSERT INTO session_categories (id, user_id, name, color, icon, sort_order) VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(id, authReq.userId, name, color || 'blue', icon || 'folder', (maxOrder.max || 0) + 1);
+    await pgRun(
+      `INSERT INTO session_categories (id, user_id, name, color, icon, sort_order) VALUES (?, ?, ?, ?, ?, ?)`,
+      id,
+      authReq.userId,
+      name,
+      color || 'blue',
+      icon || 'folder',
+      (maxOrder.max || 0) + 1
+    );
 
-    const category = db
-      .prepare(
-        `SELECT id, user_id, name, color, icon, sort_order, created_at FROM session_categories WHERE id = ?`
-      )
-      .get(id) as Category;
+    const category = (await pgGet(
+      `SELECT id, user_id, name, color, icon, sort_order, created_at FROM session_categories WHERE id = ?`,
+      id
+    )) as unknown as Category;
 
     const response: ApiResponse<Category> = {
       success: true,
@@ -89,19 +94,19 @@ router.post('/', requireAuth, (req, res) => {
 });
 
 // Update a category
-router.patch('/:id', requireAuth, (req, res) => {
+router.patch('/:id', requireAuth, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { id } = req.params;
   const { name, color, icon, sort_order } = req.body;
 
   try {
     // Check ownership
-    const existing = db
-      .prepare(
-        `SELECT id, user_id, name, color, icon, sort_order, created_at FROM session_categories WHERE id = ? AND user_id = ?`
-      )
-      .get(id, authReq.userId) as Category | undefined;
+    const existing = (await pgGet(
+      `SELECT id, user_id, name, color, icon, sort_order, created_at FROM session_categories WHERE id = ? AND user_id = ?`,
+      id,
+      authReq.userId
+    )) as unknown as Category | undefined;
 
     if (!existing) {
       const response: ApiResponse<null> = {
@@ -134,14 +139,13 @@ router.patch('/:id', requireAuth, (req, res) => {
 
     if (updates.length > 0) {
       values.push(id as string);
-      db.prepare(`UPDATE session_categories SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+      await pgRun(`UPDATE session_categories SET ${updates.join(', ')} WHERE id = ?`, ...values);
     }
 
-    const category = db
-      .prepare(
-        `SELECT id, user_id, name, color, icon, sort_order, created_at FROM session_categories WHERE id = ?`
-      )
-      .get(id) as Category;
+    const category = (await pgGet(
+      `SELECT id, user_id, name, color, icon, sort_order, created_at FROM session_categories WHERE id = ?`,
+      id
+    )) as unknown as Category;
 
     const response: ApiResponse<Category> = {
       success: true,
@@ -158,21 +162,24 @@ router.patch('/:id', requireAuth, (req, res) => {
 });
 
 // Delete a category
-router.delete('/:id', requireAuth, (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { id } = req.params;
 
   try {
     // Remove category from sessions first
-    db.prepare(`UPDATE sessions SET category = NULL WHERE category = ? AND user_id = ?`).run(
+    await pgRun(
+      `UPDATE sessions SET category = NULL WHERE category = ? AND user_id = ?`,
       id,
       authReq.userId
     );
 
-    const result = db
-      .prepare(`DELETE FROM session_categories WHERE id = ? AND user_id = ?`)
-      .run(id, authReq.userId);
+    const result = await pgRun(
+      `DELETE FROM session_categories WHERE id = ? AND user_id = ?`,
+      id,
+      authReq.userId
+    );
 
     if (result.changes === 0) {
       const response: ApiResponse<null> = {
@@ -197,9 +204,9 @@ router.delete('/:id', requireAuth, (req, res) => {
 });
 
 // Reorder categories
-router.post('/reorder', requireAuth, (req, res) => {
+router.post('/reorder', requireAuth, async (req, res) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { categoryIds } = req.body as { categoryIds: string[] };
 
   if (!Array.isArray(categoryIds)) {
@@ -211,6 +218,7 @@ router.post('/reorder', requireAuth, (req, res) => {
   }
 
   try {
+    const db = getDatabase();
     const updateStmt = db.prepare(
       `UPDATE session_categories SET sort_order = ? WHERE id = ? AND user_id = ?`
     );
@@ -219,11 +227,10 @@ router.post('/reorder', requireAuth, (req, res) => {
       updateStmt.run(index, categoryId, authReq.userId);
     });
 
-    const categories = db
-      .prepare(
-        `SELECT id, user_id, name, color, icon, sort_order, created_at FROM session_categories WHERE user_id = ? ORDER BY sort_order ASC`
-      )
-      .all(authReq.userId) as Category[];
+    const categories = (await pgAll(
+      `SELECT id, user_id, name, color, icon, sort_order, created_at FROM session_categories WHERE user_id = ? ORDER BY sort_order ASC`,
+      authReq.userId
+    )) as unknown as Category[];
 
     const response: ApiResponse<Category[]> = {
       success: true,

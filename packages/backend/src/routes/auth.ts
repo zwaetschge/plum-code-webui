@@ -1,3 +1,4 @@
+import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import passport from 'passport';
 import fs from 'fs/promises';
@@ -12,7 +13,6 @@ import {
   type AuthenticatedRequest,
 } from '../middleware/auth.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
-import { getDatabase } from '../db/index.js';
 import type { User } from '@plum-code-webui/shared';
 import { isProviderAvailable } from '../services/cli-providers.js';
 import { generateUserToken } from '../utils/authTokens.js';
@@ -38,19 +38,18 @@ const mobileExchangeSchema = z.object({
   codeVerifier: z.string().regex(/^[A-Za-z0-9_-]{43,128}$/),
 });
 
-function getAuthenticatedCliLinkUser(req: Request): User | null {
-  const userId = resolveAuthenticatedUserId(req);
+async function getAuthenticatedCliLinkUser(req: Request): Promise<User | null> {
+  const userId = await resolveAuthenticatedUserId(req);
   if (!userId) return null;
 
-  const user = getDatabase()
-    .prepare(
-      `SELECT id, email, name, avatar_url as avatarUrl, provider,
+  const user = (await pgGet(
+    `SELECT id, email, name, avatar_url as avatarUrl, provider,
               provider_id as providerId,
               strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt,
               strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) as updatedAt
-       FROM users WHERE id = ?`
-    )
-    .get(userId) as User | undefined;
+       FROM users WHERE id = ?`,
+    userId
+  )) as unknown as User | undefined;
 
   if (!user || !isEmailAllowed(user.email)) return null;
   return user;
@@ -84,9 +83,9 @@ function oauthCallbackHandler(
         return res.redirect(`${config.frontendUrl}/connect?error=${strategy}`);
       }
 
-      req.logIn(user, (loginErr) => {
+      req.logIn(user, async (loginErr) => {
         if (loginErr) return next(loginErr);
-        stampLogin(user.id, strategy, req);
+        await stampLogin(user.id, strategy, req);
         const token = generateUserToken(user.id);
         res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
       });
@@ -143,11 +142,11 @@ async function establishProxyLogin(
   proxyName: string | null,
   proxyUser: string | null
 ): Promise<User> {
-  const user = upsertProxyUser(proxyEmail, proxyName, proxyUser);
+  const user = await upsertProxyUser(proxyEmail, proxyName, proxyUser);
   await new Promise<void>((resolve, reject) => {
     req.logIn(user, (err) => (err ? reject(err) : resolve()));
   });
-  stampLogin(user.id, 'proxy', req);
+  await stampLogin(user.id, 'proxy', req);
   return user;
 }
 
@@ -213,7 +212,7 @@ router.get('/proxy/mobile', rateLimiters.strict, async (req, res, next) => {
   }
 });
 
-router.post('/mobile/exchange', rateLimiters.strict, (req, res) => {
+router.post('/mobile/exchange', rateLimiters.strict, async (req, res) => {
   const parsed = mobileExchangeSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({
@@ -230,15 +229,14 @@ router.post('/mobile/exchange', rateLimiters.strict, (req, res) => {
     });
   }
 
-  const user = getDatabase()
-    .prepare(
-      `SELECT id, email, name, avatar_url as avatarUrl, provider,
+  const user = (await pgGet(
+    `SELECT id, email, name, avatar_url as avatarUrl, provider,
               provider_id as providerId, role, status,
               strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt,
               strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) as updatedAt
-       FROM users WHERE id = ?`
-    )
-    .get(userId) as User | undefined;
+       FROM users WHERE id = ?`,
+    userId
+  )) as unknown as User | undefined;
 
   if (!user || user.status === 'suspended' || !isEmailAllowed(user.email)) {
     return res.status(401).json({
@@ -333,7 +331,7 @@ if (config.claude.oauthEnabled) {
   // Login using existing Claude CLI credentials
   router.get('/claude', async (req, res) => {
     try {
-      const user = getAuthenticatedCliLinkUser(req);
+      const user = await getAuthenticatedCliLinkUser(req);
       if (!user) return redirectCliIdentityRequired(res);
 
       let credentials = await getClaudeCredentials();
@@ -353,7 +351,7 @@ if (config.claude.oauthEnabled) {
         }
       }
 
-      stampLogin(user.id, 'claude', req);
+      await stampLogin(user.id, 'claude', req);
       const token = generateUserToken(user.id);
       res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
     } catch (error) {
@@ -370,7 +368,7 @@ if (config.claude.oauthEnabled) {
 // Codex CLI credentials login (uses ~/.codex presence)
 router.get('/codex', async (req, res) => {
   try {
-    const user = getAuthenticatedCliLinkUser(req);
+    const user = await getAuthenticatedCliLinkUser(req);
     if (!user) return redirectCliIdentityRequired(res);
 
     const available = await isProviderAvailable('codex');
@@ -378,7 +376,7 @@ router.get('/codex', async (req, res) => {
       return res.redirect(`${config.frontendUrl}/connect?error=codex_not_logged_in`);
     }
 
-    stampLogin(user.id, 'codex', req);
+    await stampLogin(user.id, 'codex', req);
     const token = generateUserToken(user.id);
     res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
   } catch (error) {
@@ -390,7 +388,7 @@ router.get('/codex', async (req, res) => {
 // OpenCode CLI credentials login (uses ~/.config/opencode presence)
 router.get('/opencode', async (req, res) => {
   try {
-    const user = getAuthenticatedCliLinkUser(req);
+    const user = await getAuthenticatedCliLinkUser(req);
     if (!user) return redirectCliIdentityRequired(res);
 
     const available = await isProviderAvailable('opencode');
@@ -398,7 +396,7 @@ router.get('/opencode', async (req, res) => {
       return res.redirect(`${config.frontendUrl}/connect?error=opencode_not_logged_in`);
     }
 
-    stampLogin(user.id, 'opencode', req);
+    await stampLogin(user.id, 'opencode', req);
     const token = generateUserToken(user.id);
     res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
   } catch (error) {
@@ -410,7 +408,7 @@ router.get('/opencode', async (req, res) => {
 // Pi shares the OpenCode API connections and therefore the same local login.
 router.get('/pi', async (req, res) => {
   try {
-    const user = getAuthenticatedCliLinkUser(req);
+    const user = await getAuthenticatedCliLinkUser(req);
     if (!user) return redirectCliIdentityRequired(res);
 
     const available = await isProviderAvailable('pi');
@@ -418,7 +416,7 @@ router.get('/pi', async (req, res) => {
       return res.redirect(`${config.frontendUrl}/connect?error=pi_not_available`);
     }
 
-    stampLogin(user.id, 'pi', req);
+    await stampLogin(user.id, 'pi', req);
     const token = generateUserToken(user.id);
     res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
   } catch (error) {
@@ -430,7 +428,7 @@ router.get('/pi', async (req, res) => {
 // Kimi Code CLI credentials login (uses ~/.kimi-code OAuth presence).
 router.get('/kimi', async (req, res) => {
   try {
-    const user = getAuthenticatedCliLinkUser(req);
+    const user = await getAuthenticatedCliLinkUser(req);
     if (!user) return redirectCliIdentityRequired(res);
 
     const available = await isProviderAvailable('kimi');
@@ -438,7 +436,7 @@ router.get('/kimi', async (req, res) => {
       return res.redirect(`${config.frontendUrl}/connect?error=kimi_not_logged_in`);
     }
 
-    stampLogin(user.id, 'kimi', req);
+    await stampLogin(user.id, 'kimi', req);
     const token = generateUserToken(user.id);
     res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
   } catch (error) {
@@ -449,32 +447,36 @@ router.get('/kimi', async (req, res) => {
 
 // Dev login (only in development mode)
 if (config.isDevelopment) {
-  router.post('/dev-login', rateLimiters.strict, (req, res) => {
+  router.post('/dev-login', rateLimiters.strict, async (req, res) => {
     const { email = 'dev@localhost', name = 'Dev User' } = req.body;
-    const db = getDatabase();
 
     // Find or create dev user
-    let user = db
-      .prepare(
-        `SELECT id, email, name, avatar_url as avatarUrl, provider, provider_id as providerId,
+    let user = (await pgGet(
+      `SELECT id, email, name, avatar_url as avatarUrl, provider, provider_id as providerId,
                 strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt,
                 strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) as updatedAt
-         FROM users WHERE provider = ? AND provider_id = ?`
-      )
-      .get('dev', 'dev-user') as User | undefined;
+         FROM users WHERE provider = ? AND provider_id = ?`,
+      'dev',
+      'dev-user'
+    )) as unknown as User | undefined;
 
     if (!user) {
       const userId = nanoid();
-      db.prepare(
+      await pgRun(
         `INSERT INTO users (id, email, name, avatar_url, provider, provider_id)
-         VALUES (?, ?, ?, ?, 'dev', 'dev-user')`
-      ).run(userId, email, name, null);
+         VALUES (?, ?, ?, ?, 'dev', 'dev-user')`,
+        userId,
+        email,
+        name,
+        null
+      );
 
       // Create default settings
-      db.prepare(
+      await pgRun(
         `INSERT INTO user_settings (user_id, theme, allowed_tools)
-         VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`
-      ).run(userId);
+         VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`,
+        userId
+      );
 
       user = {
         id: userId,
@@ -488,58 +490,58 @@ if (config.isDevelopment) {
       } as User;
     }
 
-    stampLogin(user.id, 'dev', req);
+    await stampLogin(user.id, 'dev', req);
     const token = generateUserToken(user.id);
     res.json({ success: true, data: { token, user } });
   });
 
   // Quick dev login redirect
-  router.get('/dev', (req, res) => {
-    const db = getDatabase();
-
+  router.get('/dev', async (req, res) => {
     // Find or create dev user
-    let user = db
-      .prepare('SELECT id FROM users WHERE provider = ? AND provider_id = ?')
-      .get('dev', 'dev-user') as { id: string } | undefined;
+    let user = (await pgGet(
+      'SELECT id FROM users WHERE provider = ? AND provider_id = ?',
+      'dev',
+      'dev-user'
+    )) as unknown as { id: string } | undefined;
 
     if (!user) {
       const userId = nanoid();
-      db.prepare(
+      await pgRun(
         `INSERT INTO users (id, email, name, avatar_url, provider, provider_id)
-         VALUES (?, 'dev@localhost', 'Dev User', NULL, 'dev', 'dev-user')`
-      ).run(userId);
+         VALUES (?, 'dev@localhost', 'Dev User', NULL, 'dev', 'dev-user')`,
+        userId
+      );
 
-      db.prepare(
+      await pgRun(
         `INSERT INTO user_settings (user_id, theme, allowed_tools)
-         VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`
-      ).run(userId);
+         VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`,
+        userId
+      );
 
       user = { id: userId };
     }
 
-    stampLogin(user.id, 'dev', req);
+    await stampLogin(user.id, 'dev', req);
     const token = generateUserToken(user.id);
     res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
   });
 }
 
 // Get current user
-router.get('/me', requireAuth, (req, res) => {
+router.get('/me', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
-  const user = db
-    .prepare(
-      `
+  const user = (await pgGet(
+    `
     SELECT id, email, name, avatar_url as avatarUrl, provider, provider_id as providerId,
            role, status,
            strftime('%Y-%m-%dT%H:%M:%fZ', last_login_at) as lastLoginAt,
            strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt,
            strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) as updatedAt
     FROM users WHERE id = ?
-  `
-    )
-    .get(userId) as (User & { status?: string }) | undefined;
+  `,
+    userId
+  )) as unknown as (User & { status?: string }) | undefined;
 
   if (!user) {
     return res
@@ -571,7 +573,7 @@ router.post('/logout', requireAuth, (req, res) => {
 router.get('/providers', async (req, res) => {
   let cliLinkAuthorized = false;
   try {
-    cliLinkAuthorized = Boolean(getAuthenticatedCliLinkUser(req));
+    cliLinkAuthorized = Boolean(await getAuthenticatedCliLinkUser(req));
   } catch {
     cliLinkAuthorized = false;
   }

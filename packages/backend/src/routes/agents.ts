@@ -1,6 +1,6 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
 import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
-import { getDatabase } from '../db/index.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { safeJsonParse } from '../utils/json.js';
 
@@ -28,19 +28,17 @@ interface CustomAgent {
 // Get all custom agents for the user
 router.get('/', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
 
   try {
-    const agents = db
-      .prepare(
-        `
+    const agents = (await pgAll(
+      `
       SELECT id, name, description, system_prompt, model, allowed_tools, permission_mode, icon, color, enabled, created_at, updated_at
       FROM custom_agents
       WHERE user_id = ?
       ORDER BY created_at DESC
-    `
-      )
-      .all(authReq.userId) as CustomAgent[];
+    `,
+      authReq.userId
+    )) as unknown as CustomAgent[];
 
     // Parse allowed_tools JSON for each agent
     const parsedAgents = agents.map((agent) => ({
@@ -59,19 +57,19 @@ router.get('/', async (req: Request, res: Response) => {
 // Get a specific custom agent
 router.get('/:agentId', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { agentId } = req.params;
 
   try {
-    const agent = db
-      .prepare(
-        `
+    const agent = (await pgGet(
+      `
       SELECT id, name, description, system_prompt, model, allowed_tools, permission_mode, icon, color, enabled, created_at, updated_at
       FROM custom_agents
       WHERE id = ? AND user_id = ?
-    `
-      )
-      .get(agentId, authReq.userId) as CustomAgent | undefined;
+    `,
+      agentId,
+      authReq.userId
+    )) as unknown as CustomAgent | undefined;
 
     if (!agent) {
       return res.status(404).json({ success: false, error: { message: 'Agent not found' } });
@@ -94,7 +92,7 @@ router.get('/:agentId', async (req: Request, res: Response) => {
 // Create a custom agent
 router.post('/', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const {
     name,
     description,
@@ -116,12 +114,11 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const agentId = randomUUID();
 
-    db.prepare(
+    await pgRun(
       `
       INSERT INTO custom_agents (id, user_id, name, description, system_prompt, model, allowed_tools, permission_mode, icon, color)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-    ).run(
+    `,
       agentId,
       authReq.userId,
       name,
@@ -134,15 +131,14 @@ router.post('/', async (req: Request, res: Response) => {
       color
     );
 
-    const agent = db
-      .prepare(
-        `
+    const agent = (await pgGet(
+      `
       SELECT id, name, description, system_prompt, model, allowed_tools, permission_mode, icon, color, enabled, created_at, updated_at
       FROM custom_agents
       WHERE id = ?
-    `
-      )
-      .get(agentId) as CustomAgent;
+    `,
+      agentId
+    )) as unknown as CustomAgent;
 
     res.json({
       success: true,
@@ -161,7 +157,7 @@ router.post('/', async (req: Request, res: Response) => {
 // Update a custom agent
 router.put('/:agentId', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { agentId } = req.params;
   const {
     name,
@@ -177,15 +173,17 @@ router.put('/:agentId', async (req: Request, res: Response) => {
 
   try {
     // Verify agent belongs to user
-    const existing = db
-      .prepare('SELECT id FROM custom_agents WHERE id = ? AND user_id = ?')
-      .get(agentId, authReq.userId);
+    const existing = await pgGet(
+      'SELECT id FROM custom_agents WHERE id = ? AND user_id = ?',
+      agentId,
+      authReq.userId
+    );
 
     if (!existing) {
       return res.status(404).json({ success: false, error: { message: 'Agent not found' } });
     }
 
-    db.prepare(
+    await pgRun(
       `
       UPDATE custom_agents
       SET
@@ -200,8 +198,7 @@ router.put('/:agentId', async (req: Request, res: Response) => {
         enabled = COALESCE(?, enabled),
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `
-    ).run(
+    `,
       name,
       description !== undefined ? description : null,
       systemPrompt,
@@ -214,15 +211,14 @@ router.put('/:agentId', async (req: Request, res: Response) => {
       agentId
     );
 
-    const agent = db
-      .prepare(
-        `
+    const agent = (await pgGet(
+      `
       SELECT id, name, description, system_prompt, model, allowed_tools, permission_mode, icon, color, enabled, created_at, updated_at
       FROM custom_agents
       WHERE id = ?
-    `
-      )
-      .get(agentId) as CustomAgent;
+    `,
+      agentId
+    )) as unknown as CustomAgent;
 
     res.json({
       success: true,
@@ -241,20 +237,22 @@ router.put('/:agentId', async (req: Request, res: Response) => {
 // Delete a custom agent
 router.delete('/:agentId', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { agentId } = req.params;
 
   try {
     // Verify agent belongs to user
-    const existing = db
-      .prepare('SELECT id FROM custom_agents WHERE id = ? AND user_id = ?')
-      .get(agentId, authReq.userId);
+    const existing = await pgGet(
+      'SELECT id FROM custom_agents WHERE id = ? AND user_id = ?',
+      agentId,
+      authReq.userId
+    );
 
     if (!existing) {
       return res.status(404).json({ success: false, error: { message: 'Agent not found' } });
     }
 
-    db.prepare('DELETE FROM custom_agents WHERE id = ?').run(agentId);
+    await pgRun('DELETE FROM custom_agents WHERE id = ?', agentId);
 
     res.json({ success: true });
   } catch (error) {
@@ -266,19 +264,19 @@ router.delete('/:agentId', async (req: Request, res: Response) => {
 // Duplicate a custom agent
 router.post('/:agentId/duplicate', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { agentId } = req.params;
 
   try {
-    const original = db
-      .prepare(
-        `
+    const original = (await pgGet(
+      `
       SELECT name, description, system_prompt, model, allowed_tools, permission_mode, icon, color
       FROM custom_agents
       WHERE id = ? AND user_id = ?
-    `
-      )
-      .get(agentId, authReq.userId) as CustomAgent | undefined;
+    `,
+      agentId,
+      authReq.userId
+    )) as unknown as CustomAgent | undefined;
 
     if (!original) {
       return res.status(404).json({ success: false, error: { message: 'Agent not found' } });
@@ -287,12 +285,11 @@ router.post('/:agentId/duplicate', async (req: Request, res: Response) => {
     const newId = randomUUID();
     const newName = `${original.name} (Copy)`;
 
-    db.prepare(
+    await pgRun(
       `
       INSERT INTO custom_agents (id, user_id, name, description, system_prompt, model, allowed_tools, permission_mode, icon, color)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-    ).run(
+    `,
       newId,
       authReq.userId,
       newName,
@@ -305,15 +302,14 @@ router.post('/:agentId/duplicate', async (req: Request, res: Response) => {
       original.color
     );
 
-    const agent = db
-      .prepare(
-        `
+    const agent = (await pgGet(
+      `
       SELECT id, name, description, system_prompt, model, allowed_tools, permission_mode, icon, color, enabled, created_at, updated_at
       FROM custom_agents
       WHERE id = ?
-    `
-      )
-      .get(newId) as CustomAgent;
+    `,
+      newId
+    )) as unknown as CustomAgent;
 
     res.json({
       success: true,

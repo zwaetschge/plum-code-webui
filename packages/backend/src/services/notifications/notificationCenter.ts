@@ -1,6 +1,6 @@
+import { all as pgAll, run as pgRun } from '../../db/pg.js';
 import { nanoid } from 'nanoid';
 import type { Server as SocketIOServer } from 'socket.io';
-import { getDatabase } from '../../db/index.js';
 
 /**
  * Durable "what happened" feed plus its delivery fan-out.
@@ -32,7 +32,7 @@ export function attachNotificationIo(server: SocketIOServer): void {
 }
 
 /** Persist one notification and fan it out. Never throws into the caller. */
-export function notify(input: NotifyInput): void {
+export async function notify(input: NotifyInput): Promise<void> {
   try {
     const id = nanoid();
     const data = input.data ? JSON.stringify(input.data) : null;
@@ -40,21 +40,18 @@ export function notify(input: NotifyInput): void {
       typeof input.data?.requestId === 'string' && input.data.requestId
         ? input.data.requestId
         : null;
-    getDatabase()
-      .prepare(
-        `INSERT INTO notifications (id, user_id, session_id, kind, title, body, data, request_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        id,
-        input.userId,
-        input.sessionId ?? null,
-        input.kind,
-        input.title,
-        input.body ?? null,
-        data,
-        requestId
-      );
+    await pgRun(
+      `INSERT INTO notifications (id, user_id, session_id, kind, title, body, data, request_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      input.userId,
+      input.sessionId ?? null,
+      input.kind,
+      input.title,
+      input.body ?? null,
+      data,
+      requestId
+    );
 
     const payload = {
       id,
@@ -77,15 +74,14 @@ export function notify(input: NotifyInput): void {
  * stop offering its buttons in the feed. Marking it read is enough: the row
  * stays as history but renders as resolved.
  */
-export function resolveApprovalNotification(requestId: string): void {
+export async function resolveApprovalNotification(requestId: string): Promise<void> {
   try {
-    getDatabase()
-      .prepare(
-        `UPDATE notifications
+    await pgRun(
+      `UPDATE notifications
             SET read_at = CURRENT_TIMESTAMP
-          WHERE kind = 'approval' AND read_at IS NULL AND request_id = ?`
-      )
-      .run(requestId);
+          WHERE kind = 'approval' AND read_at IS NULL AND request_id = ?`,
+      requestId
+    );
   } catch (error) {
     console.warn('[Notifications] failed to resolve approval:', error);
   }
@@ -132,9 +128,10 @@ async function sendWebPush(
     return;
   }
 
-  const subscriptions = getDatabase()
-    .prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?')
-    .all(userId) as Array<{ endpoint: string; p256dh: string; auth: string }>;
+  const subscriptions = (await pgAll(
+    'SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?',
+    userId
+  )) as unknown as Array<{ endpoint: string; p256dh: string; auth: string }>;
 
   await Promise.all(
     subscriptions.map(async (sub) => {
@@ -148,9 +145,7 @@ async function sendWebPush(
         // list does not grow with dead endpoints.
         const status = (error as { statusCode?: number }).statusCode;
         if (status === 404 || status === 410) {
-          getDatabase()
-            .prepare('DELETE FROM push_subscriptions WHERE endpoint = ?')
-            .run(sub.endpoint);
+          await pgRun('DELETE FROM push_subscriptions WHERE endpoint = ?', sub.endpoint);
         }
       }
     })

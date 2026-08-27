@@ -1,10 +1,10 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../../db/pg.js';
 import { nanoid } from 'nanoid';
 import type {
   DiscordAlertEventType,
   DiscordAlertSeverity,
   DiscordOutboxItem,
 } from '@plum-code-webui/shared';
-import { getDatabase } from '../../db/index.js';
 import {
   redactDiscordField,
   redactDiscordMetadata,
@@ -158,7 +158,10 @@ function buildPayload(input: QueueAlertInput): {
 }
 
 export class DiscordNotifierService {
-  queueAlert(input: QueueAlertInput, options: QueueOptions = {}): DiscordOutboxItem | null {
+  async queueAlert(
+    input: QueueAlertInput,
+    options: QueueOptions = {}
+  ): Promise<DiscordOutboxItem | null> {
     if (!options.force && !discordIntegrationService.shouldSend(input.severity)) {
       return null;
     }
@@ -170,27 +173,24 @@ export class DiscordNotifierService {
 
     const id = nanoid();
     const { title, summary, payload } = buildPayload(input);
-    getDatabase()
-      .prepare(
-        `INSERT INTO discord_outbox
+    await pgRun(
+      `INSERT INTO discord_outbox
           (id, user_id, session_id, event_type, severity, status, title, summary, payload_json)
-         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
-      )
-      .run(
-        id,
-        input.userId ?? null,
-        input.sessionId ?? null,
-        input.eventType,
-        input.severity,
-        title,
-        summary,
-        JSON.stringify(payload)
-      );
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+      id,
+      input.userId ?? null,
+      input.sessionId ?? null,
+      input.eventType,
+      input.severity,
+      title,
+      summary,
+      JSON.stringify(payload)
+    );
 
     return this.getOutboxItem(id);
   }
 
-  queueTest(userId: string | null): DiscordOutboxItem | null {
+  queueTest(userId: string | null): Promise<DiscordOutboxItem | null> {
     return this.queueAlert(
       {
         eventType: 'discord.test',
@@ -204,10 +204,9 @@ export class DiscordNotifierService {
     );
   }
 
-  listOutbox(limit = 50): DiscordOutboxItem[] {
-    const rows = getDatabase()
-      .prepare(
-        `SELECT id, user_id as userId, session_id as sessionId, event_type as eventType,
+  async listOutbox(limit = 50): Promise<DiscordOutboxItem[]> {
+    const rows = (await pgAll(
+      `SELECT id, user_id as userId, session_id as sessionId, event_type as eventType,
                 severity, status, title, summary, attempts,
                 strftime('%Y-%m-%dT%H:%M:%fZ', next_attempt_at) as nextAttemptAt,
                 strftime('%Y-%m-%dT%H:%M:%fZ', sent_at) as sentAt,
@@ -216,16 +215,15 @@ export class DiscordNotifierService {
                 strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) as updatedAt
          FROM discord_outbox
          ORDER BY created_at DESC
-         LIMIT ?`
-      )
-      .all(Math.max(1, Math.min(200, limit))) as Array<Record<string, unknown>>;
+         LIMIT ?`,
+      Math.max(1, Math.min(200, limit))
+    )) as unknown as Array<Record<string, unknown>>;
     return rows.map(rowToOutboxItem);
   }
 
-  getOutboxItem(id: string): DiscordOutboxItem {
-    const row = getDatabase()
-      .prepare(
-        `SELECT id, user_id as userId, session_id as sessionId, event_type as eventType,
+  async getOutboxItem(id: string): Promise<DiscordOutboxItem> {
+    const row = (await pgGet(
+      `SELECT id, user_id as userId, session_id as sessionId, event_type as eventType,
                 severity, status, title, summary, attempts,
                 strftime('%Y-%m-%dT%H:%M:%fZ', next_attempt_at) as nextAttemptAt,
                 strftime('%Y-%m-%dT%H:%M:%fZ', sent_at) as sentAt,
@@ -233,9 +231,9 @@ export class DiscordNotifierService {
                 strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt,
                 strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) as updatedAt
          FROM discord_outbox
-         WHERE id = ?`
-      )
-      .get(id) as Record<string, unknown> | undefined;
+         WHERE id = ?`,
+      id
+    )) as unknown as Record<string, unknown> | undefined;
     if (!row) throw new Error(`Discord outbox item not found: ${id}`);
     return rowToOutboxItem(row);
   }

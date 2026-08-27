@@ -25,7 +25,8 @@ const CLI_UPDATE_COMMANDS: Record<CLIProvider, string> = {
   kimi: 'npm install -g @moonshot-ai/kimi-code@latest',
 };
 
-let updateInFlight: Promise<CliProviderUpdateResponse> | null = null;
+let updateInFlight: Promise<CliProviderUpdateResponse> | null =
+  await await await await await await await await null;
 
 async function runUpdateCommand(command: string, env: NodeJS.ProcessEnv, timeoutMs: number) {
   try {
@@ -98,7 +99,7 @@ export async function runCliUpdates(providers?: CLIProvider[]): Promise<CliProvi
   })();
 
   try {
-    return await updateInFlight;
+    return updateInFlight;
   } finally {
     updateInFlight = null;
   }

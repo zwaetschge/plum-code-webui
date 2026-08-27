@@ -1,5 +1,5 @@
+import { run as pgRun } from '../db/pg.js';
 import type { Request } from 'express';
-import { getDatabase } from '../db/index.js';
 
 export interface AuditEntry {
   actorUserId: string | null;
@@ -15,13 +15,11 @@ export interface AuditEntry {
  * Append to the audit log. Failures are logged but never thrown — an audit write must
  * never break the caller's request. Treat this as best-effort telemetry.
  */
-export function recordAudit(entry: AuditEntry): void {
+export async function recordAudit(entry: AuditEntry): Promise<void> {
   try {
-    const db = getDatabase();
-    db.prepare(
+    await pgRun(
       `INSERT INTO audit_log (actor_user_id, action, resource_type, resource_id, ip, user_agent, metadata_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       entry.actorUserId,
       entry.action,
       entry.resourceType ?? null,
@@ -36,15 +34,15 @@ export function recordAudit(entry: AuditEntry): void {
 }
 
 /** Extract actor + request context from an Express request. */
-export function auditFromRequest(
+export async function auditFromRequest(
   req: Request,
   action: string,
   extras: Partial<Omit<AuditEntry, 'action' | 'ip' | 'userAgent'>> = {}
-): void {
+): Promise<void> {
   const actorUserId = (req as Request & { userId?: string }).userId ?? null;
   const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || null;
   const userAgent = (req.headers['user-agent'] as string | undefined) ?? null;
-  recordAudit({
+  await recordAudit({
     actorUserId,
     action,
     ip,
@@ -58,15 +56,14 @@ export function auditFromRequest(
  * auth code path (OAuth callbacks, basic-auth, dev-login, CLI bootstrap) so we have
  * a single place to reason about login accounting.
  */
-export function stampLogin(
+export async function stampLogin(
   userId: string,
   method: string,
   req?: Request,
   metadata: Record<string, unknown> = {}
-): void {
+): Promise<void> {
   try {
-    const db = getDatabase();
-    db.prepare(`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?`).run(userId);
+    await pgRun(`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?`, userId);
   } catch (err) {
     console.error('[audit] last_login_at update failed:', err);
   }
@@ -74,7 +71,7 @@ export function stampLogin(
     ? (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || null
     : null;
   const userAgent = req ? ((req.headers['user-agent'] as string | undefined) ?? null) : null;
-  recordAudit({
+  await recordAudit({
     actorUserId: userId,
     action: 'auth.login.success',
     ip,

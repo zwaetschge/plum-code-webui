@@ -15,8 +15,8 @@ declare module 'express-serve-static-core' {
 export const asyncHandler = (
   fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>
 ): RequestHandler => {
-  return (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
+  return async (req, res, next) => {
+    await Promise.resolve(await fn(req, res, next)).catch(next);
   };
 };
 

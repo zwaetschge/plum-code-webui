@@ -69,6 +69,26 @@ function hasAsyncModifier(fn) {
   return (fn.modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
 }
 
+/**
+ * `async` goes after the modifiers, not before them.
+ *
+ * `fn.getStart()` returns the start of the first modifier, so inserting there
+ * produces `async export function`, which is not valid TypeScript. The parser is
+ * error-tolerant and reads it as an expression statement `async` followed by
+ * `export function`, so nothing crashes — the next round rewrites the file and
+ * the `export` silently disappears. That cost 45 broken exports before it was
+ * spotted, because the only symptom is an import error in a different file.
+ */
+function asyncInsertion(fn, sourceFile) {
+  const modifiers = (fn.modifiers ?? []).filter((m) => !ts.isDecorator?.(m));
+  if (!modifiers.length) {
+    const start = fn.getStart(sourceFile);
+    return { start, end: start, replacement: 'async ' };
+  }
+  const last = modifiers[modifiers.length - 1];
+  return { start: last.end, end: last.end, replacement: ' async' };
+}
+
 function analyse(sourceFile, text) {
   const edits = [];
   const manual = [];
@@ -142,8 +162,7 @@ function analyse(sourceFile, text) {
   // `(req, res) => {` -> `async (req, res) => {`, and a declared return type
   // has to become a Promise or TypeScript rejects the function outright.
   for (const fn of asyncTargets) {
-    const start = fn.getStart(sourceFile);
-    edits.push({ start, end: start, replacement: 'async ' });
+    edits.push(asyncInsertion(fn, sourceFile));
 
     if (fn.type && !/^Promise</.test(text.slice(fn.type.pos, fn.type.end).trim())) {
       edits.push({

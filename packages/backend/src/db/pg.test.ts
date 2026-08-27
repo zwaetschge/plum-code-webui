@@ -95,7 +95,7 @@ test(
     await run('TRUNCATE pg_tx_test');
 
     await assert.rejects(
-      transaction(async (tx) => {
+      await transaction(async (tx) => {
         await tx.run('INSERT INTO pg_tx_test (id) VALUES (?)', 'x');
         throw new Error('boom');
       })

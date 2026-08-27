@@ -1,7 +1,7 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
 import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { getDatabase } from '../db/index.js';
 import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { auditFromRequest } from '../utils/auditLog.js';
@@ -32,11 +32,11 @@ function backupCallerAllowed(req: Request): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-router.post('/backup', (req: Request, res: Response) => {
+router.post('/backup', async (req: Request, res: Response) => {
   if (!backupCallerAllowed(req)) {
     throw new AppError('Admin session or hook secret required', 401, 'AUTH_REQUIRED');
   }
-  const result = createBackup();
+  const result = await createBackup();
   if (!result.verified) {
     throw new AppError(
       `Backup verification failed: ${result.detail ?? 'unknown'}`,
@@ -55,35 +55,29 @@ router.get('/backups', (_req: Request, res: Response) => {
 
 // ─── Users ──────────────────────────────────────────────────────────────────
 
-router.get('/users', (_req, res) => {
-  const db = getDatabase();
-  const rows = db
-    .prepare(
-      `SELECT u.id, u.email, u.name, u.avatar_url as avatarUrl, u.provider, u.provider_id as providerId,
+router.get('/users', async (_req, res) => {
+  const rows =
+    await pgAll(`SELECT u.id, u.email, u.name, u.avatar_url as avatarUrl, u.provider, u.provider_id as providerId,
               u.role, u.status,
               strftime('%Y-%m-%dT%H:%M:%fZ', u.last_login_at) as lastLoginAt,
               strftime('%Y-%m-%dT%H:%M:%fZ', u.created_at) as createdAt,
               strftime('%Y-%m-%dT%H:%M:%fZ', u.updated_at) as updatedAt,
               (SELECT COUNT(*) FROM sessions s WHERE s.user_id = u.id) as sessionCount
        FROM users u
-       ORDER BY u.created_at DESC`
-    )
-    .all();
+       ORDER BY u.created_at DESC`);
   res.json({ success: true, data: rows });
 });
 
-router.get('/users/:id', (req, res) => {
-  const db = getDatabase();
-  const user = db
-    .prepare(
-      `SELECT id, email, name, avatar_url as avatarUrl, provider, provider_id as providerId,
+router.get('/users/:id', async (req, res) => {
+  const user = await pgGet(
+    `SELECT id, email, name, avatar_url as avatarUrl, provider, provider_id as providerId,
               role, status,
               strftime('%Y-%m-%dT%H:%M:%fZ', last_login_at) as lastLoginAt,
               strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt,
               strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) as updatedAt
-       FROM users WHERE id = ?`
-    )
-    .get(req.params.id);
+       FROM users WHERE id = ?`,
+    req.params.id
+  );
   if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
   res.json({ success: true, data: user });
 });
@@ -96,17 +90,17 @@ const updateUserSchema = z.object({
   password: z.string().min(8).max(200).optional(),
 });
 
-router.patch('/users/:id', (req, res) => {
+router.patch('/users/:id', async (req, res) => {
   const parsed = updateUserSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
 
   const targetId = req.params.id;
   const actorId = (req as unknown as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
-  const current = db
-    .prepare(`SELECT id, email, role, status FROM users WHERE id = ?`)
-    .get(targetId) as { id: string; email: string; role: string; status: string } | undefined;
+  const current = (await pgGet(
+    `SELECT id, email, role, status FROM users WHERE id = ?`,
+    targetId
+  )) as unknown as { id: string; email: string; role: string; status: string } | undefined;
   if (!current) throw new AppError('User not found', 404, 'NOT_FOUND');
 
   // Guard: the actor must never demote or suspend themselves, otherwise a single admin
@@ -125,11 +119,10 @@ router.patch('/users/:id', (req, res) => {
     current.role === 'admin' &&
     (parsed.data.role === 'user' || parsed.data.status === 'suspended')
   ) {
-    const otherAdmins = db
-      .prepare(
-        `SELECT COUNT(*) as c FROM users WHERE role = 'admin' AND status = 'active' AND id != ?`
-      )
-      .get(targetId) as { c: number };
+    const otherAdmins = (await pgGet(
+      `SELECT COUNT(*) as c FROM users WHERE role = 'admin' AND status = 'active' AND id != ?`,
+      targetId
+    )) as unknown as { c: number };
     if (otherAdmins.c === 0) {
       throw new AppError('Cannot remove the last active admin', 400, 'LAST_ADMIN');
     }
@@ -166,14 +159,14 @@ router.patch('/users/:id', (req, res) => {
   updates.push('updated_at = CURRENT_TIMESTAMP');
   params.push(targetId);
 
-  db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+  await pgRun(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, ...params);
 
   if (parsed.data.status === 'suspended' || parsed.data.password !== undefined) {
-    revokeUserHttpSessions(targetId, db);
-    disconnectUserSockets(targetId);
+    await revokeUserHttpSessions(targetId);
+    await disconnectUserSockets(targetId);
   }
 
-  auditFromRequest(req, 'admin.user.update', {
+  await auditFromRequest(req, 'admin.user.update', {
     resourceType: 'user',
     resourceId: targetId,
     metadata: {
@@ -187,35 +180,34 @@ router.patch('/users/:id', (req, res) => {
   res.json({ success: true, data: { id: targetId, changed: updates.length - 1 } });
 });
 
-router.delete('/users/:id', (req, res) => {
+router.delete('/users/:id', async (req, res) => {
   const targetId = req.params.id;
   const actorId = (req as unknown as AuthenticatedRequest).userId;
   if (targetId === actorId) {
     throw new AppError('Cannot delete your own account', 400, 'SELF_DELETE');
   }
 
-  const db = getDatabase();
-  const current = db.prepare(`SELECT email, role FROM users WHERE id = ?`).get(targetId) as
-    | { email: string; role: string }
-    | undefined;
+  const current = (await pgGet(
+    `SELECT email, role FROM users WHERE id = ?`,
+    targetId
+  )) as unknown as { email: string; role: string } | undefined;
   if (!current) throw new AppError('User not found', 404, 'NOT_FOUND');
 
   if (current.role === 'admin') {
-    const otherAdmins = db
-      .prepare(
-        `SELECT COUNT(*) as c FROM users WHERE role = 'admin' AND status = 'active' AND id != ?`
-      )
-      .get(targetId) as { c: number };
+    const otherAdmins = (await pgGet(
+      `SELECT COUNT(*) as c FROM users WHERE role = 'admin' AND status = 'active' AND id != ?`,
+      targetId
+    )) as unknown as { c: number };
     if (otherAdmins.c === 0) {
       throw new AppError('Cannot delete the last active admin', 400, 'LAST_ADMIN');
     }
   }
 
-  disconnectUserSockets(targetId);
-  revokeUserHttpSessions(targetId, db);
-  db.prepare(`DELETE FROM users WHERE id = ?`).run(targetId);
+  await disconnectUserSockets(targetId);
+  await revokeUserHttpSessions(targetId);
+  await pgRun(`DELETE FROM users WHERE id = ?`, targetId);
 
-  auditFromRequest(req, 'admin.user.delete', {
+  await auditFromRequest(req, 'admin.user.delete', {
     resourceType: 'user',
     resourceId: targetId,
     metadata: { targetEmail: current.email, targetRole: current.role },
@@ -233,7 +225,7 @@ const auditQuerySchema = z.object({
   actorUserId: z.string().max(80).optional(),
 });
 
-router.get('/audit-log', (req, res) => {
+router.get('/audit-log', async (req, res) => {
   const parsed = auditQuerySchema.safeParse(req.query);
   if (!parsed.success) throw new AppError('Invalid query', 400, 'VALIDATION_ERROR');
   const { limit, offset, action, actorUserId } = parsed.data;
@@ -250,10 +242,8 @@ router.get('/audit-log', (req, res) => {
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  const db = getDatabase();
-  const rows = db
-    .prepare(
-      `SELECT a.id, a.actor_user_id as actorUserId, u.email as actorEmail, a.action,
+  const rows = (await pgAll(
+    `SELECT a.id, a.actor_user_id as actorUserId, u.email as actorEmail, a.action,
               a.resource_type as resourceType, a.resource_id as resourceId,
               a.ip, a.user_agent as userAgent, a.metadata_json as metadataJson,
               strftime('%Y-%m-%dT%H:%M:%fZ', a.created_at) as createdAt
@@ -261,9 +251,11 @@ router.get('/audit-log', (req, res) => {
        LEFT JOIN users u ON u.id = a.actor_user_id
        ${whereSql}
        ORDER BY a.id DESC
-       LIMIT ? OFFSET ?`
-    )
-    .all(...params, limit, offset) as Array<{
+       LIMIT ? OFFSET ?`,
+    ...params,
+    limit,
+    offset
+  )) as unknown as Array<{
     id: number;
     actorUserId: string | null;
     actorEmail: string | null;
@@ -277,7 +269,9 @@ router.get('/audit-log', (req, res) => {
   }>;
 
   const total = (
-    db.prepare(`SELECT COUNT(*) as c FROM audit_log a ${whereSql}`).get(...params) as { c: number }
+    (await pgGet(`SELECT COUNT(*) as c FROM audit_log a ${whereSql}`, ...params)) as unknown as {
+      c: number;
+    }
   ).c;
 
   const entries = rows.map((r) => ({
@@ -291,20 +285,30 @@ router.get('/audit-log', (req, res) => {
 
 // ─── Stats ──────────────────────────────────────────────────────────────────
 
-router.get('/stats', (_req, res) => {
-  const db = getDatabase();
-  const userCount = (db.prepare(`SELECT COUNT(*) as c FROM users`).get() as { c: number }).c;
+router.get('/stats', async (_req, res) => {
+  const userCount = ((await pgGet(`SELECT COUNT(*) as c FROM users`)) as unknown as { c: number })
+    .c;
   const adminCount = (
-    db.prepare(`SELECT COUNT(*) as c FROM users WHERE role = 'admin'`).get() as { c: number }
+    (await pgGet(`SELECT COUNT(*) as c FROM users WHERE role = 'admin'`)) as unknown as {
+      c: number;
+    }
   ).c;
   const suspendedCount = (
-    db.prepare(`SELECT COUNT(*) as c FROM users WHERE status = 'suspended'`).get() as { c: number }
+    (await pgGet(`SELECT COUNT(*) as c FROM users WHERE status = 'suspended'`)) as unknown as {
+      c: number;
+    }
   ).c;
-  const sessionCount = (db.prepare(`SELECT COUNT(*) as c FROM sessions`).get() as { c: number }).c;
+  const sessionCount = (
+    (await pgGet(`SELECT COUNT(*) as c FROM sessions`)) as unknown as { c: number }
+  ).c;
   const runningSessionCount = (
-    db.prepare(`SELECT COUNT(*) as c FROM sessions WHERE status = 'running'`).get() as { c: number }
+    (await pgGet(`SELECT COUNT(*) as c FROM sessions WHERE status = 'running'`)) as unknown as {
+      c: number;
+    }
   ).c;
-  const auditCount = (db.prepare(`SELECT COUNT(*) as c FROM audit_log`).get() as { c: number }).c;
+  const auditCount = (
+    (await pgGet(`SELECT COUNT(*) as c FROM audit_log`)) as unknown as { c: number }
+  ).c;
 
   res.json({
     success: true,

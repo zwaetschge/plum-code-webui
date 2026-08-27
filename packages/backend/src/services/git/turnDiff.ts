@@ -1,6 +1,6 @@
+import { run as pgRun } from '../../db/pg.js';
 import { nanoid } from 'nanoid';
 import { simpleGit } from 'simple-git';
-import { getDatabase } from '../../db/index.js';
 
 /**
  * "What did the agent actually change in this turn?"
@@ -70,24 +70,20 @@ export async function captureTurnDiff(
       untracked.length ? `${untracked.length} new` : null,
     ].filter(Boolean);
 
-    getDatabase()
-      .prepare(
-        `INSERT INTO turn_diffs
+    await pgRun(
+      `INSERT INTO turn_diffs
            (id, session_id, user_id, turn_id, files_changed, insertions, deletions, summary, diff)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        nanoid(),
-        sessionId,
-        userId,
-        turnId ?? null,
-        filesChanged,
-        insertions,
-        deletions,
-        summaryParts.join(' · '),
-        // Cap the stored diff: a huge refactor should not bloat the database.
-        (diff + '\n' + fullDiff).slice(0, 200_000)
-      );
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      nanoid(),
+      sessionId,
+      userId,
+      turnId ?? null,
+      filesChanged,
+      insertions,
+      deletions,
+      summaryParts.join(' · '), // Cap the stored diff: a huge refactor should not bloat the database.
+      (diff + '\n' + fullDiff).slice(0, 200_000)
+    );
   } catch (error) {
     console.error('[TurnDiff] capture failed:', error);
   }

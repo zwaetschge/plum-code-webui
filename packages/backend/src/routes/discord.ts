@@ -56,22 +56,22 @@ function authUserId(req: Request): string {
   return (req as AuthenticatedRequest).userId;
 }
 
-router.get('/settings', (_req, res) => {
-  res.json({ success: true, data: discordIntegrationService.getSettings() });
+router.get('/settings', async (_req, res) => {
+  res.json({ success: true, data: await discordIntegrationService.getSettings() });
 });
 
-router.put('/settings', (req, res) => {
+router.put('/settings', async (req, res) => {
   const parsed = updateSettingsSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new AppError('Invalid Discord settings payload', 400, 'VALIDATION_ERROR');
   }
 
   const payload: DiscordIntegrationSettingsUpdate = parsed.data;
-  const settings = discordIntegrationService.updateSettings({
+  const settings = await discordIntegrationService.updateSettings({
     ...payload,
     minSeverity: payload.minSeverity as DiscordAlertSeverity | undefined,
   });
-  auditFromRequest(req, 'discord.settings.updated', {
+  await auditFromRequest(req, 'discord.settings.updated', {
     resourceType: 'discord_integration',
     metadata: {
       enabled: settings.enabled,
@@ -86,7 +86,7 @@ router.put('/settings', (req, res) => {
 router.post(
   '/test',
   asyncHandler(async (req, res) => {
-    const settings = discordIntegrationService.getSettings();
+    const settings = await discordIntegrationService.getSettings();
     if (!settings.configured) {
       throw new AppError(
         settings.transport === 'bot'
@@ -97,7 +97,7 @@ router.post(
       );
     }
 
-    const item = discordNotifier.queueTest(authUserId(req));
+    const item = await discordNotifier.queueTest(authUserId(req));
     if (!item) {
       throw new AppError('Discord test message could not be queued', 500, 'DISCORD_QUEUE_FAILED');
     }
@@ -108,7 +108,7 @@ router.post(
       outboxId: item.id,
       error: result.error,
     };
-    auditFromRequest(req, 'discord.test.sent', {
+    await auditFromRequest(req, 'discord.test.sent', {
       resourceType: 'discord_outbox',
       resourceId: item.id,
       metadata: { sent: result.sent, error: result.error },
@@ -117,12 +117,12 @@ router.post(
   })
 );
 
-router.get('/outbox', (req, res) => {
+router.get('/outbox', async (req, res) => {
   const parsed = outboxQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     throw new AppError('Invalid outbox query', 400, 'VALIDATION_ERROR');
   }
-  res.json({ success: true, data: discordNotifier.listOutbox(parsed.data.limit) });
+  res.json({ success: true, data: await discordNotifier.listOutbox(parsed.data.limit) });
 });
 
 export default router;

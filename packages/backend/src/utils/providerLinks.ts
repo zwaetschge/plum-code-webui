@@ -235,17 +235,17 @@ export function buildWebuiOpenCodeProviderConfig(
   };
 }
 
-function applyWebuiOpenCodeProviderConfig(
+async function applyWebuiOpenCodeProviderConfig(
   config: Record<string, unknown>,
   userId?: string,
   storedProvidersOverride?: OpenCodeProvider[]
-): void {
+): Promise<void> {
   if (!userId && !storedProvidersOverride) return;
 
   const catalog = getOpenCodeProviderCatalog();
-  const storedProviders = (storedProvidersOverride || readOpenCodeProvidersForUser(userId!)).filter(
-    (provider) => provider.enabled && (provider.baseUrl || catalog[provider.id]?.api)
-  );
+  const storedProviders = (
+    storedProvidersOverride || (await readOpenCodeProvidersForUser(userId!))
+  ).filter((provider) => provider.enabled && (provider.baseUrl || catalog[provider.id]?.api));
   if (storedProviders.length === 0) return;
 
   const providers = isRecord(config.provider) ? config.provider : {};
@@ -493,14 +493,14 @@ function toOpenCodeMcpConfig(server: ClaudeMcpServer): Record<string, unknown> |
   return null;
 }
 
-export function syncOpenCodeConfig(
+async function syncOpenCodeConfig(
   opts: {
     quiet?: boolean;
     claudeSettingsPath?: string;
     userId?: string;
     configPath?: string;
   } = {}
-): { updated: boolean; mcpCount: number } {
+): Promise<{ updated: boolean; mcpCount: number }> {
   const configPath = opts.configPath || path.join(getOpenCodeConfigDir(), 'opencode.json');
   const config = readJsonObject(configPath);
   if (!config.$schema) {
@@ -525,10 +525,10 @@ export function syncOpenCodeConfig(
     mcpCount += 1;
   }
   config.mcp = mcp;
-  const storedProviders = opts.userId ? readOpenCodeProvidersForUser(opts.userId) : undefined;
+  const storedProviders = opts.userId ? await readOpenCodeProvidersForUser(opts.userId) : undefined;
   applyZaiVisionMcpConfig(config, storedProviders ? { providers: storedProviders } : undefined);
   applyOpenCodePrimaryAgentConfig(config);
-  applyWebuiOpenCodeProviderConfig(config, opts.userId, storedProviders);
+  await applyWebuiOpenCodeProviderConfig(config, opts.userId, storedProviders);
 
   const next = `${JSON.stringify(config, null, 2)}\n`;
   const updated = writeIfChanged(configPath, next);
@@ -540,19 +540,19 @@ export function syncOpenCodeConfig(
   return { updated, mcpCount };
 }
 
-export function syncProviderLinks(
+export async function syncProviderLinks(
   opts: {
     quiet?: boolean;
     userId?: string;
     opencodeConfigPath?: string;
     opencodeAgentsDir?: string;
   } = {}
-): ProviderLinksSyncResult {
+): Promise<ProviderLinksSyncResult> {
   const opencodeAgents = syncOpencodeAgents({
     quiet: true,
     destinationDir: opts.opencodeAgentsDir,
   });
-  const opencodeConfig = syncOpenCodeConfig({
+  const opencodeConfig = await syncOpenCodeConfig({
     quiet: true,
     userId: opts.userId,
     configPath: opts.opencodeConfigPath,

@@ -1,7 +1,8 @@
+import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
-import { getAppConfig, getDatabase, setAppConfig } from '../db/index.js';
+import { getAppConfig, setAppConfig } from '../db/index.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { safeEncrypt, safeDecrypt } from '../utils/encryption.js';
 import { safeJsonParse } from '../utils/json.js';
@@ -280,11 +281,11 @@ export function parseEnabledCliProviders(value: unknown): CLIProvider[] {
   return providers.length > 0 ? [...new Set(providers)] : [...DEFAULT_ENABLED_CLI_PROVIDERS];
 }
 
-export function getEnabledCliProvidersForUser(userId: string): CLIProvider[] {
-  const db = getDatabase();
-  const settings = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json: string | null } | undefined;
+export async function getEnabledCliProvidersForUser(userId: string): Promise<CLIProvider[]> {
+  const settings = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
   const parsed = safeJsonParse<Record<string, unknown>>(settings?.settings_json, {});
   return parseEnabledCliProviders(parsed.enabledCliProviders);
 }
@@ -481,18 +482,16 @@ export function parseAnalyticsSettings(value: unknown): AnalyticsSettings {
 }
 
 // Get user settings
-router.get('/', requireAuth, (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
-  let settings = db
-    .prepare(
-      `SELECT user_id as userId, theme, default_working_dir as defaultWorkingDir,
+  let settings = (await pgGet(
+    `SELECT user_id as userId, theme, default_working_dir as defaultWorkingDir,
               allowed_tools as allowedTools, custom_system_prompt as customSystemPrompt,
               settings_json as settingsJson
-       FROM user_settings WHERE user_id = ?`
-    )
-    .get(userId) as
+       FROM user_settings WHERE user_id = ?`,
+    userId
+  )) as unknown as
     | {
         userId: string;
         theme: Theme;
@@ -505,10 +504,11 @@ router.get('/', requireAuth, (req, res) => {
 
   if (!settings) {
     // Create default settings
-    db.prepare(
+    await pgRun(
       `INSERT INTO user_settings (user_id, theme, allowed_tools)
-       VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`
-    ).run(userId);
+       VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`,
+      userId
+    );
 
     settings = {
       userId,
@@ -568,14 +568,15 @@ router.get('/', requireAuth, (req, res) => {
  * row, and the re-read afterwards had nothing to return. That surfaced as a 500
  * on the very first save of a fresh account.
  */
-function ensureSettingsRow(db: ReturnType<typeof getDatabase>, userId: string): void {
-  db.prepare(
+async function ensureSettingsRow(userId: string): Promise<void> {
+  await pgRun(
     `INSERT OR IGNORE INTO user_settings (user_id, theme, allowed_tools)
-     VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`
-  ).run(userId);
+     VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`,
+    userId
+  );
 }
 
-router.put('/', requireAuth, (req, res) => {
+router.put('/', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = updateSettingsSchema.safeParse(req.body);
 
@@ -583,8 +584,7 @@ router.put('/', requireAuth, (req, res) => {
     throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
   }
 
-  const db = getDatabase();
-  ensureSettingsRow(db, userId);
+  await ensureSettingsRow(userId);
   const {
     defaultWorkingDir,
     allowedTools,
@@ -612,9 +612,10 @@ router.put('/', requireAuth, (req, res) => {
   // still propagates without having to resend the flag.
   const storedSettingsJson = safeJsonParse<Record<string, unknown>>(
     (
-      db.prepare('SELECT settings_json FROM user_settings WHERE user_id = ?').get(userId) as
-        | { settings_json: string | null }
-        | undefined
+      (await pgGet(
+        'SELECT settings_json FROM user_settings WHERE user_id = ?',
+        userId
+      )) as unknown as { settings_json: string | null } | undefined
     )?.settings_json,
     {}
   );
@@ -652,9 +653,10 @@ router.put('/', requireAuth, (req, res) => {
     appearanceSync !== undefined ||
     (syncAppearance && parsed.data.backgroundAnimation !== undefined)
   ) {
-    const existing = db
-      .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-      .get(userId) as { settings_json: string | null } | undefined;
+    const existing = (await pgGet(
+      'SELECT settings_json FROM user_settings WHERE user_id = ?',
+      userId
+    )) as unknown as { settings_json: string | null } | undefined;
 
     const settingsJson = safeJsonParse<Record<string, unknown>>(existing?.settings_json, {});
     if (appearanceSync !== undefined) {
@@ -741,18 +743,17 @@ router.put('/', requireAuth, (req, res) => {
 
   if (updates.length > 0) {
     values.push(userId);
-    db.prepare(`UPDATE user_settings SET ${updates.join(', ')} WHERE user_id = ?`).run(...values);
+    await pgRun(`UPDATE user_settings SET ${updates.join(', ')} WHERE user_id = ?`, ...values);
   }
 
   // Fetch updated settings
-  const settings = db
-    .prepare(
-      `SELECT user_id as userId, theme, default_working_dir as defaultWorkingDir,
+  const settings = (await pgGet(
+    `SELECT user_id as userId, theme, default_working_dir as defaultWorkingDir,
               allowed_tools as allowedTools, custom_system_prompt as customSystemPrompt,
               settings_json as settingsJson
-       FROM user_settings WHERE user_id = ?`
-    )
-    .get(userId) as {
+       FROM user_settings WHERE user_id = ?`,
+    userId
+  )) as unknown as {
     userId: string;
     theme: Theme;
     defaultWorkingDir: string | null;
@@ -805,7 +806,7 @@ router.put('/', requireAuth, (req, res) => {
 });
 
 // Update API key
-router.put('/api-key', requireAuth, (req, res) => {
+router.put('/api-key', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const { apiKey } = req.body;
 
@@ -814,34 +815,36 @@ router.put('/api-key', requireAuth, (req, res) => {
   }
 
   // Encrypt the API key before storing
-  const db = getDatabase();
-  db.prepare(
-    'UPDATE users SET api_key_encrypted = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-  ).run(safeEncrypt(apiKey), userId);
+
+  await pgRun(
+    'UPDATE users SET api_key_encrypted = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    safeEncrypt(apiKey),
+    userId
+  );
 
   res.json({ success: true });
 });
 
 // Delete API key
-router.delete('/api-key', requireAuth, (req, res) => {
+router.delete('/api-key', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
-  db.prepare(
-    'UPDATE users SET api_key_encrypted = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-  ).run(userId);
+  await pgRun(
+    'UPDATE users SET api_key_encrypted = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    userId
+  );
 
   res.json({ success: true });
 });
 
 // Get GitHub token status (not the actual token)
-router.get('/github-token', requireAuth, (req, res) => {
+router.get('/github-token', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
-  const settings = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json: string | null } | undefined;
+  const settings = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
 
   if (settings?.settings_json) {
     try {
@@ -865,7 +868,7 @@ router.get('/github-token', requireAuth, (req, res) => {
 });
 
 // Set GitHub token
-router.put('/github-token', requireAuth, (req, res) => {
+router.put('/github-token', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const { token } = req.body;
 
@@ -878,12 +881,11 @@ router.put('/github-token', requireAuth, (req, res) => {
     throw new AppError('Invalid GitHub token format', 400, 'INVALID_TOKEN');
   }
 
-  const db = getDatabase();
-
   // Get existing settings_json
-  const existing = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json: string | null } | undefined;
+  const existing = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
 
   let settingsObj: Record<string, unknown> = {};
   if (existing?.settings_json) {
@@ -897,7 +899,8 @@ router.put('/github-token', requireAuth, (req, res) => {
   // Encrypt the token before storing
   settingsObj.githubToken = safeEncrypt(token);
 
-  db.prepare('UPDATE user_settings SET settings_json = ? WHERE user_id = ?').run(
+  await pgRun(
+    'UPDATE user_settings SET settings_json = ? WHERE user_id = ?',
     JSON.stringify(settingsObj),
     userId
   );
@@ -912,21 +915,22 @@ router.put('/github-token', requireAuth, (req, res) => {
 });
 
 // Delete GitHub token
-router.delete('/github-token', requireAuth, (req, res) => {
+router.delete('/github-token', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
   // Get existing settings_json
-  const existing = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json: string | null } | undefined;
+  const existing = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
 
   if (existing?.settings_json) {
     try {
       const settingsObj = JSON.parse(existing.settings_json);
       delete settingsObj.githubToken;
 
-      db.prepare('UPDATE user_settings SET settings_json = ? WHERE user_id = ?').run(
+      await pgRun(
+        'UPDATE user_settings SET settings_json = ? WHERE user_id = ?',
         JSON.stringify(settingsObj),
         userId
       );
@@ -939,12 +943,11 @@ router.delete('/github-token', requireAuth, (req, res) => {
 });
 
 // Get GitHub token for internal use (returns full decrypted token)
-export function getGitHubTokenForUser(userId: string): string | null {
-  const db = getDatabase();
-
-  const settings = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json: string | null } | undefined;
+export async function getGitHubTokenForUser(userId: string): Promise<string | null> {
+  const settings = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
 
   if (settings?.settings_json) {
     const parsed = safeJsonParse<Record<string, unknown>>(settings.settings_json, {});
@@ -974,24 +977,24 @@ function serializeZaiApiStatus(config: ZaiApiConfig | null) {
 // Z.AI runs through the Claude Code transport, but is a separate WebUI
 // provider. Its endpoint/token are never injected into Anthropic subscription
 // sessions.
-router.get('/zai-api', requireAuth, (req, res) => {
+router.get('/zai-api', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  res.json({ success: true, data: serializeZaiApiStatus(getZaiApiConfigForUser(userId)) });
+  res.json({ success: true, data: serializeZaiApiStatus(await getZaiApiConfigForUser(userId)) });
 });
 
-router.put('/zai-api', requireAuth, (req, res) => {
+router.put('/zai-api', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = claudeApiSettingsSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new AppError('Invalid Z.AI configuration', 400, 'VALIDATION_ERROR');
   }
 
-  const db = getDatabase();
-  const existing = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json: string | null } | undefined;
+  const existing = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
   const settingsObj = safeJsonParse<Record<string, unknown>>(existing?.settings_json, {});
-  const existingConfig = getZaiApiConfigForUser(userId);
+  const existingConfig = await getZaiApiConfigForUser(userId);
   const authToken = parsed.data.authToken || existingConfig?.authToken;
   if (!authToken) {
     throw new AppError('API token is required', 400, 'MISSING_API_TOKEN');
@@ -1007,7 +1010,8 @@ router.put('/zai-api', requireAuth, (req, res) => {
   };
   delete settingsObj.claudeApi;
 
-  db.prepare('UPDATE user_settings SET settings_json = ? WHERE user_id = ?').run(
+  await pgRun(
+    'UPDATE user_settings SET settings_json = ? WHERE user_id = ?',
     JSON.stringify(settingsObj),
     userId
   );
@@ -1026,18 +1030,20 @@ router.put('/zai-api', requireAuth, (req, res) => {
   });
 });
 
-router.delete('/zai-api', requireAuth, (req, res) => {
+router.delete('/zai-api', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
-  const existing = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json: string | null } | undefined;
+
+  const existing = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
 
   if (existing?.settings_json) {
     const settingsObj = safeJsonParse<Record<string, unknown>>(existing.settings_json, {});
     delete settingsObj.zaiApi;
     delete settingsObj.claudeApi;
-    db.prepare('UPDATE user_settings SET settings_json = ? WHERE user_id = ?').run(
+    await pgRun(
+      'UPDATE user_settings SET settings_json = ? WHERE user_id = ?',
       JSON.stringify(settingsObj),
       userId
     );
@@ -1046,11 +1052,11 @@ router.delete('/zai-api', requireAuth, (req, res) => {
   res.json({ success: true });
 });
 
-export function getZaiApiConfigForUser(userId: string): ZaiApiConfig | null {
-  const db = getDatabase();
-  const settings = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json: string | null } | undefined;
+export async function getZaiApiConfigForUser(userId: string): Promise<ZaiApiConfig | null> {
+  const settings = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
   const parsed = safeJsonParse<Record<string, unknown>>(settings?.settings_json, {});
   const stored =
     parsed.zaiApi && typeof parsed.zaiApi === 'object'

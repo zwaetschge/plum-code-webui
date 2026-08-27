@@ -1,7 +1,7 @@
+import { get as pgGet } from '../db/pg.js';
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
-import { getDatabase } from '../db/index.js';
 import { AppError } from './errorHandler.js';
 import { GATEWAY_TOKEN_PREFIX, resolveGatewayToken } from '../services/gateway/tokens.js';
 import type { GatewayScope } from '../services/gateway/tokens.js';
@@ -17,10 +17,9 @@ export interface AuthenticatedRequest extends Request {
   gatewayScope?: GatewayScope;
 }
 
-function getUserRoleStatus(userId: string): { role: string; status: string } | null {
+async function getUserRoleStatus(userId: string): Promise<{ role: string; status: string } | null> {
   try {
-    const db = getDatabase();
-    const row = db.prepare(`SELECT role, status FROM users WHERE id = ?`).get(userId) as
+    const row = (await pgGet(`SELECT role, status FROM users WHERE id = ?`, userId)) as unknown as
       | { role: string; status: string }
       | undefined;
     return row ?? null;
@@ -34,10 +33,10 @@ function getUserRoleStatus(userId: string): { role: string; status: string } | n
  * Splitting this out (instead of merging into requireAuth) keeps the fast path hot
  * while making the guard explicit at the route level.
  */
-export function requireActive(req: Request, _res: Response, next: NextFunction): void {
+export async function requireActive(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const userId = (req as AuthenticatedRequest).userId;
   if (!userId) throw new AppError('Authentication required', 401, 'AUTH_REQUIRED');
-  const info = getUserRoleStatus(userId);
+  const info = await getUserRoleStatus(userId);
   if (!info) throw new AppError('User not found', 401, 'USER_NOT_FOUND');
   if (info.status === 'suspended') {
     throw new AppError('Account suspended', 403, 'ACCOUNT_SUSPENDED');
@@ -49,10 +48,14 @@ export function requireActive(req: Request, _res: Response, next: NextFunction):
  * Gate admin-only routes. Runs requireActive implicitly (suspended admins can't log in).
  * Use after requireAuth. 403 (not 404) so admins know the route exists.
  */
-export function requireAdmin(req: Request, _res: Response, next: NextFunction): void {
+export async function requireAdmin(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> {
   const userId = (req as AuthenticatedRequest).userId;
   if (!userId) throw new AppError('Authentication required', 401, 'AUTH_REQUIRED');
-  const info = getUserRoleStatus(userId);
+  const info = await getUserRoleStatus(userId);
   if (!info) throw new AppError('User not found', 401, 'USER_NOT_FOUND');
   if (info.status === 'suspended') {
     throw new AppError('Account suspended', 403, 'ACCOUNT_SUSPENDED');
@@ -68,8 +71,8 @@ export function requireAdmin(req: Request, _res: Response, next: NextFunction): 
  * Prevents long-lived JWTs from outliving user deletion/suspension.
  * A single indexed lookup (~0.1ms) on every authenticated request.
  */
-function enforceUserLifecycle(userId: string): void {
-  const info = getUserRoleStatus(userId);
+async function enforceUserLifecycle(userId: string): Promise<void> {
+  const info = await getUserRoleStatus(userId);
   if (!info) {
     throw new AppError('User no longer exists', 401, 'USER_NOT_FOUND');
   }
@@ -83,7 +86,7 @@ function enforceUserLifecycle(userId: string): void {
  * normal API authentication and the CLI-provider link routes: provider
  * credentials prove that a CLI is installed, not who is using the WebUI.
  */
-export function resolveAuthenticatedUserId(req: Request): string | null {
+export async function resolveAuthenticatedUserId(req: Request): Promise<string | null> {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
@@ -93,11 +96,11 @@ export function resolveAuthenticatedUserId(req: Request): string | null {
     // the user's capabilities through the user's endpoints, instead of a
     // parallel API that drifts out of sync with what the UI can do.
     if (token.startsWith(GATEWAY_TOKEN_PREFIX)) {
-      const resolved = resolveGatewayToken(token);
+      const resolved = await resolveGatewayToken(token);
       if (!resolved) {
         throw new AppError('Invalid gateway token', 401, 'INVALID_TOKEN');
       }
-      enforceUserLifecycle(resolved.userId);
+      await enforceUserLifecycle(resolved.userId);
       (req as AuthenticatedRequest).viaGateway = true;
       (req as AuthenticatedRequest).gatewayScope = resolved.scope;
 
@@ -120,7 +123,7 @@ export function resolveAuthenticatedUserId(req: Request): string | null {
     } catch {
       throw new AppError('Invalid token', 401, 'INVALID_TOKEN');
     }
-    enforceUserLifecycle(userId);
+    await enforceUserLifecycle(userId);
     return userId;
   }
 
@@ -129,15 +132,15 @@ export function resolveAuthenticatedUserId(req: Request): string | null {
     if (typeof userId !== 'string' || !userId) {
       throw new AppError('Invalid session identity', 401, 'INVALID_SESSION');
     }
-    enforceUserLifecycle(userId);
+    await enforceUserLifecycle(userId);
     return userId;
   }
 
   return null;
 }
 
-export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
-  const userId = resolveAuthenticatedUserId(req);
+export async function requireAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  const userId = await resolveAuthenticatedUserId(req);
   if (userId) {
     (req as AuthenticatedRequest).userId = userId;
     return next();

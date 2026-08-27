@@ -275,7 +275,7 @@ export async function importSkillIntoCatalog(
       if (await pathExists(path.join(candidate, 'SKILL.md'))) existingRuntimePaths.push(candidate);
     }
     const styleConflict = await Promise.all(
-      stylePaths.map((candidate) => pathExists(path.join(candidate, 'SKILL.md')))
+      stylePaths.map(async (candidate) => await pathExists(path.join(candidate, 'SKILL.md')))
     ).then((results) => results.some(Boolean));
 
     if (styleConflict) {

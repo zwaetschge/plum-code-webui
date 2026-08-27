@@ -600,14 +600,14 @@ export class OracleBrowserManager {
   private instances = new Map<string, BrowserInstance>();
 
   async getState(sessionId: string, userId: string): Promise<OracleEmbeddedBrowserState> {
-    const runtime = getOracleRuntimeConfigForSession(sessionId).config;
+    const runtime = (await getOracleRuntimeConfigForSession(sessionId)).config;
     const profileDir = normalizeProfileDir(runtime.manualLoginProfileDir);
     const key = instanceKey(userId, profileDir);
     const instance = this.instances.get(key);
 
     if (instance?.startPromise) {
       try {
-        await instance.startPromise;
+        instance.startPromise;
       } catch {
         // State should still render even if the start failed.
       }
@@ -616,8 +616,8 @@ export class OracleBrowserManager {
     return this.serializeState(sessionId, runtime.mode, runtime.chatgptUrl, profileDir, instance);
   }
 
-  getEmbeddedRemoteChromeTargetForSession(sessionId: string): string | null {
-    const resolved = getOracleRuntimeConfigForSession(sessionId);
+  async getEmbeddedRemoteChromeTargetForSession(sessionId: string): Promise<string | null> {
+    const resolved = await getOracleRuntimeConfigForSession(sessionId);
     if (!resolved.userId) return null;
 
     const profileDir = normalizeProfileDir(resolved.config.manualLoginProfileDir);
@@ -635,7 +635,7 @@ export class OracleBrowserManager {
     userId: string,
     url?: string
   ): Promise<OracleEmbeddedBrowserState> {
-    const runtime = getOracleRuntimeConfigForSession(sessionId).config;
+    const runtime = (await getOracleRuntimeConfigForSession(sessionId)).config;
     const profileDir = normalizeProfileDir(runtime.manualLoginProfileDir);
     const key = instanceKey(userId, profileDir);
     const startUrl = sanitizeUrl(url, runtime.chatgptUrl || DEFAULT_ORACLE_CHATGPT_URL);
@@ -644,7 +644,7 @@ export class OracleBrowserManager {
     if (instance) {
       instance.sessionIds.add(sessionId);
       if (instance.startPromise) {
-        await instance.startPromise;
+        instance.startPromise;
       }
       if (instance.status === 'running') {
         await this.navigateInstance(instance, startUrl);
@@ -681,7 +681,7 @@ export class OracleBrowserManager {
 
     instance.startPromise = this.launchInstance(instance, startUrl);
     try {
-      await instance.startPromise;
+      instance.startPromise;
     } finally {
       instance.startPromise = null;
     }
@@ -690,7 +690,7 @@ export class OracleBrowserManager {
   }
 
   async stop(sessionId: string, userId: string): Promise<OracleEmbeddedBrowserState> {
-    const runtime = getOracleRuntimeConfigForSession(sessionId).config;
+    const runtime = (await getOracleRuntimeConfigForSession(sessionId)).config;
     const profileDir = normalizeProfileDir(runtime.manualLoginProfileDir);
     const key = instanceKey(userId, profileDir);
     const instance = this.instances.get(key);
@@ -1050,10 +1050,10 @@ export class OracleBrowserManager {
     sessionId: string,
     userId: string
   ): Promise<{
-    runtime: ReturnType<typeof getOracleRuntimeConfigForSession>['config'];
+    runtime: Awaited<ReturnType<typeof getOracleRuntimeConfigForSession>>['config'];
     instance: BrowserInstance;
   }> {
-    const runtime = getOracleRuntimeConfigForSession(sessionId).config;
+    const runtime = (await getOracleRuntimeConfigForSession(sessionId)).config;
     const profileDir = normalizeProfileDir(runtime.manualLoginProfileDir);
     const key = instanceKey(userId, profileDir);
     const instance = this.instances.get(key);
@@ -1064,7 +1064,7 @@ export class OracleBrowserManager {
       );
     }
     if (instance.startPromise) {
-      await instance.startPromise;
+      instance.startPromise;
     }
     if (instance.status !== 'running') {
       throw new Error(instance.error || 'Embedded Oracle browser is not ready.');

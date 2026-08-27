@@ -1,3 +1,4 @@
+import { get as pgGet, run as pgRun } from '../db/pg.js';
 /**
  * REST API for ComfyUI image generation.
  *
@@ -21,7 +22,6 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import os from 'node:os';
 import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
-import { getDatabase } from '../db/index.js';
 import { config } from '../config.js';
 import {
   comfyui,
@@ -104,9 +104,9 @@ const settingsSchema = z.object({
 // own LoadImage handles up to ~50MB for typical RGB PNGs).
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (_req, _file, cb) => {
+    destination: async (_req, _file, cb) => {
       const dir = path.join(os.tmpdir(), 'webui-comfyui-uploads');
-      mkdir(dir, { recursive: true })
+      await mkdir(dir, { recursive: true })
         .then(() => cb(null, dir))
         .catch((err) => cb(err, dir));
     },
@@ -138,12 +138,12 @@ router.get('/workflows', (_req: Request, res: Response) => {
 });
 
 // ── GET /settings ──────────────────────────────────────────────────────
-router.get('/settings', (_req: Request, res: Response) => {
+router.get('/settings', async (_req: Request, res: Response) => {
   res.json({
     success: true,
     data: {
-      url: comfyui.getBaseUrl(),
-      enabled: comfyui.isEnabled(),
+      url: await comfyui.getBaseUrl(),
+      enabled: await comfyui.isEnabled(),
       output_dir_public: '/generated',
     },
   });
@@ -162,15 +162,15 @@ router.put('/settings', requireAdmin, async (req: Request, res: Response) => {
       await comfyui.setBaseUrl(parsed.data.url);
     }
     if (parsed.data.enabled !== undefined) {
-      const db = getDatabase();
-      db.prepare(
+      await pgRun(
         `INSERT INTO app_config (key, value) VALUES ('comfyui_enabled', ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`
-      ).run(parsed.data.enabled ? 'true' : 'false');
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+        parsed.data.enabled ? 'true' : 'false'
+      );
     }
     res.json({
       success: true,
-      data: { url: comfyui.getBaseUrl(), enabled: comfyui.isEnabled() },
+      data: { url: await comfyui.getBaseUrl(), enabled: await comfyui.isEnabled() },
     });
   } catch (err) {
     res.status(400).json({
@@ -185,7 +185,7 @@ router.put('/settings', requireAdmin, async (req: Request, res: Response) => {
 
 // ── GET /test ──────────────────────────────────────────────────────────
 router.get('/test', async (_req: Request, res: Response) => {
-  const probe = await comfyui.client().ping();
+  const probe = await (await comfyui.client()).ping();
   if (probe.ok) {
     res.json({ success: true, data: { reachable: true, version: probe.version || null } });
   } else {
@@ -321,7 +321,7 @@ internalRouter.post('/generate', requireHookSecret, async (req: Request, res: Re
       error: { code: 'SESSION_REQUIRED', message: 'WebUI session identity is required' },
     });
   }
-  const row = getDatabase().prepare('SELECT user_id FROM sessions WHERE id = ?').get(sessionId) as
+  const row = (await pgGet('SELECT user_id FROM sessions WHERE id = ?', sessionId)) as unknown as
     | { user_id: string }
     | undefined;
   if (!row?.user_id) {

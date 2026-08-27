@@ -1,10 +1,10 @@
+import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import type {
   HomeAssistantIntegrationSettingsUpdate,
   HomeAssistantStatus,
 } from '@plum-code-webui/shared';
-import { getDatabase } from '../db/index.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { requireAdmin, requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import { homeAssistantStatusLights } from '../services/home-assistant/index.js';
@@ -96,10 +96,12 @@ router.put(
     const parsed = lightAssignmentSchema.safeParse(req.body);
     if (!parsed.success) throw new AppError('Invalid light entity', 400, 'VALIDATION_ERROR');
     const userId = (req as AuthenticatedRequest).userId;
-    const db = getDatabase();
-    const session = db
-      .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-      .get(req.params.sessionId, userId) as { id: string } | undefined;
+
+    const session = (await pgGet(
+      'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+      req.params.sessionId,
+      userId
+    )) as unknown as { id: string } | undefined;
     if (!session) throw new AppError('Session not found', 404, 'NOT_FOUND');
 
     const entityId = parsed.data.entityId || null;
@@ -115,11 +117,14 @@ router.put(
       }
     }
 
-    db.prepare(
+    await pgRun(
       `UPDATE sessions
        SET home_assistant_entity_id = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND user_id = ?`
-    ).run(entityId, req.params.sessionId, userId);
+       WHERE id = ? AND user_id = ?`,
+      entityId,
+      req.params.sessionId,
+      userId
+    );
     res.json({ success: true, data: { entityId } });
   })
 );

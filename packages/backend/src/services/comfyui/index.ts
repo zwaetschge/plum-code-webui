@@ -1,3 +1,4 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../../db/pg.js';
 /**
  * ComfyUI orchestrator — single source of truth for image generation jobs.
  *
@@ -16,7 +17,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { getDatabase } from '../../db/index.js';
 import { ComfyUIClient, type ComfyUIOutputImage } from './client.js';
 import {
   buildWorkflow,
@@ -87,12 +87,12 @@ class ComfyUIOrchestrator {
   private cleanupTimer: NodeJS.Timeout | null = null;
 
   /** Read current ComfyUI URL from app_config, falling back to env then default. */
-  getBaseUrl(): string {
+  async getBaseUrl(): Promise<string> {
     try {
-      const db = getDatabase();
-      const row = db.prepare('SELECT value FROM app_config WHERE key = ?').get('comfyui_url') as
-        | { value: string }
-        | undefined;
+      const row = (await pgGet(
+        'SELECT value FROM app_config WHERE key = ?',
+        'comfyui_url'
+      )) as unknown as { value: string } | undefined;
       if (row?.value) return row.value;
     } catch {
       // DB not ready / table missing — fall through to env
@@ -111,19 +111,20 @@ class ComfyUIOrchestrator {
     if (!probe.ok) {
       throw new Error(`ComfyUI not reachable at ${trimmed}: ${probe.error}`);
     }
-    const db = getDatabase();
-    db.prepare(
+
+    await pgRun(
       `INSERT INTO app_config (key, value) VALUES ('comfyui_url', ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`
-    ).run(trimmed);
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+      trimmed
+    );
   }
 
-  isEnabled(): boolean {
+  async isEnabled(): Promise<boolean> {
     try {
-      const db = getDatabase();
-      const row = db
-        .prepare('SELECT value FROM app_config WHERE key = ?')
-        .get('comfyui_enabled') as { value: string } | undefined;
+      const row = (await pgGet(
+        'SELECT value FROM app_config WHERE key = ?',
+        'comfyui_enabled'
+      )) as unknown as { value: string } | undefined;
       if (row) return row.value === 'true';
     } catch {
       // fall through
@@ -132,8 +133,8 @@ class ComfyUIOrchestrator {
     return true;
   }
 
-  client(): ComfyUIClient {
-    return new ComfyUIClient(this.getBaseUrl());
+  async client(): Promise<ComfyUIClient> {
+    return new ComfyUIClient(await this.getBaseUrl());
   }
 
   async uploadInputImage(
@@ -160,7 +161,9 @@ class ComfyUIOrchestrator {
             ? '.gif'
             : '.png';
     const safeName = `${randomUUID()}${extension}`;
-    const uploaded = await this.client().uploadImage(safeName || originalName, bytes, {
+    const uploaded = await (
+      await this.client()
+    ).uploadImage(safeName || originalName, bytes, {
       contentType: detectedMime,
       overwrite: false,
     });
@@ -201,7 +204,8 @@ class ComfyUIOrchestrator {
   ): Promise<GenerationJob> {
     const valid = validateParams(workflowId, params);
     if (!valid.ok) throw new Error(valid.error);
-    if (!this.isEnabled()) throw new Error('ComfyUI integration is disabled in WebUI settings');
+    if (!(await this.isEnabled()))
+      throw new Error('ComfyUI integration is disabled in WebUI settings');
 
     this.ensureCleanupTimer();
 
@@ -360,9 +364,10 @@ class ComfyUIOrchestrator {
       // Generated output directory may not exist yet.
     }
 
-    const sessions = getDatabase()
-      .prepare('SELECT working_directory FROM sessions WHERE user_id = ?')
-      .all(userId) as Array<{ working_directory: string }>;
+    const sessions = (await pgAll(
+      'SELECT working_directory FROM sessions WHERE user_id = ?',
+      userId
+    )) as unknown as Array<{ working_directory: string }>;
     for (const session of sessions) {
       for (const directoryName of ['.claude-webui-attachments', '.claude-webui-images']) {
         try {
@@ -382,7 +387,7 @@ class ComfyUIOrchestrator {
     };
 
     try {
-      const client = this.client();
+      const client = await this.client();
 
       // For the image-edit workflow we need to make sure `input_image` is a
       // filename ComfyUI knows about in its /input directory. Callers (MCP,

@@ -1,3 +1,9 @@
+import {
+  get as pgGet,
+  all as pgAll,
+  run as pgRun,
+  transaction as pgTransaction,
+} from '../../db/pg.js';
 import type { Server } from 'socket.io';
 import type {
   ServerToClientEvents,
@@ -136,15 +142,15 @@ export function buildClaudeTransportProcessEnv(
   return env;
 }
 
-function buildClaudeTransportEnv(
+async function buildClaudeTransportEnv(
   provider: 'claude' | 'zai',
   userId: string,
   configHome: string
-): NodeJS.ProcessEnv {
+): Promise<NodeJS.ProcessEnv> {
   return buildClaudeTransportProcessEnv(
     provider,
     configHome,
-    provider === 'zai' ? getZaiApiConfigForUser(userId) : null
+    provider === 'zai' ? await getZaiApiConfigForUser(userId) : null
   );
 }
 
@@ -470,22 +476,23 @@ async function getCliModelForSession(
   provider: CLIProvider,
   sessionId?: string
 ): Promise<string | null> {
-  const db = getDatabase();
-
   let sessionSelectedModel: string | null = null;
   if (sessionId) {
-    const sessionRow = db
-      .prepare('SELECT cli_model FROM sessions WHERE id = ? AND user_id = ?')
-      .get(sessionId, userId) as { cli_model?: string | null } | undefined;
+    const sessionRow = (await pgGet(
+      'SELECT cli_model FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId
+    )) as unknown as { cli_model?: string | null } | undefined;
     sessionSelectedModel =
       typeof sessionRow?.cli_model === 'string' && sessionRow.cli_model.trim()
         ? sessionRow.cli_model.trim()
         : null;
   }
 
-  const row = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json?: string | null } | undefined;
+  const row = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json?: string | null } | undefined;
   const settingsJson = safeJsonParse<Record<string, unknown>>(row?.settings_json, {});
   const modelLists =
     settingsJson.cliProviderModelLists && typeof settingsJson.cliProviderModelLists === 'object'
@@ -499,7 +506,7 @@ async function getCliModelForSession(
         .filter((entry) => entry.length > 0)
     : [];
   if (provider === 'pi' && configuredModels.length === 0) {
-    configuredModels = getPiModelsForUser(userId);
+    configuredModels = await getPiModelsForUser(userId);
   }
 
   return resolveCliProviderSelectedModel(provider, null, configuredModels, sessionSelectedModel);
@@ -546,11 +553,11 @@ async function getCliReasoningForSession(
   if (!sessionId) {
     return null;
   }
-
-  const db = getDatabase();
-  const row = db
-    .prepare('SELECT cli_reasoning FROM sessions WHERE id = ? AND user_id = ?')
-    .get(sessionId, userId) as { cli_reasoning?: string | null } | undefined;
+  const row = (await pgGet(
+    'SELECT cli_reasoning FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  )) as unknown as { cli_reasoning?: string | null } | undefined;
 
   return normalizeReasoningLevel(provider, row?.cli_reasoning);
 }
@@ -567,13 +574,11 @@ async function getCliServiceTierForSession(
   if (provider !== 'codex' || !sessionId) {
     return null;
   }
-
-  const db = getDatabase();
-  const row = db
-    .prepare('SELECT cli_service_tier, cli_reasoning FROM sessions WHERE id = ? AND user_id = ?')
-    .get(sessionId, userId) as
-    | { cli_service_tier?: string | null; cli_reasoning?: string | null }
-    | undefined;
+  const row = (await pgGet(
+    'SELECT cli_service_tier, cli_reasoning FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  )) as unknown as { cli_service_tier?: string | null; cli_reasoning?: string | null } | undefined;
 
   return (
     normalizeCodexServiceTier(row?.cli_service_tier) ??
@@ -581,11 +586,11 @@ async function getCliServiceTierForSession(
   );
 }
 
-function getCodexWebSearchForUser(userId: string): CodexWebSearchMode {
-  const db = getDatabase();
-  const row = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json?: string | null } | undefined;
+async function getCodexWebSearchForUser(userId: string): Promise<CodexWebSearchMode> {
+  const row = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json?: string | null } | undefined;
 
   const settingsJson = safeJsonParse<Record<string, unknown>>(row?.settings_json, {});
   const value = settingsJson.codexWebSearch;
@@ -799,7 +804,7 @@ function dropCodexStateDatabase(dbPath: string): void {
   }
 }
 
-export function readCodexThreadState(
+async function readCodexThreadState(
   codexHome: string,
   opts: {
     threadId?: string | null;
@@ -807,7 +812,7 @@ export function readCodexThreadState(
     sinceMs?: number | null;
     promptPrefix?: string | null;
   }
-): CodexThreadState | null {
+): Promise<CodexThreadState | null> {
   const dbPath = findLatestCodexStateDatabase(codexHome);
   if (!dbPath) return null;
 
@@ -849,7 +854,7 @@ export function readCodexThreadState(
         ? `${escapeSqlLike(promptPrefix.slice(0, 180))}%`
         : null;
 
-    const queryLatest = (requirePromptMatch: boolean): CodexThreadState | null => {
+    const queryLatest = async (requirePromptMatch: boolean): Promise<CodexThreadState | null> => {
       const params: unknown[] = [cwd];
       let sql = `
         ${selectThread}
@@ -891,7 +896,7 @@ export function readCodexThreadState(
       return state ? { ...state, match: requirePromptMatch ? 'prompt' : 'cwd' } : null;
     };
 
-    return (promptPattern ? queryLatest(true) : null) || queryLatest(false);
+    return (promptPattern ? await queryLatest(true) : null) || (await queryLatest(false));
   } catch (error) {
     console.warn('[CODEX] Failed to read Codex thread state:', error);
     // A stale handle (rotated/replaced state file) should not poison every
@@ -974,12 +979,12 @@ function readLatestCodexRolloutTotalUsage(rolloutPath: string): CodexUsageCounte
   return null;
 }
 
-export function readCodexThreadCumulativeUsage(
+async function readCodexThreadCumulativeUsage(
   codexHome: string,
   threadId: string | null | undefined
-): CodexUsageCounters | undefined {
+): Promise<CodexUsageCounters | undefined> {
   if (!threadId) return undefined;
-  const thread = readCodexThreadState(codexHome, { threadId });
+  const thread = await readCodexThreadState(codexHome, { threadId });
   if (!thread?.rolloutPath) return undefined;
   return readLatestCodexRolloutTotalUsage(thread.rolloutPath) || undefined;
 }
@@ -1100,10 +1105,10 @@ export interface CodexDescendantThreadUsage {
  * strips that replayed prefix — without it a deep tree multiplies the parent's
  * tokens by its number of children.
  */
-export function readCodexDescendantUsageDetail(
+async function readCodexDescendantUsageDetail(
   codexHome: string,
   rootThreadId: string
-): CodexDescendantThreadUsage[] {
+): Promise<CodexDescendantThreadUsage[]> {
   const dbPath = findLatestCodexStateDatabase(codexHome);
   if (!dbPath || !rootThreadId.trim()) return [];
 
@@ -1190,12 +1195,12 @@ export function readCodexDescendantUsageDetail(
   }
 }
 
-export function readCodexDescendantUsage(
+async function readCodexDescendantUsage(
   codexHome: string,
   rootThreadId: string
-): CodexUsageCounters {
+): Promise<CodexUsageCounters> {
   const totals = { input: 0, cached: 0, output: 0 };
-  for (const thread of readCodexDescendantUsageDetail(codexHome, rootThreadId)) {
+  for (const thread of await readCodexDescendantUsageDetail(codexHome, rootThreadId)) {
     totals.input += thread.usage.input;
     totals.cached += thread.usage.cached;
     totals.output += thread.usage.output;
@@ -1211,10 +1216,10 @@ export function readCodexDescendantUsage(
  * can land on a leaf and then find no children — which silently drops the entire
  * subagent bill. Skip anything carrying a `thread_spawn.parent_thread_id`.
  */
-export function findCodexExecRootThreadId(
+async function findCodexExecRootThreadId(
   codexHome: string,
   opts: { cwd?: string | null; sinceMs?: number | null }
-): string | null {
+): Promise<string | null> {
   const cwd = opts.cwd?.trim();
   if (!cwd) return null;
   const dbPath = findLatestCodexStateDatabase(codexHome);
@@ -1303,7 +1308,7 @@ const codexContextSnapshotCache = new Map<
   { mtimeMs: number; size: number; snapshot: CodexContextSnapshot | null }
 >();
 
-export function readLatestCodexContextSnapshot(
+export async function readLatestCodexContextSnapshot(
   codexHome: string,
   opts: {
     threadId?: string | null;
@@ -1311,8 +1316,8 @@ export function readLatestCodexContextSnapshot(
     sinceMs?: number | null;
     promptPrefix?: string | null;
   }
-): CodexContextSnapshot | null {
-  const threadState = readCodexThreadState(codexHome, opts);
+): Promise<CodexContextSnapshot | null> {
+  const threadState = await readCodexThreadState(codexHome, opts);
   if (!threadState?.rolloutPath) return null;
 
   let stat: fsSync.Stats | null = null;
@@ -1403,14 +1408,11 @@ function scanCodexContextSnapshotTail(
   return null;
 }
 
-export function getCodexUsageBaselineFromDatabase(
+async function getCodexUsageBaselineFromDatabase(
   sessionId: string
-): CodexUsageCounters | undefined {
-  const db = getDatabase();
-
-  const latestSnapshot = db
-    .prepare(
-      `
+): Promise<CodexUsageCounters | undefined> {
+  const latestSnapshot = (await pgGet(
+    `
       SELECT metadata_json as metadataJson
       FROM session_events
       WHERE session_id = ?
@@ -1418,9 +1420,9 @@ export function getCodexUsageBaselineFromDatabase(
         AND provider = 'codex'
       ORDER BY created_at DESC, rowid DESC
       LIMIT 1
-    `
-    )
-    .get(sessionId) as { metadataJson?: string | null } | undefined;
+    `,
+    sessionId
+  )) as unknown as { metadataJson?: string | null } | undefined;
 
   const metadata = safeJsonParse<Record<string, unknown>>(latestSnapshot?.metadataJson, {});
   const persistedBaseline = normalizeCodexUsageCounters(metadata.codexUsageBaseline);
@@ -1428,9 +1430,8 @@ export function getCodexUsageBaselineFromDatabase(
     return persistedBaseline;
   }
 
-  const row = db
-    .prepare(
-      `
+  const row = (await pgGet(
+    `
       SELECT
         COALESCE(SUM(input_tokens + cache_read_tokens), 0) as input,
         COALESCE(SUM(cache_read_tokens), 0) as cached,
@@ -1441,9 +1442,9 @@ export function getCodexUsageBaselineFromDatabase(
           provider = 'codex'
           OR (provider IN ('', 'unknown') AND (model LIKE 'gpt-%' OR lower(model) LIKE '%codex%'))
         )
-    `
-    )
-    .get(sessionId) as { input: number; cached: number; output: number } | undefined;
+    `,
+    sessionId
+  )) as unknown as { input: number; cached: number; output: number } | undefined;
 
   if (!row) return undefined;
   const input = Number(row.input) || 0;
@@ -1453,9 +1454,8 @@ export function getCodexUsageBaselineFromDatabase(
     return undefined;
   }
 
-  const latestContext = db
-    .prepare(
-      `
+  const latestContext = (await pgGet(
+    `
       SELECT total_tokens as totalTokens, context_window as contextWindow
       FROM session_events
       WHERE session_id = ?
@@ -1463,9 +1463,9 @@ export function getCodexUsageBaselineFromDatabase(
         AND provider = 'codex'
       ORDER BY created_at DESC, rowid DESC
       LIMIT 1
-    `
-    )
-    .get(sessionId) as { totalTokens?: number; contextWindow?: number } | undefined;
+    `,
+    sessionId
+  )) as unknown as { totalTokens?: number; contextWindow?: number } | undefined;
   const contextWindow = Number(latestContext?.contextWindow) || DEFAULT_CONTEXT_WINDOW;
   const contextTokens = Number(latestContext?.totalTokens) || 0;
   const reconstructedTotal = input + output;
@@ -1479,18 +1479,21 @@ export function getCodexUsageBaselineFromDatabase(
   return { input, cached, output };
 }
 
-function getAndroidDeviceSerialForSession(sessionId: string, userId?: string): string | null {
+async function getAndroidDeviceSerialForSession(
+  sessionId: string,
+  userId?: string
+): Promise<string | null> {
   try {
-    const db = getDatabase();
     const row = userId
-      ? (db
-          .prepare(
-            'SELECT android_device_serial as serial FROM sessions WHERE id = ? AND user_id = ?'
-          )
-          .get(sessionId, userId) as { serial?: string | null } | undefined)
-      : (db
-          .prepare('SELECT android_device_serial as serial FROM sessions WHERE id = ?')
-          .get(sessionId) as { serial?: string | null } | undefined);
+      ? ((await pgGet(
+          'SELECT android_device_serial as serial FROM sessions WHERE id = ? AND user_id = ?',
+          sessionId,
+          userId
+        )) as unknown as { serial?: string | null } | undefined)
+      : ((await pgGet(
+          'SELECT android_device_serial as serial FROM sessions WHERE id = ?',
+          sessionId
+        )) as unknown as { serial?: string | null } | undefined);
     return row?.serial?.trim() || null;
   } catch {
     // Older test schemas and first-boot migrations may not have this column yet.
@@ -1498,11 +1501,11 @@ function getAndroidDeviceSerialForSession(sessionId: string, userId?: string): s
   }
 }
 
-function buildAndroidDeviceEnvForSession(
+async function buildAndroidDeviceEnvForSession(
   sessionId: string,
   userId?: string
-): Record<string, string> {
-  const serial = getAndroidDeviceSerialForSession(sessionId, userId);
+): Promise<Record<string, string>> {
+  const serial = await getAndroidDeviceSerialForSession(sessionId, userId);
   return serial
     ? {
         WEBUI_ANDROID_DEVICE_SERIAL: serial,
@@ -1511,8 +1514,11 @@ function buildAndroidDeviceEnvForSession(
     : {};
 }
 
-function buildAndroidDeviceContext(sessionId: string, userId: string): string | null {
-  const serial = getAndroidDeviceSerialForSession(sessionId, userId);
+async function buildAndroidDeviceContext(
+  sessionId: string,
+  userId: string
+): Promise<string | null> {
+  const serial = await getAndroidDeviceSerialForSession(sessionId, userId);
   if (!serial) return null;
   return `<system-reminder>
 Android test device selected for this Plum session: ${serial}
@@ -2096,15 +2102,14 @@ async function buildSessionStyleContext(
   userId: string,
   cliProvider: CLIProvider
 ): Promise<string | null> {
-  const db = getDatabase();
-  const selection = db
-    .prepare(
-      `SELECT design_style_skill as designStyleSkill,
+  const selection = (await pgGet(
+    `SELECT design_style_skill as designStyleSkill,
               writing_style_skill as writingStyleSkill
        FROM sessions
-       WHERE id = ? AND user_id = ?`
-    )
-    .get(sessionId, userId) as
+       WHERE id = ? AND user_id = ?`,
+    sessionId,
+    userId
+  )) as unknown as
     | { designStyleSkill: string | null; writingStyleSkill: string | null }
     | undefined;
 
@@ -3047,7 +3052,7 @@ export class ClaudeProcessManager {
     { summary: string; reason: 'mode-change' | 'provider-switch' | 'context-limit' }
   > = new Map();
   private io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
-  private readonly allocateEventSequence: (sessionId: string) => number;
+  private readonly allocateEventSequence: (sessionId: string) => Promise<number>;
 
   /** Public event emitter for external consumers */
   // Gateway SSE clients add three listeners each; the default cap of 10 warns
@@ -3056,7 +3061,7 @@ export class ClaudeProcessManager {
 
   constructor(
     io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
-    allocateEventSequence: (sessionId: string) => number = nextSessionEventSequence
+    allocateEventSequence: (sessionId: string) => Promise<number> = nextSessionEventSequence
   ) {
     this.io = io;
     this.allocateEventSequence = allocateEventSequence;
@@ -3159,22 +3164,23 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
   }
 
   // Helper method to buffer a message
-  private bufferMessage<T extends object>(
+  private async bufferMessage<T extends object>(
     sessionId: string,
     type: BufferedMessage['type'],
     data: T,
     existingSequence?: number
-  ):
+  ): Promise<
     | {
         data: T & { eventSequence: number };
         sequence: number;
         timestamp: number;
       }
-    | undefined {
+    | undefined
+  > {
     const proc = this.processes.get(sessionId);
     if (!proc) return undefined;
 
-    const sequence = existingSequence ?? this.allocateEventSequence(sessionId);
+    const sequence = existingSequence ?? (await this.allocateEventSequence(sessionId));
     const sequencedData = { ...data, eventSequence: sequence } as T & {
       eventSequence: number;
     };
@@ -3199,14 +3205,14 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
    * only then publish its cursor, so a client can never persist a cursor for
    * state it has not received/applied yet.
    */
-  private emitBufferedEvent<T extends object>(
+  private async emitBufferedEvent<T extends object>(
     sessionId: string,
     type: BufferedMessage['type'],
     data: T,
     emitLive: (sequencedData: T & { eventSequence?: number }) => void,
     existingSequence?: number
-  ): number | undefined {
-    const buffered = this.bufferMessage(sessionId, type, data, existingSequence);
+  ): Promise<number | undefined> {
+    const buffered = await this.bufferMessage(sessionId, type, data, existingSequence);
     emitLive(buffered?.data ?? data);
     if (!buffered) return undefined;
     this.io.to(`session:${sessionId}`).emit('session:cursor', {
@@ -3561,11 +3567,10 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
     turnId: string
   ): Promise<void> {
     try {
-      const row = getDatabase()
-        .prepare(
-          'SELECT user_id as userId, name, working_directory as workingDirectory FROM sessions WHERE id = ?'
-        )
-        .get(sessionId) as { userId: string; name: string; workingDirectory: string } | undefined;
+      const row = (await pgGet(
+        'SELECT user_id as userId, name, working_directory as workingDirectory FROM sessions WHERE id = ?',
+        sessionId
+      )) as unknown as { userId: string; name: string; workingDirectory: string } | undefined;
       if (!row) return;
 
       const { captureTurnDiff } = await import('../git/turnDiff.js');
@@ -3575,7 +3580,7 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
       if (trimmed) {
         const { notify } = await import('../notifications/notificationCenter.js');
         const isGoal = /^goal complete/i.test(trimmed);
-        notify({
+        await notify({
           userId: row.userId,
           sessionId,
           kind: isGoal ? 'goal' : 'reply',
@@ -3598,7 +3603,7 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
     });
   }
 
-  private notifyDiscordSessionEvent(
+  private async notifyDiscordSessionEvent(
     sessionId: string,
     input: {
       eventType: DiscordAlertEventType;
@@ -3607,17 +3612,19 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
       summary: string;
       fields?: Array<{ name: string; value: unknown; inline?: boolean }>;
     }
-  ): void {
+  ): Promise<void> {
     const proc = this.processes.get(sessionId);
     if (!proc?.userId) return;
     const homeAssistantStatus = homeAssistantStatusForSessionEvent(input.eventType, input.severity);
     if (homeAssistantStatus)
-      homeAssistantStatusLights.notifySession(sessionId, homeAssistantStatus);
+      await homeAssistantStatusLights.notifySession(sessionId, homeAssistantStatus);
     try {
-      const session = getDatabase()
-        .prepare('SELECT name FROM sessions WHERE id = ? AND user_id = ?')
-        .get(sessionId, proc.userId) as { name: string } | undefined;
-      discordNotifier.queueAlert({
+      const session = (await pgGet(
+        'SELECT name FROM sessions WHERE id = ? AND user_id = ?',
+        sessionId,
+        proc.userId
+      )) as unknown as { name: string } | undefined;
+      await discordNotifier.queueAlert({
         eventType: input.eventType,
         severity: input.severity,
         title: input.title,
@@ -3635,8 +3642,11 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
     }
   }
 
-  private buildDiscordGatewayContext(sessionId: string, proc: ClaudeProcess): string | null {
-    const settings = discordIntegrationService.getSettings();
+  private async buildDiscordGatewayContext(
+    sessionId: string,
+    proc: ClaudeProcess
+  ): Promise<string | null> {
+    const settings = await discordIntegrationService.getSettings();
     if (!settings.enabled || !settings.configured) return null;
 
     const modeLabel =
@@ -3729,7 +3739,7 @@ Discord Main Gateway:
     });
   }
 
-  private emitCompact(
+  private async emitCompact(
     sessionId: string,
     data: {
       id?: string;
@@ -3741,13 +3751,13 @@ Discord Main Gateway:
       error?: string;
       createdAt?: string;
     }
-  ): void {
+  ): Promise<void> {
     const event = {
       ...data,
       id: data.id || `compact-${nanoid()}`,
       createdAt: data.createdAt || new Date().toISOString(),
     };
-    this.persistCompactEvent(sessionId, event);
+    await this.persistCompactEvent(sessionId, event);
     this.emitBufferedEvent(sessionId, 'compact', event, (sequenced) => {
       this.io.to(`session:${sessionId}`).emit('session:compact', sequenced);
     });
@@ -3768,7 +3778,7 @@ Discord Main Gateway:
     return new Date(iso).toISOString().slice(0, 23).replace('T', ' ');
   }
 
-  private persistCompactEvent(
+  private async persistCompactEvent(
     sessionId: string,
     event: {
       id: string;
@@ -3780,14 +3790,14 @@ Discord Main Gateway:
       error?: string;
       createdAt: string;
     }
-  ): void {
+  ): Promise<void> {
     const proc = this.processes.get(sessionId);
-    const db = getDatabase();
     const session =
       proc ||
-      (db
-        .prepare('SELECT user_id as userId, cli_provider as cliProvider FROM sessions WHERE id = ?')
-        .get(sessionId) as { userId: string; cliProvider: CLIProvider | null } | undefined);
+      ((await pgGet(
+        'SELECT user_id as userId, cli_provider as cliProvider FROM sessions WHERE id = ?',
+        sessionId
+      )) as unknown as { userId: string; cliProvider: CLIProvider | null } | undefined);
     if (!session) return;
 
     const userId = 'userId' in session ? session.userId : proc?.userId;
@@ -3799,27 +3809,14 @@ Discord Main Gateway:
     const createdAt = this.toSqliteTimestamp(event.createdAt);
 
     try {
-      const insertEvent = db.prepare(
-        `
-        INSERT OR IGNORE INTO session_events (
-          id, user_id, session_id, event_type, provider, model, reason, message,
-          summary, metadata_json, created_at
-        )
-        VALUES (?, ?, ?, 'compact', ?, ?, ?, ?, ?, ?, ?)
-      `
-      );
-      const insertMessage = db.prepare(
-        `
-        INSERT OR IGNORE INTO messages (id, session_id, role, content, created_at)
-        VALUES (?, ?, 'system', ?, ?)
-      `
-      );
-      const updateSession = db.prepare(
-        'UPDATE sessions SET last_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-      );
-
-      db.transaction(() => {
-        insertEvent.run(
+      await pgTransaction(async (tx) => {
+        await tx.run(
+          `INSERT INTO session_events (
+             id, user_id, session_id, event_type, provider, model, reason, message,
+             summary, metadata_json, created_at
+           )
+           VALUES (?, ?, ?, 'compact', ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (id) DO NOTHING`,
           event.id,
           userId,
           sessionId,
@@ -3834,15 +3831,27 @@ Discord Main Gateway:
           }),
           createdAt
         );
-        insertMessage.run(event.id, sessionId, content, createdAt);
-        updateSession.run(event.message.substring(0, 200), sessionId);
-      })();
+        await tx.run(
+          `INSERT INTO messages (id, session_id, role, content, created_at)
+           VALUES (?, ?, 'system', ?, ?)
+           ON CONFLICT (id) DO NOTHING`,
+          event.id,
+          sessionId,
+          content,
+          createdAt
+        );
+        await tx.run(
+          'UPDATE sessions SET last_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          event.message.substring(0, 200),
+          sessionId
+        );
+      });
     } catch (error) {
       console.error('[EVENTS] Failed to persist compact event:', error);
     }
   }
 
-  private recordContextSnapshot(
+  private async recordContextSnapshot(
     sessionId: string,
     proc: ClaudeProcess,
     usageData: {
@@ -3858,7 +3867,7 @@ Discord Main Gateway:
       totalCostUsd: number;
       model: string;
     }
-  ): void {
+  ): Promise<void> {
     if (usageData.contextWindow <= 0) return;
 
     const now = Date.now();
@@ -3879,8 +3888,7 @@ Discord Main Gateway:
     const createdAt = this.toSqliteTimestamp(new Date(now).toISOString());
 
     try {
-      const db = getDatabase();
-      db.prepare(
+      await pgRun(
         `
         INSERT INTO session_events (
           id, user_id, session_id, event_type, provider, model,
@@ -3889,8 +3897,7 @@ Discord Main Gateway:
           metadata_json, created_at
         )
         VALUES (?, ?, ?, 'context_snapshot', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `
-      ).run(
+      `,
         eventId,
         proc.userId,
         sessionId,
@@ -3947,7 +3954,9 @@ Discord Main Gateway:
       : resolvedWindow;
   }
 
-  private readCodexDescendantUsage(rootThreadId: string | null | undefined): CodexUsageCounters {
+  private async readCodexDescendantUsage(
+    rootThreadId: string | null | undefined
+  ): Promise<CodexUsageCounters> {
     if (!rootThreadId) return { input: 0, cached: 0, output: 0 };
     const codexHome = CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir());
     return readCodexDescendantUsage(codexHome, rootThreadId);
@@ -3960,14 +3969,14 @@ Discord Main Gateway:
    * records which spawned agent spent which share. Flushed in
    * saveUsageToDatabase once the turn id is final.
    */
-  private captureCodexSubagentBreakdown(
+  private async captureCodexSubagentBreakdown(
     proc: ClaudeProcess,
     rootThreadId: string | null | undefined
-  ): void {
+  ): Promise<void> {
     proc.pendingSubagentUsage = undefined;
     if (!rootThreadId) return;
     const codexHome = CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir());
-    const detail = readCodexDescendantUsageDetail(codexHome, rootThreadId);
+    const detail = await readCodexDescendantUsageDetail(codexHome, rootThreadId);
     if (detail.length === 0) {
       proc.codexSubagentBaseline = new Map();
       return;
@@ -4018,12 +4027,15 @@ Discord Main Gateway:
    * A plain `codex exec` starts a fresh root per turn, so only resume mode may
    * keep the previously captured id.
    */
-  private resolveCodexRootThreadId(sessionId: string, proc: ClaudeProcess): string | null {
+  private async resolveCodexRootThreadId(
+    sessionId: string,
+    proc: ClaudeProcess
+  ): Promise<string | null> {
     const existing = proc.codexSessionId || proc.claudeSessionId || null;
     if (proc.codexCurrentExecUsedResume && existing) return existing;
 
     const codexHome = CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir());
-    const resolved = findCodexExecRootThreadId(codexHome, {
+    const resolved = await findCodexExecRootThreadId(codexHome, {
       cwd: proc.workingDirectory,
       sinceMs: proc.codexExecStartedAtMs,
     });
@@ -4033,9 +4045,7 @@ Discord Main Gateway:
       proc.codexSessionId = resolved;
       proc.claudeSessionId = resolved;
       try {
-        getDatabase()
-          .prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?')
-          .run(resolved, sessionId);
+        await pgRun('UPDATE sessions SET claude_session_id = ? WHERE id = ?', resolved, sessionId);
         console.log(`[CODEX] Resolved exec root thread ${resolved} for ${sessionId}`);
       } catch (error) {
         console.warn('[CODEX] Failed to persist resolved exec root thread:', error);
@@ -4051,12 +4061,12 @@ Discord Main Gateway:
    * interrupted exec never emits a turn event at all. Semantics match
    * `turn.completed.usage`, so the same delta machinery applies.
    */
-  private readCodexUsageFromThreadState(
+  private async readCodexUsageFromThreadState(
     rootThreadId: string | null | undefined
-  ): CodexUsageCounters | null {
+  ): Promise<CodexUsageCounters | null> {
     if (!rootThreadId) return null;
     const codexHome = CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir());
-    const usage = readCodexThreadCumulativeUsage(codexHome, rootThreadId);
+    const usage = await readCodexThreadCumulativeUsage(codexHome, rootThreadId);
     if (!usage) return null;
     if (usage.input <= 0 && usage.output <= 0) return null;
     return usage;
@@ -4066,11 +4076,11 @@ Discord Main Gateway:
    * Fold a turn's Codex billing counters (root + subagent threads) into the
    * process's per-turn token fields. Returns the disjoint Claude-shaped split.
    */
-  private applyCodexTurnUsage(
+  private async applyCodexTurnUsage(
     sessionId: string,
     proc: ClaudeProcess,
     counters: CodexUsageCounters
-  ): { nonCachedInput: number; cached: number; output: number } {
+  ): Promise<{ nonCachedInput: number; cached: number; output: number }> {
     // Codex's cumulative counters grow across turns in resume mode (each respawn
     // reloads the full session JSONL). Sending raw values to usage_history
     // multiplied analytics tokens 10-100x, so compute per-turn deltas there.
@@ -4104,9 +4114,9 @@ Discord Main Gateway:
       output: counters.output,
     };
 
-    const rootThreadId = this.resolveCodexRootThreadId(sessionId, proc);
-    this.captureCodexSubagentBreakdown(proc, rootThreadId);
-    const descendantUsage = this.readCodexDescendantUsage(rootThreadId);
+    const rootThreadId = await this.resolveCodexRootThreadId(sessionId, proc);
+    await this.captureCodexSubagentBreakdown(proc, rootThreadId);
+    const descendantUsage = await this.readCodexDescendantUsage(rootThreadId);
     const descendantBaseline = proc.codexDescendantUsageBaseline;
     if (descendantBaseline) {
       const countersReset =
@@ -4159,7 +4169,7 @@ Discord Main Gateway:
    * (SIGINT steer, crash, rate-limit abort). `saveUsageToDatabase` is keyed by
    * turn id, so a turn already booked by `turn.completed` is a no-op here.
    */
-  private flushCodexUsageOnExit(sessionId: string, proc: ClaudeProcess): void {
+  private async flushCodexUsageOnExit(sessionId: string, proc: ClaudeProcess): Promise<void> {
     if (proc.cliProvider !== 'codex') return;
     try {
       // Bail before touching the delta baselines: re-applying them for an
@@ -4169,14 +4179,14 @@ Discord Main Gateway:
       if (turnId && usageHistoryTurnExists(getDatabase(), sessionId, proc.cliProvider, turnId)) {
         return;
       }
-      const rootThreadId = this.resolveCodexRootThreadId(sessionId, proc);
-      const counters = this.readCodexUsageFromThreadState(rootThreadId);
+      const rootThreadId = await this.resolveCodexRootThreadId(sessionId, proc);
+      const counters = await this.readCodexUsageFromThreadState(rootThreadId);
       if (!counters) return;
-      this.applyCodexTurnUsage(sessionId, proc, counters);
+      await this.applyCodexTurnUsage(sessionId, proc, counters);
       const turnCostUsd = this.calculateTurnCost(proc);
       proc.previousTotalCostUsd = proc.totalCostUsd;
       proc.totalCostUsd += turnCostUsd;
-      this.emitUsage(sessionId, proc);
+      await this.emitUsage(sessionId, proc);
       this.saveUsageToDatabase(sessionId, proc);
     } catch (error) {
       console.warn('[CODEX] Failed to flush usage after process exit:', error);
@@ -4184,8 +4194,8 @@ Discord Main Gateway:
   }
 
   // Get buffered messages since a timestamp for reconnection
-  getSessionBuffer(sessionId: string, sinceTimestamp?: number): BufferedMessage[] {
-    return this.getSessionBufferStatus(sessionId, sinceTimestamp).items;
+  async getSessionBuffer(sessionId: string, sinceTimestamp?: number): Promise<BufferedMessage[]> {
+    return (await this.getSessionBufferStatus(sessionId, sinceTimestamp)).items;
   }
 
   /** Emit and replay-buffer a blocking permission request from the hook route. */
@@ -4199,15 +4209,15 @@ Discord Main Gateway:
    * Returns buffered items plus a rollover flag. needsFullResync=true means the buffer
    * evicted data older than sinceTimestamp — client cannot reconstruct state from the buffer alone.
    */
-  getSessionBufferStatus(
+  async getSessionBufferStatus(
     sessionId: string,
     sinceTimestamp?: number,
     sinceSequence?: number
-  ): { items: BufferedMessage[]; needsFullResync: boolean } {
+  ): Promise<{ items: BufferedMessage[]; needsFullResync: boolean }> {
     const proc = this.processes.get(sessionId);
     if (!proc) {
       if (sinceSequence !== undefined) {
-        const highWatermark = getSessionSyncState(sessionId).highWatermark;
+        const highWatermark = (await getSessionSyncState(sessionId)).highWatermark;
         return { items: [], needsFullResync: sinceSequence < highWatermark };
       }
       return { items: [], needsFullResync: false };
@@ -4216,7 +4226,7 @@ Discord Main Gateway:
     if (sinceSequence !== undefined) {
       const all = proc.outputBuffer.getAll();
       const items = all.filter((message) => (message.sequence ?? 0) > sinceSequence);
-      const highWatermark = getSessionSyncState(sessionId).highWatermark;
+      const highWatermark = (await getSessionSyncState(sessionId)).highWatermark;
       const earliest = items[0]?.sequence;
       return {
         items,
@@ -4271,28 +4281,25 @@ Discord Main Gateway:
   async recoverInterruptedKimiTurn(sessionId: string, userId: string): Promise<boolean> {
     if (this.processes.has(sessionId)) return false;
 
-    const db = getDatabase();
-    const session = db
-      .prepare(
-        `SELECT cli_provider, status
+    const session = (await pgGet(
+      `SELECT cli_provider, status
            FROM sessions
-          WHERE id = ? AND user_id = ?`
-      )
-      .get(sessionId, userId) as
-      | { cli_provider: CLIProvider | null; status: string | null }
-      | undefined;
+          WHERE id = ? AND user_id = ?`,
+      sessionId,
+      userId
+    )) as unknown as { cli_provider: CLIProvider | null; status: string | null } | undefined;
     if (!session) return false;
 
-    const latest = db
-      .prepare(
-        `SELECT role
+    const latest = (await pgGet(
+      `SELECT role
            FROM messages
           WHERE session_id = ?
             AND chat_id IS (SELECT active_chat_id FROM sessions WHERE id = ?)
           ORDER BY created_at DESC, rowid DESC
-          LIMIT 1`
-      )
-      .get(sessionId, sessionId) as { role: string } | undefined;
+          LIMIT 1`,
+      sessionId,
+      sessionId
+    )) as unknown as { role: string } | undefined;
     if (!shouldRecoverInterruptedKimiTurn(session.cli_provider, session.status, latest?.role)) {
       return false;
     }
@@ -4335,11 +4342,11 @@ Discord Main Gateway:
     userId: string,
     mode?: SessionMode
   ): Promise<void> {
-    const db = getDatabase();
-
-    const session = db
-      .prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?')
-      .get(sessionId, userId) as
+    const session = (await pgGet(
+      'SELECT * FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId
+    )) as unknown as
       | {
           working_directory: string;
           claude_session_id: string | null;
@@ -4353,7 +4360,7 @@ Discord Main Gateway:
     if (!session) {
       throw new Error('Session not found');
     }
-    assertRunnerAccess(userId);
+    await assertRunnerAccess(userId);
 
     if (this.processes.has(sessionId)) {
       return;
@@ -4370,10 +4377,10 @@ Discord Main Gateway:
     // Codex is the primary provider. Only very old rows can have NULL here.
     const cliProvider: CLIProvider = session.cli_provider || 'codex';
     const providerConfig = CLI_PROVIDERS[cliProvider];
-    if (!getEnabledCliProvidersForUser(userId).includes(cliProvider)) {
+    if (!(await getEnabledCliProvidersForUser(userId)).includes(cliProvider)) {
       throw new Error(`${providerConfig.name} is disabled in Settings`);
     }
-    if (cliProvider === 'zai' && !getZaiApiConfigForUser(userId)) {
+    if (cliProvider === 'zai' && !(await getZaiApiConfigForUser(userId))) {
       throw new Error('Configure Z.AI in Settings before starting this session');
     }
     const configHome = resolveConfigHome(cliProvider);
@@ -4414,9 +4421,9 @@ Discord Main Gateway:
     await ensureProjectInstructions(session.working_directory, configHome, cliProvider);
     // Shared links are provider-neutral. OpenCode's user-specific provider
     // blocks are written later into that user's isolated tenant config.
-    syncProviderLinks({ quiet: true });
+    await syncProviderLinks({ quiet: true });
     if (cliProvider === 'pi') {
-      const piSync = syncPiConfig(userId);
+      const piSync = await syncPiConfig(userId);
       if (piSync.providerCount === 0 || piSync.modelCount === 0) {
         throw new Error(
           'Pi requires at least one enabled OpenCode API connection with available models. Configure it under Settings → General → OpenCode.'
@@ -4451,10 +4458,7 @@ Discord Main Gateway:
           allowedDirectories: allowedDirs,
           userId,
         });
-        db.prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?').run(
-          remoteId,
-          sessionId
-        );
+        await pgRun('UPDATE sessions SET claude_session_id = ? WHERE id = ?', remoteId, sessionId);
       }
 
       console.log(`[SESSION] ========== Starting Session (opencode server) ==========`);
@@ -4525,13 +4529,14 @@ Discord Main Gateway:
 
       opencodeServer.subscribe(
         remoteId,
-        (evt) => {
-          this.translateOpencodeServerEvent(sessionId, evt);
+        async (evt) => {
+          await this.translateOpencodeServerEvent(sessionId, evt);
         },
         userId
       );
 
-      db.prepare('UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+      await pgRun(
+        'UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         'running',
         sessionId
       );
@@ -4545,7 +4550,7 @@ Discord Main Gateway:
       const shouldInjectStaticBootstrap = shouldInjectCodexStaticBootstrap(persistedSessionId);
       const extraEnv: Record<string, string> = {
         ...buildIntegrationEnv(),
-        ...buildAndroidDeviceEnvForSession(sessionId, userId),
+        ...(await buildAndroidDeviceEnvForSession(sessionId, userId)),
       };
       const child = spawnManagedProcess(providerConfig.command, ['acp'], {
         cwd: session.working_directory,
@@ -4623,12 +4628,12 @@ Discord Main Gateway:
       child.stderr?.on('data', (data: Buffer) => {
         console.error(`Kimi ACP stderr [${sessionId}]:`, data.toString());
       });
-      child.on('exit', (exitCode) => {
+      child.on('exit', async (exitCode) => {
         console.log(`[KIMI ACP] Process for session ${sessionId} exited with code ${exitCode}`);
         const managedProc = this.processes.get(sessionId);
         if (managedProc !== claudeProcess) return;
         if (managedProc.streamingText.trim()) {
-          this.saveAssistantMessage(sessionId, managedProc.streamingText.trim());
+          await this.saveAssistantMessage(sessionId, managedProc.streamingText.trim());
           managedProc.streamingText = '';
         }
         this.io.to(`session:${sessionId}`).emit('session:thinking', {
@@ -4641,21 +4646,23 @@ Discord Main Gateway:
             error: `Kimi ACP exited unexpectedly (code ${exitCode}).`,
           });
         }
-        this.cleanupProcess(sessionId, claudeProcess);
+        await this.cleanupProcess(sessionId, claudeProcess);
       });
-      child.on('error', (error) => {
+      child.on('error', async (error) => {
         console.error(`[KIMI ACP] Process error [${sessionId}]:`, error);
         if (this.processes.get(sessionId) !== claudeProcess) return;
         this.io.to(`session:${sessionId}`).emit('session:error', {
           sessionId,
           error: `Kimi ACP failed: ${error.message}`,
         });
-        this.cleanupProcess(sessionId, claudeProcess);
+        await this.cleanupProcess(sessionId, claudeProcess);
       });
 
       const acpClient: AcpClient = {
-        requestPermission: (params) => this.handleKimiAcpPermission(claudeProcess, params),
-        sessionUpdate: (params) => this.handleKimiAcpUpdate(sessionId, claudeProcess, params),
+        requestPermission: async (params) =>
+          await this.handleKimiAcpPermission(claudeProcess, params),
+        sessionUpdate: async (params) =>
+          await this.handleKimiAcpUpdate(sessionId, claudeProcess, params),
       };
       const connection = new ClientSideConnection(
         () => acpClient,
@@ -4708,13 +4715,16 @@ Discord Main Gateway:
         claudeProcess.kimiAcpConfigOptions = configOptions || [];
         await this.configureKimiAcpSession(claudeProcess);
 
-        db.prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?').run(
+        await pgRun(
+          'UPDATE sessions SET claude_session_id = ? WHERE id = ?',
           nativeSessionId,
           sessionId
         );
-        db.prepare(
-          'UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-        ).run('running', sessionId);
+        await pgRun(
+          'UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          'running',
+          sessionId
+        );
         this.emitStatus(sessionId, { sessionId, status: 'running' });
 
         console.log(`[SESSION] ========== Starting Session (kimi ACP) ==========`);
@@ -4728,7 +4738,7 @@ Discord Main Gateway:
         return;
       } catch (error) {
         terminateManagedProcess(child);
-        this.cleanupProcess(sessionId, claudeProcess);
+        await this.cleanupProcess(sessionId, claudeProcess);
         throw error;
       }
     }
@@ -4741,8 +4751,8 @@ Discord Main Gateway:
       const shouldInjectStaticBootstrap = shouldInjectCodexStaticBootstrap(persistedCodexSessionId);
       const codexHome = CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir());
       const codexTokenBaseline = persistedCodexSessionId
-        ? readCodexThreadCumulativeUsage(codexHome, persistedCodexSessionId) ||
-          getCodexUsageBaselineFromDatabase(sessionId)
+        ? (await readCodexThreadCumulativeUsage(codexHome, persistedCodexSessionId)) ||
+          (await getCodexUsageBaselineFromDatabase(sessionId))
         : undefined;
 
       console.log(`[SESSION] ========== Starting Session (codex idle) ==========`);
@@ -4812,7 +4822,8 @@ Discord Main Gateway:
       this.pendingContextReminders.delete(sessionId);
       this.processes.set(sessionId, claudeProcess);
 
-      db.prepare('UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+      await pgRun(
+        'UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         'running',
         sessionId
       );
@@ -4910,18 +4921,18 @@ Discord Main Gateway:
       extraEnv.PI_CODING_AGENT_DIR = piAgentDir;
       extraEnv.PI_TELEMETRY = '0';
       extraEnv.PI_SKIP_VERSION_CHECK = '1';
-      Object.assign(extraEnv, buildOpenCodeProviderCredentialEnv(userId));
+      Object.assign(extraEnv, await buildOpenCodeProviderCredentialEnv(userId));
     }
     extraEnv.WEBUI_SESSION_MODE = effectiveMode;
     extraEnv.WEBUI_CONFIG_HOME = configHome;
     Object.assign(extraEnv, buildIntegrationEnv());
-    Object.assign(extraEnv, buildAndroidDeviceEnvForSession(sessionId, userId));
+    Object.assign(extraEnv, await buildAndroidDeviceEnvForSession(sessionId, userId));
     // Use regular spawn for CLI providers
     const proc: ChildProcess = spawnManagedProcess(providerConfig.command, args, {
       cwd: session.working_directory,
       env: {
         ...(isClaudeTransportProvider(cliProvider)
-          ? buildClaudeTransportEnv(cliProvider, userId, configHome)
+          ? await buildClaudeTransportEnv(cliProvider, userId, configHome)
           : process.env),
         ...extraEnv,
         // Pass session ID so provider integrations can attribute image generation and permissions.
@@ -4997,7 +5008,8 @@ Discord Main Gateway:
 
     this.processes.set(sessionId, claudeProcess);
 
-    db.prepare('UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+    await pgRun(
+      'UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       'running',
       sessionId
     );
@@ -5008,8 +5020,8 @@ Discord Main Gateway:
     });
 
     // Handle stdout - JSON messages
-    proc.stdout?.on('data', (data: Buffer) => {
-      this.handleJsonOutput(sessionId, data.toString());
+    proc.stdout?.on('data', async (data: Buffer) => {
+      await this.handleJsonOutput(sessionId, data.toString());
     });
 
     if (cliProvider === 'pi') {
@@ -5030,7 +5042,7 @@ Discord Main Gateway:
       console.error(`${providerConfig.name} stderr [${sessionId}]:`, data.toString());
     });
 
-    proc.on('exit', (exitCode) => {
+    proc.on('exit', async (exitCode) => {
       console.log(
         `${providerConfig.name} process for session ${sessionId} exited with code ${exitCode}`
       );
@@ -5041,11 +5053,11 @@ Discord Main Gateway:
       if (managedProc && managedProc.process === proc) {
         // A Codex exec killed mid-turn never emits turn.completed, so book what
         // it already spent before the process state is torn down.
-        this.flushCodexUsageOnExit(sessionId, managedProc);
+        await this.flushCodexUsageOnExit(sessionId, managedProc);
         // For providers that don't send a result message,
         // save any remaining streaming text and stop thinking indicator
         if (managedProc.streamingText?.trim().length) {
-          this.saveAssistantMessage(sessionId, managedProc.streamingText.trim());
+          await this.saveAssistantMessage(sessionId, managedProc.streamingText.trim());
           managedProc.streamingText = '';
           managedProc.isStreaming = false;
         }
@@ -5054,23 +5066,23 @@ Discord Main Gateway:
           isThinking: false,
         });
       }
-      this.cleanupProcess(sessionId, claudeProcess);
+      await this.cleanupProcess(sessionId, claudeProcess);
     });
 
-    proc.on('error', (err) => {
+    proc.on('error', async (err) => {
       console.error(`${providerConfig.name} process error [${sessionId}]:`, err);
-      this.notifyDiscordSessionEvent(sessionId, {
+      await this.notifyDiscordSessionEvent(sessionId, {
         eventType: 'session.error',
         severity: 'error',
         title: 'Session process error',
         summary: err.message,
       });
 
-      this.cleanupProcess(sessionId, claudeProcess);
+      await this.cleanupProcess(sessionId, claudeProcess);
     });
   }
 
-  private handleJsonOutput(sessionId: string, data: string): void {
+  private async handleJsonOutput(sessionId: string, data: string): Promise<void> {
     const proc = this.processes.get(sessionId);
     if (!proc) return;
 
@@ -5129,30 +5141,30 @@ Discord Main Gateway:
       // non-JSON provider noise.
       try {
         if (proc.cliProvider === 'pi') {
-          const translated = this.translatePiMessage(sessionId, raw);
+          const translated = await this.translatePiMessage(sessionId, raw);
           if (Array.isArray(translated)) {
-            for (const msg of translated) this.processStreamMessage(sessionId, msg);
+            for (const msg of translated) await this.processStreamMessage(sessionId, msg);
           } else if (translated) {
-            this.processStreamMessage(sessionId, translated);
+            await this.processStreamMessage(sessionId, translated);
           }
           continue;
         }
         if (proc.cliProvider === 'codex') {
-          const translated = this.translateCodexMessage(sessionId, raw);
+          const translated = await this.translateCodexMessage(sessionId, raw);
           if (Array.isArray(translated)) {
             for (const msg of translated) {
-              this.processStreamMessage(sessionId, msg);
+              await this.processStreamMessage(sessionId, msg);
             }
           } else if (translated) {
-            this.processStreamMessage(sessionId, translated);
+            await this.processStreamMessage(sessionId, translated);
           }
           continue;
         }
         if (proc.cliProvider === 'kimi') {
-          this.processKimiLine(sessionId, proc, raw);
+          await this.processKimiLine(sessionId, proc, raw);
           continue;
         }
-        this.processStreamMessage(sessionId, raw as StreamJsonMessage);
+        await this.processStreamMessage(sessionId, raw as StreamJsonMessage);
       } catch (err) {
         console.error(
           `[STREAM] Failed to process ${proc.cliProvider} message [${sessionId}]:`,
@@ -5163,10 +5175,10 @@ Discord Main Gateway:
   }
 
   /** Translate Pi RPC events into the WebUI's existing streaming vocabulary. */
-  private translatePiMessage(
+  private async translatePiMessage(
     sessionId: string,
     raw: unknown
-  ): StreamJsonMessage | StreamJsonMessage[] | null {
+  ): Promise<StreamJsonMessage | StreamJsonMessage[] | null> {
     if (!raw || typeof raw !== 'object') return null;
     const event = raw as Record<string, unknown>;
     const proc = this.processes.get(sessionId);
@@ -5202,9 +5214,11 @@ Discord Main Gateway:
               : null;
         if (nativeSessionId && nativeSessionId !== proc.claudeSessionId) {
           proc.claudeSessionId = nativeSessionId;
-          getDatabase()
-            .prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?')
-            .run(nativeSessionId, sessionId);
+          await pgRun(
+            'UPDATE sessions SET claude_session_id = ? WHERE id = ?',
+            nativeSessionId,
+            sessionId
+          );
         }
         const stateModel = isRecordValue(data.model) ? data.model : null;
         if (stateModel) {
@@ -5341,7 +5355,7 @@ Discord Main Gateway:
 
     if (type === 'compaction_start') {
       const reason = piCompactionReason(event.reason);
-      this.emitCompact(sessionId, {
+      await this.emitCompact(sessionId, {
         sessionId,
         message:
           reason === 'manual'
@@ -5379,11 +5393,11 @@ Discord Main Gateway:
    * turn, and the user's actual request was never finished. Schedule a nudge and
    * cancel it the moment Pi shows any sign of progress on its own.
    */
-  private handlePiCompactionEnd(
+  private async handlePiCompactionEnd(
     sessionId: string,
     proc: ClaudeProcess,
     event: Record<string, unknown>
-  ): StreamJsonMessage | null {
+  ): Promise<StreamJsonMessage | null> {
     const reason = piCompactionReason(event.reason);
     const emitReason = reason === 'overflow' ? 'context-limit' : 'auto-compact';
     const stopThinking = () =>
@@ -5397,7 +5411,7 @@ Discord Main Gateway:
       proc.piTurnInFlight = false;
       proc.piCompactContinuations = 0;
       proc.isStreaming = false;
-      this.emitCompact(sessionId, {
+      await this.emitCompact(sessionId, {
         sessionId,
         message: 'Pi compaction was aborted; the turn did not continue.',
         reason: emitReason,
@@ -5426,7 +5440,7 @@ Discord Main Gateway:
       );
       proc.piTurnInFlight = false;
       proc.isStreaming = false;
-      this.emitCompact(sessionId, {
+      await this.emitCompact(sessionId, {
         sessionId,
         message: `Pi compacted ${attempted} times without finishing the turn. Stopped auto-continuing — send a follow-up to resume.`,
         reason: emitReason,
@@ -5487,7 +5501,10 @@ Discord Main Gateway:
    *   - diff updates (turn/diff/updated) — currently informational, future work
    *   - context compaction, model rerouting, errors
    */
-  private translateCodexMessage(sessionId: string, raw: unknown): StreamJsonMessage | null {
+  private async translateCodexMessage(
+    sessionId: string,
+    raw: unknown
+  ): Promise<StreamJsonMessage | null> {
     if (!raw || typeof raw !== 'object') return null;
 
     const envelope = raw as Record<string, unknown>;
@@ -5635,8 +5652,8 @@ Discord Main Gateway:
           if (proc && proc.cliProvider === 'codex' && !proc.codexSessionId) {
             proc.codexSessionId = codexSessionId;
             proc.claudeSessionId = codexSessionId;
-            const db = getDatabase();
-            db.prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?').run(
+            await pgRun(
+              'UPDATE sessions SET claude_session_id = ? WHERE id = ?',
               codexSessionId,
               sessionId
             );
@@ -5682,8 +5699,8 @@ Discord Main Gateway:
           const compactSummary = this.normalizeCodexCompactSummary(summary);
           if (compactSummary && compactSummary !== codexProc.codexLastContextSummary) {
             codexProc.codexLastContextSummary = compactSummary;
-            this.applyCodexCompactContextUsage(sessionId, codexProc, data);
-            this.emitCompact(sessionId, {
+            await this.applyCodexCompactContextUsage(sessionId, codexProc, data);
+            await this.emitCompact(sessionId, {
               sessionId,
               message: 'Codex compacted prior context and resumed from a summary.',
               summary: compactSummary,
@@ -5732,7 +5749,7 @@ Discord Main Gateway:
             cached: contextCached,
             output: contextOutput,
           };
-          this.maybeDetectCodexImplicitCompaction(sessionId, codexProc, nextContextUsage);
+          await this.maybeDetectCodexImplicitCompaction(sessionId, codexProc, nextContextUsage);
           this.applyCodexContextUsage(codexProc, {
             input: contextInputTotal,
             cached: contextCached,
@@ -5745,7 +5762,7 @@ Discord Main Gateway:
             codexProc.contextWindow
           );
           codexProc.codexSawTokenCountThisTurn = true;
-          this.emitUsage(sessionId, codexProc);
+          await this.emitUsage(sessionId, codexProc);
         }
         return null;
       }
@@ -5807,7 +5824,7 @@ Discord Main Gateway:
         // counters from Codex's own thread state and record them without
         // synthesizing a `result` — the turn did not succeed.
         if (!data.usage && codexProc) {
-          this.flushCodexUsageOnExit(sessionId, codexProc);
+          await this.flushCodexUsageOnExit(sessionId, codexProc);
           return null;
         }
 
@@ -5830,7 +5847,7 @@ Discord Main Gateway:
             nonCachedInput,
             cached: deltaCached,
             output: deltaOutput,
-          } = this.applyCodexTurnUsage(sessionId, codexProc, turnUsage);
+          } = await this.applyCodexTurnUsage(sessionId, codexProc, turnUsage);
 
           // If this Codex version did not emit token_count.last_token_usage, use
           // Codex's own persisted thread meter before falling back to billing
@@ -5839,7 +5856,7 @@ Discord Main Gateway:
           // ~250K tokens in its thread state).
           if (!codexProc.codexSawTokenCountThisTurn) {
             const codexHome = CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir());
-            const threadState = readCodexThreadState(codexHome, {
+            const threadState = await readCodexThreadState(codexHome, {
               threadId: codexProc.codexSessionId || codexProc.claudeSessionId,
               cwd: codexProc.workingDirectory,
               sinceMs: codexProc.codexExecStartedAtMs,
@@ -5851,9 +5868,11 @@ Discord Main Gateway:
                 codexProc.codexSessionId = threadState.id;
                 codexProc.claudeSessionId = threadState.id;
                 try {
-                  getDatabase()
-                    .prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?')
-                    .run(threadState.id, sessionId);
+                  await pgRun(
+                    'UPDATE sessions SET claude_session_id = ? WHERE id = ?',
+                    threadState.id,
+                    sessionId
+                  );
                   console.log(
                     `[CODEX] Captured session id ${threadState.id} from Codex state for ${sessionId}`
                   );
@@ -5867,7 +5886,11 @@ Discord Main Gateway:
                 cached: 0,
                 output: 0,
               };
-              this.maybeDetectCodexImplicitCompaction(sessionId, codexProc, threadContextUsage);
+              await this.maybeDetectCodexImplicitCompaction(
+                sessionId,
+                codexProc,
+                threadContextUsage
+              );
               this.applyCodexContextUsage(codexProc, threadContextUsage);
               codexProc.codexLastObservedContextUsage = threadContextUsage;
               codexProc.codexLastObservedContextWindow = this.resolveObservedContextWindow(
@@ -5902,7 +5925,7 @@ Discord Main Gateway:
           const turnCostUsd = this.calculateTurnCost(codexProc);
           codexProc.previousTotalCostUsd = codexProc.totalCostUsd;
           codexProc.totalCostUsd += turnCostUsd;
-          this.emitUsage(sessionId, codexProc);
+          await this.emitUsage(sessionId, codexProc);
 
           return {
             type: 'result',
@@ -6036,9 +6059,9 @@ Discord Main Gateway:
       case 'compacted': {
         const codexProc = this.processes.get(sessionId);
         if (codexProc && codexProc.cliProvider === 'codex') {
-          this.applyCodexCompactContextUsage(sessionId, codexProc, data);
+          await this.applyCodexCompactContextUsage(sessionId, codexProc, data);
         }
-        this.emitCompact(sessionId, {
+        await this.emitCompact(sessionId, {
           sessionId,
           message: 'Context was compacted to reduce token usage',
           summary: typeof data.summary === 'string' ? data.summary : undefined,
@@ -6379,11 +6402,11 @@ Discord Main Gateway:
     if (!order.includes(messageId)) order.push(messageId);
   }
 
-  private flushOpenCodeAssistantMessage(
+  private async flushOpenCodeAssistantMessage(
     sessionId: string,
     proc: ClaudeProcess,
     messageId: string
-  ): boolean {
+  ): Promise<boolean> {
     const streams = proc.partStreams;
     if (!streams) return false;
 
@@ -6412,14 +6435,17 @@ Discord Main Gateway:
       content: '',
       isComplete: true,
     });
-    this.saveAssistantMessage(sessionId, content);
+    await this.saveAssistantMessage(sessionId, content);
     if (proc.opencodeActiveMessageId === messageId) {
       proc.opencodeActiveMessageId = null;
     }
     return true;
   }
 
-  private flushAllOpenCodeAssistantMessages(sessionId: string, proc: ClaudeProcess): void {
+  private async flushAllOpenCodeAssistantMessages(
+    sessionId: string,
+    proc: ClaudeProcess
+  ): Promise<void> {
     const streams = proc.partStreams;
     if (!streams || streams.size === 0) return;
 
@@ -6427,26 +6453,26 @@ Discord Main Gateway:
     const seen = new Set<string>();
     for (const messageId of ordered) {
       seen.add(messageId);
-      this.flushOpenCodeAssistantMessage(sessionId, proc, messageId);
+      await this.flushOpenCodeAssistantMessage(sessionId, proc, messageId);
     }
     for (const entry of streams.values()) {
       if (seen.has(entry.messageId)) continue;
       seen.add(entry.messageId);
-      this.flushOpenCodeAssistantMessage(sessionId, proc, entry.messageId);
+      await this.flushOpenCodeAssistantMessage(sessionId, proc, entry.messageId);
     }
   }
 
-  private processOpencodeTextChunk(
+  private async processOpencodeTextChunk(
     sessionId: string,
     proc: ClaudeProcess,
     partId: string,
     messageId: string,
     rawChunk: string
-  ): void {
+  ): Promise<void> {
     if (!rawChunk) return;
     this.rememberOpenCodeMessage(proc, messageId);
     if (proc.opencodeActiveMessageId && proc.opencodeActiveMessageId !== messageId) {
-      this.flushOpenCodeAssistantMessage(sessionId, proc, proc.opencodeActiveMessageId);
+      await this.flushOpenCodeAssistantMessage(sessionId, proc, proc.opencodeActiveMessageId);
     }
     proc.opencodeActiveMessageId = messageId;
 
@@ -6489,7 +6515,10 @@ Discord Main Gateway:
     }
   }
 
-  private translateOpencodeServerEvent(sessionId: string, event: OpencodeEvent): void {
+  private async translateOpencodeServerEvent(
+    sessionId: string,
+    event: OpencodeEvent
+  ): Promise<void> {
     const proc = this.processes.get(sessionId);
     if (!proc) {
       if (process.env.OPENCODE_DEBUG_EVENTS === '1') {
@@ -6540,7 +6569,7 @@ Discord Main Gateway:
           : [];
         const metadata = props.metadata ?? {};
         if (!requestId) return;
-        recordAudit({
+        await recordAudit({
           actorUserId: proc.userId,
           action: 'permission.request',
           resourceType: 'session',
@@ -6564,7 +6593,7 @@ Discord Main Gateway:
         this.emitBufferedEvent(sessionId, 'permission_request', permissionEvent, (sequenced) => {
           this.io.to(`session:${sessionId}`).emit('session:permission_request', sequenced);
         });
-        this.notifyDiscordSessionEvent(sessionId, {
+        await this.notifyDiscordSessionEvent(sessionId, {
           eventType: 'session.permission_requested',
           severity: 'warning',
           title: 'Session needs permission',
@@ -6587,7 +6616,7 @@ Discord Main Gateway:
           : [];
         const metadata = props.metadata ?? {};
         if (!requestId) return;
-        recordAudit({
+        await recordAudit({
           actorUserId: proc.userId,
           action: 'permission.request',
           resourceType: 'session',
@@ -6611,7 +6640,7 @@ Discord Main Gateway:
         this.emitBufferedEvent(sessionId, 'permission_request', permissionEvent, (sequenced) => {
           this.io.to(`session:${sessionId}`).emit('session:permission_request', sequenced);
         });
-        this.notifyDiscordSessionEvent(sessionId, {
+        await this.notifyDiscordSessionEvent(sessionId, {
           eventType: 'session.permission_requested',
           severity: 'warning',
           title: 'Session needs permission',
@@ -6666,7 +6695,7 @@ Discord Main Gateway:
         this.emitBufferedEvent(sessionId, 'question', questionEvent, (sequenced) => {
           this.io.to(`session:${sessionId}`).emit('session:question_request', sequenced);
         });
-        this.notifyDiscordSessionEvent(sessionId, {
+        await this.notifyDiscordSessionEvent(sessionId, {
           eventType: 'session.needs_input',
           severity: 'warning',
           title: 'Session needs input',
@@ -6737,7 +6766,7 @@ Discord Main Gateway:
         proc.cacheReadTokens = 0;
         proc.cacheCreationTokens = 0;
         this.resetCurrentContextUsage(proc);
-        this.emitUsage(sessionId, proc);
+        await this.emitUsage(sessionId, proc);
         const compactText =
           typeof props.text === 'string' && props.text.trim()
             ? props.text
@@ -6747,7 +6776,7 @@ Discord Main Gateway:
           proc.opencodeLastManualCompactAt &&
           Date.now() - proc.opencodeLastManualCompactAt < 10_000;
         if (!justEmittedManual) {
-          this.emitCompact(sessionId, {
+          await this.emitCompact(sessionId, {
             sessionId,
             message: 'OpenCode compacted session context.',
             summary: compactText || undefined,
@@ -6769,7 +6798,7 @@ Discord Main Gateway:
           content: `${message}\n`,
           isComplete: true,
         });
-        this.notifyDiscordSessionEvent(sessionId, {
+        await this.notifyDiscordSessionEvent(sessionId, {
           eventType: 'session.error',
           severity: 'error',
           title: 'OpenCode session error',
@@ -6801,7 +6830,7 @@ Discord Main Gateway:
               rawChunk = fullText.slice(existing?.text?.length ?? 0);
             }
           }
-          this.processOpencodeTextChunk(sessionId, proc, partId, messageId, rawChunk);
+          await this.processOpencodeTextChunk(sessionId, proc, partId, messageId, rawChunk);
           return;
         }
 
@@ -6828,7 +6857,7 @@ Discord Main Gateway:
           const emittedTools = (proc.emittedTools ??= new Set());
 
           if (state.status === 'pending' || state.status === 'running') {
-            this.flushOpenCodeAssistantMessage(
+            await this.flushOpenCodeAssistantMessage(
               sessionId,
               proc,
               proc.opencodeActiveMessageId || messageId
@@ -6916,8 +6945,8 @@ Discord Main Gateway:
             proc.totalCostUsd += cost;
             proc.turnCostUsd = (proc.turnCostUsd ?? 0) + cost;
           }
-          this.emitUsage(sessionId, proc);
-          this.flushOpenCodeAssistantMessage(
+          await this.emitUsage(sessionId, proc);
+          await this.flushOpenCodeAssistantMessage(
             sessionId,
             proc,
             proc.opencodeActiveMessageId || messageId
@@ -6939,7 +6968,7 @@ Discord Main Gateway:
           partId;
         const delta = typeof props.delta === 'string' ? (props.delta as string) : undefined;
         if (!partId || !messageId || !delta) return;
-        this.processOpencodeTextChunk(sessionId, proc, partId, messageId, delta);
+        await this.processOpencodeTextChunk(sessionId, proc, partId, messageId, delta);
         return;
       }
 
@@ -6991,12 +7020,12 @@ Discord Main Gateway:
       // separately, then drop partial streams so the next turn starts clean.
       const streams = proc.partStreams;
       if (streams && streams.size > 0) {
-        this.flushAllOpenCodeAssistantMessages(sessionId, proc);
+        await this.flushAllOpenCodeAssistantMessages(sessionId, proc);
         streams.clear();
       }
       proc.opencodeActiveMessageId = null;
       proc.opencodeMessageOrder = [];
-      this.emitUsage(sessionId, proc);
+      await this.emitUsage(sessionId, proc);
       this.saveUsageToDatabase(sessionId, proc);
     } finally {
       proc.opencodeUsageBaseline = null;
@@ -7025,14 +7054,12 @@ Discord Main Gateway:
     const selectedModel = await getCliModelForSession(proc.userId, 'codex', sessionId);
     const selectedReasoning = await getCliReasoningForSession(proc.userId, 'codex', sessionId);
     const selectedServiceTier = await getCliServiceTierForSession(proc.userId, 'codex', sessionId);
-    const webSearchMode = getCodexWebSearchForUser(proc.userId);
+    const webSearchMode = await getCodexWebSearchForUser(proc.userId);
 
-    const db = getDatabase();
-    const session = db
-      .prepare('SELECT working_directory, allowed_directories FROM sessions WHERE id = ?')
-      .get(sessionId) as
-      | { working_directory: string; allowed_directories: string | null }
-      | undefined;
+    const session = (await pgGet(
+      'SELECT working_directory, allowed_directories FROM sessions WHERE id = ?',
+      sessionId
+    )) as unknown as { working_directory: string; allowed_directories: string | null } | undefined;
 
     if (!session) throw new Error('Session not found for codex respawn');
 
@@ -7078,16 +7105,18 @@ Discord Main Gateway:
       // Ignore
     }
     Object.assign(extraEnv, buildIntegrationEnv());
-    Object.assign(extraEnv, buildAndroidDeviceEnvForSession(sessionId, proc.userId));
+    Object.assign(extraEnv, await buildAndroidDeviceEnvForSession(sessionId, proc.userId));
 
-    proc.codexDescendantUsageBaseline = this.readCodexDescendantUsage(resumeSessionId);
+    proc.codexDescendantUsageBaseline = await this.readCodexDescendantUsage(resumeSessionId);
     // Keep the per-thread baseline in step with the aggregate one, otherwise a
     // resumed exec would re-book every subagent's full lifetime each turn.
     proc.codexSubagentBaseline = new Map(
       resumeSessionId
-        ? readCodexDescendantUsageDetail(
-            CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir()),
-            resumeSessionId
+        ? (
+            await readCodexDescendantUsageDetail(
+              CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir()),
+              resumeSessionId
+            )
           ).map((thread) => [thread.threadId, thread.usage] as const)
         : []
     );
@@ -7126,13 +7155,13 @@ Discord Main Gateway:
     proc.codexTotalTokenUsage = undefined;
 
     // Re-attach output handlers
-    newChildProc.stdout?.on('data', (data: Buffer) => {
-      this.handleJsonOutput(sessionId, data.toString());
+    newChildProc.stdout?.on('data', async (data: Buffer) => {
+      await this.handleJsonOutput(sessionId, data.toString());
     });
     newChildProc.stderr?.on('data', (data: Buffer) => {
       console.error(`Claude stderr [${sessionId}]:`, data.toString());
     });
-    newChildProc.on('exit', (exitCode) => {
+    newChildProc.on('exit', async (exitCode) => {
       console.log(
         `[CODEX] Respawned process for session ${sessionId} exited with code ${exitCode}`
       );
@@ -7146,7 +7175,7 @@ Discord Main Gateway:
         // Steering kills the exec with SIGINT, so turn.completed never arrives
         // and the turn's tokens (root + subagents) would go unbilled. Runs
         // before the steered follow-up starts and rotates currentUsageTurnId.
-        this.flushCodexUsageOnExit(sessionId, managedProc);
+        await this.flushCodexUsageOnExit(sessionId, managedProc);
 
         const hasPendingFollowup = (managedProc.codexQueuedTurns?.length ?? 0) > 0;
 
@@ -7163,7 +7192,10 @@ Discord Main Gateway:
           }
           if (managedProc.streamingText?.trim().length) {
             const suffix = exitCode === 0 ? '' : '\n\n[Steered by newer user message]';
-            this.saveAssistantMessage(sessionId, `${managedProc.streamingText.trim()}${suffix}`);
+            await this.saveAssistantMessage(
+              sessionId,
+              `${managedProc.streamingText.trim()}${suffix}`
+            );
           }
           managedProc.codexIdle = true;
           managedProc.codexPreemptingForSteer = false;
@@ -7181,24 +7213,24 @@ Discord Main Gateway:
           return;
         }
         if (managedProc.streamingText?.trim().length) {
-          this.saveAssistantMessage(sessionId, managedProc.streamingText.trim());
+          await this.saveAssistantMessage(sessionId, managedProc.streamingText.trim());
           managedProc.streamingText = '';
           managedProc.isStreaming = false;
         }
       }
       this.io.to(`session:${sessionId}`).emit('session:thinking', { sessionId, isThinking: false });
-      this.cleanupProcess(sessionId, proc);
+      await this.cleanupProcess(sessionId, proc);
     });
-    newChildProc.on('error', (err) => {
+    newChildProc.on('error', async (err) => {
       console.error(`Claude process error [${sessionId}]:`, err);
-      this.notifyDiscordSessionEvent(sessionId, {
+      await this.notifyDiscordSessionEvent(sessionId, {
         eventType: 'session.error',
         severity: 'error',
         title: 'Codex process error',
         summary: err.message,
       });
 
-      this.cleanupProcess(sessionId, proc);
+      await this.cleanupProcess(sessionId, proc);
     });
 
     console.log(`[CODEX] Respawned process [${sessionId}], args: ${args.join(' ')}`);
@@ -7223,11 +7255,11 @@ Discord Main Gateway:
     return Math.max(counters.input, 0) + Math.max(counters.output, 0);
   }
 
-  private maybeDetectCodexImplicitCompaction(
+  private async maybeDetectCodexImplicitCompaction(
     sessionId: string,
     proc: ClaudeProcess,
     nextUsage: CodexUsageCounters
-  ): boolean {
+  ): Promise<boolean> {
     const previousUsage = proc.codexLastObservedContextUsage;
     if (!previousUsage) return false;
 
@@ -7259,7 +7291,7 @@ Discord Main Gateway:
       proc.codexLastCompactAtMs = Date.now();
       proc.codexLastPromptEstimateTokens = undefined;
       proc.codexLastPromptPrefix = undefined;
-      this.emitCompact(sessionId, {
+      await this.emitCompact(sessionId, {
         sessionId,
         message: 'Codex compacted prior context and resumed from a reduced context window.',
         reason: 'auto-compact',
@@ -7286,11 +7318,11 @@ Discord Main Gateway:
     proc.contextOutputTokens = output;
   }
 
-  private applyCodexCompactContextUsage(
+  private async applyCodexCompactContextUsage(
     sessionId: string,
     proc: ClaudeProcess,
     data: unknown
-  ): void {
+  ): Promise<void> {
     const compactCounters = extractCodexContextUsageCounters(data);
     if (compactCounters) {
       this.applyCodexContextUsage(proc, compactCounters);
@@ -7308,7 +7340,7 @@ Discord Main Gateway:
     proc.codexLastCompactAtMs = Date.now();
     proc.codexLastPromptEstimateTokens = undefined;
     proc.codexLastPromptPrefix = undefined;
-    this.emitUsage(sessionId, proc);
+    await this.emitUsage(sessionId, proc);
   }
 
   private buildUsageSnapshot(
@@ -7369,12 +7401,12 @@ Discord Main Gateway:
     };
   }
 
-  private emitUsage(sessionId: string, proc: ClaudeProcess): void {
+  private async emitUsage(sessionId: string, proc: ClaudeProcess): Promise<void> {
     const usageData = this.buildUsageSnapshot(sessionId, proc);
     this.emitBufferedEvent(sessionId, 'usage', usageData, (sequenced) => {
       this.io.to(`session:${sessionId}`).emit('session:usage', sequenced);
     });
-    this.recordContextSnapshot(sessionId, proc, usageData);
+    await this.recordContextSnapshot(sessionId, proc, usageData);
     // Note: DB saving moved to saveUsageToDatabase() called only on turn completion
   }
 
@@ -7432,7 +7464,7 @@ Discord Main Gateway:
   }
 
   // Save usage to database - called ONCE per turn when result is received
-  private saveUsageToDatabase(sessionId: string, proc: ClaudeProcess): void {
+  private async saveUsageToDatabase(sessionId: string, proc: ClaudeProcess): Promise<void> {
     const turnTotalTokens =
       proc.turnInputTokens +
       proc.turnOutputTokens +
@@ -7446,8 +7478,7 @@ Discord Main Gateway:
     const turnId = (proc.currentUsageTurnId ??= nanoid());
 
     try {
-      const db = getDatabase();
-      const inserted = insertUsageHistoryTurn(db, {
+      const inserted = await insertUsageHistoryTurn({
         userId: proc.userId,
         sessionId,
         provider: proc.cliProvider,
@@ -7504,14 +7535,18 @@ Discord Main Gateway:
     );
   }
 
-  private handleContextLimit(sessionId: string, proc: ClaudeProcess, errorText: string): void {
+  private async handleContextLimit(
+    sessionId: string,
+    proc: ClaudeProcess,
+    errorText: string
+  ): Promise<void> {
     const now = Date.now();
     if (proc.lastContextLimitAt && now - proc.lastContextLimitAt < 2000) {
       return;
     }
     proc.lastContextLimitAt = now;
 
-    const summary = this.buildContextSummary(
+    const summary = await this.buildContextSummary(
       sessionId,
       HANDOFF_CONTEXT_MAX_MESSAGES,
       HANDOFF_CONTEXT_MAX_CHARS,
@@ -7534,7 +7569,7 @@ Discord Main Gateway:
       isThinking: false,
     });
 
-    this.emitCompact(sessionId, {
+    await this.emitCompact(sessionId, {
       sessionId,
       message: `Context limit reached. Auto-compacting context to continue.`,
       summary: summary || undefined,
@@ -7542,10 +7577,10 @@ Discord Main Gateway:
       reason: 'context-limit',
       error: errorText,
     });
-    this.emitUsage(sessionId, proc);
+    await this.emitUsage(sessionId, proc);
   }
 
-  private processStreamMessage(sessionId: string, msg: StreamJsonMessage): void {
+  private async processStreamMessage(sessionId: string, msg: StreamJsonMessage): Promise<void> {
     const proc = this.processes.get(sessionId);
     if (!proc) return;
 
@@ -7556,7 +7591,7 @@ Discord Main Gateway:
     if (msg.type === 'error' || (msg.type === 'system' && msg.subtype === 'error')) {
       const errorText = this.extractErrorText(msg);
       if (errorText && this.isContextLimitError(errorText)) {
-        this.handleContextLimit(sessionId, proc, errorText);
+        await this.handleContextLimit(sessionId, proc, errorText);
         return;
       }
     }
@@ -7570,8 +7605,8 @@ Discord Main Gateway:
     if (msg.type === 'system' && msg.subtype === 'init') {
       if (msg.session_id) {
         proc.claudeSessionId = msg.session_id;
-        const db = getDatabase();
-        db.prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?').run(
+        await pgRun(
+          'UPDATE sessions SET claude_session_id = ? WHERE id = ?',
           msg.session_id,
           sessionId
         );
@@ -7606,7 +7641,7 @@ Discord Main Gateway:
             const responseId =
               typeof event.message.id === 'string' ? event.message.id : `response-${Date.now()}`;
             accumulateClaudeMessageStartUsage(proc, responseId, event.message.usage);
-            this.emitUsage(sessionId, proc);
+            await this.emitUsage(sessionId, proc);
           }
         }
       }
@@ -7617,14 +7652,14 @@ Discord Main Gateway:
           // message_delta output usage is cumulative for the current model
           // response. Add only its growth to billed turn usage.
           accumulateClaudeMessageDeltaUsage(proc, event.usage);
-          this.emitUsage(sessionId, proc);
+          await this.emitUsage(sessionId, proc);
         }
         // If stop_reason is tool_use, Claude is about to use a tool - show thinking
         if (event.delta?.stop_reason === 'tool_use') {
           console.log(`[TOOL] Claude is using a tool, showing thinking indicator`);
           // Save any pending streaming content
           if (proc.streamingText.trim().length > 0) {
-            this.saveAssistantMessage(sessionId, proc.streamingText.trim());
+            await this.saveAssistantMessage(sessionId, proc.streamingText.trim());
             proc.streamingText = '';
             proc.isStreaming = false;
           }
@@ -7707,7 +7742,7 @@ Discord Main Gateway:
       if (event.type === 'content_block_stop') {
         // Save any streaming text
         if (proc.streamingText.trim().length > 0) {
-          this.saveAssistantMessage(sessionId, proc.streamingText.trim());
+          await this.saveAssistantMessage(sessionId, proc.streamingText.trim());
           proc.streamingText = '';
           proc.isStreaming = false;
         }
@@ -7844,7 +7879,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
           msg.permission_denials.map((d) => d.tool_name).join(', ')
         );
         proc.pendingPermissionDenials = msg.permission_denials;
-        recordAudit({
+        await recordAudit({
           actorUserId: proc.userId,
           action: 'permission.request',
           resourceType: 'session',
@@ -7866,7 +7901,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
         this.emitBufferedEvent(sessionId, 'permission_request', permissionEvent, (sequenced) => {
           this.io.to(`session:${sessionId}`).emit('session:permission_request', sequenced);
         });
-        this.notifyDiscordSessionEvent(sessionId, {
+        await this.notifyDiscordSessionEvent(sessionId, {
           eventType: 'session.permission_requested',
           severity: 'warning',
           title: 'Session needs permission',
@@ -7916,7 +7951,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
           proc.contextWindow = primaryModel[1].contextWindow;
         }
       }
-      this.emitUsage(sessionId, proc);
+      await this.emitUsage(sessionId, proc);
 
       // Save usage to database - ONLY HERE at the end of the turn
       // Cost is calculated from tokens, not from CLI cumulative value
@@ -7949,7 +7984,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     // Handle content_block_stop - save complete message
     if (msg.type === 'content_block_stop') {
       if (proc.streamingText.trim().length > 0) {
-        this.saveAssistantMessage(sessionId, proc.streamingText.trim());
+        await this.saveAssistantMessage(sessionId, proc.streamingText.trim());
       }
       proc.isStreaming = false;
       proc.streamingText = '';
@@ -7980,7 +8015,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
         });
 
         // Save immediately as separate message
-        this.saveAssistantMessage(sessionId, content.trim());
+        await this.saveAssistantMessage(sessionId, content.trim());
       }
     }
 
@@ -7988,7 +8023,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     if (msg.type === 'tool_use' && msg.tool_use) {
       // Save any pending streaming content before tool use
       if (proc.streamingText.trim().length > 0) {
-        this.saveAssistantMessage(sessionId, proc.streamingText.trim());
+        await this.saveAssistantMessage(sessionId, proc.streamingText.trim());
         proc.streamingText = '';
         proc.isStreaming = false;
       }
@@ -8109,19 +8144,19 @@ The planning phase is complete. You are now in Auto-Accept mode.
       proc.cacheCreationTokens = 0;
       this.resetCurrentContextUsage(proc);
       // Notify frontend about compaction
-      this.emitCompact(sessionId, {
+      await this.emitCompact(sessionId, {
         sessionId,
         message: 'Context was auto-compacted to reduce token usage',
         reason: 'auto-compact',
       });
-      this.emitUsage(sessionId, proc);
+      await this.emitUsage(sessionId, proc);
     }
 
     // Handle result/completion
     if (msg.type === 'result' || (msg.type === 'system' && msg.subtype === 'turn_end')) {
       // Save any remaining streaming content
       if (proc.streamingText.trim().length > 0) {
-        this.saveAssistantMessage(sessionId, proc.streamingText.trim());
+        await this.saveAssistantMessage(sessionId, proc.streamingText.trim());
         proc.streamingText = '';
         proc.isStreaming = false;
       }
@@ -8149,12 +8184,12 @@ The planning phase is complete. You are now in Auto-Accept mode.
         proc.claudeIdle = true;
         this.emitQueueState(sessionId, proc);
         queueMicrotask(() => this.drainClaudeQueuedTurns(sessionId, proc));
-        queueMicrotask(() => this.applyDeferredModeRestart(sessionId, proc));
+        queueMicrotask(async () => await this.applyDeferredModeRestart(sessionId, proc));
       }
     }
   }
 
-  private saveAssistantMessage(sessionId: string, content: string): void {
+  private async saveAssistantMessage(sessionId: string, content: string): Promise<void> {
     const proc = this.processes.get(sessionId);
     const explicitWorkspaceMedia = proc
       ? extractExplicitWorkspaceChatMedia(content, proc.workingDirectory)
@@ -8178,26 +8213,33 @@ The planning phase is complete. You are now in Auto-Accept mode.
       return;
     }
 
-    const db = getDatabase();
     const messageId = nanoid();
     const createdAt = new Date().toISOString();
     // The provider turn owns its thread even if another device changes the
     // session-wide active chat before this response finishes.
-    const chatId = proc?.currentChatId ?? getSessionSyncState(sessionId).activeChatId;
-    const eventSequence = this.allocateEventSequence(sessionId);
+    const chatId = proc?.currentChatId ?? (await getSessionSyncState(sessionId)).activeChatId;
+    const eventSequence = await this.allocateEventSequence(sessionId);
 
     // This runs from child 'exit' handlers among other places; a throw there
     // becomes an uncaughtException and kills the whole backend. Log and bail
     // instead of emitting a message whose row was never persisted.
     try {
-      db.prepare(
+      await pgRun(
         `INSERT INTO messages (
            id, session_id, chat_id, role, content, event_sequence
-         ) VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(messageId, sessionId, chatId, 'assistant', deliveredContent, eventSequence);
-      db.prepare(
-        'UPDATE sessions SET last_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-      ).run(deliveredContent.substring(0, 200), sessionId);
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+        messageId,
+        sessionId,
+        chatId,
+        'assistant',
+        deliveredContent,
+        eventSequence
+      );
+      await pgRun(
+        'UPDATE sessions SET last_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        deliveredContent.substring(0, 200),
+        sessionId
+      );
     } catch (error) {
       console.error(`[SAVE] Failed to persist assistant message [${sessionId}]:`, error);
       return;
@@ -8415,7 +8457,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     });
   }
 
-  private applyDeferredModeRestart(sessionId: string, proc: ClaudeProcess): void {
+  private async applyDeferredModeRestart(sessionId: string, proc: ClaudeProcess): Promise<void> {
     const deferred = proc.claudeDeferredModeRestart;
     if (!deferred) return;
     if (proc.claudeIdle === false) return;
@@ -8423,7 +8465,13 @@ The planning phase is complete. You are now in Auto-Accept mode.
 
     proc.claudeDeferredModeRestart = undefined;
     console.log(`[MODE] Applying deferred ${deferred.mode} for ${sessionId}`);
-    this.restartForMode(sessionId, proc, deferred.mode, deferred.userId, deferred.previousMode);
+    await this.restartForMode(
+      sessionId,
+      proc,
+      deferred.mode,
+      deferred.userId,
+      deferred.previousMode
+    );
   }
 
   private drainClaudeQueuedTurns(sessionId: string, proc: ClaudeProcess): void {
@@ -8448,7 +8496,10 @@ The planning phase is complete. You are now in Auto-Accept mode.
     }
   }
 
-  private requestCodexSteeringPreemption(sessionId: string, proc: ClaudeProcess): void {
+  private async requestCodexSteeringPreemption(
+    sessionId: string,
+    proc: ClaudeProcess
+  ): Promise<void> {
     if (proc.cliProvider !== 'codex' || proc.codexIdle || proc.codexPreemptingForSteer) {
       return;
     }
@@ -8463,7 +8514,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     this.emitQueueState(sessionId, proc);
 
     if (proc.streamingText.trim().length > 0) {
-      this.saveAssistantMessage(
+      await this.saveAssistantMessage(
         sessionId,
         `${proc.streamingText.trim()}\n\n[Steered by newer user message]`
       );
@@ -8645,7 +8696,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
       proc.contextOutputTokens = 0;
       proc.contextCacheReadTokens = 0;
       proc.contextCacheCreationTokens = 0;
-      this.emitUsage(sessionId, proc);
+      await this.emitUsage(sessionId, proc);
       return;
     }
 
@@ -8737,16 +8788,16 @@ The planning phase is complete. You are now in Auto-Accept mode.
       proc.totalOutputTokens += proc.turnOutputTokens;
       proc.cacheReadTokens += proc.turnCacheReadTokens;
       proc.cacheCreationTokens += proc.turnCacheCreationTokens;
-      this.emitUsage(sessionId, proc);
+      await this.emitUsage(sessionId, proc);
       const text = proc.streamingText.trim();
-      if (text) this.saveAssistantMessage(sessionId, text);
+      if (text) await this.saveAssistantMessage(sessionId, text);
       this.saveUsageToDatabase(sessionId, proc);
       console.log(`[KIMI ACP] Turn completed [${sessionId}] reason=${response.stopReason}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[KIMI ACP] Prompt failed [${sessionId}]:`, error);
       const partial = proc.streamingText.trim();
-      if (partial) this.saveAssistantMessage(sessionId, `${partial}\n\n[Interrupted]`);
+      if (partial) await this.saveAssistantMessage(sessionId, `${partial}\n\n[Interrupted]`);
       this.io.to(`session:${sessionId}`).emit('session:error', {
         sessionId,
         error: `Kimi failed: ${message}`,
@@ -8815,11 +8866,10 @@ The planning phase is complete. You are now in Auto-Accept mode.
     proc.turnOutputTokens = 0;
 
     const providerConfig = CLI_PROVIDERS.kimi;
-    const session = getDatabase()
-      .prepare('SELECT working_directory, allowed_directories FROM sessions WHERE id = ?')
-      .get(sessionId) as
-      | { working_directory: string; allowed_directories: string | null }
-      | undefined;
+    const session = (await pgGet(
+      'SELECT working_directory, allowed_directories FROM sessions WHERE id = ?',
+      sessionId
+    )) as unknown as { working_directory: string; allowed_directories: string | null } | undefined;
     const workingDirectory = session?.working_directory || proc.workingDirectory || os.homedir();
     let allowedDirectories: string[] = [];
     try {
@@ -8845,7 +8895,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
 
     const extraEnv: Record<string, string> = {};
     Object.assign(extraEnv, buildIntegrationEnv());
-    Object.assign(extraEnv, buildAndroidDeviceEnvForSession(sessionId, proc.userId));
+    Object.assign(extraEnv, await buildAndroidDeviceEnvForSession(sessionId, proc.userId));
 
     console.log(
       `[KIMI] Respawning process for next message [${sessionId}] args=${args
@@ -8886,17 +8936,17 @@ The planning phase is complete. You are now in Auto-Accept mode.
       isThinking: true,
     });
 
-    child.stdout?.on('data', (data: Buffer) => {
+    child.stdout?.on('data', async (data: Buffer) => {
       receivedStructuredOutput = true;
       clearTimeout(quietProgressTimer);
-      this.handleJsonOutput(sessionId, data.toString());
+      await this.handleJsonOutput(sessionId, data.toString());
     });
     child.stderr?.on('data', (data: Buffer) => {
       const chunk = data.toString();
       stderr = `${stderr}${chunk}`.slice(-8_000);
       console.error(`Kimi stderr [${sessionId}]:`, chunk);
     });
-    child.on('exit', (exitCode) => {
+    child.on('exit', async (exitCode) => {
       clearTimeout(quietProgressTimer);
       console.log(`[KIMI] Process for session ${sessionId} exited with code ${exitCode}`);
       const managedProc = this.processes.get(sessionId);
@@ -8916,9 +8966,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
         managedProc.codexIdle = true;
         managedProc.streamingText = '';
         managedProc.isStreaming = false;
-        getDatabase()
-          .prepare('UPDATE sessions SET claude_session_id = NULL WHERE id = ?')
-          .run(sessionId);
+        await pgRun('UPDATE sessions SET claude_session_id = NULL WHERE id = ?', sessionId);
         void this.dispatchKimiTurn(sessionId, managedProc, turn, true).catch((error) => {
           console.error(`[KIMI] Fresh-session retry failed [${sessionId}]:`, error);
           managedProc.codexIdle = true;
@@ -8936,7 +8984,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
 
       const text = managedProc.streamingText.trim();
       if (text) {
-        this.saveAssistantMessage(sessionId, text);
+        await this.saveAssistantMessage(sessionId, text);
       } else if (exitCode !== 0) {
         this.io.to(`session:${sessionId}`).emit('session:output', {
           sessionId,
@@ -8981,7 +9029,11 @@ The planning phase is complete. You are now in Auto-Accept mode.
    * Defensive: any text found is streamed; unknown shapes are ignored rather
    * than crashing the turn. Refined against real output post-login.
    */
-  private processKimiLine(sessionId: string, proc: ClaudeProcess, raw: unknown): void {
+  private async processKimiLine(
+    sessionId: string,
+    proc: ClaudeProcess,
+    raw: unknown
+  ): Promise<void> {
     if (!raw || typeof raw !== 'object') return;
     const obj = raw as Record<string, unknown>;
     const role = typeof obj.role === 'string' ? obj.role : '';
@@ -9005,9 +9057,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
       proc.codexSessionId = sid;
       proc.claudeSessionId = sid;
       try {
-        getDatabase()
-          .prepare('UPDATE sessions SET claude_session_id = ? WHERE id = ?')
-          .run(sid, sessionId);
+        await pgRun('UPDATE sessions SET claude_session_id = ? WHERE id = ?', sid, sessionId);
         console.log(`[KIMI] Captured native session id ${sid} for ${sessionId}`);
       } catch (error) {
         console.warn('[KIMI] Failed to persist native session id:', error);
@@ -9114,7 +9164,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
       // `thread.started`) lands
       // and proc.codexSessionId is set, subsequent respawns use native
       // `codex exec resume <id>` and we skip the manual prefix entirely.
-      const contextPrefix = this.buildCodexContextPrefix(
+      const contextPrefix = await this.buildCodexContextPrefix(
         sessionId,
         turn.originalMessage,
         turn.chatId
@@ -9162,7 +9212,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
         sessionId,
         error: `Failed to start queued Codex message: ${message}`,
       });
-      this.notifyDiscordSessionEvent(sessionId, {
+      await this.notifyDiscordSessionEvent(sessionId, {
         eventType: 'session.error',
         severity: 'error',
         title: 'Codex queued turn failed',
@@ -9226,8 +9276,8 @@ The planning phase is complete. You are now in Auto-Accept mode.
         proc.cacheReadTokens = 0;
         proc.cacheCreationTokens = 0;
         this.resetCurrentContextUsage(proc);
-        this.emitUsage(sessionId, proc);
-        this.emitCompact(sessionId, {
+        await this.emitUsage(sessionId, proc);
+        await this.emitCompact(sessionId, {
           sessionId,
           message: 'OpenCode compacted session context.',
         });
@@ -9331,7 +9381,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
         sessionId,
         error: `Failed to start queued OpenCode message: ${message}`,
       });
-      this.notifyDiscordSessionEvent(sessionId, {
+      await this.notifyDiscordSessionEvent(sessionId, {
         eventType: 'session.error',
         severity: 'error',
         title: 'OpenCode queued turn failed',
@@ -9369,10 +9419,10 @@ The planning phase is complete. You are now in Auto-Accept mode.
       staleProcRedispatch?: boolean;
     }
   ): Promise<SendMessageResult> {
-    assertRunnerAccess(userId);
+    await assertRunnerAccess(userId);
     // Resolve once before reading attachments. Later cross-device switches may
     // change sessions.active_chat_id, but this turn remains pinned here.
-    const targetChatId = resolveSessionSendChatId(sessionId, userId, options?.chatId);
+    const targetChatId = await resolveSessionSendChatId(sessionId, userId, options?.chatId);
     let proc = this.processes.get(sessionId);
 
     if (!proc) {
@@ -9458,7 +9508,7 @@ ${proc.contextReminder.summary}
     }
 
     if (!codexReviewCommand && !providerNativeSlashCommand) {
-      const discordGatewayContext = this.buildDiscordGatewayContext(sessionId, proc);
+      const discordGatewayContext = await this.buildDiscordGatewayContext(sessionId, proc);
       if (discordGatewayContext && proc.discordGatewayContextInjected !== discordGatewayContext) {
         messageForClaude = `${discordGatewayContext}\n\n${messageForClaude}`;
         proc.discordGatewayContextInjected = discordGatewayContext;
@@ -9498,9 +9548,9 @@ ${proc.contextReminder.summary}
     }
 
     if (!codexReviewCommand && !providerNativeSlashCommand) {
-      const androidDeviceSerial = getAndroidDeviceSerialForSession(sessionId, userId);
+      const androidDeviceSerial = await getAndroidDeviceSerialForSession(sessionId, userId);
       if (androidDeviceSerial && proc.androidDeviceSerialInjected !== androidDeviceSerial) {
-        const androidContext = buildAndroidDeviceContext(sessionId, userId);
+        const androidContext = await buildAndroidDeviceContext(sessionId, userId);
         if (androidContext) {
           messageForClaude = `${androidContext}\n\n${messageForClaude}`;
           proc.androidDeviceSerialInjected = androidDeviceSerial;
@@ -9644,13 +9694,11 @@ ${proc.contextReminder.summary}
 
     if (recordMessage) {
       // Save user message and emit to frontend (show original message, images as metadata)
-      const db = getDatabase();
-      recordedEventSequence = this.allocateEventSequence(sessionId);
-      db.prepare(
+      recordedEventSequence = await this.allocateEventSequence(sessionId);
+      await pgRun(
         `INSERT INTO messages (
            id, session_id, chat_id, role, content, client_message_id, event_sequence
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).run(
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         recordedMessageId,
         sessionId,
         recordedChatId,
@@ -9663,9 +9711,11 @@ ${proc.contextReminder.summary}
       // only assistant replies touched last_message, so user-only sessions showed
       // a stale preview until Claude responded.
       const preview = message.length > 200 ? message.slice(0, 200) : message;
-      db.prepare(
-        'UPDATE sessions SET last_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-      ).run(preview, sessionId);
+      await pgRun(
+        'UPDATE sessions SET last_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        preview,
+        sessionId
+      );
 
       // Persist every accepted upload as durable chat media. Clients render
       // from `media` (served via /api/sessions/:id/media/:mediaId); the raw
@@ -9701,7 +9751,7 @@ ${proc.contextReminder.summary}
           });
         } catch (error) {
           console.error(`[MEDIA] Failed to persist user media [${sessionId}]:`, error);
-          db.prepare('DELETE FROM messages WHERE id = ?').run(recordedMessageId);
+          await pgRun('DELETE FROM messages WHERE id = ?', recordedMessageId);
           throw new Error(
             `Failed to persist message attachments: ${error instanceof Error ? error.message : String(error)}`
           );
@@ -9715,11 +9765,10 @@ ${proc.contextReminder.summary}
             sessionId,
             options.uploadIds,
             recordedMessageId,
-            options.clientMessageId ?? '',
-            db
+            options.clientMessageId ?? ''
           );
         } catch (error) {
-          db.prepare('DELETE FROM messages WHERE id = ?').run(recordedMessageId);
+          await pgRun('DELETE FROM messages WHERE id = ?', recordedMessageId);
           throw error;
         }
       }
@@ -9771,13 +9820,14 @@ ${proc.contextReminder.summary}
           (process.env.CODEX_PREEMPT_FOLLOWUPS === '1' ? 'steer' : 'queue');
         this.queueCodexTurn(sessionId, proc, codexTurn, activeFollowupMode);
         if (activeFollowupMode === 'steer') {
-          this.requestCodexSteeringPreemption(sessionId, proc);
+          await this.requestCodexSteeringPreemption(sessionId, proc);
         }
         return {
           ...(recordMessage ? { messageId: recordedMessageId } : {}),
           chatId: recordedChatId,
           disposition: 'queued',
-          highWatermark: recordedEventSequence ?? getSessionSyncState(sessionId).highWatermark,
+          highWatermark:
+            recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
         };
       }
 
@@ -9786,7 +9836,8 @@ ${proc.contextReminder.summary}
         ...(recordMessage ? { messageId: recordedMessageId } : {}),
         chatId: recordedChatId,
         disposition: 'dispatched',
-        highWatermark: recordedEventSequence ?? getSessionSyncState(sessionId).highWatermark,
+        highWatermark:
+          recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
       };
     }
 
@@ -9808,7 +9859,8 @@ ${proc.contextReminder.summary}
           ...(recordMessage ? { messageId: recordedMessageId } : {}),
           chatId: recordedChatId,
           disposition: 'queued',
-          highWatermark: recordedEventSequence ?? getSessionSyncState(sessionId).highWatermark,
+          highWatermark:
+            recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
         };
       }
 
@@ -9817,7 +9869,8 @@ ${proc.contextReminder.summary}
         ...(recordMessage ? { messageId: recordedMessageId } : {}),
         chatId: recordedChatId,
         disposition: 'dispatched',
-        highWatermark: recordedEventSequence ?? getSessionSyncState(sessionId).highWatermark,
+        highWatermark:
+          recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
       };
     }
 
@@ -9838,7 +9891,8 @@ ${proc.contextReminder.summary}
           ...(recordMessage ? { messageId: recordedMessageId } : {}),
           chatId: recordedChatId,
           disposition: 'queued',
-          highWatermark: recordedEventSequence ?? getSessionSyncState(sessionId).highWatermark,
+          highWatermark:
+            recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
         };
       }
 
@@ -9847,7 +9901,8 @@ ${proc.contextReminder.summary}
         ...(recordMessage ? { messageId: recordedMessageId } : {}),
         chatId: recordedChatId,
         disposition: 'dispatched',
-        highWatermark: recordedEventSequence ?? getSessionSyncState(sessionId).highWatermark,
+        highWatermark:
+          recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
       };
     }
 
@@ -9870,7 +9925,8 @@ ${proc.contextReminder.summary}
           ...(recordMessage ? { messageId: recordedMessageId } : {}),
           chatId: recordedChatId,
           disposition: 'queued',
-          highWatermark: recordedEventSequence ?? getSessionSyncState(sessionId).highWatermark,
+          highWatermark:
+            recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
         };
       }
       await this.dispatchKimiAcpTurn(sessionId, proc, kimiTurn);
@@ -9878,7 +9934,8 @@ ${proc.contextReminder.summary}
         ...(recordMessage ? { messageId: recordedMessageId } : {}),
         chatId: recordedChatId,
         disposition: 'dispatched',
-        highWatermark: recordedEventSequence ?? getSessionSyncState(sessionId).highWatermark,
+        highWatermark:
+          recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
       };
     }
 
@@ -9925,7 +9982,8 @@ ${proc.contextReminder.summary}
         ...(recordMessage ? { messageId: recordedMessageId } : {}),
         chatId: recordedChatId,
         disposition: 'dispatched',
-        highWatermark: recordedEventSequence ?? getSessionSyncState(sessionId).highWatermark,
+        highWatermark:
+          recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
       };
     }
 
@@ -9957,11 +10015,11 @@ ${proc.contextReminder.summary}
       ...(recordMessage ? { messageId: recordedMessageId } : {}),
       chatId: recordedChatId,
       disposition: 'dispatched',
-      highWatermark: recordedEventSequence ?? getSessionSyncState(sessionId).highWatermark,
+      highWatermark: recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
     };
   }
 
-  interrupt(sessionId: string, userId: string): void {
+  async interrupt(sessionId: string, userId: string): Promise<void> {
     const proc = this.processes.get(sessionId);
     if (!proc) {
       throw new Error('Session not running');
@@ -9981,7 +10039,7 @@ ${proc.contextReminder.summary}
     // Clear any pending streaming content
     if (proc.streamingText.trim().length > 0) {
       // Save partial response before interrupt
-      this.saveAssistantMessage(sessionId, proc.streamingText.trim() + '\n\n[Interrupted]');
+      await this.saveAssistantMessage(sessionId, proc.streamingText.trim() + '\n\n[Interrupted]');
       proc.streamingText = '';
       proc.isStreaming = false;
     }
@@ -10022,7 +10080,7 @@ ${proc.contextReminder.summary}
     await this.sendMessage(sessionId, userId, input);
   }
 
-  stopSession(sessionId: string, userId: string): void {
+  async stopSession(sessionId: string, userId: string): Promise<void> {
     const proc = this.processes.get(sessionId);
     if (!proc) {
       return;
@@ -10034,17 +10092,17 @@ ${proc.contextReminder.summary}
 
     if (proc.serverBacked && proc.cliProvider === 'opencode') {
       this.detachProcessForRestart(proc);
-      this.cleanupProcess(sessionId, proc);
+      await this.cleanupProcess(sessionId, proc);
       return;
     }
 
     // Close stdin to signal end
     proc.process.stdin?.end();
 
-    setTimeout(() => {
+    setTimeout(async () => {
       if (this.processes.get(sessionId) === proc) {
         terminateManagedProcess(proc.process);
-        this.cleanupProcess(sessionId, proc);
+        await this.cleanupProcess(sessionId, proc);
       }
     }, 2000);
   }
@@ -10082,7 +10140,7 @@ ${proc.contextReminder.summary}
       console.log(
         `[SESSION] Turn in flight for ${sessionId}; reloading settings after it finishes`
       );
-      this.emitCompact(sessionId, {
+      await this.emitCompact(sessionId, {
         sessionId,
         message: 'Setting saved. It takes effect after the current turn finishes.',
         clear: false,
@@ -10091,16 +10149,17 @@ ${proc.contextReminder.summary}
       return;
     }
 
-    const db = getDatabase();
-    const sessionRow = db
-      .prepare('SELECT cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?')
-      .get(sessionId, userId) as { cliProvider: CLIProvider | null } | undefined;
+    const sessionRow = (await pgGet(
+      'SELECT cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId
+    )) as unknown as { cliProvider: CLIProvider | null } | undefined;
     const nextProvider = sessionRow?.cliProvider || proc?.cliProvider || 'codex';
     const providerChanged = !!proc && nextProvider !== proc.cliProvider;
 
     if (providerChanged) {
       this.pendingContextReminders.delete(sessionId);
-      this.emitCompact(sessionId, {
+      await this.emitCompact(sessionId, {
         sessionId,
         message: 'Provider switched. Fresh CLI context started.',
         clear: true,
@@ -10135,16 +10194,19 @@ ${proc.contextReminder.summary}
     }
 
     if (options.preserveNativeContext) {
-      db.prepare('UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+      await pgRun(
+        'UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         'stopped',
         sessionId
       );
       console.log(`[SESSION] Preserving provider session context for runtime-setting reload`);
     } else {
       // Explicit restarts intentionally begin a fresh provider conversation.
-      db.prepare(
-        'UPDATE sessions SET status = ?, claude_session_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-      ).run('stopped', sessionId);
+      await pgRun(
+        'UPDATE sessions SET status = ?, claude_session_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        'stopped',
+        sessionId
+      );
       console.log(`[SESSION] Cleared claude_session_id for fresh start`);
     }
 
@@ -10157,18 +10219,18 @@ ${proc.contextReminder.summary}
     console.log(`[SESSION] Session ${sessionId} restarted`);
   }
 
-  private buildContextSummary(
+  private async buildContextSummary(
     sessionId: string,
     maxMessages: number,
     maxChars: number,
     chatId: string | null
-  ): string | null {
-    const db = getDatabase();
-    const rows = db
-      .prepare(
-        'SELECT role, content FROM messages WHERE session_id = ? AND chat_id IS ? ORDER BY created_at DESC, rowid DESC LIMIT ?'
-      )
-      .all(sessionId, chatId, maxMessages) as { role: string; content: string }[];
+  ): Promise<string | null> {
+    const rows = (await pgAll(
+      'SELECT role, content FROM messages WHERE session_id = ? AND chat_id IS ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+      sessionId,
+      chatId,
+      maxMessages
+    )) as unknown as { role: string; content: string }[];
 
     if (!rows.length) {
       return null;
@@ -10199,20 +10261,20 @@ ${proc.contextReminder.summary}
    *
    * Returns null if there are no prior turns to replay.
    */
-  private buildCodexContextPrefix(
+  private async buildCodexContextPrefix(
     sessionId: string,
     latestUserMessage: string,
     chatId: string | null
-  ): string | null {
-    const db = getDatabase();
+  ): Promise<string | null> {
     const MAX_MESSAGES = 40;
     const MAX_CHARS = 24_000;
 
-    const rows = db
-      .prepare(
-        'SELECT role, content FROM messages WHERE session_id = ? AND chat_id IS ? ORDER BY created_at DESC, rowid DESC LIMIT ?'
-      )
-      .all(sessionId, chatId, MAX_MESSAGES + 1) as { role: string; content: string }[];
+    const rows = (await pgAll(
+      'SELECT role, content FROM messages WHERE session_id = ? AND chat_id IS ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+      sessionId,
+      chatId,
+      MAX_MESSAGES + 1
+    )) as unknown as { role: string; content: string }[];
 
     const newest = rows[0];
     if (!newest) return null;
@@ -10252,7 +10314,7 @@ ${proc.contextReminder.summary}
   }
 
   // Set permission mode for a session
-  setMode(sessionId: string, userId: string, mode: SessionMode): void {
+  async setMode(sessionId: string, userId: string, mode: SessionMode): Promise<void> {
     const proc = this.processes.get(sessionId);
 
     // If no process running, store the mode for when it starts
@@ -10327,20 +10389,20 @@ ${proc.contextReminder.summary}
       return;
     }
 
-    this.restartForMode(sessionId, proc, mode, userId, previousMode);
+    await this.restartForMode(sessionId, proc, mode, userId, previousMode);
   }
 
-  private restartForMode(
+  private async restartForMode(
     sessionId: string,
     proc: ClaudeProcess,
     mode: SessionMode,
     userId: string,
     previousMode: SessionMode
-  ): void {
+  ): Promise<void> {
     // For mode changes on running sessions, we need to restart the process
     // Save any pending streaming content first
     if (proc.streamingText.trim().length > 0) {
-      this.saveAssistantMessage(sessionId, proc.streamingText.trim());
+      await this.saveAssistantMessage(sessionId, proc.streamingText.trim());
       proc.streamingText = '';
       proc.isStreaming = false;
     }
@@ -10370,7 +10432,7 @@ ${proc.contextReminder.summary}
     }, 1000);
   }
 
-  private cleanupProcess(sessionId: string, expected?: ClaudeProcess): void {
+  private async cleanupProcess(sessionId: string, expected?: ClaudeProcess): Promise<void> {
     const proc = this.processes.get(sessionId);
     if (!proc) return;
     // An older child's delayed exit/error must never remove a replacement
@@ -10399,8 +10461,8 @@ ${proc.contextReminder.summary}
     // Runs from child 'exit'/'error' handlers: a DB throw here would become an
     // uncaughtException and take the backend down with it.
     try {
-      const db = getDatabase();
-      db.prepare('UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+      await pgRun(
+        'UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         'stopped',
         sessionId
       );
@@ -10500,7 +10562,6 @@ ${proc.contextReminder.summary}
     }
 
     console.log(`[SHUTDOWN] Terminating ${sessionIds.length} Claude process(es)`);
-    const db = getDatabase();
 
     for (const sessionId of sessionIds) {
       const proc = this.processes.get(sessionId);
@@ -10516,9 +10577,10 @@ ${proc.contextReminder.summary}
         console.error(`[SHUTDOWN] SIGTERM failed for ${sessionId}:`, err);
       }
       try {
-        db.prepare(
-          `UPDATE sessions SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-        ).run(sessionId);
+        await pgRun(
+          `UPDATE sessions SET status = 'stopped', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          sessionId
+        );
       } catch {
         // DB may already be closing — best effort.
       }
@@ -10625,10 +10687,11 @@ ${proc.contextReminder.summary}
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Restart with allowed tools
-    const db = getDatabase();
-    const session = db
-      .prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?')
-      .get(sessionId, userId) as
+    const session = (await pgGet(
+      'SELECT * FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId
+    )) as unknown as
       | {
           working_directory: string;
           claude_session_id: string | null;
@@ -10723,9 +10786,9 @@ ${proc.contextReminder.summary}
       cwd: workingDirectory,
       env: {
         ...(isClaudeTransportProvider(cliProvider)
-          ? buildClaudeTransportEnv(cliProvider, userId, configHome)
+          ? await buildClaudeTransportEnv(cliProvider, userId, configHome)
           : process.env),
-        ...buildAndroidDeviceEnvForSession(sessionId, userId),
+        ...(await buildAndroidDeviceEnvForSession(sessionId, userId)),
         WEBUI_SESSION_ID: sessionId,
         WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
         WEBUI_PROJECT_PATH: workingDirectory,
@@ -10788,29 +10851,29 @@ ${proc.contextReminder.summary}
     this.processes.set(sessionId, claudeProcess);
 
     // Setup handlers
-    newProc.stdout?.on('data', (data: Buffer) => {
-      this.handleJsonOutput(sessionId, data.toString());
+    newProc.stdout?.on('data', async (data: Buffer) => {
+      await this.handleJsonOutput(sessionId, data.toString());
     });
 
     newProc.stderr?.on('data', (data: Buffer) => {
       console.error(`Claude stderr [${sessionId}]:`, data.toString());
     });
 
-    newProc.on('exit', (exitCode) => {
+    newProc.on('exit', async (exitCode) => {
       console.log(`Claude process for session ${sessionId} exited with code ${exitCode}`);
-      this.cleanupProcess(sessionId, claudeProcess);
+      await this.cleanupProcess(sessionId, claudeProcess);
     });
 
-    newProc.on('error', (err) => {
+    newProc.on('error', async (err) => {
       console.error(`Claude process error [${sessionId}]:`, err);
-      this.notifyDiscordSessionEvent(sessionId, {
+      await this.notifyDiscordSessionEvent(sessionId, {
         eventType: 'session.error',
         severity: 'error',
         title: 'Session process error',
         summary: err.message,
       });
 
-      this.cleanupProcess(sessionId, claudeProcess);
+      await this.cleanupProcess(sessionId, claudeProcess);
     });
 
     // Wait for initialization

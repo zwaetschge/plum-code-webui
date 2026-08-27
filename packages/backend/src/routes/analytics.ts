@@ -1,10 +1,11 @@
+import { get as pgGet, all as pgAll } from '../db/pg.js';
 import { Router, Request, Response } from 'express';
 import {
   estimateModelCost,
   getProviderLabelForUsage,
   getUsageModelKey,
 } from '@plum-code-webui/shared';
-import { getDatabase, insertUsageHistoryTurn } from '../db/index.js';
+import { insertUsageHistoryTurn } from '../db/index.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { nanoid } from 'nanoid';
 import type { CLIProvider } from '../services/cli-providers.js';
@@ -301,15 +302,13 @@ function enrichModelRow(row: ModelSummaryRow) {
 // Get usage summary (totals across all sessions)
 router.get('/summary', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
 
   try {
     const window = await resolveAnalyticsWindow(req.query.period, req.query.tz, req.query.offset);
     const dateFilter = buildDateFilter(window);
     // Get totals
-    const totals = db
-      .prepare(
-        `
+    const totals = (await pgGet(
+      `
       SELECT
         COALESCE(SUM(input_tokens), 0) as total_input_tokens,
         COALESCE(SUM(output_tokens), 0) as total_output_tokens,
@@ -320,9 +319,10 @@ router.get('/summary', async (req: Request, res: Response) => {
         COUNT(*) as total_requests
       FROM usage_history
       WHERE user_id = ? ${dateFilter.sql}
-    `
-      )
-      .get(authReq.userId, ...dateFilter.params) as {
+    `,
+      authReq.userId,
+      ...dateFilter.params
+    )) as unknown as {
       total_input_tokens: number;
       total_output_tokens: number;
       total_cache_read_tokens: number;
@@ -333,9 +333,8 @@ router.get('/summary', async (req: Request, res: Response) => {
     };
 
     // Get per-model breakdown
-    const modelRows = db
-      .prepare(
-        `
+    const modelRows = (await pgAll(
+      `
       SELECT
         model,
         provider,
@@ -352,9 +351,10 @@ router.get('/summary', async (req: Request, res: Response) => {
       WHERE user_id = ? ${dateFilter.sql}
       GROUP BY provider, model
       ORDER BY cost DESC
-    `
-      )
-      .all(authReq.userId, ...dateFilter.params) as ModelSummaryRow[];
+    `,
+      authReq.userId,
+      ...dateFilter.params
+    )) as unknown as ModelSummaryRow[];
 
     const byModel = modelRows
       .map(enrichModelRow)
@@ -439,9 +439,8 @@ router.get('/summary', async (req: Request, res: Response) => {
     // flooding the response with every session that ever ran a request.
     // Use fully qualified column name for created_at to avoid ambiguity with sessions table
     const sessionDateFilter = buildDateFilter(window, 'uh.created_at');
-    const sessionRows = db
-      .prepare(
-        `
+    const sessionRows = (await pgAll(
+      `
       SELECT
         uh.session_id,
         s.name as session_name,
@@ -457,9 +456,10 @@ router.get('/summary', async (req: Request, res: Response) => {
       LEFT JOIN sessions s ON s.id = uh.session_id
       WHERE uh.user_id = ? ${sessionDateFilter.sql}
       GROUP BY uh.session_id, uh.model
-    `
-      )
-      .all(authReq.userId, ...sessionDateFilter.params) as Array<
+    `,
+      authReq.userId,
+      ...sessionDateFilter.params
+    )) as unknown as Array<
       TokenCostRow & {
         session_id: string;
         session_name: string | null;
@@ -511,23 +511,22 @@ router.get('/summary', async (req: Request, res: Response) => {
       )
       .slice(0, 50);
 
-    const eventRows = db
-      .prepare(
-        `
+    const eventRows = (await pgAll(
+      `
       SELECT event_type, COUNT(*) as count
       FROM session_events
       WHERE user_id = ? ${dateFilter.sql}
       GROUP BY event_type
-    `
-      )
-      .all(authReq.userId, ...dateFilter.params) as Array<{
+    `,
+      authReq.userId,
+      ...dateFilter.params
+    )) as unknown as Array<{
       event_type: string;
       count: number;
     }>;
     const eventCounts = new Map(eventRows.map((row) => [row.event_type, row.count]));
-    const latestContext = db
-      .prepare(
-        `
+    const latestContext = (await pgGet(
+      `
       SELECT
         session_id as sessionId,
         provider,
@@ -545,9 +544,10 @@ router.get('/summary', async (req: Request, res: Response) => {
       WHERE user_id = ? AND event_type = 'context_snapshot' ${dateFilter.sql}
       ORDER BY created_at DESC, rowid DESC
       LIMIT 1
-    `
-      )
-      .get(authReq.userId, ...dateFilter.params) as
+    `,
+      authReq.userId,
+      ...dateFilter.params
+    )) as unknown as
       | {
           sessionId: string;
           provider: string | null;
@@ -627,16 +627,14 @@ router.get('/summary', async (req: Request, res: Response) => {
  */
 router.get('/subagents', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
 
   try {
     const window = await resolveAnalyticsWindow(req.query.period, req.query.tz, req.query.offset);
     const dateFilter = buildDateFilter(window);
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 500);
 
-    const agents = db
-      .prepare(
-        `
+    const agents = await pgAll(
+      `
       SELECT
         agent_id as agentId,
         MAX(agent_type) as agentType,
@@ -656,13 +654,14 @@ router.get('/subagents', async (req: Request, res: Response) => {
       GROUP BY agent_id, provider
       ORDER BY totalTokens DESC
       LIMIT ?
-    `
-      )
-      .all(authReq.userId, ...dateFilter.params, limit);
+    `,
+      authReq.userId,
+      ...dateFilter.params,
+      limit
+    );
 
-    const totals = db
-      .prepare(
-        `
+    const totals = (await pgGet(
+      `
       SELECT
         COALESCE(SUM(total_tokens), 0) as totalTokens,
         COALESCE(SUM(cost_usd), 0) as costUsd,
@@ -670,22 +669,23 @@ router.get('/subagents', async (req: Request, res: Response) => {
         COUNT(DISTINCT turn_id) as turnCount
       FROM usage_subagent_turns
       WHERE user_id = ? ${dateFilter.sql}
-    `
-      )
-      .get(authReq.userId, ...dateFilter.params) as {
+    `,
+      authReq.userId,
+      ...dateFilter.params
+    )) as unknown as {
       totalTokens: number;
       costUsd: number;
       agentCount: number;
       turnCount: number;
     };
 
-    const overall = db
-      .prepare(
-        `SELECT COALESCE(SUM(total_tokens), 0) as totalTokens
+    const overall = (await pgGet(
+      `SELECT COALESCE(SUM(total_tokens), 0) as totalTokens
          FROM usage_history
-         WHERE user_id = ? ${dateFilter.sql}`
-      )
-      .get(authReq.userId, ...dateFilter.params) as { totalTokens: number };
+         WHERE user_id = ? ${dateFilter.sql}`,
+      authReq.userId,
+      ...dateFilter.params
+    )) as unknown as { totalTokens: number };
 
     res.json({
       success: true,
@@ -713,7 +713,7 @@ router.get('/subagents', async (req: Request, res: Response) => {
 // Get usage over time (for charts)
 router.get('/timeline', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { granularity = 'day', tz } = req.query;
   const tzModifier = parseTzModifier(tz);
 
@@ -727,9 +727,8 @@ router.get('/timeline', async (req: Request, res: Response) => {
       dateFormat = '%Y-%m';
     }
 
-    const timeline = db
-      .prepare(
-        `
+    const timeline = await pgAll(
+      `
       SELECT
         strftime('${dateFormat}', created_at, ?) as date,
         COALESCE(SUM(input_tokens), 0) as input_tokens,
@@ -742,13 +741,15 @@ router.get('/timeline', async (req: Request, res: Response) => {
       WHERE user_id = ? ${dateFilter.sql}
       GROUP BY strftime('${dateFormat}', created_at, ?)
       ORDER BY date ASC
-    `
-      )
-      .all(tzModifier, authReq.userId, ...dateFilter.params, tzModifier);
+    `,
+      tzModifier,
+      authReq.userId,
+      ...dateFilter.params,
+      tzModifier
+    );
 
-    const providerRows = db
-      .prepare(
-        `
+    const providerRows = (await pgAll(
+      `
       SELECT
         strftime('${dateFormat}', created_at, ?) as date,
         model,
@@ -763,9 +764,12 @@ router.get('/timeline', async (req: Request, res: Response) => {
       WHERE user_id = ? ${dateFilter.sql}
       GROUP BY strftime('${dateFormat}', created_at, ?), provider, model
       ORDER BY date ASC
-    `
-      )
-      .all(tzModifier, authReq.userId, ...dateFilter.params, tzModifier) as Array<{
+    `,
+      tzModifier,
+      authReq.userId,
+      ...dateFilter.params,
+      tzModifier
+    )) as unknown as Array<{
       date: string;
       model: string | null;
       provider: string | null;
@@ -819,9 +823,8 @@ router.get('/timeline', async (req: Request, res: Response) => {
       costByDate.set(row.date, (costByDate.get(row.date) || 0) + apiEquivalentCost);
     }
 
-    const eventRows = db
-      .prepare(
-        `
+    const eventRows = (await pgAll(
+      `
       SELECT
         strftime('${dateFormat}', created_at, ?) as date,
         event_type,
@@ -831,9 +834,12 @@ router.get('/timeline', async (req: Request, res: Response) => {
       WHERE user_id = ? ${dateFilter.sql}
       GROUP BY strftime('${dateFormat}', created_at, ?), event_type
       ORDER BY date ASC
-    `
-      )
-      .all(tzModifier, authReq.userId, ...dateFilter.params, tzModifier) as Array<{
+    `,
+      tzModifier,
+      authReq.userId,
+      ...dateFilter.params,
+      tzModifier
+    )) as unknown as Array<{
       date: string;
       event_type: string;
       count: number;
@@ -925,15 +931,14 @@ router.get('/timeline', async (req: Request, res: Response) => {
 // Get session-specific analytics
 router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const { sessionId } = req.params;
 
   try {
     // One round-trip: ownership check + totals in a single query. Returns null-row
     // when the session doesn't exist OR doesn't belong to the user.
-    const sessionTotals = db
-      .prepare(
-        `
+    const sessionTotals = (await pgGet(
+      `
       SELECT
         s.id as session_id,
         s.name as session_name,
@@ -948,9 +953,10 @@ router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
       LEFT JOIN usage_history uh ON uh.session_id = s.id AND uh.user_id = s.user_id
       WHERE s.id = ? AND s.user_id = ?
       GROUP BY s.id
-    `
-      )
-      .get(sessionId, authReq.userId) as
+    `,
+      sessionId,
+      authReq.userId
+    )) as unknown as
       | {
           session_id: string;
           session_name: string;
@@ -971,9 +977,8 @@ router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
     const session = { id: sessionTotals.session_id, name: sessionTotals.session_name };
     const totals = sessionTotals;
 
-    const sessionModelRows = db
-      .prepare(
-        `
+    const sessionModelRows = (await pgAll(
+      `
       SELECT
         model,
         COALESCE(SUM(input_tokens), 0) as input_tokens,
@@ -983,9 +988,10 @@ router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
       FROM usage_history
       WHERE session_id = ? AND user_id = ?
       GROUP BY model
-    `
-      )
-      .all(sessionId, authReq.userId) as TokenCostRow[];
+    `,
+      sessionId,
+      authReq.userId
+    )) as unknown as TokenCostRow[];
     const apiEquivalentTotalCost = sessionModelRows.reduce(
       (sum, row) => sum + estimateApiEquivalentCost(row).cost,
       0
@@ -993,9 +999,8 @@ router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
 
     // Get usage history for this session — scoped by user_id too so a shared
     // session row can't leak rows that belong to another user.
-    const historyRows = db
-      .prepare(
-        `
+    const historyRows = (await pgAll(
+      `
       SELECT
         id,
         provider,
@@ -1012,9 +1017,10 @@ router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
       WHERE session_id = ? AND user_id = ?
       ORDER BY created_at DESC, id DESC
       LIMIT 100
-    `
-      )
-      .all(sessionId, authReq.userId) as Array<
+    `,
+      sessionId,
+      authReq.userId
+    )) as unknown as Array<
       TokenCostRow & {
         id: number;
         provider: string;
@@ -1036,9 +1042,8 @@ router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
       };
     });
 
-    const eventRows = db
-      .prepare(
-        `
+    const eventRows = (await pgAll(
+      `
       SELECT
         id,
         event_type as eventType,
@@ -1060,9 +1065,10 @@ router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
       WHERE session_id = ? AND user_id = ?
       ORDER BY created_at DESC, rowid DESC
       LIMIT 100
-    `
-      )
-      .all(sessionId, authReq.userId) as Array<{
+    `,
+      sessionId,
+      authReq.userId
+    )) as unknown as Array<{
       id: string;
       eventType: string;
       provider: string | null;
@@ -1120,7 +1126,7 @@ router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
 // Record usage (internal use - called from ClaudeProcessManager)
 router.post('/record', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
-  const db = getDatabase();
+
   const {
     sessionId,
     inputTokens,
@@ -1146,9 +1152,11 @@ router.post('/record', async (req: Request, res: Response) => {
   const costUsd = estimateModelCost(model, normalizedTokens, null).cost;
 
   try {
-    const session = db
-      .prepare('SELECT cli_provider as provider FROM sessions WHERE id = ? AND user_id = ?')
-      .get(sessionId, authReq.userId) as { provider: CLIProvider | null } | undefined;
+    const session = (await pgGet(
+      'SELECT cli_provider as provider FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      authReq.userId
+    )) as unknown as { provider: CLIProvider | null } | undefined;
     if (!session) {
       return res.status(404).json({ success: false, error: { message: 'Session not found' } });
     }
@@ -1158,7 +1166,7 @@ router.post('/record', async (req: Request, res: Response) => {
         ? requestedTurnId.trim()
         : nanoid();
     const provider = session.provider || 'codex';
-    const inserted = insertUsageHistoryTurn(db, {
+    const inserted = await insertUsageHistoryTurn({
       userId: authReq.userId,
       sessionId,
       provider,
@@ -1171,9 +1179,12 @@ router.post('/record', async (req: Request, res: Response) => {
       costUsd: costUsd || 0,
       model: model || 'unknown',
     });
-    const row = db
-      .prepare('SELECT id FROM usage_history WHERE session_id = ? AND provider = ? AND turn_id = ?')
-      .get(sessionId, provider, turnId) as { id: number } | undefined;
+    const row = (await pgGet(
+      'SELECT id FROM usage_history WHERE session_id = ? AND provider = ? AND turn_id = ?',
+      sessionId,
+      provider,
+      turnId
+    )) as unknown as { id: number } | undefined;
 
     res.json({ success: true, data: { id: row?.id ?? null, turnId, inserted } });
   } catch (error) {

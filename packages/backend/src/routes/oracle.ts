@@ -1,8 +1,8 @@
+import { get as pgGet } from '../db/pg.js';
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
-import { getDatabase } from '../db/index.js';
 import { config } from '../config.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 import { getOracleBrowserManager } from '../services/oracleBrowser.js';
@@ -111,31 +111,34 @@ async function probeRemoteChrome(target: string): Promise<{
   };
 }
 
-function assertOwnedSession(sessionId: string, userId: string): void {
-  const db = getDatabase();
-  const row = db
-    .prepare('SELECT 1 AS ok FROM sessions WHERE id = ? AND user_id = ?')
-    .get(sessionId, userId) as { ok: number } | undefined;
+async function assertOwnedSession(sessionId: string, userId: string): Promise<void> {
+  const row = (await pgGet(
+    'SELECT 1 AS ok FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  )) as unknown as { ok: number } | undefined;
 
   if (!row?.ok) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
   }
 }
 
-function getOwnedSessionContext(req: Request): { sessionId: string; userId: string } {
+async function getOwnedSessionContext(
+  req: Request
+): Promise<{ sessionId: string; userId: string }> {
   const sessionId = (req.params.sessionId || '').trim();
   if (!sessionId) {
     throw new AppError('Missing session ID', 400, 'VALIDATION_ERROR');
   }
 
   const userId = (req as AuthenticatedRequest).userId;
-  assertOwnedSession(sessionId, userId);
+  await assertOwnedSession(sessionId, userId);
   return { sessionId, userId };
 }
 
 router.get('/test', async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const settings = getOracleBrowserSettingsForUser(userId);
+  const settings = await getOracleBrowserSettingsForUser(userId);
   const mode = settings?.mode || 'profile';
   const chatgptUrl = settings?.chatgptUrl || 'https://chatgpt.com/';
 
@@ -226,7 +229,7 @@ router.get('/test', async (req, res) => {
 router.get(
   '/browser/:sessionId',
   asyncHandler(async (req, res) => {
-    const { sessionId, userId } = getOwnedSessionContext(req);
+    const { sessionId, userId } = await getOwnedSessionContext(req);
     const state = await getOracleBrowserManager().getState(sessionId, userId);
     res.json({ success: true, data: state });
   })
@@ -235,7 +238,7 @@ router.get(
 router.post(
   '/browser/:sessionId/start',
   asyncHandler(async (req, res) => {
-    const { sessionId, userId } = getOwnedSessionContext(req);
+    const { sessionId, userId } = await getOwnedSessionContext(req);
     const url = typeof req.body?.url === 'string' ? req.body.url : undefined;
     const state = await getOracleBrowserManager().start(sessionId, userId, url);
     res.json({ success: true, data: state });
@@ -245,7 +248,7 @@ router.post(
 router.post(
   '/browser/:sessionId/stop',
   asyncHandler(async (req, res) => {
-    const { sessionId, userId } = getOwnedSessionContext(req);
+    const { sessionId, userId } = await getOwnedSessionContext(req);
     const state = await getOracleBrowserManager().stop(sessionId, userId);
     res.json({ success: true, data: state });
   })
@@ -254,7 +257,7 @@ router.post(
 router.post(
   '/browser/:sessionId/reload',
   asyncHandler(async (req, res) => {
-    const { sessionId, userId } = getOwnedSessionContext(req);
+    const { sessionId, userId } = await getOwnedSessionContext(req);
     const state = await getOracleBrowserManager().reload(sessionId, userId);
     res.json({ success: true, data: state });
   })
@@ -263,7 +266,7 @@ router.post(
 router.post(
   '/browser/:sessionId/navigate',
   asyncHandler(async (req, res) => {
-    const { sessionId, userId } = getOwnedSessionContext(req);
+    const { sessionId, userId } = await getOwnedSessionContext(req);
     const url = typeof req.body?.url === 'string' ? req.body.url : '';
     if (!url.trim()) {
       throw new AppError('Navigation URL is required', 400, 'VALIDATION_ERROR');
@@ -276,7 +279,7 @@ router.post(
 router.get(
   '/browser/:sessionId/frame',
   asyncHandler(async (req, res) => {
-    const { sessionId, userId } = getOwnedSessionContext(req);
+    const { sessionId, userId } = await getOwnedSessionContext(req);
     const frame = await getOracleBrowserManager().captureFrame(sessionId, userId);
     res.setHeader('Content-Type', frame.contentType);
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
@@ -288,7 +291,7 @@ router.get(
 router.post(
   '/browser/:sessionId/click',
   asyncHandler(async (req, res) => {
-    const { sessionId, userId } = getOwnedSessionContext(req);
+    const { sessionId, userId } = await getOwnedSessionContext(req);
     const xRatio = Number(req.body?.xRatio);
     const yRatio = Number(req.body?.yRatio);
     const button =
@@ -306,7 +309,7 @@ router.post(
 router.post(
   '/browser/:sessionId/wheel',
   asyncHandler(async (req, res) => {
-    const { sessionId, userId } = getOwnedSessionContext(req);
+    const { sessionId, userId } = await getOwnedSessionContext(req);
     const xRatio = Number(req.body?.xRatio);
     const yRatio = Number(req.body?.yRatio);
     const deltaX = Number(req.body?.deltaX || 0);
@@ -324,7 +327,7 @@ router.post(
 router.post(
   '/browser/:sessionId/key',
   asyncHandler(async (req, res) => {
-    const { sessionId, userId } = getOwnedSessionContext(req);
+    const { sessionId, userId } = await getOwnedSessionContext(req);
     const key = typeof req.body?.key === 'string' ? req.body.key : '';
     if (!key) {
       throw new AppError('Key is required', 400, 'VALIDATION_ERROR');
@@ -345,7 +348,7 @@ router.post(
 router.post(
   '/browser/:sessionId/text',
   asyncHandler(async (req, res) => {
-    const { sessionId, userId } = getOwnedSessionContext(req);
+    const { sessionId, userId } = await getOwnedSessionContext(req);
     const text = typeof req.body?.text === 'string' ? req.body.text : '';
     if (!text) {
       throw new AppError('Text is required', 400, 'VALIDATION_ERROR');
@@ -358,10 +361,10 @@ router.post(
 
 const internalRouter = Router();
 
-internalRouter.get('/runtime', requireHookSecret, (req, res) => {
+internalRouter.get('/runtime', requireHookSecret, async (req, res) => {
   const sessionId = (req.header('x-webui-session-id') || '').trim();
   const resolved = sessionId
-    ? getOracleRuntimeConfigForSession(sessionId)
+    ? await getOracleRuntimeConfigForSession(sessionId)
     : { userId: null, config: buildOracleRuntimeConfig() };
 
   res.json({
@@ -371,7 +374,7 @@ internalRouter.get('/runtime', requireHookSecret, (req, res) => {
       userId: resolved.userId,
       ...resolved.config,
       embeddedRemoteChrome: sessionId
-        ? getOracleBrowserManager().getEmbeddedRemoteChromeTargetForSession(sessionId)
+        ? await getOracleBrowserManager().getEmbeddedRemoteChromeTargetForSession(sessionId)
         : null,
     },
   });
@@ -386,7 +389,7 @@ internalRouter.post(
       throw new AppError('Missing session ID', 400, 'VALIDATION_ERROR');
     }
 
-    const resolved = getOracleRuntimeConfigForSession(sessionId);
+    const resolved = await getOracleRuntimeConfigForSession(sessionId);
     if (!resolved.userId) {
       throw new AppError('Session not found', 404, 'NOT_FOUND');
     }

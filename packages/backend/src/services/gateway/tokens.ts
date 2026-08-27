@@ -1,6 +1,6 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../../db/pg.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import { getDatabase } from '../../db/index.js';
 
 /**
  * Credentials for an external supervisor.
@@ -36,23 +36,27 @@ function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-export function createGatewayToken(
+export async function createGatewayToken(
   userId: string,
   name: string,
   scope: GatewayScope = 'write'
-): { token: string; row: GatewayTokenRow } {
+): Promise<{ token: string; row: GatewayTokenRow }> {
   const secret = randomBytes(32).toString('base64url');
   const token = `${GATEWAY_TOKEN_PREFIX}${secret}`;
   const id = nanoid();
   // Enough to recognise a token in a list without being enough to use it.
   const tokenPrefix = token.slice(0, GATEWAY_TOKEN_PREFIX.length + 6);
 
-  getDatabase()
-    .prepare(
-      `INSERT INTO gateway_tokens (id, user_id, name, token_hash, token_prefix, scope)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .run(id, userId, name.trim() || 'gateway', hashToken(token), tokenPrefix, scope);
+  await pgRun(
+    `INSERT INTO gateway_tokens (id, user_id, name, token_hash, token_prefix, scope)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    id,
+    userId,
+    name.trim() || 'gateway',
+    hashToken(token),
+    tokenPrefix,
+    scope
+  );
 
   return {
     token,
@@ -68,21 +72,22 @@ export function createGatewayToken(
   };
 }
 
-export function listGatewayTokens(userId: string): GatewayTokenRow[] {
-  const rows = getDatabase()
-    .prepare(
-      `SELECT id, name, token_prefix AS tokenPrefix, scope, revoked,
+export async function listGatewayTokens(userId: string): Promise<GatewayTokenRow[]> {
+  const rows = (await pgAll(
+    `SELECT id, name, token_prefix AS tokenPrefix, scope, revoked,
               last_used_at AS lastUsedAt, created_at AS createdAt
-         FROM gateway_tokens WHERE user_id = ? ORDER BY created_at DESC`
-    )
-    .all(userId) as Array<Omit<GatewayTokenRow, 'revoked'> & { revoked: number }>;
+         FROM gateway_tokens WHERE user_id = ? ORDER BY created_at DESC`,
+    userId
+  )) as unknown as Array<Omit<GatewayTokenRow, 'revoked'> & { revoked: number }>;
   return rows.map((row) => ({ ...row, revoked: row.revoked === 1 }));
 }
 
-export function revokeGatewayToken(userId: string, id: string): boolean {
-  const result = getDatabase()
-    .prepare('UPDATE gateway_tokens SET revoked = 1 WHERE id = ? AND user_id = ?')
-    .run(id, userId);
+export async function revokeGatewayToken(userId: string, id: string): Promise<boolean> {
+  const result = await pgRun(
+    'UPDATE gateway_tokens SET revoked = 1 WHERE id = ? AND user_id = ?',
+    id,
+    userId
+  );
   return result.changes > 0;
 }
 
@@ -96,23 +101,22 @@ export interface ResolvedGatewayToken {
   scope: GatewayScope;
 }
 
-export function resolveGatewayToken(token: string): ResolvedGatewayToken | null {
+export async function resolveGatewayToken(token: string): Promise<ResolvedGatewayToken | null> {
   if (!token.startsWith(GATEWAY_TOKEN_PREFIX)) return null;
 
   const presented = hashToken(token);
-  const row = getDatabase()
-    .prepare(
-      `SELECT id, user_id AS userId, token_hash AS tokenHash, scope
-         FROM gateway_tokens WHERE token_hash = ? AND revoked = 0`
-    )
-    .get(presented) as { id: string; userId: string; tokenHash: string; scope: string } | undefined;
+  const row = (await pgGet(
+    `SELECT id, user_id AS userId, token_hash AS tokenHash, scope
+         FROM gateway_tokens WHERE token_hash = ? AND revoked = 0`,
+    presented
+  )) as unknown as { id: string; userId: string; tokenHash: string; scope: string } | undefined;
   if (!row) return null;
 
   const a = Buffer.from(row.tokenHash, 'hex');
   const b = Buffer.from(presented, 'hex');
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
 
-  touchLastUsed(row.id);
+  await touchLastUsed(row.id);
   // Anything unrecognised is treated as read-only: a corrupt value must not
   // widen a token's rights.
   return { userId: row.userId, scope: row.scope === 'write' ? 'write' : 'read' };
@@ -126,15 +130,13 @@ const LAST_USED_WRITE_INTERVAL_MS = 60_000;
  * seconds would otherwise turn every request into a WAL write for a timestamp
  * nobody reads at that resolution.
  */
-function touchLastUsed(tokenId: string): void {
+async function touchLastUsed(tokenId: string): Promise<void> {
   const now = Date.now();
   const last = lastUsedWrites.get(tokenId) ?? 0;
   if (now - last < LAST_USED_WRITE_INTERVAL_MS) return;
   lastUsedWrites.set(tokenId, now);
   try {
-    getDatabase()
-      .prepare('UPDATE gateway_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(tokenId);
+    await pgRun('UPDATE gateway_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?', tokenId);
   } catch {
     /* ignore */
   }

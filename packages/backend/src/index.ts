@@ -211,7 +211,7 @@ async function main() {
   } catch (err) {
     console.warn('[skills] startup reconciliation skipped:', err);
   }
-  syncProviderLinks();
+  await syncProviderLinks();
 
   const app = express();
 
@@ -337,7 +337,7 @@ async function main() {
     // Provider status is attached for visibility only; a signed-out harness
     // must never make the container look unhealthy.
     const providers = await getProviderStatuses().catch(() => undefined);
-    const report = buildReadinessReport(frontendPath, providers);
+    const report = await buildReadinessReport(frontendPath, providers);
     res.status(report.status === 'ready' ? 200 : 503).json(report);
   });
 
@@ -514,7 +514,7 @@ async function main() {
   // and mirrors MCP servers from ~/.claude/settings.json so Codex sessions get the
   // same tool surface. Idempotent; runs once per boot. Best-effort, errors logged.
   void import('./utils/codexConfigSync.js')
-    .then(({ syncCodexConfig }) => syncCodexConfig())
+    .then(async ({ syncCodexConfig }) => await syncCodexConfig())
     .then((status) => console.log(`[codex-config] ${status}`))
     .catch((err) => console.warn('[codex-config] sync skipped:', err));
 
@@ -523,8 +523,8 @@ async function main() {
   const providers = parseCliUpdateProviders(process.env.CLI_AUTO_UPDATE_PROVIDERS);
 
   if (autoUpdateEnabled) {
-    const runUpdate = () => {
-      runCliUpdates(providers)
+    const runUpdate = async () => {
+      await runCliUpdates(providers)
         .then((data) => {
           logUpdateSummary(data.results);
           if (data.results.some((result) => result.status === 'updated')) {
@@ -534,7 +534,7 @@ async function main() {
         .catch((error) => console.error('[CLI UPDATE] Failed:', error));
     };
 
-    runUpdate();
+    await runUpdate();
 
     if (Number.isFinite(intervalHours) && intervalHours > 0) {
       const intervalMs = intervalHours * 60 * 60 * 1000;

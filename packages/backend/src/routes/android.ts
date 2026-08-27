@@ -1,6 +1,6 @@
+import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import { z } from 'zod';
-import { getDatabase } from '../db/index.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import { AppError, asyncHandler } from '../middleware/errorHandler.js';
 
@@ -166,36 +166,47 @@ async function builderBinaryRequest(path: string): Promise<{
   }
 }
 
-function requireSession(sessionId: string, userId: string): void {
-  const db = getDatabase();
-  const row = db
-    .prepare('SELECT id FROM sessions WHERE id = ? AND user_id = ?')
-    .get(sessionId, userId) as { id: string } | undefined;
+async function requireSession(sessionId: string, userId: string): Promise<void> {
+  const row = (await pgGet(
+    'SELECT id FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  )) as unknown as { id: string } | undefined;
   if (!row) {
     throw new AppError('Session not found', 404, 'NOT_FOUND');
   }
 }
 
-function getSessionSerial(sessionId: string | undefined, userId: string): string | null {
+async function getSessionSerial(
+  sessionId: string | undefined,
+  userId: string
+): Promise<string | null> {
   if (!sessionId) return null;
-  requireSession(sessionId, userId);
-  const db = getDatabase();
-  const row = db
-    .prepare('SELECT android_device_serial as serial FROM sessions WHERE id = ? AND user_id = ?')
-    .get(sessionId, userId) as { serial: string | null } | undefined;
+  await requireSession(sessionId, userId);
+
+  const row = (await pgGet(
+    'SELECT android_device_serial as serial FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  )) as unknown as { serial: string | null } | undefined;
   return row?.serial?.trim() || null;
 }
 
-function bindSessionSerial(sessionId: string, userId: string, serial: string | null): void {
-  requireSession(sessionId, userId);
+async function bindSessionSerial(
+  sessionId: string,
+  userId: string,
+  serial: string | null
+): Promise<void> {
+  await requireSession(sessionId, userId);
   const normalized = serial?.trim() || null;
-  getDatabase()
-    .prepare(
-      `UPDATE sessions
+  await pgRun(
+    `UPDATE sessions
        SET android_device_serial = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND user_id = ?`
-    )
-    .run(normalized, sessionId, userId);
+       WHERE id = ? AND user_id = ?`,
+    normalized,
+    sessionId,
+    userId
+  );
 }
 
 function parsePathParam(schema: z.ZodType<string>, value: unknown, label: string): string {
@@ -213,7 +224,7 @@ async function loadSnapshot(sessionId: string | undefined, userId: string) {
   ]);
   const live = normalizeDevices(livePayload);
   const known = normalizeDevices(knownPayload);
-  const selectedSerial = getSessionSerial(sessionId, userId);
+  const selectedSerial = await getSessionSerial(sessionId, userId);
   return {
     live,
     known,
@@ -301,7 +312,7 @@ router.post(
       typeof req.query.sessionId === 'string' && req.query.sessionId.trim()
         ? req.query.sessionId.trim()
         : undefined;
-    if (sessionId) requireSession(sessionId, userId);
+    if (sessionId) await requireSession(sessionId, userId);
 
     const result = await builderRequest<unknown>('POST', '/api/devices/reconnect-all');
     const devices = await loadSnapshot(sessionId, userId);
@@ -329,7 +340,7 @@ router.post(
       connectPort,
       selectForSession,
     } = parsed.data;
-    if (sessionId) requireSession(sessionId, userId);
+    if (sessionId) await requireSession(sessionId, userId);
 
     const pair = await builderRequest<unknown>('POST', '/api/devices/pair', {
       host,
@@ -356,7 +367,7 @@ router.post(
     }
 
     if (sessionId && selectForSession && selectedSerial) {
-      bindSessionSerial(sessionId, userId, selectedSerial);
+      await bindSessionSerial(sessionId, userId, selectedSerial);
     }
 
     const devices = await loadSnapshot(sessionId, userId);
@@ -375,7 +386,7 @@ router.post(
     }
 
     const { sessionId, host, port, friendlyName, selectForSession, replaceSerial } = parsed.data;
-    if (sessionId) requireSession(sessionId, userId);
+    if (sessionId) await requireSession(sessionId, userId);
 
     const connect = await builderRequest<unknown>('POST', '/api/devices/connect', {
       host,
@@ -400,7 +411,7 @@ router.post(
     }
 
     if (sessionId && selectForSession) {
-      bindSessionSerial(sessionId, userId, selectedSerial);
+      await bindSessionSerial(sessionId, userId, selectedSerial);
     }
 
     const devices = await loadSnapshot(sessionId, userId);
@@ -419,7 +430,7 @@ router.put(
       throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
     }
 
-    bindSessionSerial(sessionId, userId, parsed.data.serial);
+    await bindSessionSerial(sessionId, userId, parsed.data.serial);
     const devices = await loadSnapshot(sessionId, userId);
     res.json({ success: true, data: devices });
   })
@@ -431,7 +442,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     const userId = (req as AuthenticatedRequest).userId;
     const sessionId = parsePathParam(sessionIdSchema, req.params.sessionId, 'session id');
-    bindSessionSerial(sessionId, userId, null);
+    await bindSessionSerial(sessionId, userId, null);
     const devices = await loadSnapshot(sessionId, userId);
     res.json({ success: true, data: devices });
   })

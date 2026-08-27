@@ -776,7 +776,7 @@ export async function refreshCodexModelsCache(): Promise<boolean> {
   })();
 
   try {
-    return await codexRefreshInFlight;
+    return codexRefreshInFlight;
   } finally {
     codexRefreshInFlight = null;
   }
@@ -1570,7 +1570,7 @@ export async function isProviderAvailable(
     // up one harness and leave the others untouched.
     if (userId && (provider === 'pi' || provider === 'opencode')) {
       const { readOpenCodeProvidersForUser } = await import('../utils/opencodeProviderKeys.js');
-      return readOpenCodeProvidersForUser(userId).some(
+      return (await readOpenCodeProvidersForUser(userId)).some(
         (entry) => entry.enabled && entry.apiKey.trim().length > 0
       );
     }

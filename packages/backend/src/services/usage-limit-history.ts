@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import { all as pgAll, transaction as pgTransaction } from '../db/pg.js';
 
 export type TrackedUsageLimitProvider = 'codex' | 'claude' | 'zai' | 'kimi';
 export type UsageLimitHistoryRange = '24h' | '7d' | '30d' | '90d';
@@ -172,17 +172,7 @@ function sameNumber(a: number | null, b: number | null): boolean {
   return a === b || (a !== null && b !== null && Math.abs(a - b) < 0.000001);
 }
 
-export function recordUsageLimitSnapshots(
-  database: Database.Database,
-  userId: string,
-  provider: TrackedUsageLimitProvider,
-  payload: UsageLimitSnapshotPayload,
-  now = new Date()
-): number {
-  const metrics = flattenPayload(provider, payload);
-  if (metrics.length === 0) return 0;
-
-  const latestStatement = database.prepare(`
+const LATEST_SNAPSHOT_SQL = `
     SELECT
       utilization,
       used_value,
@@ -195,8 +185,9 @@ export function recordUsageLimitSnapshots(
     WHERE user_id = ? AND provider = ? AND metric_key = ?
     ORDER BY recorded_at DESC, id DESC
     LIMIT 1
-  `);
-  const insertStatement = database.prepare(`
+  `;
+
+const INSERT_SNAPSHOT_SQL = `
     INSERT INTO usage_limit_snapshots (
       user_id,
       provider,
@@ -215,11 +206,20 @@ export function recordUsageLimitSnapshots(
       recorded_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+  `;
+
+export async function recordUsageLimitSnapshots(
+  userId: string,
+  provider: TrackedUsageLimitProvider,
+  payload: UsageLimitSnapshotPayload,
+  now = new Date()
+): Promise<number> {
+  const metrics = flattenPayload(provider, payload);
+  if (metrics.length === 0) return 0;
 
   const recordedAt = toSqlTimestamp(now);
   let inserted = 0;
-  const tx = database.transaction(() => {
+  await pgTransaction(async (tx) => {
     for (const metric of metrics) {
       const utilization = metric.metricKey.startsWith('account_')
         ? null
@@ -229,7 +229,7 @@ export function recordUsageLimitSnapshots(
       const remaining = finiteOrNull(metric.window.remaining);
       const resetsAt = normalizeIso(metric.window.resetsAt);
       const unit = metric.window.unit || null;
-      const previous = latestStatement.get(userId, provider, metric.metricKey) as
+      const previous = (await tx.get(LATEST_SNAPSHOT_SQL, userId, provider, metric.metricKey)) as
         | {
             utilization: number | null;
             used_value: number | null;
@@ -291,7 +291,8 @@ export function recordUsageLimitSnapshots(
           : now.toISOString()
         : null;
 
-      insertStatement.run(
+      await tx.run(
+        INSERT_SNAPSHOT_SQL,
         userId,
         provider,
         metric.metricKey,
@@ -311,21 +312,22 @@ export function recordUsageLimitSnapshots(
       inserted += 1;
     }
 
-    database
-      .prepare(`DELETE FROM usage_limit_snapshots WHERE recorded_at < datetime('now', '-180 days')`)
-      .run();
+    // recorded_at is TEXT in the SQLite shape the schema kept, so the cutoff is
+    // formatted to match rather than compared as a timestamp.
+    await tx.run(
+      `DELETE FROM usage_limit_snapshots
+        WHERE recorded_at < to_char(now() - interval '180 days', 'YYYY-MM-DD HH24:MI:SS')`
+    );
   });
-  tx();
   return inserted;
 }
 
-export function queryUsageLimitHistory(
-  database: Database.Database,
+export async function queryUsageLimitHistory(
   userId: string,
   providers: TrackedUsageLimitProvider[],
   range: UsageLimitHistoryRange,
   now = new Date()
-): {
+): Promise<{
   range: UsageLimitHistoryRange;
   startsAt: string;
   endsAt: string;
@@ -333,7 +335,7 @@ export function queryUsageLimitHistory(
   points: UsageLimitHistoryPoint[];
   trackedTokens: UsageLimitTrackedTokensPoint[];
   latestAt: string | null;
-} {
+}> {
   const config = RANGE_CONFIG[range];
   const startsAt = new Date(now.getTime() - config.durationSeconds * 1000);
   const providerPlaceholders = providers.map(() => '?').join(',');
@@ -349,9 +351,8 @@ export function queryUsageLimitHistory(
     };
   }
 
-  const rows = database
-    .prepare(
-      `
+  const rows = (await pgAll(
+    `
       WITH ranked AS (
         SELECT
           provider,
@@ -385,15 +386,13 @@ export function queryUsageLimitHistory(
       FROM ranked
       WHERE sample_rank = 1 OR reset_detected = 1
       ORDER BY recorded_at ASC, provider ASC, metric_key ASC
-    `
-    )
-    .all(
-      config.sampleSeconds,
-      userId,
-      ...providers,
-      toSqlTimestamp(startsAt),
-      toSqlTimestamp(now)
-    ) as Array<{
+    `,
+    config.sampleSeconds,
+    userId,
+    ...providers,
+    toSqlTimestamp(startsAt),
+    toSqlTimestamp(now)
+  )) as unknown as Array<{
     provider: TrackedUsageLimitProvider;
     metric_key: string;
     metric_label: string;
@@ -429,9 +428,8 @@ export function queryUsageLimitHistory(
     })
   );
 
-  const trackedTokenRows = database
-    .prepare(
-      `
+  const trackedTokenRows = (await pgAll(
+    `
       WITH normalized AS (
         SELECT
           CASE
@@ -463,16 +461,14 @@ export function queryUsageLimitHistory(
       WHERE tracked_provider IN (${providerPlaceholders})
       GROUP BY tracked_provider, bucket_epoch
       ORDER BY bucket_epoch ASC, tracked_provider ASC
-    `
-    )
-    .all(
-      config.sampleSeconds,
-      config.sampleSeconds,
-      userId,
-      toSqlTimestamp(startsAt),
-      toSqlTimestamp(now),
-      ...providers
-    ) as Array<{
+    `,
+    config.sampleSeconds,
+    config.sampleSeconds,
+    userId,
+    toSqlTimestamp(startsAt),
+    toSqlTimestamp(now),
+    ...providers
+  )) as unknown as Array<{
     provider: TrackedUsageLimitProvider;
     bucket_epoch: number;
     input_tokens: number;

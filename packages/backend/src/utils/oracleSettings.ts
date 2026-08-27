@@ -1,5 +1,5 @@
+import { get as pgGet } from '../db/pg.js';
 import type { OracleBrowserMode, OracleBrowserSettings } from '@plum-code-webui/shared';
-import { getDatabase } from '../db/index.js';
 import { safeJsonParse } from './json.js';
 
 export const DEFAULT_ORACLE_CHATGPT_URL = 'https://chatgpt.com/';
@@ -65,11 +65,13 @@ export function buildOracleRuntimeConfig(
   };
 }
 
-export function getOracleBrowserSettingsForUser(userId: string): OracleBrowserSettings | undefined {
-  const db = getDatabase();
-  const row = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json: string | null } | undefined;
+export async function getOracleBrowserSettingsForUser(
+  userId: string
+): Promise<OracleBrowserSettings | undefined> {
+  const row = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
 
   if (!row?.settings_json) return undefined;
 
@@ -77,12 +79,11 @@ export function getOracleBrowserSettingsForUser(userId: string): OracleBrowserSe
   return parseOracleBrowserSettings(parsed.oracleBrowser);
 }
 
-export function getOracleRuntimeConfigForSession(sessionId: string): {
+export async function getOracleRuntimeConfigForSession(sessionId: string): Promise<{
   userId: string | null;
   config: OracleRuntimeConfig;
-} {
-  const db = getDatabase();
-  const row = db.prepare('SELECT user_id FROM sessions WHERE id = ?').get(sessionId) as
+}> {
+  const row = (await pgGet('SELECT user_id FROM sessions WHERE id = ?', sessionId)) as unknown as
     | { user_id: string }
     | undefined;
 
@@ -95,6 +96,6 @@ export function getOracleRuntimeConfigForSession(sessionId: string): {
 
   return {
     userId: row.user_id,
-    config: buildOracleRuntimeConfig(getOracleBrowserSettingsForUser(row.user_id)),
+    config: buildOracleRuntimeConfig(await getOracleBrowserSettingsForUser(row.user_id)),
   };
 }

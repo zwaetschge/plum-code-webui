@@ -1,5 +1,5 @@
+import { get as pgGet } from '../db/pg.js';
 import type { User } from '@plum-code-webui/shared';
-import { getDatabase } from '../db/index.js';
 
 interface UserRow {
   id: string;
@@ -18,20 +18,21 @@ export interface AuthLookupResult {
   passwordHash: string;
 }
 
-export function findUserForBasicAuth(usernameOrEmail: string): AuthLookupResult | null {
-  const db = getDatabase();
+export async function findUserForBasicAuth(
+  usernameOrEmail: string
+): Promise<AuthLookupResult | null> {
   const lookup = usernameOrEmail.trim();
   if (!lookup) return null;
 
-  const row = db
-    .prepare(
-      `SELECT id, email, name, avatar_url, provider, provider_id, password_hash, created_at, updated_at
+  const row = (await pgGet(
+    `SELECT id, email, name, avatar_url, provider, provider_id, password_hash, created_at, updated_at
      FROM users
      WHERE (LOWER(email) = LOWER(?) OR LOWER(name) = LOWER(?))
        AND password_hash IS NOT NULL AND password_hash <> ''
-     LIMIT 1`
-    )
-    .get(lookup, lookup) as UserRow | undefined;
+     LIMIT 1`,
+    lookup,
+    lookup
+  )) as unknown as UserRow | undefined;
 
   if (!row) return null;
 

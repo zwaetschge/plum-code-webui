@@ -1,9 +1,9 @@
+import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { getDatabase } from '../db/index.js';
 import { CLI_PROVIDERS, type CLIProvider } from '../services/cli-providers.js';
 import {
   getOpenCodeCredentialEnvVars,
@@ -133,12 +133,7 @@ function persistUsageLimitResult(userId: string, result: UsageLimitResult): Usag
   }
 
   try {
-    recordUsageLimitSnapshots(
-      getDatabase(),
-      userId,
-      provider as TrackedUsageLimitProvider,
-      result.data
-    );
+    recordUsageLimitSnapshots(userId, provider as TrackedUsageLimitProvider, result.data);
   } catch (error) {
     // Quota history must never break the live provider-limit cards.
     console.error(`[USAGE LIMITS] Failed to persist ${provider} snapshot:`, error);
@@ -264,11 +259,14 @@ function getEnvBudget(provider: CLIProvider, window: 'daily' | 'weekly'): number
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function getLocalUsageBudget(userId: string, provider: CLIProvider): LocalUsageBudget {
-  const db = getDatabase();
-  const row = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json?: string | null } | undefined;
+async function getLocalUsageBudget(
+  userId: string,
+  provider: CLIProvider
+): Promise<LocalUsageBudget> {
+  const row = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json?: string | null } | undefined;
 
   const settings = safeJsonParse<Record<string, unknown>>(row?.settings_json, {});
   const budgets =
@@ -315,10 +313,11 @@ function normalizeDateOnly(value: unknown): string | undefined {
   return Number.isFinite(Date.parse(`${trimmed}T00:00:00Z`)) ? trimmed : undefined;
 }
 
-export function getTokenPlanConfig(userId: string, planId: string): TokenPlanConfig | null {
-  const row = getDatabase()
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json?: string | null } | undefined;
+async function getTokenPlanConfig(userId: string, planId: string): Promise<TokenPlanConfig | null> {
+  const row = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json?: string | null } | undefined;
   const settings = safeJsonParse<Record<string, unknown>>(row?.settings_json, {});
   const plans = asRecord(settings.tokenPlans) || {};
   const plan = asRecord(plans[planId]) || {};
@@ -352,21 +351,22 @@ function resolveTokenPlanWindow(config: TokenPlanConfig, now: Date) {
   return { start, end, cycles };
 }
 
-function readTokenPlanConsumption(userId: string, startIso: string): number {
-  const row = getDatabase()
-    .prepare(
-      `SELECT COALESCE(SUM(total_tokens), 0) as tokens
+async function readTokenPlanConsumption(userId: string, startIso: string): Promise<number> {
+  const row = (await pgGet(
+    `SELECT COALESCE(SUM(total_tokens), 0) as tokens
          FROM usage_history
         WHERE user_id = ?
           AND model LIKE ?
-          AND created_at >= ?`
-    )
-    .get(userId, `${ALIBABA_TOKEN_PLAN_MODEL_PREFIX}%`, startIso) as { tokens: number };
+          AND created_at >= ?`,
+    userId,
+    `${ALIBABA_TOKEN_PLAN_MODEL_PREFIX}%`,
+    startIso
+  )) as unknown as { tokens: number };
   return row?.tokens ?? 0;
 }
 
-function buildAlibabaLimitResponse(userId: string) {
-  const config = getTokenPlanConfig(userId, 'alibaba-token-plan');
+async function buildAlibabaLimitResponse(userId: string) {
+  const config = await getTokenPlanConfig(userId, 'alibaba-token-plan');
   if (!config) {
     return {
       success: true,
@@ -384,7 +384,7 @@ function buildAlibabaLimitResponse(userId: string) {
   const now = new Date();
   const { start, end } = resolveTokenPlanWindow(config, now);
   const startSql = start.toISOString().slice(0, 19).replace('T', ' ');
-  const used = readTokenPlanConsumption(userId, startSql);
+  const used = await readTokenPlanConsumption(userId, startSql);
   const utilization = config.totalTokens > 0 ? (used / config.totalTokens) * 100 : 0;
   const windowSeconds = config.periodDays * 24 * 60 * 60;
 
@@ -494,8 +494,11 @@ function readApiKeyFromOpenCodeProviderConfig(
   return null;
 }
 
-function readOpenCodeStoredProviderKey(userId: string, providerIds: string[]): string | null {
-  const providers = readOpenCodeProvidersForUser(userId).filter(
+async function readOpenCodeStoredProviderKey(
+  userId: string,
+  providerIds: string[]
+): Promise<string | null> {
+  const providers = (await readOpenCodeProvidersForUser(userId)).filter(
     (provider) => provider.enabled && providerIds.includes(provider.id)
   );
 
@@ -509,7 +512,7 @@ function readOpenCodeStoredProviderKey(userId: string, providerIds: string[]): s
 export async function getZaiApiKey(userId: string): Promise<string | null> {
   return (
     configuredEnvKey(['ZAI_API_KEY', 'GLM_API_KEY', 'ZHIPU_API_KEY', 'Z_AI_API_KEY']) ||
-    readOpenCodeStoredProviderKey(userId, ['z-ai', 'zai']) ||
+    (await readOpenCodeStoredProviderKey(userId, ['z-ai', 'zai'])) ||
     readApiKeyFromOpenCodeProviderConfig(await readOpenCodeConfig(), ['z-ai', 'zai'])
   );
 }
@@ -526,7 +529,7 @@ async function hasConfiguredOpenCodeProvider(
     equivalentIds.add('opencode');
   }
 
-  const stored = readOpenCodeProvidersForUser(userId).some(
+  const stored = (await readOpenCodeProvidersForUser(userId)).some(
     (provider) =>
       provider.enabled &&
       equivalentIds.has(provider.id) &&
@@ -959,9 +962,10 @@ async function readOpenCodeGoCredentialsFile(): Promise<OpenCodeGoCredentials | 
 }
 
 async function getOpenCodeGoCredentials(userId: string): Promise<OpenCodeGoCredentials | null> {
-  const settingsRow = getDatabase()
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as { settings_json?: string | null } | undefined;
+  const settingsRow = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json?: string | null } | undefined;
   const settings = safeJsonParse<Record<string, unknown>>(settingsRow?.settings_json, {});
   const quotaSettings = asRecord(settings.opencodeGoQuota);
 
@@ -1188,19 +1192,22 @@ function addMsToSqlTimestamp(sqlTimestamp: string | null, ms: number): string | 
   return new Date(parsed + ms).toISOString();
 }
 
-function rollingWindowSpend(userId: string, predicate: string, windowMs: number): UsageSpendWindow {
-  const db = getDatabase();
+async function rollingWindowSpend(
+  userId: string,
+  predicate: string,
+  windowMs: number
+): Promise<UsageSpendWindow> {
   const startsAt = new Date(Date.now() - windowMs);
-  return db
-    .prepare(
-      `SELECT COALESCE(SUM(cost_usd), 0) as cost,
+  return (await pgGet(
+    `SELECT COALESCE(SUM(cost_usd), 0) as cost,
               COALESCE(SUM(total_tokens), 0) as tokens,
               COUNT(*) as requests,
               MIN(created_at) as oldest
        FROM usage_history
-       WHERE user_id = ? AND created_at >= ? AND ${predicate}`
-    )
-    .get(userId, toSqlTimestamp(startsAt)) as UsageSpendWindow;
+       WHERE user_id = ? AND created_at >= ? AND ${predicate}`,
+    userId,
+    toSqlTimestamp(startsAt)
+  )) as unknown as UsageSpendWindow;
 }
 
 export function hasOpenCodeGoLocalUsage(windows: Array<{ requests: number }>): boolean {
@@ -1252,9 +1259,9 @@ export async function fetchOpenCodeGoUsage(userId: string): Promise<UsageLimitRe
   const fiveHourMs = 5 * 60 * 60 * 1000;
   const weeklyMs = 7 * 24 * 60 * 60 * 1000;
   const monthlyMs = 30 * 24 * 60 * 60 * 1000;
-  const fiveHour = rollingWindowSpend(userId, predicate, fiveHourMs);
-  const weekly = rollingWindowSpend(userId, predicate, weeklyMs);
-  const monthly = rollingWindowSpend(userId, predicate, monthlyMs);
+  const fiveHour = await rollingWindowSpend(userId, predicate, fiveHourMs);
+  const weekly = await rollingWindowSpend(userId, predicate, weeklyMs);
+  const monthly = await rollingWindowSpend(userId, predicate, monthlyMs);
   const configured = await hasConfiguredOpenCodeProvider(['opencode-go'], userId);
 
   if (!hasOpenCodeGoLocalUsage([fiveHour, weekly, monthly])) {
@@ -1320,29 +1327,27 @@ export async function fetchOpenCodeGoUsage(userId: string): Promise<UsageLimitRe
   };
 }
 
-export function fetchLocalBudgetUsage(userId: string, provider: CLIProvider) {
-  const budget = getLocalUsageBudget(userId, provider);
+export async function fetchLocalBudgetUsage(userId: string, provider: CLIProvider) {
+  const budget = await getLocalUsageBudget(userId, provider);
   if (!budget.dailyUsd && !budget.weeklyUsd) {
     return null;
   }
-
-  const db = getDatabase();
   const predicate = providerSqlPredicate(provider);
   const localWeek = getLocalWeekWindow();
-  const daily = db
-    .prepare(
-      `SELECT COALESCE(SUM(cost_usd), 0) as cost, COALESCE(SUM(total_tokens), 0) as tokens, COUNT(*) as requests
+  const daily = (await pgGet(
+    `SELECT COALESCE(SUM(cost_usd), 0) as cost, COALESCE(SUM(total_tokens), 0) as tokens, COUNT(*) as requests
        FROM usage_history
-       WHERE user_id = ? AND created_at >= datetime('now', '-1 day') AND ${predicate}`
-    )
-    .get(userId) as { cost: number; tokens: number; requests: number };
-  const weekly = db
-    .prepare(
-      `SELECT COALESCE(SUM(cost_usd), 0) as cost, COALESCE(SUM(total_tokens), 0) as tokens, COUNT(*) as requests
+       WHERE user_id = ? AND created_at >= datetime('now', '-1 day') AND ${predicate}`,
+    userId
+  )) as unknown as { cost: number; tokens: number; requests: number };
+  const weekly = (await pgGet(
+    `SELECT COALESCE(SUM(cost_usd), 0) as cost, COALESCE(SUM(total_tokens), 0) as tokens, COUNT(*) as requests
        FROM usage_history
-       WHERE user_id = ? AND created_at >= ? AND created_at < ? AND ${predicate}`
-    )
-    .get(userId, toSqlTimestamp(localWeek.startsAt), toSqlTimestamp(localWeek.resetsAt)) as {
+       WHERE user_id = ? AND created_at >= ? AND created_at < ? AND ${predicate}`,
+    userId,
+    toSqlTimestamp(localWeek.startsAt),
+    toSqlTimestamp(localWeek.resetsAt)
+  )) as unknown as {
     cost: number;
     tokens: number;
     requests: number;
@@ -1433,7 +1438,7 @@ async function fetchUsage(
   }
 }
 
-router.get('/limit-history', requireAuth, (req, res) => {
+router.get('/limit-history', requireAuth, async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).userId;
     const requestedProviders = String(req.query.providers || '')
@@ -1450,7 +1455,7 @@ router.get('/limit-history', requireAuth, (req, res) => {
 
     return res.json({
       success: true,
-      data: queryUsageLimitHistory(getDatabase(), userId, providers, range),
+      data: await queryUsageLimitHistory(userId, providers, range),
     });
   } catch (error) {
     console.error('[USAGE LIMITS] Failed to read quota history:', error);
@@ -1462,15 +1467,15 @@ router.get('/limit-history', requireAuth, (req, res) => {
 });
 
 // Read/write the locally configured prepaid token plan (Alibaba Token Plan).
-router.get('/token-plan', requireAuth, (req, res) => {
+router.get('/token-plan', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   return res.json({
     success: true,
-    data: getTokenPlanConfig(userId, 'alibaba-token-plan'),
+    data: await getTokenPlanConfig(userId, 'alibaba-token-plan'),
   });
 });
 
-router.put('/token-plan', requireAuth, (req, res) => {
+router.put('/token-plan', requireAuth, async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).userId;
     const body = asRecord(req.body) || {};
@@ -1487,11 +1492,10 @@ router.put('/token-plan', requireAuth, (req, res) => {
         },
       });
     }
-
-    const db = getDatabase();
-    const row = db
-      .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-      .get(userId) as { settings_json?: string | null } | undefined;
+    const row = (await pgGet(
+      'SELECT settings_json FROM user_settings WHERE user_id = ?',
+      userId
+    )) as unknown as { settings_json?: string | null } | undefined;
     const settings = safeJsonParse<Record<string, unknown>>(row?.settings_json, {});
     const plans = asRecord(settings.tokenPlans) || {};
     settings.tokenPlans = {
@@ -1499,11 +1503,13 @@ router.put('/token-plan', requireAuth, (req, res) => {
       'alibaba-token-plan': { totalTokens, periodStart, periodDays },
     };
 
-    db.prepare(
+    await pgRun(
       `INSERT INTO user_settings (user_id, settings_json)
        VALUES (?, ?)
-       ON CONFLICT(user_id) DO UPDATE SET settings_json = excluded.settings_json`
-    ).run(userId, JSON.stringify(settings));
+       ON CONFLICT(user_id) DO UPDATE SET settings_json = excluded.settings_json`,
+      userId,
+      JSON.stringify(settings)
+    );
 
     return res.json({ success: true, data: { totalTokens, periodStart, periodDays } });
   } catch (error) {
@@ -1535,7 +1541,7 @@ router.get('/limits', requireAuth, async (req, res) => {
     }
 
     if (providerParam === 'alibaba' || providerParam === 'alibaba-token-plan') {
-      return res.json(buildAlibabaLimitResponse((req as AuthenticatedRequest).userId));
+      return res.json(await buildAlibabaLimitResponse((req as AuthenticatedRequest).userId));
     }
 
     const accountProviders: UsageProviderId[] = ['claude', 'zai', 'codex', 'kimi', 'z-ai'];
@@ -1556,7 +1562,7 @@ router.get('/limits', requireAuth, async (req, res) => {
     const userId = (req as AuthenticatedRequest).userId;
 
     if (provider === 'zai') {
-      const zaiApi = getZaiApiConfigForUser(userId);
+      const zaiApi = await getZaiApiConfigForUser(userId);
       const result = await fetchZaiUsageLimits(userId, zaiApi?.authToken, 'zai');
       return res.json(persistUsageLimitResult(userId, result));
     }

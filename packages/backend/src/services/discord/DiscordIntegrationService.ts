@@ -1,3 +1,4 @@
+import { get as pgGet } from '../../db/pg.js';
 import type {
   DiscordAlertSeverity,
   DiscordGatewayMode,
@@ -5,7 +6,7 @@ import type {
   DiscordIntegrationSettings,
   DiscordMaintenancePolicy,
 } from '@plum-code-webui/shared';
-import { getAppConfig, getDatabase, setAppConfig } from '../../db/index.js';
+import { getAppConfig, setAppConfig } from '../../db/index.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { safeDecrypt, safeEncrypt } from '../../utils/encryption.js';
 
@@ -227,27 +228,23 @@ export class DiscordIntegrationService {
     };
   }
 
-  getSettings(): DiscordIntegrationSettings {
+  async getSettings(): Promise<DiscordIntegrationSettings> {
     const runtime = this.getRuntimeSettings();
-    const db = getDatabase();
-    const counts = db
-      .prepare(
-        `SELECT
+
+    const counts = (await pgGet(`SELECT
            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
            MAX(sent_at) as lastSentAt
-         FROM discord_outbox`
-      )
-      .get() as { pending: number | null; failed: number | null; lastSentAt: string | null };
-    const latestFailure = db
-      .prepare(
-        `SELECT error
+         FROM discord_outbox`)) as unknown as {
+      pending: number | null;
+      failed: number | null;
+      lastSentAt: string | null;
+    };
+    const latestFailure = (await pgGet(`SELECT error
          FROM discord_outbox
          WHERE error IS NOT NULL AND error != ''
          ORDER BY updated_at DESC
-         LIMIT 1`
-      )
-      .get() as { error: string | null } | undefined;
+         LIMIT 1`)) as unknown as { error: string | null } | undefined;
 
     return {
       enabled: runtime.enabled,
@@ -287,7 +284,7 @@ export class DiscordIntegrationService {
     maintenancePolicy?: DiscordMaintenancePolicy;
     inboundJobsEnabled?: boolean;
     criticalRoleId?: string | null;
-  }): DiscordIntegrationSettings {
+  }): Promise<DiscordIntegrationSettings> {
     if (input.enabled !== undefined) {
       setAppConfig(CONFIG_KEYS.enabled, input.enabled ? 'true' : 'false');
     }
@@ -337,8 +334,8 @@ export class DiscordIntegrationService {
     return this.getSettings();
   }
 
-  shouldSend(severity: DiscordAlertSeverity): boolean {
-    const runtime = this.getRuntimeSettings();
+  async shouldSend(severity: DiscordAlertSeverity): Promise<boolean> {
+    const runtime = await this.getRuntimeSettings();
     if (!runtime.enabled || !runtime.configured) return false;
     return SEVERITY_ORDER[severity] >= SEVERITY_ORDER[runtime.minSeverity];
   }

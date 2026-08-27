@@ -1,5 +1,5 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
 import { createHash } from 'crypto';
-import { getDatabase } from '../db/index.js';
 import { safeDecrypt, safeEncrypt } from './encryption.js';
 import { getOpenCodeProviderCatalog, type OpenCodeProviderCatalog } from './opencodeCatalog.js';
 import { safeJsonParse } from './json.js';
@@ -114,37 +114,36 @@ function parseProviders(settingsJson: string | null | undefined): OpenCodeProvid
     .filter((provider): provider is OpenCodeProvider => Boolean(provider));
 }
 
-export function readOpenCodeProvidersForUser(userId: string): OpenCodeProvider[] {
-  const db = getDatabase();
-  const row = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as UserSettingsRow | undefined;
+export async function readOpenCodeProvidersForUser(userId: string): Promise<OpenCodeProvider[]> {
+  const row = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as UserSettingsRow | undefined;
   return parseProviders(row?.settings_json);
 }
 
-export function writeOpenCodeProvidersForUser(userId: string, providers: OpenCodeProvider[]): void {
-  const db = getDatabase();
-  const row = db
-    .prepare('SELECT settings_json FROM user_settings WHERE user_id = ?')
-    .get(userId) as UserSettingsRow | undefined;
+export async function writeOpenCodeProvidersForUser(
+  userId: string,
+  providers: OpenCodeProvider[]
+): Promise<void> {
+  const row = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as UserSettingsRow | undefined;
 
   const settings = safeJsonParse<Record<string, unknown>>(row?.settings_json, {});
   settings.opencodeProviders = providers;
   const json = JSON.stringify(settings);
 
   if (row) {
-    db.prepare('UPDATE user_settings SET settings_json = ? WHERE user_id = ?').run(json, userId);
+    await pgRun('UPDATE user_settings SET settings_json = ? WHERE user_id = ?', json, userId);
   } else {
-    db.prepare('INSERT INTO user_settings (user_id, settings_json) VALUES (?, ?)').run(
-      userId,
-      json
-    );
+    await pgRun('INSERT INTO user_settings (user_id, settings_json) VALUES (?, ?)', userId, json);
   }
 }
 
-function readAllEnabledOpenCodeProviders(): OpenCodeProvider[] {
-  const db = getDatabase();
-  const rows = db.prepare('SELECT user_id, settings_json FROM user_settings').all() as
+async function readAllEnabledOpenCodeProviders(): Promise<OpenCodeProvider[]> {
+  const rows = (await pgAll('SELECT user_id, settings_json FROM user_settings')) as unknown as
     | UserSettingsRow[]
     | undefined;
   const providers: OpenCodeProvider[] = [];
@@ -172,10 +171,12 @@ export function encryptOpenCodeProviderKey(apiKey: string | undefined): string {
   return apiKey ? (safeEncrypt(apiKey) ?? '') : '';
 }
 
-export function buildOpenCodeProviderCredentialEnv(userId?: string): Record<string, string> {
+export async function buildOpenCodeProviderCredentialEnv(
+  userId?: string
+): Promise<Record<string, string>> {
   const providers = userId
-    ? readOpenCodeProvidersForUser(userId).filter((provider) => provider.enabled)
-    : readAllEnabledOpenCodeProviders();
+    ? (await readOpenCodeProvidersForUser(userId)).filter((provider) => provider.enabled)
+    : await readAllEnabledOpenCodeProviders();
   const catalog = getOpenCodeProviderCatalog();
   const env: Record<string, string> = {};
 
@@ -191,10 +192,10 @@ export function buildOpenCodeProviderCredentialEnv(userId?: string): Record<stri
   return env;
 }
 
-export function getOpenCodeProviderCredentialFingerprint(userId?: string): string {
+export async function getOpenCodeProviderCredentialFingerprint(userId?: string): Promise<string> {
   const providers = userId
-    ? readOpenCodeProvidersForUser(userId).filter((provider) => provider.enabled)
-    : readAllEnabledOpenCodeProviders();
+    ? (await readOpenCodeProvidersForUser(userId)).filter((provider) => provider.enabled)
+    : await readAllEnabledOpenCodeProviders();
   const payload = providers
     .map((provider) => ({
       id: provider.id,
@@ -207,11 +208,11 @@ export function getOpenCodeProviderCredentialFingerprint(userId?: string): strin
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-export function overlayOpenCodeProviderStatus(
+export async function overlayOpenCodeProviderStatus(
   catalog: OpenCodeProviderCatalog,
   userId: string
-): OpenCodeProviderCatalog {
-  const providers = readOpenCodeProvidersForUser(userId);
+): Promise<OpenCodeProviderCatalog> {
+  const providers = await readOpenCodeProvidersForUser(userId);
   if (providers.length === 0) return catalog;
 
   const next: OpenCodeProviderCatalog = {};

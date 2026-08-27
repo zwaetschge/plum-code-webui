@@ -1,9 +1,7 @@
+import { run as pgRun, transaction as pgTransaction } from '../db/pg.js';
 import { createHash, randomUUID } from 'node:crypto';
 
 import type { SessionSendAck } from '@plum-code-webui/shared';
-import type Database from 'better-sqlite3';
-
-import { getDatabase } from '../db/index.js';
 
 export interface DeliveryPayload {
   sessionId: string;
@@ -32,10 +30,6 @@ export type DeliveryClaim =
   | { kind: 'claimed'; payloadHash: string }
   | { kind: 'stored'; acknowledgement: SessionSendAck }
   | { kind: 'conflict'; acknowledgement: SessionSendAck };
-
-function deliveryDatabase(database?: Database.Database): Database.Database {
-  return database ?? getDatabase();
-}
 
 /**
  * Hash the semantic payload without retaining attachment bodies in SQLite.
@@ -75,25 +69,29 @@ export function claimMessageDelivery(
   userId: string,
   sessionId: string,
   clientMessageId: string,
-  payloadHash: string,
-  database?: Database.Database
-): DeliveryClaim {
-  const db = deliveryDatabase(database);
-  return db.transaction((): DeliveryClaim => {
-    const existing = db
-      .prepare(
-        `SELECT payload_hash AS payloadHash, status, ack_json AS ackJson, retryable
+  payloadHash: string
+): Promise<DeliveryClaim> {
+  return pgTransaction(async (tx): Promise<DeliveryClaim> => {
+    const existing = (await tx.get(
+      `SELECT payload_hash AS payloadHash, status, ack_json AS ackJson, retryable
            FROM message_deliveries
-          WHERE user_id = ? AND session_id = ? AND client_message_id = ?`
-      )
-      .get(userId, sessionId, clientMessageId) as DeliveryRow | undefined;
+          WHERE user_id = ? AND session_id = ? AND client_message_id = ?`,
+      userId,
+      sessionId,
+      clientMessageId
+    )) as unknown as DeliveryRow | undefined;
 
     if (!existing) {
-      db.prepare(
+      await tx.run(
         `INSERT INTO message_deliveries (
            id, user_id, session_id, client_message_id, payload_hash, status
-         ) VALUES (?, ?, ?, ?, ?, 'processing')`
-      ).run(randomUUID(), userId, sessionId, clientMessageId, payloadHash);
+         ) VALUES (?, ?, ?, ?, ?, 'processing')`,
+        randomUUID(),
+        userId,
+        sessionId,
+        clientMessageId,
+        payloadHash
+      );
       return { kind: 'claimed', payloadHash };
     }
 
@@ -117,15 +115,15 @@ export function claimMessageDelivery(
     // The process may have died after persisting the user message but before
     // finalising message_deliveries. Recover from the unique message marker so
     // a restart retry never inserts or dispatches a second user turn.
-    const recovered = db
-      .prepare(
-        `SELECT id, chat_id AS chatId, created_at AS createdAt,
+    const recovered = (await tx.get(
+      `SELECT id, chat_id AS chatId, created_at AS createdAt,
                 event_sequence AS eventSequence
            FROM messages
           WHERE session_id = ? AND client_message_id = ?
-          LIMIT 1`
-      )
-      .get(sessionId, clientMessageId) as RecoveredMessageRow | undefined;
+          LIMIT 1`,
+      sessionId,
+      clientMessageId
+    )) as unknown as RecoveredMessageRow | undefined;
     if (recovered) {
       const acknowledgement: SessionSendAck = {
         clientMessageId,
@@ -136,13 +134,12 @@ export function claimMessageDelivery(
         disposition: 'dispatched',
         ...(recovered.eventSequence === null ? {} : { highWatermark: recovered.eventSequence }),
       };
-      db.prepare(
+      await tx.run(
         `UPDATE message_deliveries
             SET status = 'accepted', message_id = ?, disposition = 'dispatched',
                 ack_json = ?, accepted_at = ?, error = NULL, retryable = 0,
                 updated_at = CURRENT_TIMESTAMP
-          WHERE user_id = ? AND session_id = ? AND client_message_id = ?`
-      ).run(
+          WHERE user_id = ? AND session_id = ? AND client_message_id = ?`,
         recovered.id,
         JSON.stringify(acknowledgement),
         acknowledgement.acceptedAt,
@@ -156,33 +153,33 @@ export function claimMessageDelivery(
     // A processing row left by a terminated backend, or a retryable rejection,
     // is safe to reclaim. A single backend process additionally serializes the
     // live attempt, so this branch is restart recovery rather than duplication.
-    db.prepare(
+    await tx.run(
       `UPDATE message_deliveries
           SET status = 'processing', ack_json = NULL, error = NULL,
               retryable = 0, attempts = attempts + 1,
               updated_at = CURRENT_TIMESTAMP
-        WHERE user_id = ? AND session_id = ? AND client_message_id = ?`
-    ).run(userId, sessionId, clientMessageId);
+        WHERE user_id = ? AND session_id = ? AND client_message_id = ?`,
+      userId,
+      sessionId,
+      clientMessageId
+    );
     return { kind: 'claimed', payloadHash };
-  })();
+  });
 }
 
-export function finishMessageDelivery(
+export async function finishMessageDelivery(
   userId: string,
   sessionId: string,
   clientMessageId: string,
-  acknowledgement: SessionSendAck,
-  database?: Database.Database
-): void {
-  const db = deliveryDatabase(database);
+  acknowledgement: SessionSendAck
+): Promise<void> {
   if (acknowledgement.status === 'accepted') {
-    db.prepare(
+    await pgRun(
       `UPDATE message_deliveries
           SET status = 'accepted', message_id = ?, disposition = ?, ack_json = ?,
               accepted_at = ?, error = NULL, retryable = 0,
               updated_at = CURRENT_TIMESTAMP
-        WHERE user_id = ? AND session_id = ? AND client_message_id = ?`
-    ).run(
+        WHERE user_id = ? AND session_id = ? AND client_message_id = ?`,
       acknowledgement.messageId ?? null,
       acknowledgement.disposition ?? null,
       JSON.stringify(acknowledgement),
@@ -194,12 +191,11 @@ export function finishMessageDelivery(
     return;
   }
 
-  db.prepare(
+  await pgRun(
     `UPDATE message_deliveries
         SET status = 'rejected', ack_json = ?, error = ?, retryable = ?,
             updated_at = CURRENT_TIMESTAMP
-      WHERE user_id = ? AND session_id = ? AND client_message_id = ?`
-  ).run(
+      WHERE user_id = ? AND session_id = ? AND client_message_id = ?`,
     JSON.stringify(acknowledgement),
     acknowledgement.error,
     acknowledgement.retryable ? 1 : 0,

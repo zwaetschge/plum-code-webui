@@ -1,8 +1,8 @@
+import { get as pgGet, all as pgAll } from '../db/pg.js';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
-import { getDatabase } from '../db/index.js';
 import { getProcessManager } from '../websocket/index.js';
 import { listPendingPermissionsForUser } from './permissions.js';
 import {
@@ -41,20 +41,20 @@ function rejectGatewayCaller(req: Request): void {
   }
 }
 
-router.get('/tokens', requireAuth, (req: Request, res: Response) => {
+router.get('/tokens', requireAuth, async (req: Request, res: Response) => {
   rejectGatewayCaller(req);
   const userId = (req as AuthenticatedRequest).userId;
-  res.json({ success: true, data: listGatewayTokens(userId) });
+  res.json({ success: true, data: await listGatewayTokens(userId) });
 });
 
-router.post('/tokens', requireAuth, (req: Request, res: Response) => {
+router.post('/tokens', requireAuth, async (req: Request, res: Response) => {
   rejectGatewayCaller(req);
   const parsed = createTokenSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new AppError('A token name is required', 400, 'VALIDATION_ERROR');
   }
   const userId = (req as AuthenticatedRequest).userId;
-  const { token, row } = createGatewayToken(userId, parsed.data.name, parsed.data.scope);
+  const { token, row } = await createGatewayToken(userId, parsed.data.name, parsed.data.scope);
   // The only time the secret is ever returned.
   res.json({ success: true, data: { ...row, token } });
 });
@@ -91,20 +91,19 @@ interface SessionOverview {
  * sessions exist, which are actually working, which are blocked on a human,
  * and how deep their queues are.
  */
-router.get('/overview', requireAuth, (req: Request, res: Response) => {
+router.get('/overview', requireAuth, async (req: Request, res: Response) => {
   const userId = (req as AuthenticatedRequest).userId;
   const includeArchived = req.query.archived === '1';
 
-  const rows = getDatabase()
-    .prepare(
-      `SELECT id, name, cli_provider AS provider, cli_model AS model,
+  const rows = (await pgAll(
+    `SELECT id, name, cli_provider AS provider, cli_model AS model,
               working_directory AS workingDirectory, status, archived,
               strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updatedAt
          FROM sessions
         WHERE user_id = ? ${includeArchived ? '' : 'AND archived = 0'}
-        ORDER BY updated_at DESC`
-    )
-    .all(userId) as Array<
+        ORDER BY updated_at DESC`,
+    userId
+  )) as unknown as Array<
     Omit<
       SessionOverview,
       | 'running'
@@ -187,29 +186,32 @@ router.get('/events', requireAuth, (req: Request, res: Response) => {
   // for every connected supervisor.
   const ownershipCache = new Map<string, { owned: boolean; at: number }>();
   const OWNERSHIP_TTL_MS = 30_000;
-  const ownsSession = (sessionId: string): boolean => {
+  const ownsSession = async (sessionId: string): Promise<boolean> => {
     const cached = ownershipCache.get(sessionId);
     if (cached && Date.now() - cached.at < OWNERSHIP_TTL_MS) return cached.owned;
-    const row = getDatabase()
-      .prepare('SELECT 1 FROM sessions WHERE id = ? AND user_id = ?')
-      .get(sessionId, userId);
+    const row = await pgGet(
+      'SELECT 1 FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId
+    );
     const owned = Boolean(row);
     ownershipCache.set(sessionId, { owned, at: Date.now() });
     return owned;
   };
 
-  const send = (event: string, sessionId: string, payload: unknown): void => {
-    if (!ownsSession(sessionId)) return;
+  const send = async (event: string, sessionId: string, payload: unknown): Promise<void> => {
+    if (!(await ownsSession(sessionId))) return;
     res.write(
       `event: ${event}\ndata: ${JSON.stringify({ sessionId, ...(payload as object) })}\n\n`
     );
   };
 
-  const onAssistant = (sessionId: string, content: string) =>
-    send('assistant_message', sessionId, { content });
-  const onUser = (sessionId: string, content: string) =>
-    send('user_message', sessionId, { content });
-  const onTurn = (sessionId: string, usage: unknown) => send('turn_complete', sessionId, { usage });
+  const onAssistant = async (sessionId: string, content: string) =>
+    await send('assistant_message', sessionId, { content });
+  const onUser = async (sessionId: string, content: string) =>
+    await send('user_message', sessionId, { content });
+  const onTurn = async (sessionId: string, usage: unknown) =>
+    await send('turn_complete', sessionId, { usage });
 
   manager.events.on('assistantMessage', onAssistant);
   manager.events.on('userMessage', onUser);

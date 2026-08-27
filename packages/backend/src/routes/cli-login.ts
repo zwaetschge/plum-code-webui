@@ -174,11 +174,11 @@ function serializeLoginSession(session: LoginSession) {
 router.post(
   '/:provider/start',
   requireAuth,
-  asyncHandler(async (req, res) => {
+  await asyncHandler(async (req, res) => {
     const userId = (req as AuthenticatedRequest).userId;
     const provider = (req.params.provider || '').toLowerCase() as CLIProvider;
 
-    const runnerAccess = getRunnerAccessDecision(userId);
+    const runnerAccess = await getRunnerAccessDecision(userId);
     if (!runnerAccess.allowed) {
       throw new AppError(
         runnerAccess.reason || 'CLI runner access is not allowed for this account.',

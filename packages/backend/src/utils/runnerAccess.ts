@@ -1,6 +1,4 @@
-import type Database from 'better-sqlite3';
-
-import { getDatabase } from '../db/index.js';
+import { get as pgGet } from '../db/pg.js';
 
 export type RunnerAccessMode = 'admin-only' | 'trusted-users';
 
@@ -27,13 +25,11 @@ function explicitlyAllowedEmails(value = process.env.CLI_RUNNER_ALLOWED_EMAILS):
  * explicitly trusted users may start them. This prevents a normal WebUI user
  * from reading shared provider homes or broad operator mounts.
  */
-export function getRunnerAccessDecision(
-  userId: string,
-  database: Database.Database = getDatabase()
-): RunnerAccessDecision {
-  const user = database
-    .prepare('SELECT email, role, status FROM users WHERE id = ?')
-    .get(userId) as { email: string; role: string; status: string } | undefined;
+export async function getRunnerAccessDecision(userId: string): Promise<RunnerAccessDecision> {
+  const user = (await pgGet(
+    'SELECT email, role, status FROM users WHERE id = ?',
+    userId
+  )) as unknown as { email: string; role: string; status: string } | undefined;
 
   if (!user || user.status !== 'active') {
     return { allowed: false, reason: 'Account unavailable' };
@@ -49,7 +45,7 @@ export function getRunnerAccessDecision(
   };
 }
 
-export function assertRunnerAccess(userId: string): void {
-  const decision = getRunnerAccessDecision(userId);
+export async function assertRunnerAccess(userId: string): Promise<void> {
+  const decision = await getRunnerAccessDecision(userId);
   if (!decision.allowed) throw new Error(decision.reason || 'Runner access denied');
 }

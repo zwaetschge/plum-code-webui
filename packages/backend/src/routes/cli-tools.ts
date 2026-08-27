@@ -1,10 +1,10 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import * as pty from 'node-pty';
 import path from 'node:path';
 import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
-import { getDatabase } from '../db/index.js';
 import { AppError } from '../middleware/errorHandler.js';
 import type { CliTool, CliToolExecution } from '@plum-code-webui/shared';
 import { buildRestrictedChildEnv } from '../utils/childProcessEnv.js';
@@ -45,16 +45,14 @@ function parseCliTool(row: Record<string, unknown>): CliTool {
 }
 
 // List CLI tools
-router.get('/', requireAuth, (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
-  const rows = db
-    .prepare(
-      `SELECT id, user_id, name, command, description, use_session_cwd, timeout_seconds, enabled, created_at
-       FROM cli_tools WHERE user_id = ? ORDER BY name`
-    )
-    .all(userId) as Record<string, unknown>[];
+  const rows = (await pgAll(
+    `SELECT id, user_id, name, command, description, use_session_cwd, timeout_seconds, enabled, created_at
+       FROM cli_tools WHERE user_id = ? ORDER BY name`,
+    userId
+  )) as unknown as Record<string, unknown>[];
 
   const tools = rows.map(parseCliTool);
 
@@ -62,16 +60,15 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // Get CLI tool by ID
-router.get('/:id', requireAuth, (req, res) => {
+router.get('/:id', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
-  const row = db
-    .prepare(
-      `SELECT id, user_id, name, command, description, use_session_cwd, timeout_seconds, enabled, created_at
-       FROM cli_tools WHERE id = ? AND user_id = ?`
-    )
-    .get(req.params.id, userId) as Record<string, unknown> | undefined;
+  const row = (await pgGet(
+    `SELECT id, user_id, name, command, description, use_session_cwd, timeout_seconds, enabled, created_at
+       FROM cli_tools WHERE id = ? AND user_id = ?`,
+    req.params.id,
+    userId
+  )) as unknown as Record<string, unknown> | undefined;
 
   if (!row) {
     throw new AppError('CLI tool not found', 404, 'NOT_FOUND');
@@ -81,7 +78,7 @@ router.get('/:id', requireAuth, (req, res) => {
 });
 
 // Create CLI tool
-router.post('/', requireAuth, requireAdmin, (req, res) => {
+router.post('/', requireAuth, requireAdmin, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = createCliToolSchema.safeParse(req.body);
 
@@ -91,13 +88,11 @@ router.post('/', requireAuth, requireAdmin, (req, res) => {
 
   const { name, command, description, useSessionCwd, timeoutSeconds, enabled } = parsed.data;
 
-  const db = getDatabase();
   const toolId = nanoid();
 
-  db.prepare(
+  await pgRun(
     `INSERT INTO cli_tools (id, user_id, name, command, description, use_session_cwd, timeout_seconds, enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     toolId,
     userId,
     name,
@@ -108,18 +103,17 @@ router.post('/', requireAuth, requireAdmin, (req, res) => {
     enabled !== false ? 1 : 0
   );
 
-  const row = db
-    .prepare(
-      `SELECT id, user_id, name, command, description, use_session_cwd, timeout_seconds, enabled, created_at
-       FROM cli_tools WHERE id = ?`
-    )
-    .get(toolId) as Record<string, unknown>;
+  const row = (await pgGet(
+    `SELECT id, user_id, name, command, description, use_session_cwd, timeout_seconds, enabled, created_at
+       FROM cli_tools WHERE id = ?`,
+    toolId
+  )) as unknown as Record<string, unknown>;
 
   res.status(201).json({ success: true, data: parseCliTool(row) });
 });
 
 // Update CLI tool
-router.put('/:id', requireAuth, requireAdmin, (req, res) => {
+router.put('/:id', requireAuth, requireAdmin, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = updateCliToolSchema.safeParse(req.body);
 
@@ -127,10 +121,11 @@ router.put('/:id', requireAuth, requireAdmin, (req, res) => {
     throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
   }
 
-  const db = getDatabase();
-  const existing = db
-    .prepare('SELECT id FROM cli_tools WHERE id = ? AND user_id = ?')
-    .get(req.params.id, userId);
+  const existing = await pgGet(
+    'SELECT id FROM cli_tools WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  );
 
   if (!existing) {
     throw new AppError('CLI tool not found', 404, 'NOT_FOUND');
@@ -168,27 +163,27 @@ router.put('/:id', requireAuth, requireAdmin, (req, res) => {
 
   if (updates.length > 0) {
     values.push(req.params.id);
-    db.prepare(`UPDATE cli_tools SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    await pgRun(`UPDATE cli_tools SET ${updates.join(', ')} WHERE id = ?`, ...values);
   }
 
-  const row = db
-    .prepare(
-      `SELECT id, user_id, name, command, description, use_session_cwd, timeout_seconds, enabled, created_at
-       FROM cli_tools WHERE id = ?`
-    )
-    .get(req.params.id) as Record<string, unknown>;
+  const row = (await pgGet(
+    `SELECT id, user_id, name, command, description, use_session_cwd, timeout_seconds, enabled, created_at
+       FROM cli_tools WHERE id = ?`,
+    req.params.id
+  )) as unknown as Record<string, unknown>;
 
   res.json({ success: true, data: parseCliTool(row) });
 });
 
 // Delete CLI tool
-router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
+router.delete('/:id', requireAuth, requireAdmin, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const db = getDatabase();
 
-  const result = db
-    .prepare('DELETE FROM cli_tools WHERE id = ? AND user_id = ?')
-    .run(req.params.id, userId);
+  const result = await pgRun(
+    'DELETE FROM cli_tools WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  );
 
   if (result.changes === 0) {
     throw new AppError('CLI tool not found', 404, 'NOT_FOUND');
@@ -206,13 +201,12 @@ router.post('/:id/execute', requireAuth, requireAdmin, async (req, res) => {
     throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
   }
 
-  const db = getDatabase();
-  const row = db
-    .prepare(
-      `SELECT id, user_id, name, command, description, use_session_cwd, timeout_seconds, enabled, created_at
-       FROM cli_tools WHERE id = ? AND user_id = ?`
-    )
-    .get(req.params.id, userId) as Record<string, unknown> | undefined;
+  const row = (await pgGet(
+    `SELECT id, user_id, name, command, description, use_session_cwd, timeout_seconds, enabled, created_at
+       FROM cli_tools WHERE id = ? AND user_id = ?`,
+    req.params.id,
+    userId
+  )) as unknown as Record<string, unknown> | undefined;
 
   if (!row) {
     throw new AppError('CLI tool not found', 404, 'NOT_FOUND');
@@ -226,9 +220,11 @@ router.post('/:id/execute', requireAuth, requireAdmin, async (req, res) => {
 
   const { prompt, workingDirectory, sessionId } = parsed.data;
   const session = sessionId
-    ? (db
-        .prepare('SELECT working_directory FROM sessions WHERE id = ? AND user_id = ?')
-        .get(sessionId, userId) as { working_directory: string } | undefined)
+    ? ((await pgGet(
+        'SELECT working_directory FROM sessions WHERE id = ? AND user_id = ?',
+        sessionId,
+        userId
+      )) as unknown as { working_directory: string } | undefined)
     : undefined;
   if (sessionId && !session) {
     throw new AppError('Session not found', 404, 'SESSION_NOT_FOUND');
@@ -249,9 +245,14 @@ router.post('/:id/execute', requireAuth, requireAdmin, async (req, res) => {
   // Save user message if sessionId provided
   if (sessionId) {
     const userMsgId = nanoid();
-    db.prepare(
-      'INSERT INTO messages (id, session_id, chat_id, role, content) VALUES (?, ?, (SELECT active_chat_id FROM sessions WHERE id = ?), ?, ?)'
-    ).run(userMsgId, sessionId, sessionId, 'user', `[${tool.name}] ${prompt}`);
+    await pgRun(
+      'INSERT INTO messages (id, session_id, chat_id, role, content) VALUES (?, ?, (SELECT active_chat_id FROM sessions WHERE id = ?), ?, ?)',
+      userMsgId,
+      sessionId,
+      sessionId,
+      'user',
+      `[${tool.name}] ${prompt}`
+    );
   }
 
   const execution: CliToolExecution = {
@@ -314,9 +315,8 @@ router.post('/:id/execute', requireAuth, requireAdmin, async (req, res) => {
     if (sessionId) {
       const assistantMsgId = nanoid();
       const statusEmoji = execution.status === 'completed' ? '✓' : '✗';
-      db.prepare(
-        'INSERT INTO messages (id, session_id, chat_id, role, content) VALUES (?, ?, (SELECT active_chat_id FROM sessions WHERE id = ?), ?, ?)'
-      ).run(
+      await pgRun(
+        'INSERT INTO messages (id, session_id, chat_id, role, content) VALUES (?, ?, (SELECT active_chat_id FROM sessions WHERE id = ?), ?, ?)',
         assistantMsgId,
         sessionId,
         sessionId,
@@ -336,9 +336,8 @@ router.post('/:id/execute', requireAuth, requireAdmin, async (req, res) => {
     if (sessionId) {
       const errorMsgId = nanoid();
       const statusEmoji = execution.status === 'timeout' ? '⏱' : '✗';
-      db.prepare(
-        'INSERT INTO messages (id, session_id, chat_id, role, content) VALUES (?, ?, (SELECT active_chat_id FROM sessions WHERE id = ?), ?, ?)'
-      ).run(
+      await pgRun(
+        'INSERT INTO messages (id, session_id, chat_id, role, content) VALUES (?, ?, (SELECT active_chat_id FROM sessions WHERE id = ?), ?, ?)',
         errorMsgId,
         sessionId,
         sessionId,

@@ -4,8 +4,8 @@ import type { GitHubUser, GitHubRepo, CreateRepoRequest } from '@plum-code-webui
 import { getGitHubTokenForUser } from '../routes/settings.js';
 
 export class GitHubService {
-  private getOctokit(userId: string): Octokit | null {
-    const token = getGitHubTokenForUser(userId);
+  private async getOctokit(userId: string): Promise<Octokit | null> {
+    const token = await getGitHubTokenForUser(userId);
     if (!token) return null;
     return new Octokit({ auth: token });
   }
@@ -13,7 +13,7 @@ export class GitHubService {
   async validateToken(
     userId: string
   ): Promise<{ valid: boolean; user?: GitHubUser; scopes?: string[]; error?: string }> {
-    const octokit = this.getOctokit(userId);
+    const octokit = await this.getOctokit(userId);
     if (!octokit) {
       return { valid: false, error: 'No GitHub token configured' };
     }
@@ -43,7 +43,7 @@ export class GitHubService {
   }
 
   async getUser(userId: string): Promise<GitHubUser | null> {
-    const octokit = this.getOctokit(userId);
+    const octokit = await this.getOctokit(userId);
     if (!octokit) return null;
 
     try {
@@ -66,7 +66,7 @@ export class GitHubService {
     page = 1,
     perPage = 30
   ): Promise<{ repos: GitHubRepo[]; hasMore: boolean }> {
-    const octokit = this.getOctokit(userId);
+    const octokit = await this.getOctokit(userId);
     if (!octokit) {
       return { repos: [], hasMore: false };
     }
@@ -110,7 +110,7 @@ export class GitHubService {
     userId: string,
     request: CreateRepoRequest
   ): Promise<{ success: boolean; repo?: GitHubRepo; error?: string }> {
-    const octokit = this.getOctokit(userId);
+    const octokit = await this.getOctokit(userId);
     if (!octokit) {
       return { success: false, error: 'No GitHub token configured' };
     }
@@ -157,7 +157,7 @@ export class GitHubService {
     targetDir: string,
     branch?: string
   ): Promise<{ success: boolean; path?: string; error?: string }> {
-    const token = getGitHubTokenForUser(userId);
+    const token = await getGitHubTokenForUser(userId);
 
     try {
       // Inject token into URL for private repos
@@ -194,7 +194,7 @@ export class GitHubService {
     branch?: string,
     force = false
   ): Promise<{ success: boolean; error?: string }> {
-    const token = getGitHubTokenForUser(userId);
+    const token = await getGitHubTokenForUser(userId);
 
     try {
       const git: SimpleGit = simpleGit(workingDirectory);
@@ -271,7 +271,7 @@ export class GitHubService {
   async getRateLimitStatus(
     userId: string
   ): Promise<{ remaining: number; limit: number; reset: Date } | null> {
-    const octokit = this.getOctokit(userId);
+    const octokit = await this.getOctokit(userId);
     if (!octokit) return null;
 
     try {

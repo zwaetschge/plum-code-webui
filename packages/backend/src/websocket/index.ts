@@ -1,3 +1,4 @@
+import { get as pgGet } from '../db/pg.js';
 import { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
@@ -11,7 +12,6 @@ import type {
   SessionSendPayload,
 } from '@plum-code-webui/shared';
 import { config } from '../config.js';
-import { getDatabase } from '../db/index.js';
 import { ClaudeProcessManager } from '../services/claude/ClaudeProcessManager.js';
 import { getRunnerAccessDecision } from '../utils/runnerAccess.js';
 import {
@@ -66,19 +66,19 @@ interface SendReceipt {
 
 // Authorization helper: owner OR admin may access a session.
 // Returns false on any DB error (fail-closed).
-function canAccessSession(sessionId: string, userId: string): boolean {
+async function canAccessSession(sessionId: string, userId: string): Promise<boolean> {
   if (!sessionId || !userId) return false;
   try {
-    const db = getDatabase();
-    const row = db
-      .prepare(
-        `SELECT 1 FROM sessions s
+    const row = await pgGet(
+      `SELECT 1 FROM sessions s
          WHERE s.id = ?
            AND (s.user_id = ? OR EXISTS (
              SELECT 1 FROM users u WHERE u.id = ? AND u.role = 'admin'
-           ))`
-      )
-      .get(sessionId, userId, userId);
+           ))`,
+      sessionId,
+      userId,
+      userId
+    );
     return !!row;
   } catch (err) {
     console.error(
@@ -89,12 +89,14 @@ function canAccessSession(sessionId: string, userId: string): boolean {
   }
 }
 
-function ownsSession(sessionId: string, userId: string): boolean {
+async function ownsSession(sessionId: string, userId: string): Promise<boolean> {
   if (!sessionId || !userId) return false;
   try {
-    return !!getDatabase()
-      .prepare(`SELECT 1 FROM sessions WHERE id = ? AND user_id = ?`)
-      .get(sessionId, userId);
+    return !!(await pgGet(
+      `SELECT 1 FROM sessions WHERE id = ? AND user_id = ?`,
+      sessionId,
+      userId
+    ));
   } catch {
     return false;
   }
@@ -105,16 +107,15 @@ function ownsSession(sessionId: string, userId: string): boolean {
 // someone else's session. ProcessManager enforces the same rule downstream; this
 // is the outer layer so unauthorized writes never touch in-memory state like
 // pendingModes (which sits upstream of startSession's DB check).
-function controlDenialReason(sessionId: string, userId: string): string | null {
+async function controlDenialReason(sessionId: string, userId: string): Promise<string | null> {
   if (!sessionId || !userId) return 'Runner authorization failed';
   try {
-    const db = getDatabase();
-    const row = db.prepare(`SELECT user_id FROM sessions WHERE id = ?`).get(sessionId) as
+    const row = (await pgGet(`SELECT user_id FROM sessions WHERE id = ?`, sessionId)) as unknown as
       | { user_id: string }
       | undefined;
     if (!row || row.user_id !== userId) return 'Forbidden: session not owned';
 
-    const runnerAccess = getRunnerAccessDecision(userId, db);
+    const runnerAccess = await getRunnerAccessDecision(userId);
     return runnerAccess.allowed ? null : runnerAccess.reason || 'Runner access denied';
   } catch (err) {
     console.error(
@@ -129,12 +130,10 @@ function controlDenialReason(sessionId: string, userId: string): string | null {
 let _processManager: ClaudeProcessManager | null = null;
 let _io: Server | null = null;
 
-function isActiveUser(userId: string): boolean {
+async function isActiveUser(userId: string): Promise<boolean> {
   if (!userId) return false;
   try {
-    const row = getDatabase()
-      .prepare(`SELECT 1 FROM users WHERE id = ? AND status = 'active'`)
-      .get(userId);
+    const row = await pgGet(`SELECT 1 FROM users WHERE id = ? AND status = 'active'`, userId);
     return !!row;
   } catch {
     return false;
@@ -149,7 +148,7 @@ export function getProcessManager(): ClaudeProcessManager {
 }
 
 /** Immediately revoke live sockets and stop active CLI sessions for a user. */
-export function disconnectUserSockets(userId: string): number {
+export async function disconnectUserSockets(userId: string): Promise<number> {
   if (!_io || !userId) return 0;
 
   let disconnected = 0;
@@ -162,10 +161,11 @@ export function disconnectUserSockets(userId: string): number {
   if (_processManager) {
     for (const sessionId of _processManager.getRunningSessionIds()) {
       try {
-        const owner = getDatabase()
-          .prepare('SELECT user_id FROM sessions WHERE id = ?')
-          .get(sessionId) as { user_id: string } | undefined;
-        if (owner?.user_id === userId) _processManager.stopSession(sessionId, userId);
+        const owner = (await pgGet(
+          'SELECT user_id FROM sessions WHERE id = ?',
+          sessionId
+        )) as unknown as { user_id: string } | undefined;
+        if (owner?.user_id === userId) await _processManager.stopSession(sessionId, userId);
       } catch (error) {
         console.warn(`[WS] Failed to stop revoked user session ${sessionId}:`, error);
       }
@@ -248,7 +248,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
     }
   };
 
-  const enqueueSessionSend = <T>(key: string, task: () => Promise<T>): Promise<T> => {
+  const enqueueSessionSend = async <T>(key: string, task: () => Promise<T>): Promise<T> => {
     const previous = sessionSendChains.get(key) ?? Promise.resolve();
     const current = previous.then(task, task);
     const completion = current.then(
@@ -256,14 +256,14 @@ export function setupWebSocket(httpServer: HttpServer): Server {
       () => undefined
     );
     sessionSendChains.set(key, completion);
-    void completion.then(() => {
+    void completion.then(async () => {
       if (sessionSendChains.get(key) === completion) sessionSendChains.delete(key);
     });
     return current;
   };
 
   // Authentication middleware
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
       return next(new Error('Authentication required'));
@@ -271,7 +271,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
 
     try {
       const decoded = jwt.verify(token, config.jwtSecret) as { userId: string };
-      if (!isActiveUser(decoded.userId)) {
+      if (!(await isActiveUser(decoded.userId))) {
         return next(new Error('Account unavailable'));
       }
       socket.data.userId = decoded.userId;
@@ -282,12 +282,12 @@ export function setupWebSocket(httpServer: HttpServer): Server {
     }
   });
 
-  io.on('connection', (socket) => {
+  io.on('connection', async (socket) => {
     console.log(`Client connected: ${socket.id} (user: ${socket.data.userId})`);
 
     // Account-wide room: notification-centre events are not tied to one
     // session, so they fan out per user rather than per session.
-    if (socket.data.userId) socket.join(`user:${socket.data.userId}`);
+    if (socket.data.userId) await socket.join(`user:${socket.data.userId}`);
 
     // Per-socket rate limit bucket for outbound messages to Claude.
     const messageBucket = makeBucket();
@@ -299,10 +299,10 @@ export function setupWebSocket(httpServer: HttpServer): Server {
     // directly when a user is suspended.
     let lifecycleCheckedAt = 0;
     let lifecycleOk = false;
-    socket.use((_event, next) => {
+    socket.use(async (_event, next) => {
       const now = Date.now();
       if (now - lifecycleCheckedAt > 5_000) {
-        lifecycleOk = isActiveUser(socket.data.userId);
+        lifecycleOk = await isActiveUser(socket.data.userId);
         lifecycleCheckedAt = now;
       }
       if (lifecycleOk) return next();
@@ -332,7 +332,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
 
     // Subscribe to session output
     socket.on('session:subscribe', async (sessionId) => {
-      if (!canAccessSession(sessionId, socket.data.userId)) {
+      if (!(await canAccessSession(sessionId, socket.data.userId))) {
         console.warn(
           `[WS] DENIED session:subscribe userId=${socket.data.userId} sessionId=${sessionId}`
         );
@@ -340,7 +340,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
         return;
       }
       socket.data.subscribedSessions.add(sessionId);
-      socket.join(`session:${sessionId}`);
+      await socket.join(`session:${sessionId}`);
       console.log(`Socket ${socket.id} subscribed to session ${sessionId}`);
       try {
         await processManager.recoverInterruptedKimiTurn(sessionId, socket.data.userId);
@@ -353,9 +353,9 @@ export function setupWebSocket(httpServer: HttpServer): Server {
     });
 
     // Unsubscribe from session output
-    socket.on('session:unsubscribe', (sessionId) => {
+    socket.on('session:unsubscribe', async (sessionId) => {
       socket.data.subscribedSessions.delete(sessionId);
-      socket.leave(`session:${sessionId}`);
+      await socket.leave(`session:${sessionId}`);
       leavePresence(socket.id, sessionId);
       console.log(`Socket ${socket.id} unsubscribed from session ${sessionId}`);
 
@@ -368,66 +368,70 @@ export function setupWebSocket(httpServer: HttpServer): Server {
       }
     });
 
-    socket.on('session:presence', ({ sessionId, deviceId, label, state, lastReadMessageId }) => {
-      if (!ownsSession(sessionId, socket.data.userId)) {
-        socket.emit('session:error', { sessionId, error: 'Forbidden: session not owned' });
-        return;
-      }
-      const cleanDeviceId = deviceId?.trim();
-      const cleanLabel = label
-        ?.replace(/[\u0000-\u001f\u007f]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (
-        !cleanDeviceId ||
-        cleanDeviceId.length > 128 ||
-        !/^[a-zA-Z0-9._:-]+$/.test(cleanDeviceId) ||
-        (cleanLabel?.length ?? 0) > 80 ||
-        !['active', 'idle', 'leave'].includes(state) ||
-        (lastReadMessageId !== undefined &&
-          lastReadMessageId !== null &&
-          (typeof lastReadMessageId !== 'string' || lastReadMessageId.length > 160))
-      ) {
-        socket.emit('session:error', { sessionId, error: 'Invalid presence payload' });
-        return;
-      }
-      if (lastReadMessageId !== undefined) {
-        const validMarker =
-          lastReadMessageId === null ||
-          !!getDatabase()
-            .prepare(
+    socket.on(
+      'session:presence',
+      async ({ sessionId, deviceId, label, state, lastReadMessageId }) => {
+        if (!(await ownsSession(sessionId, socket.data.userId))) {
+          socket.emit('session:error', { sessionId, error: 'Forbidden: session not owned' });
+          return;
+        }
+        const cleanDeviceId = deviceId?.trim();
+        const cleanLabel = label
+          ?.replace(/[\u0000-\u001f\u007f]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (
+          !cleanDeviceId ||
+          cleanDeviceId.length > 128 ||
+          !/^[a-zA-Z0-9._:-]+$/.test(cleanDeviceId) ||
+          (cleanLabel?.length ?? 0) > 80 ||
+          !['active', 'idle', 'leave'].includes(state) ||
+          (lastReadMessageId !== undefined &&
+            lastReadMessageId !== null &&
+            (typeof lastReadMessageId !== 'string' || lastReadMessageId.length > 160))
+        ) {
+          socket.emit('session:error', { sessionId, error: 'Invalid presence payload' });
+          return;
+        }
+        if (lastReadMessageId !== undefined) {
+          const validMarker =
+            lastReadMessageId === null ||
+            !!(await pgGet(
               `SELECT 1
                    FROM messages m
                    JOIN sessions s ON s.id = m.session_id
                   WHERE m.id = ? AND m.session_id = ? AND s.user_id = ?
-                    AND m.chat_id IS s.active_chat_id`
-            )
-            .get(lastReadMessageId, sessionId, socket.data.userId);
-        if (!validMarker) {
-          socket.emit('session:error', { sessionId, error: 'Invalid read marker' });
-          return;
+                    AND m.chat_id IS s.active_chat_id`,
+              lastReadMessageId,
+              sessionId,
+              socket.data.userId
+            ));
+          if (!validMarker) {
+            socket.emit('session:error', { sessionId, error: 'Invalid read marker' });
+            return;
+          }
         }
+        const key = `${socket.id}:${cleanDeviceId}`;
+        const viewers = presenceBySession.get(sessionId) ?? new Map();
+        if (state === 'leave') {
+          viewers.delete(key);
+        } else {
+          viewers.set(key, {
+            socketId: socket.id,
+            deviceId: cleanDeviceId,
+            ...(cleanLabel ? { label: cleanLabel } : {}),
+            state,
+            activeAt: new Date().toISOString(),
+            ...(lastReadMessageId === undefined ? {} : { lastReadMessageId }),
+          });
+        }
+        if (viewers.size > 0) presenceBySession.set(sessionId, viewers);
+        else presenceBySession.delete(sessionId);
+        socket.data.subscribedSessions.add(sessionId);
+        await socket.join(`session:${sessionId}`);
+        broadcastPresence(sessionId);
       }
-      const key = `${socket.id}:${cleanDeviceId}`;
-      const viewers = presenceBySession.get(sessionId) ?? new Map();
-      if (state === 'leave') {
-        viewers.delete(key);
-      } else {
-        viewers.set(key, {
-          socketId: socket.id,
-          deviceId: cleanDeviceId,
-          ...(cleanLabel ? { label: cleanLabel } : {}),
-          state,
-          activeAt: new Date().toISOString(),
-          ...(lastReadMessageId === undefined ? {} : { lastReadMessageId }),
-        });
-      }
-      if (viewers.size > 0) presenceBySession.set(sessionId, viewers);
-      else presenceBySession.delete(sessionId);
-      socket.data.subscribedSessions.add(sessionId);
-      socket.join(`session:${sessionId}`);
-      broadcastPresence(sessionId);
-    });
+    );
 
     const logError = (event: string, sessionId: string, err: unknown): string => {
       const message = err instanceof Error ? err.message : String(err);
@@ -439,8 +443,8 @@ export function setupWebSocket(httpServer: HttpServer): Server {
       return message;
     };
 
-    const denyControl = (sessionId: string, event: string): boolean => {
-      const reason = controlDenialReason(sessionId, socket.data.userId);
+    const denyControl = async (sessionId: string, event: string): Promise<boolean> => {
+      const reason = await controlDenialReason(sessionId, socket.data.userId);
       if (!reason) return false;
       console.warn(`[WS] DENIED ${event} userId=${socket.data.userId} sessionId=${sessionId}`);
       socket.emit('session:error', { sessionId, error: reason });
@@ -458,7 +462,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
 
     onReliableSend(
       'session:send',
-      (
+      async (
         { sessionId, chatId, message, images, uploadIds, activeFollowupMode, clientMessageId },
         acknowledge
       ) => {
@@ -544,7 +548,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
           return;
         }
 
-        const denialReason = controlDenialReason(sessionId, socket.data.userId);
+        const denialReason = await controlDenialReason(sessionId, socket.data.userId);
         if (denialReason) {
           console.warn(
             `[WS] DENIED session:send userId=${socket.data.userId} sessionId=${sessionId}`
@@ -556,7 +560,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
 
         let pinnedChatId: string | null;
         try {
-          pinnedChatId = resolveSessionSendChatId(sessionId, socket.data.userId, chatId);
+          pinnedChatId = await resolveSessionSendChatId(sessionId, socket.data.userId, chatId);
         } catch (error) {
           acknowledgeRejected(error instanceof Error ? error.message : 'Invalid chat', false);
           return;
@@ -585,20 +589,27 @@ export function setupWebSocket(httpServer: HttpServer): Server {
         }
 
         if (sendId) {
-          const claim = claimMessageDelivery(socket.data.userId, sessionId, sendId, payloadHash);
+          const claim = await claimMessageDelivery(
+            socket.data.userId,
+            sessionId,
+            sendId,
+            payloadHash
+          );
           if (claim.kind !== 'claimed') {
             acknowledge?.(claim.acknowledgement);
             return;
           }
         }
 
-        if (getSessionSyncState(sessionId, socket.data.userId).activeChatId !== pinnedChatId) {
+        if (
+          (await getSessionSyncState(sessionId, socket.data.userId)).activeChatId !== pinnedChatId
+        ) {
           const stale = acknowledgeRejected(
             'This message belongs to a different chat. Return to that chat and retry.',
             true
           );
           if (sendId) {
-            finishMessageDelivery(socket.data.userId, sessionId, sendId, stale);
+            await finishMessageDelivery(socket.data.userId, sessionId, sendId, stale);
           }
           return;
         }
@@ -611,7 +622,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
           socket.emit('session:error', { sessionId, error });
           const rejected = acknowledgeRejected(error, true);
           if (sendId) {
-            finishMessageDelivery(socket.data.userId, sessionId, sendId, rejected);
+            await finishMessageDelivery(socket.data.userId, sessionId, sendId, rejected);
           }
           return;
         }
@@ -620,14 +631,10 @@ export function setupWebSocket(httpServer: HttpServer): Server {
         const terminalPromise = enqueueSessionSend(chainKey, async () => {
           try {
             const staged = uploadIds?.length
-              ? await resolveChatUploads(
-                  socket.data.userId,
-                  sessionId,
-                  uploadIds,
-                  sendId,
-                  undefined,
-                  { fileCount: inlineUploadCount, byteSize: inlineUploadBytes }
-                )
+              ? await resolveChatUploads(socket.data.userId, sessionId, uploadIds, sendId, {
+                  fileCount: inlineUploadCount,
+                  byteSize: inlineUploadBytes,
+                })
               : [];
             const combinedAttachments = [
               ...(images ?? []),
@@ -664,7 +671,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
                 : {}),
             };
             if (sendId) {
-              finishMessageDelivery(socket.data.userId, sessionId, sendId, accepted);
+              await finishMessageDelivery(socket.data.userId, sessionId, sendId, accepted);
             }
             return accepted;
           } catch (err) {
@@ -675,7 +682,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
             const retryable = !(err instanceof ChatUploadError) || err.statusCode >= 500;
             const rejected = reject(error, retryable);
             if (sendId) {
-              finishMessageDelivery(socket.data.userId, sessionId, sendId, rejected);
+              await finishMessageDelivery(socket.data.userId, sessionId, sendId, rejected);
             }
             socket.emit('session:error', { sessionId, error });
             return rejected;
@@ -696,10 +703,10 @@ export function setupWebSocket(httpServer: HttpServer): Server {
     );
 
     // Interrupt the active CLI session.
-    socket.on('session:interrupt', (sessionId) => {
-      if (denyControl(sessionId, 'session:interrupt')) return;
+    socket.on('session:interrupt', async (sessionId) => {
+      if (await denyControl(sessionId, 'session:interrupt')) return;
       try {
-        processManager.interrupt(sessionId, socket.data.userId);
+        await processManager.interrupt(sessionId, socket.data.userId);
       } catch (err) {
         socket.emit('session:error', {
           sessionId,
@@ -709,11 +716,11 @@ export function setupWebSocket(httpServer: HttpServer): Server {
     });
 
     // Set session permission mode
-    socket.on('session:set-mode', ({ sessionId, mode }) => {
-      if (denyControl(sessionId, 'session:set-mode')) return;
+    socket.on('session:set-mode', async ({ sessionId, mode }) => {
+      if (await denyControl(sessionId, 'session:set-mode')) return;
       console.log(`Setting session ${sessionId} mode to ${mode}`);
       try {
-        processManager.setMode(sessionId, socket.data.userId, mode);
+        await processManager.setMode(sessionId, socket.data.userId, mode);
       } catch (err) {
         socket.emit('session:error', {
           sessionId,
@@ -724,7 +731,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
 
     // Restart session (stop and start fresh)
     socket.on('session:restart', async (sessionId) => {
-      if (denyControl(sessionId, 'session:restart')) return;
+      if (await denyControl(sessionId, 'session:restart')) return;
       console.log(`Restart request for session ${sessionId}`);
       try {
         await processManager.restartSession(sessionId, socket.data.userId);
@@ -738,7 +745,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
 
     // Send raw input for interactive prompts (trust dialogs, etc.)
     socket.on('session:input', async ({ sessionId, input }) => {
-      if (denyControl(sessionId, 'session:input')) return;
+      if (await denyControl(sessionId, 'session:input')) return;
       if (rateLimited(sessionId, 'session:input')) return;
       console.log(`Received session:input for ${sessionId}: "${input}"`);
       try {
@@ -754,7 +761,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
 
     // Approve permission request
     socket.on('session:approve_permission', async ({ sessionId, toolNames, originalMessage }) => {
-      if (denyControl(sessionId, 'session:approve_permission')) return;
+      if (await denyControl(sessionId, 'session:approve_permission')) return;
       console.log(
         `Received session:approve_permission for ${sessionId}: tools=${toolNames.join(', ')}`
       );
@@ -776,8 +783,8 @@ export function setupWebSocket(httpServer: HttpServer): Server {
     });
 
     // Deny permission request
-    socket.on('session:deny_permission', ({ sessionId }) => {
-      if (denyControl(sessionId, 'session:deny_permission')) return;
+    socket.on('session:deny_permission', async ({ sessionId }) => {
+      if (await denyControl(sessionId, 'session:deny_permission')) return;
       console.log(`Received session:deny_permission for ${sessionId}`);
       try {
         processManager.denyPermission(sessionId, socket.data.userId);
@@ -793,7 +800,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
     socket.on('session:reconnect', async ({ sessionId, lastTimestamp, lastSequence }) => {
       console.log(`Reconnect request for session ${sessionId} from socket ${socket.id}`);
 
-      if (!canAccessSession(sessionId, socket.data.userId)) {
+      if (!(await canAccessSession(sessionId, socket.data.userId))) {
         console.warn(
           `[WS] DENIED session:reconnect userId=${socket.data.userId} sessionId=${sessionId}`
         );
@@ -804,7 +811,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
       // ALWAYS subscribe to the session room, regardless of running state
       // This ensures the socket receives events when a session starts
       socket.data.subscribedSessions.add(sessionId);
-      socket.join(`session:${sessionId}`);
+      await socket.join(`session:${sessionId}`);
       console.log(`Socket ${socket.id} joined session room ${sessionId}`);
 
       // Kimi ACP requests cannot survive a container replacement. If the
@@ -827,12 +834,9 @@ export function setupWebSocket(httpServer: HttpServer): Server {
         // getSessionBufferStatus signals needsFullResync when the circular buffer rolled
         // over since lastTimestamp — client should then fetch full state via REST instead
         // of trusting the truncated replay.
-        const { items: bufferedMessages, needsFullResync } = processManager.getSessionBufferStatus(
-          sessionId,
-          lastTimestamp,
-          lastSequence
-        );
-        const syncState = getSessionSyncState(sessionId, socket.data.userId);
+        const { items: bufferedMessages, needsFullResync } =
+          await processManager.getSessionBufferStatus(sessionId, lastTimestamp, lastSequence);
+        const syncState = await getSessionSyncState(sessionId, socket.data.userId);
 
         console.log(
           `Session ${sessionId} reconnected with ${bufferedMessages.length} buffered messages (needsFullResync=${needsFullResync})`
@@ -851,7 +855,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
           snapshotRevision: syncState.snapshotRevision,
         });
       } else {
-        const syncState = getSessionSyncState(sessionId, socket.data.userId);
+        const syncState = await getSessionSyncState(sessionId, socket.data.userId);
         const needsFullResync =
           lastSequence === undefined
             ? syncState.highWatermark > 0

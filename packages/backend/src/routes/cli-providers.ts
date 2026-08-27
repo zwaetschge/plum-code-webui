@@ -122,11 +122,11 @@ function getCodexModelsCacheInfo() {
   }
 }
 
-function getProviderModelsForUser(
+async function getProviderModelsForUser(
   provider: CLIProvider,
   userId: string,
-  zaiConfig: ReturnType<typeof getZaiApiConfigForUser>
-): string[] {
+  zaiConfig: Awaited<ReturnType<typeof getZaiApiConfigForUser>>
+): Promise<string[]> {
   if (provider === 'pi') return getPiModelsForUser(userId);
   if (provider !== 'zai') return getCliModels(provider);
 
@@ -143,33 +143,37 @@ router.get('/', requireAuth, async (req, res) => {
     const userId = (req as AuthenticatedRequest).userId;
     const availableProviders = await getAvailableProviders(userId);
     const availableIds = new Set(availableProviders.map((p) => p.id));
-    const enabledIds = new Set(getEnabledCliProvidersForUser(userId));
-    const zaiConfig = getZaiApiConfigForUser(userId);
+    const enabledIds = new Set(await getEnabledCliProvidersForUser(userId));
+    const zaiConfig = await getZaiApiConfigForUser(userId);
 
     const labels = getModelDisplayLabels();
     const zaiModelLabels = getClaudeApiModelLabels(zaiConfig);
-    const providers = Object.values(CLI_PROVIDERS).map((provider) => {
-      const models = getProviderModelsForUser(provider.id, userId, zaiConfig);
-      const providerLabels: Record<string, string> = {};
-      for (const m of models) {
-        if (labels[m]) providerLabels[m] = labels[m];
-      }
-      if (provider.defaultModel && labels[provider.defaultModel]) {
-        providerLabels[provider.defaultModel] = labels[provider.defaultModel]!;
-      }
-      if (provider.id === 'zai' && zaiModelLabels) {
-        Object.assign(providerLabels, zaiModelLabels);
-      }
-      const enabled = enabledIds.has(provider.id);
-      return {
-        ...provider,
-        models,
-        modelLabels: providerLabels,
-        enabled,
-        available:
-          enabled && availableIds.has(provider.id) && (provider.id !== 'zai' || zaiConfig !== null),
-      };
-    });
+    const providers = await Promise.all(
+      Object.values(CLI_PROVIDERS).map(async (provider) => {
+        const models = await getProviderModelsForUser(provider.id, userId, zaiConfig);
+        const providerLabels: Record<string, string> = {};
+        for (const m of models) {
+          if (labels[m]) providerLabels[m] = labels[m];
+        }
+        if (provider.defaultModel && labels[provider.defaultModel]) {
+          providerLabels[provider.defaultModel] = labels[provider.defaultModel]!;
+        }
+        if (provider.id === 'zai' && zaiModelLabels) {
+          Object.assign(providerLabels, zaiModelLabels);
+        }
+        const enabled = enabledIds.has(provider.id);
+        return {
+          ...provider,
+          models,
+          modelLabels: providerLabels,
+          enabled,
+          available:
+            enabled &&
+            availableIds.has(provider.id) &&
+            (provider.id !== 'zai' || zaiConfig !== null),
+        };
+      })
+    );
 
     const response: ApiResponse<typeof providers> = {
       success: true,
@@ -189,16 +193,18 @@ router.get('/', requireAuth, async (req, res) => {
 router.get('/available', requireAuth, async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).userId;
-    const enabledIds = new Set(getEnabledCliProvidersForUser(userId));
-    const zaiConfig = getZaiApiConfigForUser(userId);
+    const enabledIds = new Set(await getEnabledCliProvidersForUser(userId));
+    const zaiConfig = await getZaiApiConfigForUser(userId);
     const providers = (await getAvailableProviders(userId)).filter(
       (provider) => enabledIds.has(provider.id) && (provider.id !== 'zai' || zaiConfig !== null)
     );
 
-    const providersWithModels = providers.map((provider) => ({
-      ...provider,
-      models: getProviderModelsForUser(provider.id, userId, zaiConfig),
-    }));
+    const providersWithModels = await Promise.all(
+      providers.map(async (provider) => ({
+        ...provider,
+        models: await getProviderModelsForUser(provider.id, userId, zaiConfig),
+      }))
+    );
 
     const response: ApiResponse<CLIProviderConfig[]> = {
       success: true,
@@ -216,10 +222,10 @@ router.get('/available', requireAuth, async (req, res) => {
 
 router.get('/diagnostics', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
-  const zaiConfig = getZaiApiConfigForUser(userId);
+  const zaiConfig = await getZaiApiConfigForUser(userId);
   const diagnostics = await Promise.all(
     Object.values(CLI_PROVIDERS).map(async (provider) => {
-      const models = getProviderModelsForUser(provider.id, userId, zaiConfig);
+      const models = await getProviderModelsForUser(provider.id, userId, zaiConfig);
       const commandInfo = getCommandInfoCached(provider.command);
       const binaryPath = commandInfo.path;
       const credentialsPath = expandHome(provider.credentialsPath);
@@ -247,7 +253,7 @@ router.get('/diagnostics', requireAuth, async (req, res) => {
 });
 
 // Get specific CLI provider info
-router.get('/:id', requireAuth, (req, res) => {
+router.get('/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
   const provider = CLI_PROVIDERS[id as CLIProvider];
 
@@ -260,19 +266,19 @@ router.get('/:id', requireAuth, (req, res) => {
   }
 
   const userId = (req as AuthenticatedRequest).userId;
-  const zaiConfig = getZaiApiConfigForUser(userId);
+  const zaiConfig = await getZaiApiConfigForUser(userId);
   const response: ApiResponse<CLIProviderConfig> = {
     success: true,
     data: {
       ...provider,
-      models: getProviderModelsForUser(id as CLIProvider, userId, zaiConfig),
+      models: await getProviderModelsForUser(id as CLIProvider, userId, zaiConfig),
     },
   };
   res.json(response);
 });
 
 // Get models for a specific CLI provider
-router.get('/:id/models', requireAuth, (req, res) => {
+router.get('/:id/models', requireAuth, async (req, res) => {
   const { id } = req.params;
   const provider = CLI_PROVIDERS[id as CLIProvider];
 
@@ -285,7 +291,7 @@ router.get('/:id/models', requireAuth, (req, res) => {
   }
 
   const userId = (req as AuthenticatedRequest).userId;
-  const zaiConfig = getZaiApiConfigForUser(userId);
+  const zaiConfig = await getZaiApiConfigForUser(userId);
   const response: ApiResponse<{
     provider: string;
     models: string[];
@@ -294,7 +300,7 @@ router.get('/:id/models', requireAuth, (req, res) => {
     success: true,
     data: {
       provider: id!,
-      models: getProviderModelsForUser(id as CLIProvider, userId, zaiConfig),
+      models: await getProviderModelsForUser(id as CLIProvider, userId, zaiConfig),
       defaultModel: provider.defaultModel,
     },
   };
@@ -316,22 +322,24 @@ router.post(
 
     const labels = getModelDisplayLabels();
     const userId = (req as AuthenticatedRequest).userId;
-    const zaiConfig = getZaiApiConfigForUser(userId);
+    const zaiConfig = await getZaiApiConfigForUser(userId);
     const zaiModelLabels = getClaudeApiModelLabels(zaiConfig);
-    const providers = Object.values(CLI_PROVIDERS).map((provider) => {
-      const models = getProviderModelsForUser(provider.id, userId, zaiConfig);
-      const providerLabels: Record<string, string> = {};
-      for (const m of models) {
-        if (labels[m]) providerLabels[m] = labels[m];
-      }
-      if (provider.defaultModel && labels[provider.defaultModel]) {
-        providerLabels[provider.defaultModel] = labels[provider.defaultModel]!;
-      }
-      if (provider.id === 'zai' && zaiModelLabels) {
-        Object.assign(providerLabels, zaiModelLabels);
-      }
-      return { id: provider.id, models, modelLabels: providerLabels };
-    });
+    const providers = await Promise.all(
+      Object.values(CLI_PROVIDERS).map(async (provider) => {
+        const models = await getProviderModelsForUser(provider.id, userId, zaiConfig);
+        const providerLabels: Record<string, string> = {};
+        for (const m of models) {
+          if (labels[m]) providerLabels[m] = labels[m];
+        }
+        if (provider.defaultModel && labels[provider.defaultModel]) {
+          providerLabels[provider.defaultModel] = labels[provider.defaultModel]!;
+        }
+        if (provider.id === 'zai' && zaiModelLabels) {
+          Object.assign(providerLabels, zaiModelLabels);
+        }
+        return { id: provider.id, models, modelLabels: providerLabels };
+      })
+    );
 
     const response: ApiResponse<{ providers: typeof providers; codexCacheRefreshed: boolean }> = {
       success: true,

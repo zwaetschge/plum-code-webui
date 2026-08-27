@@ -24,8 +24,8 @@ initDatabase();
 
 test.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
 
-test('a backup is written, verified and readable on its own', () => {
-  const result = createBackup(new Date('2026-08-26T10:00:00Z'));
+test('a backup is written, verified and readable on its own', async () => {
+  const result = await createBackup(new Date('2026-08-26T10:00:00Z'));
   assert.ok(result.bytes > 0, 'an empty file is not a backup');
   assert.equal(result.verified, true, result.detail);
 
@@ -38,13 +38,13 @@ test('a backup is written, verified and readable on its own', () => {
   copy.close();
 });
 
-test('the copy carries the data, not just the schema', () => {
+test('the copy carries the data, not just the schema', async () => {
   const db = getDatabase();
   db.prepare(
     'INSERT INTO users (id, email, name, provider, provider_id) VALUES (?, ?, ?, ?, ?)'
   ).run('backup-user', 'b@example.test', 'B', 'local', 'backup-user');
 
-  const result = createBackup(new Date('2026-08-26T11:00:00Z'));
+  const result = await createBackup(new Date('2026-08-26T11:00:00Z'));
   const copy = new Database(result.path, { readonly: true });
   const row = copy.prepare('SELECT name FROM users WHERE id = ?').get('backup-user') as
     | { name: string }
@@ -53,9 +53,9 @@ test('the copy carries the data, not just the schema', () => {
   assert.equal(row?.name, 'B');
 });
 
-test('retention keeps the newest and drops the rest', () => {
+test('retention keeps the newest and drops the rest', async () => {
   for (let hour = 12; hour < 17; hour++) {
-    createBackup(new Date(`2026-08-26T${hour}:00:00Z`));
+    await createBackup(new Date(`2026-08-26T${hour}:00:00Z`));
   }
   const before = listBackups();
   assert.ok(before.length >= 5);
@@ -71,8 +71,8 @@ test('retention keeps the newest and drops the rest', () => {
   );
 });
 
-test('retention never wipes everything, even when asked for zero', () => {
-  createBackup(new Date('2026-08-26T18:00:00Z'));
+test('retention never wipes everything, even when asked for zero', async () => {
+  await createBackup(new Date('2026-08-26T18:00:00Z'));
   pruneBackups(0);
   assert.ok(listBackups().length >= 1, 'keeping nothing would leave no recovery point');
 });

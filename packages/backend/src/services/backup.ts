@@ -1,8 +1,9 @@
+import { get as pgGet, run as pgRun } from '../db/pg.js';
 import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 
-import { getDatabase, getDatabasePath } from '../db/index.js';
+import { getDatabasePath } from '../db/index.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('backup');
@@ -50,7 +51,7 @@ function timestamp(now: Date): string {
  * Verification opens the *copy*, never the live file — a fresh connection to a
  * file nobody else holds is safe, and an unverified backup is not a backup.
  */
-function verify(filePath: string): { ok: boolean; detail?: string } {
+async function verify(filePath: string): Promise<{ ok: boolean; detail?: string }> {
   let copy: Database.Database | null = null;
   try {
     copy = new Database(filePath, { readonly: true, fileMustExist: true });
@@ -61,8 +62,12 @@ function verify(filePath: string): { ok: boolean; detail?: string } {
     if (verdict !== 'ok') return { ok: false, detail: verdict.slice(0, 200) };
 
     // Structure alone is not enough: an empty file passes integrity_check.
-    const sessions = copy.prepare('SELECT COUNT(*) AS c FROM sessions').get() as { c: number };
-    const messages = copy.prepare('SELECT COUNT(*) AS c FROM messages').get() as { c: number };
+    const sessions = (await pgGet('SELECT COUNT(*) AS c FROM sessions')) as unknown as {
+      c: number;
+    };
+    const messages = (await pgGet('SELECT COUNT(*) AS c FROM messages')) as unknown as {
+      c: number;
+    };
     return { ok: true, detail: `${sessions.c} sessions, ${messages.c} messages` };
   } catch (error) {
     return {
@@ -74,17 +79,17 @@ function verify(filePath: string): { ok: boolean; detail?: string } {
   }
 }
 
-export function createBackup(now: Date = new Date()): BackupResult {
+export async function createBackup(now: Date = new Date()): Promise<BackupResult> {
   const startedAt = Date.now();
   const target = path.join(backupDirectory(), `${BACKUP_PREFIX}${timestamp(now)}${BACKUP_SUFFIX}`);
 
   // VACUUM INTO refuses to overwrite, which is the behaviour we want.
   if (fs.existsSync(target)) fs.rmSync(target);
 
-  getDatabase().prepare('VACUUM INTO ?').run(target);
+  await pgRun('VACUUM INTO ?', target);
 
   const bytes = fs.statSync(target).size;
-  const verification = verify(target);
+  const verification = await verify(target);
   const result: BackupResult = {
     path: target,
     bytes,
@@ -144,9 +149,9 @@ export function startBackupSchedule(): void {
     return;
   }
 
-  const run = () => {
+  const run = async () => {
     try {
-      createBackup();
+      await createBackup();
       pruneBackups(keep);
     } catch (error) {
       log.error('Scheduled backup failed', { error: String(error) });

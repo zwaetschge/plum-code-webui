@@ -1,10 +1,11 @@
+import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { mkdir, open, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { ChatMedia, ChatMediaSource } from '@plum-code-webui/shared';
-import { getDatabase, getDatabasePath } from '../db/index.js';
+import { getDatabasePath } from '../db/index.js';
 
 export const MAX_CHAT_MEDIA_BYTES = 25 * 1024 * 1024;
 
@@ -328,15 +329,16 @@ async function ensureStoredBlob(
 /** Persist validated media rows and return only the public, path-free shape. */
 export async function persistMessageMedia(input: PersistMessageMediaInput): Promise<ChatMedia[]> {
   if (input.media.length === 0) return [];
-  const database = getDatabase();
-  const owner = database
-    .prepare(
-      `SELECT m.id
+
+  const owner = await pgGet(
+    `SELECT m.id
        FROM messages m
        JOIN sessions s ON s.id = m.session_id
-       WHERE m.id = ? AND m.session_id = ? AND s.user_id = ?`
-    )
-    .get(input.messageId, input.sessionId, input.userId);
+       WHERE m.id = ? AND m.session_id = ? AND s.user_id = ?`,
+    input.messageId,
+    input.sessionId,
+    input.userId
+  );
   if (!owner) throw new Error('chat media message does not belong to session owner');
 
   const preparedItems = await Promise.all(input.media.map(preparePendingMedia));
@@ -349,21 +351,24 @@ export async function persistMessageMedia(input: PersistMessageMediaInput): Prom
   };
 
   for (const prepared of preparedItems) {
-    const existingForMessage = database
-      .prepare(`${MEDIA_SELECT} WHERE message_id = ? AND sha256 = ? LIMIT 1`)
-      .get(input.messageId, prepared.sha256) as MessageMediaRow | undefined;
+    const existingForMessage = (await pgGet(
+      `${MEDIA_SELECT} WHERE message_id = ? AND sha256 = ? LIMIT 1`,
+      input.messageId,
+      prepared.sha256
+    )) as unknown as MessageMediaRow | undefined;
     if (existingForMessage) {
       addResult(toChatMedia(existingForMessage));
       continue;
     }
 
     if (prepared.sourceId) {
-      const sourceMatch = database
-        .prepare(
-          `${MEDIA_SELECT}
-           WHERE session_id = ? AND source = ? AND source_id = ? LIMIT 1`
-        )
-        .get(input.sessionId, prepared.source, prepared.sourceId) as MessageMediaRow | undefined;
+      const sourceMatch = (await pgGet(
+        `${MEDIA_SELECT}
+           WHERE session_id = ? AND source = ? AND source_id = ? LIMIT 1`,
+        input.sessionId,
+        prepared.source,
+        prepared.sourceId
+      )) as unknown as MessageMediaRow | undefined;
       if (sourceMatch) {
         if (sourceMatch.messageId !== input.messageId) {
           throw new Error('chat media source id is already attached to another message');
@@ -373,38 +378,35 @@ export async function persistMessageMedia(input: PersistMessageMediaInput): Prom
       }
     }
 
-    const reusable = database
-      .prepare(
-        `SELECT storage_key AS storageKey
+    const reusable = (await pgGet(
+      `SELECT storage_key AS storageKey
          FROM message_media
          WHERE user_id = ? AND sha256 = ?
-         ORDER BY created_at ASC, id ASC LIMIT 1`
-      )
-      .get(input.userId, prepared.sha256) as { storageKey: string } | undefined;
+         ORDER BY created_at ASC, id ASC LIMIT 1`,
+      input.userId,
+      prepared.sha256
+    )) as unknown as { storageKey: string } | undefined;
     const storageKey = await ensureStoredBlob(input.userId, prepared, reusable?.storageKey);
     const id = randomUUID();
 
-    database
-      .prepare(
-        `INSERT INTO message_media (
+    await pgRun(
+      `INSERT INTO message_media (
            id, message_id, session_id, user_id, storage_key, filename,
            mime_type, byte_size, sha256, alt_text, source, source_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        id,
-        input.messageId,
-        input.sessionId,
-        input.userId,
-        storageKey,
-        prepared.filename,
-        prepared.mimeType,
-        prepared.byteSize,
-        prepared.sha256,
-        prepared.altText,
-        prepared.source,
-        prepared.sourceId
-      );
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      input.messageId,
+      input.sessionId,
+      input.userId,
+      storageKey,
+      prepared.filename,
+      prepared.mimeType,
+      prepared.byteSize,
+      prepared.sha256,
+      prepared.altText,
+      prepared.source,
+      prepared.sourceId
+    );
 
     addResult(
       toChatMedia({
@@ -428,21 +430,19 @@ export async function persistMessageMedia(input: PersistMessageMediaInput): Prom
 }
 
 /** Load persisted public media grouped by message id for REST hydration. */
-export function loadMessageMedia(messageIds: string[]): Map<string, ChatMedia[]> {
+export async function loadMessageMedia(messageIds: string[]): Promise<Map<string, ChatMedia[]>> {
   const grouped = new Map<string, ChatMedia[]>();
   if (messageIds.length === 0) return grouped;
-  const database = getDatabase();
 
   for (let offset = 0; offset < messageIds.length; offset += 500) {
     const batch = messageIds.slice(offset, offset + 500);
     const placeholders = batch.map(() => '?').join(', ');
-    const rows = database
-      .prepare(
-        `${MEDIA_SELECT}
+    const rows = (await pgAll(
+      `${MEDIA_SELECT}
          WHERE message_id IN (${placeholders})
-         ORDER BY created_at ASC, message_media.rowid ASC`
-      )
-      .all(...batch) as MessageMediaRow[];
+         ORDER BY created_at ASC, message_media.rowid ASC`,
+      ...batch
+    )) as unknown as MessageMediaRow[];
     for (const row of rows) {
       const media = grouped.get(row.messageId) ?? [];
       media.push(toChatMedia(row));
@@ -458,18 +458,19 @@ export async function resolveOwnedChatMedia(input: {
   sessionId: string;
   userId: string;
 }): Promise<ResolvedChatMedia | null> {
-  const database = getDatabase();
-  const row = database
-    .prepare(
-      `${MEDIA_SELECT}
+  const row = (await pgGet(
+    `${MEDIA_SELECT}
        JOIN sessions s ON s.id = message_media.session_id
        WHERE message_media.id = ?
          AND message_media.session_id = ?
          AND message_media.user_id = ?
          AND s.user_id = ?
-       LIMIT 1`
-    )
-    .get(input.mediaId, input.sessionId, input.userId, input.userId) as MessageMediaRow | undefined;
+       LIMIT 1`,
+    input.mediaId,
+    input.sessionId,
+    input.userId,
+    input.userId
+  )) as unknown as MessageMediaRow | undefined;
   if (!row || !STORAGE_KEY_PATTERN.test(row.storageKey)) return null;
 
   const userDirectory = userStorageDirectory(input.userId);
