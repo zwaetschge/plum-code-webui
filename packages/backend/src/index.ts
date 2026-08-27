@@ -9,6 +9,7 @@ import fs from 'fs';
 import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
 import passport from 'passport';
@@ -306,6 +307,24 @@ async function main() {
       credentials: true,
     })
   );
+  // Nothing else compresses: there is no compress middleware on the Traefik
+  // router either, so the frontend bundle went out at its full size — the entry
+  // chunk alone is 178 kB raw against 53 kB gzipped, paid on every cold load
+  // over the internet.
+  //
+  // Streaming responses are excluded. Socket.IO has its own permessage-deflate,
+  // and buffering an SSE stream to compress it would defeat the point of the
+  // gateway's event feed.
+  app.use(
+    compression({
+      filter: (req, res) => {
+        const type = String(res.getHeader('Content-Type') ?? '');
+        if (type.includes('text/event-stream')) return false;
+        return compression.filter(req, res);
+      },
+    })
+  );
+
   app.use(express.json());
   app.use(cookieParser());
   app.use(

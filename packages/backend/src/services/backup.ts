@@ -41,6 +41,19 @@ export interface BackupResult {
 const BACKUP_PREFIX = 'backup-';
 const BACKUP_SUFFIX = '.dump';
 
+/**
+ * The schema the application actually uses.
+ *
+ * Dumping the whole database instead was both wasteful and wrong: a test run
+ * creates and drops its own schemas constantly, so an unscoped dump grew to 84
+ * tables, took twice as long, and failed outright when pg_dump's snapshot
+ * caught a schema mid-drop. Scoping it means the archive holds exactly what a
+ * restore needs and nothing that happens to share the database.
+ */
+function applicationSchema(): string {
+  return process.env.PGSCHEMA || 'public';
+}
+
 function backupDirectory(): string {
   const dir = path.join(getDataDirectory(), 'backups');
   fs.mkdirSync(dir, { recursive: true });
@@ -68,7 +81,7 @@ async function verify(filePath: string): Promise<{ ok: boolean; detail?: string 
     });
     const tables = stdout.match(/^\d+;.*TABLE DATA /gm)?.length ?? 0;
     const missing = ['sessions', 'messages'].filter(
-      (table) => !new RegExp(`TABLE DATA public ${table} `).test(stdout)
+      (table) => !new RegExp(`TABLE DATA ${applicationSchema()} ${table} `).test(stdout)
     );
     if (missing.length) {
       return { ok: false, detail: `dump is missing ${missing.join(', ')}` };
@@ -104,6 +117,8 @@ export async function createBackup(now: Date = new Date()): Promise<BackupResult
       pg.user,
       '--dbname',
       pg.database,
+      '--schema',
+      applicationSchema(),
       '--format',
       'custom',
       '--compress',
