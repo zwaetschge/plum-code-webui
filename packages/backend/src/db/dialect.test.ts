@@ -121,7 +121,7 @@ describe('translateDialect: strftime', () => {
   it('translates epoch seconds to EXTRACT', () => {
     assert.equal(
       translateDialect("SELECT CAST(strftime('%s', recorded_at) AS INTEGER)"),
-      'SELECT CAST(EXTRACT(EPOCH FROM (recorded_at)::timestamp) AS INTEGER)'
+      'SELECT CAST(EXTRACT(EPOCH FROM (recorded_at)::timestamp)::bigint AS INTEGER)'
     );
   });
 
@@ -335,5 +335,17 @@ describe('translateDialect: IS against a subquery', () => {
       ),
       'SELECT 1 FROM messages WHERE chat_id IS NOT DISTINCT FROM (SELECT active_chat_id FROM sessions WHERE id = ?)'
     );
+  });
+});
+
+describe('translateDialect: epoch division truncates', () => {
+  it('casts the epoch to bigint so a bucket division truncates', () => {
+    // Without the cast the division is exact and the surrounding CAST rounds,
+    // so a row at 10:11 lands in the 10:15 bucket where SQLite put it in 10:00
+    // — two rows that used to aggregate into one quietly stop doing so.
+    const out = translateDialect(
+      "SELECT CAST(strftime('%s', created_at) / ? AS INTEGER) * ? AS bucket_epoch FROM t"
+    );
+    assert.match(out, /EXTRACT\(EPOCH FROM \(created_at\)::timestamp\)::bigint/);
   });
 });

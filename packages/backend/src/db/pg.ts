@@ -24,6 +24,20 @@ const log = createLogger('pg');
 types.setTypeParser(types.builtins.INT8, (value) => Number(value));
 
 /**
+ * And so does NUMERIC, which is what an aggregate over BIGINT produces.
+ *
+ * `SUM(total_tokens)` on a BIGINT column returns numeric, not int8 — Postgres
+ * widens it so the sum cannot overflow. `pg` returns numeric as a string for
+ * the same reason it does int8, and the analytics code adds those sums,
+ * compares them and sends them to the charts. Left as strings, a token total
+ * renders as `"600"` and two of them add up to `"600200"`.
+ *
+ * No column in this schema is declared NUMERIC, so this parser only ever sees
+ * an aggregate of values that were already safe as numbers.
+ */
+types.setTypeParser(types.builtins.NUMERIC, (value) => Number(value));
+
+/**
  * Async data access for the migration off SQLite.
  *
  * `better-sqlite3` is synchronous, so all 536 call sites read like

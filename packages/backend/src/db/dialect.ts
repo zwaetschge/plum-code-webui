@@ -156,7 +156,13 @@ function translateStrftime(args: string): string | null {
   let value = `(${column})::timestamp`;
   if (modifier) value = `(${value} + (${modifier})::interval)`;
 
-  if (format === '%s') return `EXTRACT(EPOCH FROM ${value})`;
+  // `::bigint`, and it matters. SQLite's strftime('%s', ...) yields an integer,
+  // so `strftime('%s', t) / 900` is integer division and truncates. EXTRACT
+  // returns numeric, where the same division is exact and the surrounding CAST
+  // rounds instead — which puts a row recorded at 10:11 into the 10:15 bucket
+  // while SQLite put it in 10:00. Two rows that used to aggregate into one
+  // silently stop doing so.
+  if (format === '%s') return `EXTRACT(EPOCH FROM ${value})::bigint`;
 
   const pattern = translateStrftimeFormat(format!);
   return pattern === null ? null : `to_char(${value}, '${pattern}')`;

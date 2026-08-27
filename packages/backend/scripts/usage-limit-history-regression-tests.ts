@@ -1,80 +1,63 @@
 import assert from 'node:assert/strict';
-import Database from 'better-sqlite3';
-import {
-  normalizeUsageLimitHistoryRange,
-  queryUsageLimitHistory,
-  recordUsageLimitSnapshots,
-} from '../src/services/usage-limit-history.js';
 
-const database = new Database(':memory:');
-database.exec(`
-  CREATE TABLE usage_limit_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    metric_key TEXT NOT NULL,
-    metric_label TEXT NOT NULL,
-    utilization REAL,
-    used_value REAL,
-    limit_value REAL,
-    remaining_value REAL,
-    unit TEXT,
-    resets_at TEXT,
-    window_seconds INTEGER,
-    source TEXT,
-    reset_detected INTEGER NOT NULL DEFAULT 0,
-    reset_event_at TEXT,
-    recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+import { createTestSchema, dropTestSchema, useTestSchema } from '../src/db/testing.js';
+
+useTestSchema();
+
+const { normalizeUsageLimitHistoryRange, queryUsageLimitHistory, recordUsageLimitSnapshots } =
+  await import('../src/services/usage-limit-history.js');
+const { run: pgRun } = await import('../src/db/pg.js');
+
+await createTestSchema();
+
+// usage_history has foreign keys to both. The hand-written SQLite schema this
+// suite used to declare had none, so it inserted usage for sessions that did
+// not exist and nothing objected.
+for (const id of ['quota-user', 'other-user']) {
+  await pgRun(
+    `INSERT INTO users (id, email, name, provider, provider_id)
+     VALUES (?, ?, ?, 'local', ?)`,
+    id,
+    `${id}@example.test`,
+    id,
+    id
   );
-  CREATE INDEX idx_usage_limit_snapshots_series_recorded
-    ON usage_limit_snapshots(user_id, provider, metric_key, recorded_at DESC);
-  CREATE TABLE usage_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    input_tokens INTEGER NOT NULL DEFAULT 0,
-    output_tokens INTEGER NOT NULL DEFAULT 0,
-    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
-    total_tokens INTEGER NOT NULL DEFAULT 0,
-    cost_usd REAL NOT NULL DEFAULT 0,
-    model TEXT,
-    provider TEXT NOT NULL DEFAULT 'unknown',
-    turn_id TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+}
+for (const id of ['session-1', 'session-2']) {
+  await pgRun(
+    `INSERT INTO sessions (id, user_id, name, working_directory)
+     VALUES (?, 'quota-user', ?, '/tmp')`,
+    id,
+    id
   );
-`);
+}
 
 const userId = 'quota-user';
 const initialAt = new Date('2026-07-28T10:00:00.000Z');
 const firstResetAt = '2026-07-28T11:00:00.000Z';
 
-database
-  .prepare(
-    `INSERT INTO usage_history (
+await pgRun(
+  `INSERT INTO usage_history (
       user_id, session_id, input_tokens, output_tokens, cache_read_tokens,
       cache_creation_tokens, total_tokens, provider, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-  .run(userId, 'session-1', 600, 200, 100, 0, 900, 'zai', '2026-07-28 10:04:00');
-database
-  .prepare(
-    `INSERT INTO usage_history (
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  userId, 'session-1', 600, 200, 100, 0, 900, 'zai', '2026-07-28 10:04:00'
+);
+await pgRun(
+  `INSERT INTO usage_history (
       user_id, session_id, input_tokens, output_tokens, cache_read_tokens,
       cache_creation_tokens, total_tokens, provider, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  )
-  .run(userId, 'session-1', 100, 50, 25, 0, 175, 'z-ai', '2026-07-28 10:11:00');
-database
-  .prepare(
-    `INSERT INTO usage_history (
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  userId, 'session-1', 100, 50, 25, 0, 175, 'z-ai', '2026-07-28 10:11:00'
+);
+await pgRun(
+  `INSERT INTO usage_history (
       user_id, session_id, total_tokens, provider, created_at
-    ) VALUES (?, ?, ?, ?, ?)`
-  )
-  .run('other-user', 'session-2', 99_999, 'zai', '2026-07-28 10:07:00');
+    ) VALUES (?, ?, ?, ?, ?)`,
+  'other-user', 'session-2', 99_999, 'zai', '2026-07-28 10:07:00'
+);
 
-const initialCount = recordUsageLimitSnapshots(
-  database,
+const initialCount = await recordUsageLimitSnapshots(
   userId,
   'zai',
   {
@@ -111,8 +94,7 @@ const initialCount = recordUsageLimitSnapshots(
 );
 assert.equal(initialCount, 4, 'five-hour, web-search, account tokens, and account calls persist');
 
-const duplicateCount = recordUsageLimitSnapshots(
-  database,
+const duplicateCount = await recordUsageLimitSnapshots(
   userId,
   'zai',
   {
@@ -133,8 +115,7 @@ const duplicateCount = recordUsageLimitSnapshots(
 );
 assert.equal(duplicateCount, 0, 'rapid identical refreshes are deduplicated');
 
-const resetCount = recordUsageLimitSnapshots(
-  database,
+const resetCount = await recordUsageLimitSnapshots(
   userId,
   'zai',
   {
@@ -155,8 +136,7 @@ const resetCount = recordUsageLimitSnapshots(
 );
 assert.equal(resetCount, 1);
 
-const history = queryUsageLimitHistory(
-  database,
+const history = await queryUsageLimitHistory(
   userId,
   ['zai'],
   '24h',
@@ -186,8 +166,7 @@ assert.deepEqual(history.trackedTokens, [
   },
 ]);
 
-const otherUserHistory = queryUsageLimitHistory(
-  database,
+const otherUserHistory = await queryUsageLimitHistory(
   'other-user',
   ['zai'],
   '24h',
@@ -199,5 +178,5 @@ assert.equal(otherUserHistory.trackedTokens[0]?.totalTokens, 99_999);
 assert.equal(normalizeUsageLimitHistoryRange('30d'), '30d');
 assert.equal(normalizeUsageLimitHistoryRange('invalid'), '24h');
 
-database.close();
+await dropTestSchema();
 console.log('usage limit history regression tests passed');
