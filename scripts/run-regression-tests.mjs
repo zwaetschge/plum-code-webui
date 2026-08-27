@@ -6,6 +6,23 @@ const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
 export const REGRESSION_SUITES = [
   {
+    // Unit tests, run by Node's built-in runner through tsx. Discovery is by
+    // filename, so a new *.test.ts anywhere under the backend joins the suite
+    // without touching this list.
+    name: 'unit tests',
+    command: 'pnpm',
+    args: [
+      '--filter',
+      '@plum-code-webui/backend',
+      'exec',
+      'node',
+      '--import',
+      'tsx',
+      '--test',
+      'src/**/*.test.ts',
+    ],
+  },
+  {
     name: 'regression runner',
     command: 'node',
     args: ['scripts/regression-runner-tests.mjs'],

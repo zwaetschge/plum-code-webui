@@ -4,6 +4,9 @@ import fs from 'node:fs';
 import { REGRESSION_SUITES, runRegressionSuites } from './run-regression-tests.mjs';
 
 const expectedSuites = [
+  // Node's built-in runner over src/**/*.test.ts; discovery is by filename, so
+  // new unit tests join without touching this list.
+  'unit tests',
   'regression runner',
   'android MCP device selection',
   'providers',
@@ -74,9 +77,12 @@ const result = await runRegressionSuites(
 assert.deepEqual(calls, expectedSuites.slice(0, 3), 'a failed suite must not hide later suites');
 assert.deepEqual(
   result.failures.map(({ name, exitCode }) => ({ name, exitCode })),
+  // Positions shifted when 'unit tests' became the first suite; the point of the
+  // assertion is that a failure does not stop the ones after it, not which
+  // suites happen to sit in slots 1 to 3.
   [
-    { name: 'regression runner', exitCode: 1 },
-    { name: 'providers', exitCode: 2 },
+    { name: expectedSuites[0], exitCode: 1 },
+    { name: expectedSuites[2], exitCode: 2 },
   ]
 );
 
