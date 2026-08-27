@@ -64,7 +64,7 @@ export const REGRESSION_SUITES = [
     args: ['--filter', '@plum-code-webui/backend', 'run', 'test:security-boundaries'],
   },
   {
-    name: 'sqlite session store',
+    name: 'session store',
     command: 'pnpm',
     args: ['--filter', '@plum-code-webui/backend', 'run', 'test:session-store'],
   },

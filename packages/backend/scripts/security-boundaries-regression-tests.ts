@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Database from 'better-sqlite3';
 import authRouter from '../src/routes/auth.js';
 import basicAuthRouter from '../src/routes/basic-auth.js';
 import claudeConfigRouter from '../src/routes/claude-config.js';
@@ -17,6 +16,10 @@ import { permissionIdentityMatches } from '../src/routes/permissions.js';
 import { permissionRequestBelongsToSession } from '../src/services/opencode/OpencodeServer.js';
 import { MobileAuthCodeStore, createPkceChallenge } from '../src/services/mobileAuthCodes.js';
 import { isMobileGatewayPublicRequest } from '../src/middleware/mobileGateway.js';
+import { createTestSchema, dropTestSchema, useTestSchema } from '../src/db/testing.js';
+
+useTestSchema();
+const { get: pgGet, run: pgRun } = await import('../src/db/pg.js');
 
 type RouterLayer = {
   route?: {
@@ -188,26 +191,32 @@ function testComfyInputPrimitives(): void {
   assert.equal(detectImageMime(Buffer.from('not an image')), null);
 }
 
-function testBootstrapAdminIdentity(): void {
+/**
+ * First boot hands out the admin role, and SEED_ADMIN_EMAIL decides to whom.
+ * Anyone else signing in first must not take it.
+ */
+async function testBootstrapAdminIdentity(): Promise<void> {
   const previous = process.env.SEED_ADMIN_EMAIL;
   process.env.SEED_ADMIN_EMAIL = 'owner@example.com';
   try {
-    const db = new Database(':memory:');
-    db.exec(`
-      CREATE TABLE users (
-        id TEXT PRIMARY KEY,
-        email TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'user',
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    for (const [id, email] of [
+      ['attacker', 'attacker@example.com'],
+      ['owner', 'owner@example.com'],
+    ]) {
+      await pgRun(
+        `INSERT INTO users (id, email, name, provider, provider_id)
+         VALUES (?, ?, ?, 'local', ?)`,
+        id,
+        email,
+        id,
+        id
       );
-      INSERT INTO users (id, email) VALUES ('attacker', 'attacker@example.com');
-      INSERT INTO users (id, email) VALUES ('owner', 'owner@example.com');
-    `);
-    assert.equal(ensureBootstrapAdmin(db, 'attacker', 'attacker@example.com'), false);
-    assert.equal(ensureBootstrapAdmin(db, 'owner', 'owner@example.com'), true);
-    const owner = db.prepare(`SELECT role FROM users WHERE id = 'owner'`).get() as { role: string };
+    }
+
+    assert.equal(await ensureBootstrapAdmin('attacker', 'attacker@example.com'), false);
+    assert.equal(await ensureBootstrapAdmin('owner', 'owner@example.com'), true);
+    const owner = (await pgGet(`SELECT role FROM users WHERE id = 'owner'`)) as { role: string };
     assert.equal(owner.role, 'admin');
-    db.close();
   } finally {
     if (previous === undefined) delete process.env.SEED_ADMIN_EMAIL;
     else process.env.SEED_ADMIN_EMAIL = previous;
@@ -276,15 +285,19 @@ async function testCustomCommandsUseRestrictedEnvironment(): Promise<void> {
   }
 }
 
+await createTestSchema();
+
 testAdminMutationBoundaries();
 await testCliProviderLoginNeedsIdentity();
 testRestrictedCommandEnvironment();
 testPermissionIdentityBinding();
 testUntrustedActiveDocuments();
 testComfyInputPrimitives();
-testBootstrapAdminIdentity();
+await testBootstrapAdminIdentity();
 testMobileAuthBoundary();
 await testPermissionHookCarriesSessionIdentity();
 await testCustomCommandsUseRestrictedEnvironment();
+
+await dropTestSchema();
 
 console.log('security boundary regression tests passed');

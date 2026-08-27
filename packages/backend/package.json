@@ -24,7 +24,7 @@
     "test:usage-limit-history": "tsx scripts/usage-limit-history-regression-tests.ts",
     "test:security-boundaries": "tsx scripts/security-boundaries-regression-tests.ts",
     "test:migrations": "tsx scripts/migration-dry-run.ts",
-    "test:session-store": "tsx scripts/sqlite-session-store-regression-tests.ts",
+    "test:session-store": "tsx scripts/session-store-regression-tests.ts",
     "test:websocket-auth": "tsx scripts/websocket-authorization-regression-tests.ts",
     "test:websocket-send-ack": "tsx scripts/websocket-send-ack-regression-tests.ts",
     "test:durable-chat": "tsx scripts/durable-chat-regression-tests.ts",

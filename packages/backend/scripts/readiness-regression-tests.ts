@@ -25,11 +25,15 @@ process.env.WEBUI_DATA_DIR = dataDirectory;
 process.env.WEBUI_CONFIG_HOME = configDirectory;
 process.env.WEBUI_SUPPRESS_BOOTSTRAP_CREDENTIAL_LOG = '1';
 
-const { initDatabase } = await import('../src/db/index.js');
-const { buildReadinessReport } = await import('../src/services/readiness.js');
+const { useTestSchema, createTestSchema, dropTestSchema } = await import('../src/db/testing.js');
+useTestSchema();
 
-const database = initDatabase();
-const ready = buildReadinessReport(frontendDirectory);
+const { buildReadinessReport } = await import('../src/services/readiness.js');
+const { run: pgRun } = await import('../src/db/pg.js');
+
+await createTestSchema();
+
+const ready = await buildReadinessReport(frontendDirectory);
 assert.equal(ready.status, 'ready');
 assert.equal(ready.checks.database?.ok, true);
 assert.equal(ready.checks.dataDirectory?.ok, true);
@@ -37,26 +41,34 @@ assert.equal(ready.checks.configHome?.ok, true);
 assert.equal(ready.checks.frontend?.ok, true);
 
 fs.rmSync(path.join(frontendDirectory, 'assets/app.js'));
-const missingAsset = buildReadinessReport(frontendDirectory);
+const missingAsset = await buildReadinessReport(frontendDirectory);
 assert.equal(missingAsset.status, 'not_ready');
 assert.equal(missingAsset.checks.frontend?.ok, false);
 assert.match(missingAsset.checks.frontend?.detail || '', /referenced asset is missing/);
 
 fs.writeFileSync(path.join(frontendDirectory, 'assets/app.js'), 'globalThis.appLoaded = true;');
 fs.writeFileSync(path.join(frontendDirectory, 'assets/app.css'), '');
-const emptyAsset = buildReadinessReport(frontendDirectory);
+const emptyAsset = await buildReadinessReport(frontendDirectory);
 assert.equal(emptyAsset.status, 'not_ready');
 assert.equal(emptyAsset.checks.frontend?.ok, false);
 assert.match(emptyAsset.checks.frontend?.detail || '', /frontend asset is empty/);
 
 fs.writeFileSync(path.join(frontendDirectory, 'assets/app.css'), 'body { color: black; }');
 fs.rmSync(path.join(frontendDirectory, 'index.html'));
-const missingFrontend = buildReadinessReport(frontendDirectory);
+const missingFrontend = await buildReadinessReport(frontendDirectory);
 assert.equal(missingFrontend.status, 'not_ready');
 assert.equal(missingFrontend.checks.frontend?.ok, false);
 
-database.close();
-assert.equal(buildReadinessReport().checks.database?.ok, false);
+// Renaming the table away is the cheapest stand-in for a database that cannot
+// answer: the connection is fine, the read is not.
+await pgRun('ALTER TABLE messages RENAME TO messages_hidden');
+try {
+  assert.equal((await buildReadinessReport()).checks.database?.ok, false);
+} finally {
+  await pgRun('ALTER TABLE messages_hidden RENAME TO messages');
+}
+
+await dropTestSchema();
 fs.rmSync(root, { recursive: true, force: true });
 
 console.log('readiness regression tests passed');

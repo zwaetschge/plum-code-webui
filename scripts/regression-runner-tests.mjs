@@ -14,7 +14,7 @@ const expectedSuites = [
   'runtime analytics',
   'analytics formatting',
   'security boundaries',
-  'sqlite session store',
+  'session store',
   'websocket authorization',
   'runner access',
   'managed process lifecycle',
