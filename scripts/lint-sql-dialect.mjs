@@ -7,7 +7,13 @@
  * undefined function. This walks the AST for calls to the pg helpers and checks
  * the statement each one carries.
  *
- * Each statement is run through `translateDialect` first, the same function the
+ * Every string and template literal that looks like SQL is checked, not just the
+ * ones passed directly to a helper: a good part of this codebase builds
+ * statements from fragments returned by functions like `sessionIconSelect`, and
+ * an earlier version that only looked at the helpers' first argument missed
+ * `instr()` and a negative `substr()` hiding in two of them.
+ *
+ * Each candidate is run through `translateDialect` first, the same function the
  * query layer applies at runtime, and the rules are checked against what comes
  * out. So the linter never has to keep a second list of what the translator
  * covers: if a construct survives translation, it reaches Postgres, and that is
@@ -23,10 +29,60 @@ import { translateDialect } from '../packages/backend/src/db/dialect.ts';
 const backend = path.resolve('packages/backend');
 const config = ts.readConfigFile(path.join(backend, 'tsconfig.json'), ts.sys.readFile);
 const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, backend);
-const program = ts.createProgram(parsed.fileNames, parsed.options);
 
-const HELPERS = new Set(['pgGet', 'pgAll', 'pgRun']);
-const TX_METHODS = new Set(['get', 'all', 'run']);
+/**
+ * Parsed per file with parent pointers, not through a Program.
+ *
+ * `createProgram` sets parents lazily — only once something asks the checker
+ * for types — so walking up from a node silently hit `undefined` and every
+ * literal looked like it was outside a `prepare()` call. No types are needed
+ * here anyway, and parsing alone is far quicker.
+ */
+const sourceFiles = parsed.fileNames.map((fileName) =>
+  ts.createSourceFile(
+    fileName,
+    ts.sys.readFile(fileName) ?? '',
+    ts.ScriptTarget.ES2022,
+    /* setParentNodes */ true
+  )
+);
+
+/**
+ * A literal is SQL if it reads like a statement or a fragment of one.
+ *
+ * Deliberately generous: a false positive costs one look, a false negative is a
+ * statement that fails in production. The rules below are specific enough that
+ * ordinary prose does not trip them.
+ */
+const SQL_SHAPE =
+  /\b(SELECT|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|CREATE\s+(TABLE|INDEX)|ALTER\s+TABLE|JOIN|WHERE|ORDER\s+BY|GROUP\s+BY|COALESCE|\bAS\s+\w+\s*$)/i;
+
+function looksLikeSql(text) {
+  return SQL_SHAPE.test(text);
+}
+
+/**
+ * True for a literal that belongs to a deliberate better-sqlite3 call.
+ *
+ * Three readers open Codex's own state file and the backup verifier opens a
+ * copy it made; those are SQLite databases and their SQL should stay SQLite.
+ * Without this the linter reports its own correct code.
+ */
+function insideSqliteCall(node) {
+  for (let current = node.parent; current; current = current.parent) {
+    if (
+      ts.isCallExpression(current) &&
+      ts.isPropertyAccessExpression(current.expression) &&
+      ['prepare', 'exec', 'pragma'].includes(current.expression.name.text)
+    ) {
+      return true;
+    }
+    // A fragment assigned to a variable and interpolated into a prepare() call
+    // later is still SQLite; the walk up stops at the function that holds both.
+    if (ts.isSourceFile(current)) return false;
+  }
+  return false;
+}
 
 const RULES = [
   {
@@ -73,6 +129,46 @@ const RULES = [
     hint: 'use string_agg',
   },
   {
+    // `x IS ?` is SQLite's null-safe equality. Postgres only allows IS with
+    // NULL/TRUE/FALSE/UNKNOWN or DISTINCT FROM, so this is a syntax error.
+    id: 'is-null-safe-compare',
+    severity: 'error',
+    test: /\bIS\s+(\?|\$\d)/i,
+    hint: 'use IS NOT DISTINCT FROM',
+  },
+  {
+    id: 'instr',
+    severity: 'error',
+    test: /\binstr\s*\(/i,
+    hint: 'use strpos (note the argument order is the same)',
+  },
+  {
+    id: 'hex',
+    severity: 'error',
+    test: /\bhex\s*\(/i,
+    hint: "use encode(convert_to(x, 'UTF8'), 'hex')",
+  },
+  {
+    // SQLite counts a negative start from the end of the string; Postgres
+    // treats it as a position before the start and returns the whole thing.
+    id: 'negative-substr',
+    severity: 'wrong',
+    test: /\bsubstr\s*\([^,]+,\s*-\d/i,
+    hint: 'use right(x, n)',
+  },
+  {
+    id: 'printf',
+    severity: 'error',
+    test: /\bprintf\s*\(/i,
+    hint: 'use format()',
+  },
+  {
+    id: 'sqlite-scalar',
+    severity: 'error',
+    test: /\b(typeof|randomblob|zeroblob|last_insert_rowid|total_changes|likelihood)\s*\(/i,
+    hint: 'SQLite-only scalar function',
+  },
+  {
     id: 'limit-negative',
     severity: 'error',
     test: /\bLIMIT\s+-1\b/i,
@@ -83,7 +179,7 @@ const RULES = [
 
 const findings = [];
 
-for (const sourceFile of program.getSourceFiles()) {
+for (const sourceFile of sourceFiles) {
   if (sourceFile.isDeclarationFile) continue;
   if (!sourceFile.fileName.startsWith(path.join(backend, 'src'))) continue;
   if (sourceFile.fileName.endsWith('.test.ts')) continue;
@@ -91,23 +187,26 @@ for (const sourceFile of program.getSourceFiles()) {
   if (/src\/db\/(index|migrations)\.ts$/.test(sourceFile.fileName)) continue;
 
   const visit = (node) => {
-    if (ts.isCallExpression(node)) {
-      const callee = node.expression;
-      const isHelper =
-        (ts.isIdentifier(callee) && HELPERS.has(callee.text)) ||
-        (ts.isPropertyAccessExpression(callee) &&
-          TX_METHODS.has(callee.name.text) &&
-          ts.isIdentifier(callee.expression) &&
-          callee.expression.text === 'tx');
+    const isLiteral =
+      ts.isStringLiteral(node) ||
+      ts.isTemplateExpression(node) ||
+      ts.isNoSubstitutionTemplateLiteral(node);
 
-      const sqlArg = isHelper ? node.arguments[0] : null;
-      if (sqlArg && (ts.isStringLiteral(sqlArg) || ts.isTemplateLiteral(sqlArg) || ts.isNoSubstitutionTemplateLiteral(sqlArg))) {
-        const raw = sourceFile.getFullText().slice(sqlArg.getStart(sourceFile), sqlArg.end);
+    if (isLiteral) {
+      // The delimiters have to go before translation: translateDialect skips
+      // string literals, and a leading quote makes it treat the whole statement
+      // as one — which silently reports every construct as untranslated.
+      const raw = sourceFile
+        .getFullText()
+        .slice(node.getStart(sourceFile), node.end)
+        .replace(/^[`'"]/, '')
+        .replace(/[`'"]$/, '');
+      if (looksLikeSql(raw) && !insideSqliteCall(node)) {
         // What Postgres will actually receive.
         const sql = translateDialect(raw);
         for (const rule of RULES) {
           if (rule.test.test(sql)) {
-            const { line } = sourceFile.getLineAndCharacterOfPosition(sqlArg.getStart(sourceFile));
+            const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
             findings.push({
               file: sourceFile.fileName.replace(backend + '/', ''),
               line: line + 1,

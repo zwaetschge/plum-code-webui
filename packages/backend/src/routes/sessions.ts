@@ -334,11 +334,21 @@ async function ensureDir(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
 }
 
+/**
+ * A cache-busting suffix derived from the icon's path, so a replaced icon gets
+ * a new URL.
+ *
+ * `right(x, 16)` rather than `substr(x, -16)`: SQLite counts a negative start
+ * from the end of the string, Postgres treats it as a position before the
+ * start and returns the whole path — which would put the full filesystem path
+ * of every icon into a URL the browser sees.
+ */
 function sessionIconSelect(prefix = ''): string {
   const p = prefix ? `${prefix}.` : '';
   return `CASE
                 WHEN ${p}icon_path IS NOT NULL AND ${p}icon_path != ''
-                THEN '/api/sessions/' || ${p}id || '/icon?v=' || lower(hex(substr(${p}icon_path, -16)))
+                THEN '/api/sessions/' || ${p}id || '/icon?v=' ||
+                     encode(convert_to(right(${p}icon_path, 16), 'UTF8'), 'hex')
                 ELSE NULL
               END as iconUrl,
               ${p}icon_source as iconSource`;
@@ -352,8 +362,8 @@ export function sessionUnreadCountSelect(alias = 's'): string {
      WHERE unread_message.session_id = ${alias}.id
        AND unread_message.chat_id IS ${alias}.active_chat_id
        AND unread_message.role = 'assistant'
-       AND unread_message.rowid > COALESCE((
-         SELECT marker.rowid
+       AND unread_message.seq > COALESCE((
+         SELECT marker.seq
            FROM session_reads read_state
            JOIN messages marker ON marker.id = read_state.last_read_message_id
           WHERE read_state.user_id = ${alias}.user_id
@@ -782,7 +792,7 @@ async function getSessionTelemetrySnapshot(
         created_at as createdAt
       FROM session_events
       WHERE session_id = ? AND user_id = ? AND event_type = 'context_snapshot'
-      ORDER BY created_at DESC, rowid DESC
+      ORDER BY created_at DESC, seq DESC
       LIMIT 1
     `,
     session.id,
@@ -1453,7 +1463,7 @@ async function listSessionChats(sessionId: string) {
     `SELECT id, title, provider_session_id as providerSessionId,
               strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt,
               strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) as updatedAt
-       FROM session_chats WHERE session_id = ? ORDER BY created_at ASC, rowid ASC`,
+       FROM session_chats WHERE session_id = ? ORDER BY created_at ASC, seq ASC`,
     sessionId
   )) as unknown as Array<{
     id: string;
@@ -2454,7 +2464,7 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
                                client_message_id AS clientMessageId,
                                event_sequence AS eventSequence,
                                strftime('%Y-%m-%dT%H:%M:%fZ', created_at) AS createdAt,
-                               rowid AS rid
+                               seq AS rid
                           FROM messages`;
     type HistoryRow = { rid: number; id: string; [key: string]: unknown };
     let ordered: HistoryRow[];
@@ -2463,7 +2473,7 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
 
     if (around) {
       const anchor = (await tx.get(
-        `SELECT rowid AS rid FROM messages
+        `SELECT seq AS rid FROM messages
             WHERE id = ? AND session_id = ? AND chat_id IS ?`,
         around,
         req.params.id,
@@ -2475,7 +2485,7 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
       const ordinal = (
         (await tx.get(
           `SELECT COUNT(*) AS count FROM messages
-              WHERE session_id = ? AND chat_id IS ? AND rowid <= ?`,
+              WHERE session_id = ? AND chat_id IS ? AND seq <= ?`,
           req.params.id,
           activeChatId,
           anchor.rid
@@ -2485,7 +2495,7 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
       ordered = (await tx.all(
         `${baseSelect}
             WHERE session_id = ? AND chat_id IS ?
-            ORDER BY rowid ASC LIMIT ? OFFSET ?`,
+            ORDER BY seq ASC LIMIT ? OFFSET ?`,
         req.params.id,
         activeChatId,
         limit,
@@ -2496,7 +2506,7 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
       let cursorRowId: number | null = null;
       if (before || after) {
         const cursor = (await tx.get(
-          `SELECT rowid AS rid FROM messages
+          `SELECT seq AS rid FROM messages
               WHERE id = ? AND session_id = ? AND chat_id IS ?`,
           before ?? after,
           req.params.id,
@@ -2511,8 +2521,8 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
       if (after && cursorRowId !== null) {
         ordered = (await tx.all(
           `${baseSelect}
-              WHERE session_id = ? AND chat_id IS ? AND rowid > ?
-              ORDER BY rowid ASC LIMIT ?`,
+              WHERE session_id = ? AND chat_id IS ? AND seq > ?
+              ORDER BY seq ASC LIMIT ?`,
           req.params.id,
           activeChatId,
           cursorRowId,
@@ -2524,15 +2534,15 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
             ? await tx.all(
                 `${baseSelect}
                     WHERE session_id = ? AND chat_id IS ?
-                    ORDER BY rowid DESC LIMIT ?`,
+                    ORDER BY seq DESC LIMIT ?`,
                 req.params.id,
                 activeChatId,
                 limit
               )
             : await tx.all(
                 `${baseSelect}
-                    WHERE session_id = ? AND chat_id IS ? AND rowid < ?
-                    ORDER BY rowid DESC LIMIT ?`,
+                    WHERE session_id = ? AND chat_id IS ? AND seq < ?
+                    ORDER BY seq DESC LIMIT ?`,
                 req.params.id,
                 activeChatId,
                 cursorRowId,
@@ -2549,7 +2559,7 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
       oldestRid !== null &&
       (await tx.get(
         `SELECT 1 FROM messages
-            WHERE session_id = ? AND chat_id IS ? AND rowid < ? LIMIT 1`,
+            WHERE session_id = ? AND chat_id IS ? AND seq < ? LIMIT 1`,
         req.params.id,
         activeChatId,
         oldestRid
@@ -2558,7 +2568,7 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
       newestRid !== null &&
       (await tx.get(
         `SELECT 1 FROM messages
-            WHERE session_id = ? AND chat_id IS ? AND rowid > ? LIMIT 1`,
+            WHERE session_id = ? AND chat_id IS ? AND seq > ? LIMIT 1`,
         req.params.id,
         activeChatId,
         newestRid
@@ -2618,7 +2628,7 @@ router.post('/:id/rewind', requireAuth, async (req, res) => {
   }
 
   const target = (await pgGet(
-    'SELECT rowid as rid, created_at as createdAt FROM messages WHERE id = ? AND session_id = ?',
+    'SELECT seq as rid, created_at as createdAt FROM messages WHERE id = ? AND session_id = ?',
     messageId,
     sessionId
   )) as unknown as { rid: number; createdAt: string } | undefined;
@@ -2640,7 +2650,7 @@ router.post('/:id/rewind', requireAuth, async (req, res) => {
 
   const result = await pgTransaction(async (tx) => {
     const del = await tx.run(
-      'DELETE FROM messages WHERE session_id = ? AND rowid >= ?',
+      'DELETE FROM messages WHERE session_id = ? AND seq >= ?',
       sessionId,
       target.rid
     );
@@ -3002,28 +3012,35 @@ router.patch('/:id/category', requireAuth, async (req, res) => {
   res.json({ success: true, data: { category: categoryId || null } });
 });
 
-// Build an FTS5 MATCH expression that does prefix search on every whitespace-separated
-// token. Strips control chars + double-quotes (which are FTS5 phrase delimiters) to
-// keep user input from injecting operators. Result example: `hello* world*`.
+/**
+ * Builds a tsquery that prefix-matches every word in the query.
+ *
+ * Words are extracted rather than the input being forwarded, so `foo:*`, `&`,
+ * `!`, parentheses and unterminated quotes cannot reach the parser as
+ * operators — the token pattern admits letters, digits and underscore and
+ * nothing else. Result: `hello:* & world:*`.
+ */
 export function buildFtsMatch(query: string): string | null {
-  // Extract words instead of forwarding FTS syntax. Quoting every term makes
-  // inputs such as `foo*`, `OR`, parentheses or unterminated quotes harmless.
   const tokens = (query.normalize('NFKC').match(/[\p{L}\p{N}_]+/gu) ?? [])
     .slice(0, 24)
     .map((token) => token.slice(0, 64));
-  return tokens.length > 0 ? tokens.map((token) => `"${token}"*`).join(' AND ') : null;
+  return tokens.length > 0 ? tokens.map((token) => `${token}:*`).join(' & ') : null;
 }
 
 export function escapeMessageSearchLike(query: string): string {
   return query.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
-// FTS5 is created by the schema migration but only when the SQLite build supports it.
-// Fall back to LIKE so search still works on stripped-down builds.
+/**
+ * The search column is added by the migration. If that has not run yet the
+ * queries below would fail outright, so search falls back to LIKE — slower, but
+ * a working search box beats a 500.
+ */
 async function ftsAvailable(): Promise<boolean> {
   try {
     const row = await pgGet(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'`
+      `SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'messages' AND column_name = 'search_vector'`
     );
     return !!row;
   } catch {
@@ -3062,24 +3079,28 @@ router.get('/:id/messages/search', requireAuth, async (req, res) => {
   const messages = useFts
     ? await pgAll(
         `SELECT m.id, m.session_id as sessionId, m.chat_id AS chatId, m.role,
-                  substr(snippet(messages_fts, 0, '', '', ' … ', 64), 1, 2000) AS content,
+                  substr(
+                    ts_headline('simple', m.content, to_tsquery('simple', ?),
+                                'StartSel=,StopSel=,MaxWords=64,MinWords=16,MaxFragments=1'),
+                    1, 2000
+                  ) AS content,
                   strftime('%Y-%m-%dT%H:%M:%fZ', m.created_at) as createdAt
-           FROM messages_fts f
-           JOIN messages m ON m.rowid = f.rowid
-           WHERE f.content MATCH ? AND m.session_id = ?
+           FROM messages m
+           WHERE m.search_vector @@ to_tsquery('simple', ?) AND m.session_id = ?
            ORDER BY m.created_at DESC
            LIMIT ?`,
+        ftsExpr,
         ftsExpr,
         req.params.id,
         limit
       )
     : await pgAll(
         `SELECT id, session_id as sessionId, chat_id AS chatId, role,
-                  substr(content, max(1, instr(lower(content), lower(?)) - 400), 1600) AS content,
+                  substr(content, greatest(1, strpos(lower(content), lower(?)) - 400), 1600) AS content,
                   strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt
            FROM messages
            WHERE session_id = ? AND content LIKE ? ESCAPE '\\'
-           ORDER BY created_at DESC, rowid DESC
+           ORDER BY created_at DESC, seq DESC
            LIMIT ?`,
         query,
         req.params.id,
@@ -3120,22 +3141,26 @@ router.get('/messages/search', requireAuth, async (req, res) => {
   const messages = useFts
     ? await pgAll(
         `SELECT m.id, m.session_id as sessionId, m.chat_id AS chatId, m.role,
-                  substr(snippet(messages_fts, 0, '', '', ' … ', 64), 1, 2000) AS content,
+                  substr(
+                    ts_headline('simple', m.content, to_tsquery('simple', ?),
+                                'StartSel=,StopSel=,MaxWords=64,MinWords=16,MaxFragments=1'),
+                    1, 2000
+                  ) AS content,
                   strftime('%Y-%m-%dT%H:%M:%fZ', m.created_at) as createdAt,
                   s.name as sessionName
-           FROM messages_fts f
-           JOIN messages m ON m.rowid = f.rowid
+           FROM messages m
            JOIN sessions s ON m.session_id = s.id
-           WHERE f.content MATCH ? AND s.user_id = ?
+           WHERE m.search_vector @@ to_tsquery('simple', ?) AND s.user_id = ?
            ORDER BY m.created_at DESC
            LIMIT ?`,
+        ftsExpr,
         ftsExpr,
         userId,
         limit
       )
     : await pgAll(
         `SELECT m.id, m.session_id as sessionId, m.chat_id AS chatId, m.role,
-                  substr(m.content, max(1, instr(lower(m.content), lower(?)) - 400), 1600) AS content,
+                  substr(m.content, greatest(1, strpos(lower(m.content), lower(?)) - 400), 1600) AS content,
                   strftime('%Y-%m-%dT%H:%M:%fZ', m.created_at) as createdAt,
                   s.name as sessionName
            FROM messages m
@@ -3195,7 +3220,7 @@ router.get('/:id/export', requireAuth, async (req: Request, res: Response) => {
     `SELECT role, content, strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS createdAt
          FROM messages
         WHERE session_id = ?${chatId ? ' AND chat_id = ?' : ''}
-        ORDER BY created_at ASC, rowid ASC`,
+        ORDER BY created_at ASC, seq ASC`,
     ...(chatId ? [session.id, chatId] : [session.id])
   )) as unknown as Array<{
     role: string;

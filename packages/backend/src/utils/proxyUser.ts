@@ -19,8 +19,9 @@ const USER_SELECT = `
 
 async function ensureUserSettings(userId: string): Promise<void> {
   await pgRun(
-    `INSERT OR IGNORE INTO user_settings (user_id, theme, allowed_tools)
-     VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`,
+    `INSERT INTO user_settings (user_id, theme, allowed_tools)
+     VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')
+     ON CONFLICT (user_id) DO NOTHING`,
     userId
   );
 }

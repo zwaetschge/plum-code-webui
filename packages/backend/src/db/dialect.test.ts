@@ -159,3 +159,45 @@ describe('translateDialect: strftime hour buckets', () => {
     );
   });
 });
+
+describe('translateDialect: nested arguments', () => {
+  it('matches the closing paren rather than the first inner one', () => {
+    // A `[^()]*` argument match stops inside the subquery and leaves the call
+    // untranslated, which then reaches Postgres as an unknown function.
+    assert.equal(
+      translateDialect(
+        "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.session_id = s.id), s.updated_at)) AS activityAt"
+      ),
+      `SELECT to_char((COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.session_id = s.id), s.updated_at))::timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS activityAt`
+    );
+  });
+
+  it('translates two calls in one statement', () => {
+    const out = translateDialect(
+      "SELECT strftime('%Y-%m', a), strftime('%Y-%m', b) FROM t"
+    );
+    assert.equal(out.match(/to_char/g)?.length, 2);
+    assert.ok(!/strftime/.test(out));
+  });
+});
+
+describe('translateDialect: null-safe equality', () => {
+  it('rewrites IS ? to IS NOT DISTINCT FROM', () => {
+    assert.equal(
+      translateDialect('SELECT * FROM messages WHERE session_id = ? AND chat_id IS ?'),
+      'SELECT * FROM messages WHERE session_id = ? AND chat_id IS NOT DISTINCT FROM ?'
+    );
+  });
+
+  it('leaves IS NULL and IS NOT NULL alone', () => {
+    const sql = 'SELECT * FROM t WHERE a IS NULL AND b IS NOT NULL';
+    assert.equal(translateDialect(sql), sql);
+  });
+
+  it('leaves the phrase inside a literal alone', () => {
+    assert.equal(
+      translateDialect("INSERT INTO t (note) VALUES ('what IS ?')"),
+      "INSERT INTO t (note) VALUES ('what IS ?')"
+    );
+  });
+});

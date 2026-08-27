@@ -542,7 +542,7 @@ router.get('/summary', async (req: Request, res: Response) => {
         strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt
       FROM session_events
       WHERE user_id = ? AND event_type = 'context_snapshot' ${dateFilter.sql}
-      ORDER BY created_at DESC, rowid DESC
+      ORDER BY created_at DESC, seq DESC
       LIMIT 1
     `,
       authReq.userId,
@@ -1063,7 +1063,7 @@ router.get('/sessions/:sessionId', async (req: Request, res: Response) => {
         strftime('%Y-%m-%dT%H:%M:%fZ', created_at) as createdAt
       FROM session_events
       WHERE session_id = ? AND user_id = ?
-      ORDER BY created_at DESC, rowid DESC
+      ORDER BY created_at DESC, seq DESC
       LIMIT 100
     `,
       sessionId,

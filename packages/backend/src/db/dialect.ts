@@ -164,6 +164,41 @@ function translateDatetime(args: string): string | null {
 }
 
 /**
+ * Rewrites `name(...)` calls, matching the closing paren rather than assuming
+ * the arguments contain none.
+ */
+function replaceCall(
+  sql: string,
+  name: string,
+  translate: (args: string) => string | null
+): string {
+  const pattern = new RegExp(`\\b${name}\\s*\\(`, 'gi');
+  let out = '';
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(sql))) {
+    if (match.index < cursor) continue;
+    let depth = 1;
+    let i = pattern.lastIndex;
+    while (i < sql.length && depth > 0) {
+      if (sql[i] === '(') depth++;
+      else if (sql[i] === ')') depth--;
+      i++;
+    }
+    if (depth !== 0) break;
+
+    const args = sql.slice(pattern.lastIndex, i - 1);
+    const replacement = translate(args);
+    out += sql.slice(cursor, match.index) + (replacement ?? sql.slice(match.index, i));
+    cursor = i;
+    pattern.lastIndex = i;
+  }
+
+  return out + sql.slice(cursor);
+}
+
+/**
  * Translates the SQLite dialect the statements are written in.
  *
  * Done here rather than at the call sites because it is the same two constructs
@@ -184,19 +219,23 @@ export function translateDialect(sql: string): string {
 
     let text = span.text.replace(/\bCURRENT_TIMESTAMP\b/gi, UTC_TIMESTAMP);
 
+    // `chat_id IS ?` is SQLite's null-safe equality, used so one query handles
+    // both "the default chat" (NULL) and a named one. Postgres allows IS only
+    // with NULL/TRUE/FALSE/UNKNOWN, so this is a syntax error rather than a
+    // wrong answer — every message query would have failed on the first call.
+    text = text.replace(/\bIS\s+\?/gi, 'IS NOT DISTINCT FROM ?');
+
     // datetime(...) needs its arguments, which the span split may have cut in
     // half; it is matched against the whole statement below instead.
     out += text;
   }
 
-  // Balanced-argument match, so a nested call or a comma inside a literal does
-  // not truncate the rewrite.
-  out = out.replace(/\bdatetime\s*\(([^()]*)\)/gi, (whole, args) => {
-    return translateDatetime(args) ?? whole;
-  });
-  out = out.replace(/\bstrftime\s*\(([^()]*)\)/gi, (whole, args) => {
-    return translateStrftime(args) ?? whole;
-  });
+  // Balanced, because the argument is often a subquery:
+  // `strftime(fmt, COALESCE((SELECT MAX(...) FROM ...), s.updated_at))`. A
+  // `[^()]*` match stops at the first inner paren and silently leaves the call
+  // untranslated.
+  out = replaceCall(out, 'datetime', translateDatetime);
+  out = replaceCall(out, 'strftime', translateStrftime);
 
   return out;
 }

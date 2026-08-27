@@ -17,10 +17,18 @@
  *   and 161 places in the code compare, slice and sort those strings. Moving to
  *   TIMESTAMPTZ is the right destination, but as a separate step — doing it here
  *   would mix a storage migration with a semantic one.
- * - **FTS5 is not translated.** `messages_fts` is a virtual table with no
- *   Postgres equivalent; it becomes a `tsvector` column plus a GIN index, which
- *   the search code has to be rewritten for anyway. Skipped here, tracked
- *   separately.
+ * - **FTS5 becomes a generated tsvector.** `messages_fts` is a virtual table
+ *   with no Postgres equivalent. It is replaced by a `search_vector` column on
+ *   `messages` plus a GIN index. Generated rather than trigger-maintained: the
+ *   SQLite side needed triggers to keep the shadow table in step and had a
+ *   repair path for when they fell behind, and a generated column cannot fall
+ *   behind at all.
+ * - **`rowid` becomes a real column.** 29 queries use SQLite's implicit rowid to
+ *   break ties between rows written in the same second — "the later message" is
+ *   the one with the larger rowid, and `created_at` alone cannot say. Postgres
+ *   has no such column, so the tables that rely on it get a `seq BIGSERIAL`,
+ *   filled in rowid order during the copy so the existing ordering is preserved
+ *   exactly rather than approximated.
  *
  * Usage:
  *   node scripts/sqlite-to-postgres.mjs --source <backup.db> [--schema-only] [--dry-run]
@@ -47,6 +55,9 @@ if (!SOURCE) {
 
 /** Virtual tables and their shadow storage; rebuilt natively on the other side. */
 const isFts = (name) => name.startsWith('messages_fts');
+
+/** Tables whose queries order by rowid, and so need a real column for it. */
+const ROWID_ORDERED = new Set(['messages', 'message_media', 'session_chats']);
 
 /**
  * SQLite is loosely typed and accepts almost any type name. Postgres is not, so
@@ -96,6 +107,10 @@ function buildCreateTable(db, table) {
     if (fallback != null && !isSerial) parts.push(`DEFAULT ${fallback}`);
     return '  ' + parts.join(' ');
   });
+
+  if (ROWID_ORDERED.has(table)) {
+    lines.push('  "seq" BIGSERIAL NOT NULL');
+  }
 
   const pkColumns = columns.filter((c) => c.pk > 0).sort((a, b) => a.pk - b.pk);
   if (pkColumns.length) {
@@ -155,6 +170,10 @@ async function main() {
   const ddl = [];
   for (const table of tables) ddl.push(buildCreateTable(db, table));
   const indexDdl = tables.flatMap((table) => buildIndexes(db, table));
+  for (const table of tables) {
+    if (!ROWID_ORDERED.has(table)) continue;
+    indexDdl.push(`CREATE INDEX IF NOT EXISTS "idx_${table}_seq" ON "${table}" ("seq");`);
+  }
   const fkDdl = tables.flatMap((table) => buildForeignKeys(db, table));
 
   if (DRY_RUN) {
@@ -185,6 +204,17 @@ async function main() {
     await client.query(`SET search_path TO "${schema}"`);
   }
 
+  // Replaces the FTS5 virtual table. 'simple' rather than a language config on
+  // purpose: the messages are a mix of German, English and code, so stemming by
+  // one language would help some rows and hurt the rest, and prefix matching is
+  // what the search box actually does.
+  const ftsDdl = [
+    `ALTER TABLE "messages" ADD COLUMN IF NOT EXISTS "search_vector" tsvector
+       GENERATED ALWAYS AS (to_tsvector('simple', coalesce("content", ''))) STORED;`,
+    `CREATE INDEX IF NOT EXISTS "idx_messages_search_vector"
+       ON "messages" USING GIN ("search_vector");`,
+  ];
+
   console.log(`Creating ${tables.length} tables…`);
   // Foreign keys reference tables that may not exist yet, so defer enforcement
   // until the whole schema is in place.
@@ -208,6 +238,8 @@ async function main() {
     }
   }
 
+  for (const statement of ftsDdl) await client.query(statement);
+
   if (!SCHEMA_ONLY) {
     // One TRUNCATE for everything, before any insert. Doing it per table inside
     // the loop was wrong: CASCADE on a parent wipes the children that were
@@ -220,7 +252,10 @@ async function main() {
         .prepare(`PRAGMA table_info("${table}")`)
         .all()
         .map((c) => c.name);
-      const rows = db.prepare(`SELECT * FROM "${table}"`).all();
+      // rowid order, so the BIGSERIAL lands in the same sequence the queries
+      // that used rowid have always seen.
+      const order = ROWID_ORDERED.has(table) ? ' ORDER BY rowid' : '';
+      const rows = db.prepare(`SELECT * FROM "${table}"${order}`).all();
       if (!rows.length) {
         console.log(`  ${table}: empty`);
         continue;

@@ -132,7 +132,7 @@ export async function getMessageHistorySnapshot(
     `SELECT id
          FROM messages
         WHERE session_id = ? AND chat_id IS ?
-        ORDER BY rowid DESC
+        ORDER BY seq DESC
         LIMIT 1`,
     sessionId,
     effectiveChatId
@@ -173,19 +173,19 @@ export async function getSessionReadState(
   )) as unknown as { lastReadMessageId: string | null; updatedAt: string } | undefined;
   const marker = read?.lastReadMessageId
     ? ((await pgGet(
-        `SELECT rowid FROM messages WHERE id = ? AND session_id = ?`,
+        `SELECT seq FROM messages WHERE id = ? AND session_id = ?`,
         read.lastReadMessageId,
         sessionId
-      )) as unknown as { rowid: number } | undefined)
+      )) as unknown as { seq: number } | undefined)
     : undefined;
   const unread = (await pgGet(
     `SELECT COUNT(*) AS count
          FROM messages
         WHERE session_id = ? AND chat_id IS ? AND role = 'assistant'
-          AND rowid > ?`,
+          AND seq > ?`,
     sessionId,
     effectiveChatId,
-    marker?.rowid ?? 0
+    marker?.seq ?? 0
   )) as unknown as { count: number };
   return {
     sessionId,
@@ -226,7 +226,7 @@ export async function setSessionReadState(
     const newest = (await pgGet(
       `SELECT id FROM messages
           WHERE session_id = ? AND chat_id IS ?
-          ORDER BY rowid DESC LIMIT 1`,
+          ORDER BY seq DESC LIMIT 1`,
       sessionId,
       effectiveChatId
     )) as unknown as { id: string } | undefined;

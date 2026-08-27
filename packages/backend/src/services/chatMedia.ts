@@ -440,7 +440,7 @@ export async function loadMessageMedia(messageIds: string[]): Promise<Map<string
     const rows = (await pgAll(
       `${MEDIA_SELECT}
          WHERE message_id IN (${placeholders})
-         ORDER BY created_at ASC, message_media.rowid ASC`,
+         ORDER BY created_at ASC, message_media.seq ASC`,
       ...batch
     )) as unknown as MessageMediaRow[];
     for (const row of rows) {

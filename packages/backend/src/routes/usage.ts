@@ -555,7 +555,7 @@ function providerSqlPredicate(provider: CLIProvider): string {
     case 'zai':
       return "lower(provider) IN ('zai', 'z-ai')";
     case 'opencode':
-      return "(lower(provider) = 'opencode' OR (lower(provider) IN ('', 'unknown') AND (instr(model, '/') > 0 OR lower(model) LIKE '%opencode%')))";
+      return "(lower(provider) = 'opencode' OR (lower(provider) IN ('', 'unknown') AND (strpos(model, '/') > 0 OR lower(model) LIKE '%opencode%')))";
     case 'pi':
       return "lower(provider) = 'pi'";
     case 'kimi':

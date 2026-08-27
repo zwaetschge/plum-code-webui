@@ -1418,7 +1418,7 @@ async function getCodexUsageBaselineFromDatabase(
       WHERE session_id = ?
         AND event_type = 'context_snapshot'
         AND provider = 'codex'
-      ORDER BY created_at DESC, rowid DESC
+      ORDER BY created_at DESC, seq DESC
       LIMIT 1
     `,
     sessionId
@@ -1461,7 +1461,7 @@ async function getCodexUsageBaselineFromDatabase(
       WHERE session_id = ?
         AND event_type = 'context_snapshot'
         AND provider = 'codex'
-      ORDER BY created_at DESC, rowid DESC
+      ORDER BY created_at DESC, seq DESC
       LIMIT 1
     `,
     sessionId
@@ -4295,7 +4295,7 @@ Discord Main Gateway:
            FROM messages
           WHERE session_id = ?
             AND chat_id IS (SELECT active_chat_id FROM sessions WHERE id = ?)
-          ORDER BY created_at DESC, rowid DESC
+          ORDER BY created_at DESC, seq DESC
           LIMIT 1`,
       sessionId,
       sessionId
@@ -10226,7 +10226,7 @@ ${proc.contextReminder.summary}
     chatId: string | null
   ): Promise<string | null> {
     const rows = (await pgAll(
-      'SELECT role, content FROM messages WHERE session_id = ? AND chat_id IS ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+      'SELECT role, content FROM messages WHERE session_id = ? AND chat_id IS ? ORDER BY created_at DESC, seq DESC LIMIT ?',
       sessionId,
       chatId,
       maxMessages
@@ -10270,7 +10270,7 @@ ${proc.contextReminder.summary}
     const MAX_CHARS = 24_000;
 
     const rows = (await pgAll(
-      'SELECT role, content FROM messages WHERE session_id = ? AND chat_id IS ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+      'SELECT role, content FROM messages WHERE session_id = ? AND chat_id IS ? ORDER BY created_at DESC, seq DESC LIMIT ?',
       sessionId,
       chatId,
       MAX_MESSAGES + 1

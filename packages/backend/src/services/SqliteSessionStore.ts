@@ -104,8 +104,8 @@ export async function revokeUserHttpSessions(userId: string): Promise<number> {
   return (
     await pgRun(
       `DELETE FROM http_sessions
-       WHERE json_valid(data)
-         AND json_extract(data, '$.passport.user') = ?`,
+       WHERE data ~ '^\\s*[{[]'
+         AND data::jsonb #>> '{passport,user}' = ?`,
       userId
     )
   ).changes;
