@@ -492,7 +492,7 @@ private fun AgentEditSheet(
                 value = model,
                 onValueChange = { model = it },
                 label = { Text("Model Override") },
-                placeholder = { Text("e.g. gpt-5.5 (leave empty for default)") },
+                placeholder = { Text("e.g. glm-5.3 (Z.AI) or sonnet — empty for default") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(

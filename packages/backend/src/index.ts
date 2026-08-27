@@ -18,6 +18,7 @@ import { initDatabase } from './db/index.js';
 import { setupPassport } from './auth/passport.js';
 import { setupWebSocket } from './websocket/index.js';
 import { errorHandler, requestIdMiddleware } from './middleware/errorHandler.js';
+import { modelRouter } from './services/modelRouterInstance.js';
 import { mobileGatewayAuth } from './middleware/mobileGateway.js';
 import {
   previewVhostMiddleware,
@@ -301,6 +302,12 @@ async function main() {
       credentials: true,
     })
   );
+  // Raw proxy for per-request model routing in Claude sessions. Mounted before
+  // compression and body parsing on purpose: it forwards bodies byte-for-byte
+  // and pipes SSE, so nothing in this file may touch either. Requests carry a
+  // per-session token and are accepted from loopback only.
+  app.use('/model-router', modelRouter.handler);
+
   // Nothing else compresses: there is no compress middleware on the Traefik
   // router either, so the frontend bundle went out at its full size — the entry
   // chunk alone is 178 kB raw against 53 kB gzipped, paid on every cold load

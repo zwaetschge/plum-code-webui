@@ -4,6 +4,7 @@ import {
   run as pgRun,
   transaction as pgTransaction,
 } from '../../db/pg.js';
+import { modelRouter } from '../modelRouterInstance.js';
 import type { Server } from 'socket.io';
 import type {
   ServerToClientEvents,
@@ -144,13 +145,32 @@ export function buildClaudeTransportProcessEnv(
 async function buildClaudeTransportEnv(
   provider: 'claude' | 'zai',
   userId: string,
-  configHome: string
+  configHome: string,
+  sessionId?: string
 ): Promise<NodeJS.ProcessEnv> {
-  return buildClaudeTransportProcessEnv(
+  const env = buildClaudeTransportProcessEnv(
     provider,
     configHome,
     provider === 'zai' ? await getZaiApiConfigForUser(userId) : null
   );
+
+  // Mixed subagents: a claude session gets its base URL pointed at the model
+  // router, so a subagent whose definition names a glm-* model runs on the
+  // user's Z.AI subscription while the main agent stays on the Claude one.
+  // Only when Z.AI is actually configured — without it the indirection would
+  // buy nothing — and never for zai sessions, whose base URL already is Z.AI.
+  // MODEL_ROUTER_DISABLED=1 is the kill switch if the passthrough ever
+  // misbehaves against a new CLI version.
+  if (
+    provider === 'claude' &&
+    sessionId &&
+    process.env.MODEL_ROUTER_DISABLED !== '1' &&
+    (await getZaiApiConfigForUser(userId))
+  ) {
+    const token = modelRouter.registerSession(sessionId, userId);
+    env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${config.port}/model-router/${token}`;
+  }
+  return env;
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -4933,7 +4953,7 @@ Discord Main Gateway:
       cwd: session.working_directory,
       env: {
         ...(isClaudeTransportProvider(cliProvider)
-          ? await buildClaudeTransportEnv(cliProvider, userId, configHome)
+          ? await buildClaudeTransportEnv(cliProvider, userId, configHome, sessionId)
           : process.env),
         ...extraEnv,
         // Pass session ID so provider integrations can attribute image generation and permissions.
@@ -7469,6 +7489,27 @@ Discord Main Gateway:
 
   // Save usage to database - called ONCE per turn when result is received
   private async saveUsageToDatabase(sessionId: string, proc: ClaudeProcess): Promise<void> {
+    // Claude Code's final result aggregates the whole turn including its
+    // subagents — and a subagent routed to Z.AI was already booked by the
+    // model router as its own `zai` row the moment its response completed.
+    // Left in, those tokens would be billed twice, the second time priced as
+    // whatever the main model is. The router hands them over exactly once.
+    if (isClaudeTransportProvider(proc.cliProvider)) {
+      const routed = modelRouter.drainRoutedUsage(sessionId);
+      if (routed.requests > 0) {
+        proc.turnInputTokens = Math.max(0, proc.turnInputTokens - routed.inputTokens);
+        proc.turnOutputTokens = Math.max(0, proc.turnOutputTokens - routed.outputTokens);
+        proc.turnCacheReadTokens = Math.max(0, proc.turnCacheReadTokens - routed.cacheReadTokens);
+        proc.turnCacheCreationTokens = Math.max(
+          0,
+          proc.turnCacheCreationTokens - routed.cacheCreationTokens
+        );
+        // The CLI's own cost figure also contains the routed tokens, priced by
+        // its idea of the model; recompute from the corrected counters instead.
+        proc.turnCostUsd = undefined;
+      }
+    }
+
     const turnTotalTokens =
       proc.turnInputTokens +
       proc.turnOutputTokens +
@@ -10094,6 +10135,11 @@ ${proc.contextReminder.summary}
       throw new Error('Unauthorized');
     }
 
+    // The router token dies with the session. A respawn mints a new one, so
+    // this is belt-and-braces rather than load-bearing, but a stopped session
+    // should not leave a working credential behind.
+    modelRouter.unregisterSession(sessionId);
+
     if (proc.serverBacked && proc.cliProvider === 'opencode') {
       this.detachProcessForRestart(proc);
       await this.cleanupProcess(sessionId, proc);
@@ -10790,7 +10836,7 @@ ${proc.contextReminder.summary}
       cwd: workingDirectory,
       env: {
         ...(isClaudeTransportProvider(cliProvider)
-          ? await buildClaudeTransportEnv(cliProvider, userId, configHome)
+          ? await buildClaudeTransportEnv(cliProvider, userId, configHome, sessionId)
           : process.env),
         ...(await buildAndroidDeviceEnvForSession(sessionId, userId)),
         WEBUI_SESSION_ID: sessionId,

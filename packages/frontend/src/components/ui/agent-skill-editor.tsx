@@ -320,6 +320,15 @@ export function AgentSkillEditor({
                   <option value="opus">Claude Opus</option>
                   <option value="sonnet">Claude Sonnet</option>
                   <option value="haiku">Claude Haiku</option>
+                  {/* Routed to the Z.AI subscription by the backend model
+                      router — the main agent stays on the Claude plan while a
+                      subagent with one of these runs on GLM. Requires Z.AI to
+                      be configured under Settings → General. */}
+                  <optgroup label="Z.AI (GLM subscription)">
+                    <option value="glm-5.3">GLM 5.3</option>
+                    <option value="glm-5.1">GLM 5.1</option>
+                    <option value="glm-4.7">GLM 4.7</option>
+                  </optgroup>
                 </select>
               </div>
 
