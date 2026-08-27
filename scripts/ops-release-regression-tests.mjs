@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmod,
@@ -18,8 +18,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(import.meta.url);
-const Database = require('../packages/backend/node_modules/better-sqlite3');
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = path.resolve(scriptDir, '..');
 const sidecarScript = path.join(scriptDir, 'rebuild-robot-sidecar.sh');
@@ -262,17 +260,41 @@ async function testDockerProxyReleaseContract(tempDir) {
         ...process.env,
         SESSION_SECRET: 's'.repeat(48),
         JWT_SECRET: 'j'.repeat(48),
+        POSTGRES_PASSWORD: 'p'.repeat(24),
       },
     }
   );
   assert.equal(normalized.status, 0, normalized.stderr || normalized.stdout);
-  const mainService = JSON.parse(normalized.stdout).services['claude-code-webui'];
+  const services = JSON.parse(normalized.stdout).services;
+  const mainService = services['claude-code-webui'];
   assert.ok(mainService, 'portable compose must define the main WebUI service');
+  assert.ok(services.postgres, 'portable compose must define the database it now requires');
+  assert.ok(
+    mainService.depends_on?.postgres,
+    'the WebUI must wait for the database rather than race it on boot'
+  );
   assert.doesNotMatch(
     JSON.stringify(mainService.volumes ?? []),
     /\/var\/run\/docker\.sock/,
     'the main WebUI service must never mount the raw Docker socket'
   );
+
+  // Without a password there is no sensible default to fall back to, so the
+  // deployment has to fail loudly instead of reaching some other database.
+  const withoutPassword = run(
+    'docker',
+    ['compose', '-f', portableCompose, 'config', '--quiet'],
+    {
+      env: {
+        ...process.env,
+        SESSION_SECRET: 's'.repeat(48),
+        JWT_SECRET: 'j'.repeat(48),
+        POSTGRES_PASSWORD: '',
+      },
+    }
+  );
+  assert.notEqual(withoutPassword.status, 0, 'a missing POSTGRES_PASSWORD must fail the config');
+  assert.match(withoutPassword.stderr, /POSTGRES_PASSWORD/);
 
   assert.match(rebuildSource, /^SIDECAR_NAME="repair-bot"$/m);
   assert.match(rebuildSource, /TRIGGER_FILE=.*rebuild-trigger\.json/);
@@ -304,17 +326,11 @@ async function testMaintenance(tempDir) {
     mkdir(cacheDir, { recursive: true }),
   ]);
 
-  const databasePath = path.join(dataDir, 'claude-webui.db');
-  const database = new Database(databasePath);
-  database.exec(
-    "CREATE TABLE regression (id INTEGER PRIMARY KEY, value TEXT); INSERT INTO regression(value) VALUES ('ok')"
-  );
-  database.close();
 
   const files = {
-    oldBackup: path.join(backupDir, 'claude-webui-old.db'),
-    recentBackup: path.join(backupDir, 'claude-webui-recent.db'),
-    manualBackup: path.join(backupDir, 'manual.db'),
+    oldBackup: path.join(backupDir, 'backup-2026-01-01_00-00-00.dump'),
+    recentBackup: path.join(backupDir, 'backup-2026-07-13_00-00-00.dump'),
+    manualBackup: path.join(backupDir, 'manual.dump'),
     oldLog: path.join(dataDir, 'oc-debug.log'),
     recentLog: path.join(logsDir, 'current.log'),
     oldSession: path.join(sessionDir, 'old.jsonl'),
@@ -369,15 +385,12 @@ async function testMaintenance(tempDir) {
     assert.ok((await stat(file)).isFile(), `${file} should be retained`);
   }
 
-  // The script must never open the live database itself — that second connection
-  // is what truncated it on 2026-08-26. Assert the source stayed untouched
-  // instead of asserting that this script produced a copy.
-  const sourceDatabase = path.join(dataDir, 'claude-webui.db');
-  const sourceBefore = await stat(sourceDatabase);
-  assert.ok(sourceBefore.isFile(), 'the source database must still be there');
+  // Retention must never touch a file it does not recognise. The naming rule is
+  // the only thing standing between "prune old backups" and "delete whatever is
+  // in this directory", so a hand-named file is the case worth asserting.
   assert.ok(
-    !(await readdir(dataDir)).some((name) => name.endsWith('.db-shm')),
-    'a shared-memory file would mean something opened the database'
+    existsSync(files.manualBackup),
+    'a file outside the backup naming scheme must survive retention'
   );
 
   await writeFile(files.oldLog, 'old again\n');

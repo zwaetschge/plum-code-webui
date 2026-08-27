@@ -1,6 +1,19 @@
-import 'dotenv/config';
 import { randomBytes } from 'crypto';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+import dotenv from 'dotenv';
 import { z } from 'zod';
+
+// `dotenv/config` reads ./.env relative to the working directory, which is the
+// container's /app in production but packages/backend when a script or a test
+// is run from there — and the file lives at the repository root. Both are
+// loaded, nearest first, and neither overrides a variable the environment
+// already set.
+dotenv.config();
+dotenv.config({
+  path: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.env'),
+});
 
 const envSchema = z.object({
   PORT: z.string().default('3001'),

@@ -1,23 +1,26 @@
 #!/usr/bin/env node
 
-import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(import.meta.url);
-const Database = require('../packages/backend/node_modules/better-sqlite3');
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = path.resolve(scriptDir, '..');
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function defaultDataDir() {
+  // The rows are in Postgres; this directory holds what is still on disk —
+  // backups, generated images, attachments.
   const rootData = path.join(projectDir, 'data');
   const backendData = path.join(projectDir, 'packages', 'backend', 'data');
-  if (existsSync(path.join(rootData, 'claude-webui.db'))) return rootData;
-  if (existsSync(path.join(backendData, 'claude-webui.db'))) return backendData;
+  if (existsSync(path.join(rootData, 'backups'))) return rootData;
+  if (existsSync(path.join(backendData, 'backups'))) return backendData;
   return rootData;
 }
 
@@ -210,19 +213,24 @@ async function removeFiles(files, dryRun, label) {
 }
 
 /**
- * Verification only ever touches a finished backup file — never the live
- * database. Opening the running database from this script is what caused the
- * 2026-08-26 corruption: a second connection negotiating locks with the server
- * across two views of the same file (/mnt/cache directly and /mnt/user through
- * FUSE) truncated the main file mid-checkpoint.
+ * Reads the archive back before treating it as a backup.
+ *
+ * Under SQLite this ran `quick_check`, and the comment here explained at length
+ * why it only ever touched a finished file: opening the running database from
+ * this script is what caused the 2026-08-26 corruption. That hazard is gone
+ * with the file, but the habit it produced is worth keeping — an archive nobody
+ * has read is not a backup. `pg_restore --list` reads the dump's own table of
+ * contents, so a truncated or empty file fails here rather than during a
+ * restore.
  */
-function assertHealthyBackup(backupPath) {
-  const database = new Database(backupPath, { readonly: true, fileMustExist: true });
-  try {
-    const result = database.pragma('quick_check', { simple: true });
-    if (result !== 'ok') throw new Error(`SQLite quick_check failed for ${backupPath}: ${result}`);
-  } finally {
-    database.close();
+async function assertHealthyBackup(backupPath) {
+  const { stdout } = await execFileAsync('pg_restore', ['--list', backupPath], {
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  for (const table of ['sessions', 'messages']) {
+    if (!new RegExp(`TABLE DATA public ${table} `).test(stdout)) {
+      throw new Error(`${backupPath} contains no data for ${table}`);
+    }
   }
 }
 
@@ -260,7 +268,7 @@ async function createBackup(dataDir, now, dryRun) {
   if (!destinationPath) throw new Error('Backup response contained no path');
 
   await chmod(destinationPath, 0o600).catch(() => {});
-  assertHealthyBackup(destinationPath);
+  await assertHealthyBackup(destinationPath);
   process.stdout.write(`created validated SQLite backup: ${destinationPath}\n`);
   return destinationPath;
 }
@@ -273,7 +281,7 @@ async function main() {
 
   const backupFiles = await regularFilesRecursively(
     path.join(options.dataDir, 'backups'),
-    (_file, name) => /^claude-webui-.*\.db(?:-(?:wal|shm))?$/.test(name)
+    (_file, name) => /^backup-.*\.dump$/.test(name)
   );
   const expiredBackups = await expiredFiles(
     backupFiles,

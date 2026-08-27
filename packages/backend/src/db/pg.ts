@@ -65,7 +65,11 @@ export function readPgConfig(): PgConfig {
     port: Number(process.env.PGPORT || 5432),
     database: process.env.PGDATABASE || 'plumcode',
     user: process.env.PGUSER || 'plumcode',
-    password: process.env.PGPASSWORD || '',
+    // POSTGRES_PASSWORD is what the compose file and .env already call it,
+    // because that is the name the Postgres image requires. Accepting it here
+    // as well means the secret is written once rather than kept in step in two
+    // places, while PGPASSWORD still wins for anything setting it explicitly.
+    password: process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || '',
     max: Number(process.env.PGPOOL_MAX || 10),
   };
 }

@@ -261,13 +261,17 @@ export function translateDialect(sql: string): string {
       return `AS "${name}"`;
     });
 
-    // `chat_id IS ?` and `chat_id IS s.active_chat_id` are SQLite's null-safe
-    // equality, used so one query serves both "the default chat" (NULL) and a
-    // named one. Postgres allows IS only with NULL/TRUE/FALSE/UNKNOWN, so these
-    // are syntax errors rather than wrong answers — every message query would
-    // have failed on the first call.
+    // SQLite's null-safe equality, used so one query serves both "the default
+    // chat" (NULL) and a named one. It appears against a parameter
+    // (`chat_id IS ?`), a column (`IS s.active_chat_id`) and a subquery
+    // (`IS (SELECT active_chat_id FROM ...)`). Postgres allows IS only with
+    // NULL/TRUE/FALSE/UNKNOWN, so all three are syntax errors rather than wrong
+    // answers — every message query would have failed on the first call.
+    //
+    // The negative lookaheads list what Postgres does accept, so a form that is
+    // not listed is rewritten rather than quietly left to fail.
     text = text.replace(
-      /\bIS\s+(?!NOT\s+DISTINCT\b)(?!NULL\b)(?!NOT\s+NULL\b)(?!TRUE\b)(?!FALSE\b)(?!UNKNOWN\b)(\?|[A-Za-z_][A-Za-z0-9_.]*)/gi,
+      /\bIS\s+(?!NOT\s+DISTINCT\b)(?!NULL\b)(?!NOT\s+NULL\b)(?!TRUE\b)(?!FALSE\b)(?!UNKNOWN\b)(\?|\(|[A-Za-z_][A-Za-z0-9_.]*)/gi,
       'IS NOT DISTINCT FROM $1'
     );
 

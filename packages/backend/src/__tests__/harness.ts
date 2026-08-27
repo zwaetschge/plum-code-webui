@@ -5,6 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// For its side effect: the child server inherits this process's environment, so
+// the database password has to be loaded here before it is spawned.
+import '../config.js';
+
 /**
  * Boots the real server against a throwaway database and talks to it over HTTP.
  *

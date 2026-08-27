@@ -326,3 +326,14 @@ describe('translateDialect: strftime with a modifier', () => {
     );
   });
 });
+
+describe('translateDialect: IS against a subquery', () => {
+  it('rewrites the subquery form too', () => {
+    assert.equal(
+      translateDialect(
+        'SELECT 1 FROM messages WHERE chat_id IS (SELECT active_chat_id FROM sessions WHERE id = ?)'
+      ),
+      'SELECT 1 FROM messages WHERE chat_id IS NOT DISTINCT FROM (SELECT active_chat_id FROM sessions WHERE id = ?)'
+    );
+  });
+});

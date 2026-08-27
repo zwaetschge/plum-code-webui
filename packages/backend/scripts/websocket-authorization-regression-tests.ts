@@ -16,24 +16,34 @@ process.env.ENCRYPTION_KEY = 'websocket-auth-test-encryption-key-00000000000';
 process.env.WEBUI_DATA_DIR = temporaryDirectory;
 process.env.WEBUI_SUPPRESS_BOOTSTRAP_CREDENTIAL_LOG = '1';
 
-const { initDatabase } = await import('../src/db/index.js');
+const { useTestSchema, createTestSchema, dropTestSchema } = await import(
+  '../src/db/testing.js'
+);
+useTestSchema();
+const { all: pgAll, get: pgGet, run: pgRun } = await import('../src/db/pg.js');
+await createTestSchema();
 const { disconnectUserSockets, setupWebSocket } = await import('../src/websocket/index.js');
 const { revokeUserHttpSessions } = await import('../src/services/SqliteSessionStore.js');
 
-const database = initDatabase();
-const insertUser = database.prepare(
-  `INSERT INTO users (id, email, name, provider, provider_id, role, status)
-   VALUES (?, ?, ?, 'basic', ?, 'user', ?)`
+for (const [id, email, name, status] of [
+  ['user-a', 'a@example.test', 'A', 'active'],
+  ['user-b', 'b@example.test', 'B', 'active'],
+  ['user-suspended', 's@example.test', 'S', 'suspended'],
+]) {
+  await pgRun(
+    `INSERT INTO users (id, email, name, provider, provider_id, role, status)
+     VALUES (?, ?, ?, 'basic', ?, 'user', ?)`,
+    id,
+    email,
+    name,
+    id,
+    status
+  );
+}
+await pgRun(
+  `INSERT INTO sessions (id, user_id, name, working_directory, status)
+   VALUES ('session-a', 'user-a', 'A session', '/tmp', 'stopped')`
 );
-insertUser.run('user-a', 'a@example.test', 'A', 'user-a', 'active');
-insertUser.run('user-b', 'b@example.test', 'B', 'user-b', 'active');
-insertUser.run('user-suspended', 's@example.test', 'S', 'user-suspended', 'suspended');
-database
-  .prepare(
-    `INSERT INTO sessions (id, user_id, name, working_directory, status)
-     VALUES ('session-a', 'user-a', 'A session', '/tmp', 'stopped')`
-  )
-  .run();
 
 const httpServer = createServer();
 const ioServer = setupWebSocket(httpServer);
@@ -99,24 +109,23 @@ const suspendedError = await new Promise<Error>((resolve) => {
 });
 assert.match(suspendedError.message, /Account unavailable/);
 
-database
-  .prepare('INSERT INTO http_sessions (sid, data, expires_at) VALUES (?, ?, ?)')
-  .run(
-    'passport-user-a',
-    JSON.stringify({ cookie: {}, passport: { user: 'user-a' } }),
-    Date.now() + 60_000
-  );
-assert.equal(revokeUserHttpSessions('user-a', database), 1);
+await pgRun(
+  'INSERT INTO http_sessions (sid, data, expires_at) VALUES (?, ?, ?)',
+  'passport-user-a',
+  JSON.stringify({ cookie: {}, passport: { user: 'user-a' } }),
+  Date.now() + 60_000
+);
+assert.equal(await revokeUserHttpSessions('user-a'), 1);
 
 const disconnected = new Promise<void>((resolve) => owner.once('disconnect', () => resolve()));
-database.prepare("UPDATE users SET status = 'suspended' WHERE id = 'user-a'").run();
-assert.equal(disconnectUserSockets('user-a'), 1);
+await pgRun("UPDATE users SET status = 'suspended' WHERE id = 'user-a'");
+assert.equal(await disconnectUserSockets('user-a'), 1);
 await disconnected;
 
 stranger.close();
 await new Promise<void>((resolve) => ioServer.close(() => resolve()));
 await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-database.close();
 fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+await dropTestSchema();
 
 console.log('websocket authorization regression tests passed');

@@ -131,9 +131,12 @@ const RULES = [
   {
     // `x IS ?` is SQLite's null-safe equality. Postgres only allows IS with
     // NULL/TRUE/FALSE/UNKNOWN or DISTINCT FROM, so this is a syntax error.
+    // Anything Postgres does not accept after IS. Listing what is allowed
+    // rather than what is not means a form nobody thought of is reported
+    // instead of slipping through.
     id: 'is-null-safe-compare',
     severity: 'error',
-    test: /\bIS\s+(\?|\$\d)/i,
+    test: /\bIS\s+(?!NOT\s+DISTINCT\b)(?!NULL\b)(?!NOT\s+NULL\b)(?!TRUE\b)(?!FALSE\b)(?!UNKNOWN\b)(\?|\$\d|\(|[A-Za-z_])/i,
     hint: 'use IS NOT DISTINCT FROM',
   },
   {

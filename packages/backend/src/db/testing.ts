@@ -3,6 +3,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// For its side effect: config reads the repository's .env, which is where the
+// database password lives. Without it a test run finds no credentials and
+// skips itself, reporting success for a suite that never ran.
+import '../config.js';
 import { closePool, getPool } from './pg.js';
 
 /**
