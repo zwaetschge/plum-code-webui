@@ -38,10 +38,14 @@ export async function getRunnerAccessDecision(userId: string): Promise<RunnerAcc
   if (explicitlyAllowedEmails().has(user.email.trim().toLowerCase())) return { allowed: true };
   if (runnerAccessMode() === 'trusted-users') return { allowed: true };
 
+  // "until isolation" was a promise, and per-user provider isolation is not
+  // coming: it would sign every account out of all five harnesses, which is not
+  // worth it for a deployment with a handful of trusted users. Sharing is the
+  // design, so the denial says what to do rather than what to wait for.
   return {
     allowed: false,
     reason:
-      'Runner access is admin-only until per-user process isolation is enabled. Ask an admin to add this account to CLI_RUNNER_ALLOWED_EMAILS.',
+      'Runner access is admin-only because CLI sessions share provider credentials and a Unix home. Ask an admin to add this account to CLI_RUNNER_ALLOWED_EMAILS.',
   };
 }
 

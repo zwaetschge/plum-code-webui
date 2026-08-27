@@ -439,7 +439,10 @@ attachments, backups.
 - Codex quota requires a valid OAuth token and ChatGPT account ID in `~/.codex/auth.json`; defaults are 60-second caching and 10-second timeout.
 - MCPs bind at spawn; start a fresh chat for newly added tools.
 - Old custom agents may use `model='claude-sonnet-4-20250514'`; new agents default to `gpt-5.5`. Edit Claude-flavored model fields before using them in Codex sessions.
-- CLI sessions share a Unix UID and provider homes. `CLI_RUNNER_ACCESS=admin-only` is the containment boundary until per-user/container runners exist; never silently change it.
+- CLI sessions share a Unix UID and provider homes, and that is the design rather than a
+  stage on the way to something else — per-user isolation would sign every account out of
+  all five harnesses. `CLI_RUNNER_ACCESS=admin-only` is therefore a permanent containment
+  boundary, not a temporary one; never silently change it.
 - Preview vhost cookies are not cryptographically bound to WebUI users. Ownership is checked, but preview hosts must remain behind the same authenticated proxy.
 
 ## Implemented optimisation baseline
