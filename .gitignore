@@ -129,3 +129,6 @@ packages/android/*.apk
 packages/android/*.aab
 packages/android/test_*.png
 packages/android/ui_dump*.xml
+
+# Postgres data directory (bind-mounted into the plum-postgres container)
+/postgres/

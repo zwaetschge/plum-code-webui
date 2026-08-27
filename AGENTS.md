@@ -205,10 +205,10 @@ Claude-backed MCP servers are registered under `mcpServers` in `config/claude/se
 
 ## Image generation paths
 
-| Path              | Trigger                                    | Model                  | Counts against    | Best for                                 |
-| ----------------- | ------------------------------------------ | ---------------------- | ----------------- | ---------------------------------------- |
-| Codex `$imagegen` | `$imagegen ...` or natural image hint      | gpt-image-2            | Codex plan limits | ad-hoc single images                     |
-| `openai-image.sh` | `bash /app/scripts/openai-image.sh ...`    | gpt-image-2/1          | OpenAI API        | reproducible batches and fixed filenames |
+| Path              | Trigger                                      | Model                  | Counts against    | Best for                                 |
+| ----------------- | -------------------------------------------- | ---------------------- | ----------------- | ---------------------------------------- |
+| Codex `$imagegen` | `$imagegen ...` or natural image hint        | gpt-image-2            | Codex plan limits | ad-hoc single images                     |
+| `openai-image.sh` | `bash /app/scripts/openai-image.sh ...`      | gpt-image-2/1          | OpenAI API        | reproducible batches and fixed filenames |
 | ComfyUI MCP tools | `generate_image` / `_quality` / `edit_image` | Z-Image / Flux.2 Klein | local GPU         | offline batches and style control        |
 
 - `/app/scripts/openai-image.sh` uses `curl + jq + base64`; subcommands `generate` and `edit` accept `--prompt`, `--output`, `--model`, `--size`, `--quality`, `--n`, and `--background`.
@@ -242,7 +242,7 @@ The WebUI talks directly to ComfyUI without a LoRA Tester sidecar. Backend workf
 - Backend: `http://host.docker.internal:4000` (`android-app-creator-backend` on the host).
 - Pair once with `adb_pair_wifi` and `adb_connect_wifi`; `/app/data/known-devices.json` persists the registry and startup auto-reconnects.
 - Load `android-build` for the full workflow. **Never call `adb` or `gradle` from `Bash` when this MCP is available.**
-- The WebUI Android client builds from builder project `796aa064-f0bb-4031-bbf2-2da83a4bca94`; sync sources from `packages/android` into its `workspacePath` with `cp` (no rsync in the container; `app/src` itself is owned by the builder UID — copy directory *contents*, don't delete the tree).
+- The WebUI Android client builds from builder project `796aa064-f0bb-4031-bbf2-2da83a4bca94`; sync sources from `packages/android` into its `workspacePath` with `cp` (no rsync in the container; `app/src` itself is owned by the builder UID — copy directory _contents_, don't delete the tree).
 
 ### Android app: home-screen widgets & Wear OS
 
@@ -272,14 +272,15 @@ New Android env: none required; the app degrades gracefully when a feature's ser
 
 ### WebUI ↔ Android feature parity
 
-**New features ship in both clients in the same pass.** Building one side first and backfilling later is what produced the parity gaps closed on 2026-08-11; treat a feature as unfinished until it is reachable in `packages/frontend` *and* `packages/android`.
+**New features ship in both clients in the same pass.** Building one side first and backfilling later is what produced the parity gaps closed on 2026-08-11; treat a feature as unfinished until it is reachable in `packages/frontend` _and_ `packages/android`.
 
 **WebUI side-menu split:** the left menu holds main navigation (sessions, analytics, settings, operations); the right menu holds chat and session functions (chat threads, Git, Checkpoints, Notes, Preview, Tool Log, Styles, Runtime, Android devices). Session-scoped controls belong in the right menu, not in the chat header. The right dock is `hidden md:flex`, so anything added there needs a slot in the mobile session sheet as well.
 
 Both clients speak the same REST/socket API; keep new session features reachable from both.
 
 - **Dockable panels** are the WebUI's extension point: add the key to `DockablePanel` in `stores/panelDockStore.ts` (plus both default maps), then a `panelMeta` entry and a `renderDockedPanel` branch in `SessionPage.tsx`. Git, Checkpoints, Notes, Preview and Tool Log live there; Categories and Discovered Projects sit in a secondary row on the dashboard. Components that exist but are mounted nowhere are invisible to users — check `grep -rl "<ComponentName"` before assuming a feature ships.
-- **Android equivalents**: slash commands in `ChatInput` (`/` picker fed by `/api/commands`), `TaskWorkbenchStrip` (todos/queue/context), `CompactBoundaryCard` (messages whose id starts with `compact-`), per-session presets via `PATCH /api/sessions/:id/styles`, and the Devices tab in DevTools (`/api/android/*` pair/connect/emulator).
+- **Android equivalents**: slash commands in `ChatInput` (`/` picker fed by `/api/commands`), `TaskWorkbenchStrip` (todos/queue/context), `CompactBoundaryCard` (messages whose id starts with `compact-`), per-session presets via `PATCH /api/sessions/:id/styles`, and the Devices tab in DevTools (`/api/android/*` pair/connect/emulator). Closed later: the Tool Log (a sheet behind the chat's Tools tab), control-gateway tokens and the Codex plugin catalogue (`ParityPanels.kt`, mounted in `SettingsScreen`), and discovered projects (a collapsible row on the dashboard).
+- **Reconnecting a wireless device**: Android hands out a new debug port on every wireless-debugging restart, so each remembered device row carries a port field prefilled with the last one. `POST /api/android/devices/connect` takes `replaceSerial` and drops the stale entry only after the new port answers, so a failed reconnect never loses the entry you need to retry.
 - Reasoning levels are provider-specific and must match `reasoningOptions` in `SessionPage.tsx`: Codex offers none/minimal/low/medium/high/xhigh/max/ultra, Claude and Z.AI low/medium/high/max, OpenCode and Pi minimal/low/medium/high/max. Codex's `fast` is a service tier, not a level — the backend moves it to `cli_service_tier` and clears `cli_reasoning`.
 - Integration secrets are write-only in both clients: the server returns `*Configured` flags only, an empty field means "keep", and removing one needs the explicit `clear*` flag.
 
@@ -346,6 +347,10 @@ Both clients speak the same REST/socket API; keep new session features reachable
 - Re-auth after a token revoke: `gh auth login --hostname github.com --git-protocol ssh --web`. It prints a one-time code the user enters at <https://github.com/login/device>; there is no headless path, since the WebUI's own GitHub OAuth is login-only and stores no repo-scoped token.
 - The token is stored in plain text inside the mounted config, exactly like the other provider credentials. Treat `${CONFIG_DIR}/gh` as secret material: never commit it, never echo `gh auth token`, and redact it in Discord or logs.
 
+`services/githubCli.ts` wraps it for the API: `/api/github/pulls` (list, create, `:number/merge`), `/api/github/runs` (list, `:id/rerun`, `:id/failure-log`), `/api/github/issues` (list, create) and `/api/github/releases`. Every call is `execFile` with an argument array — never a shell string — so branch names and PR titles cannot inject commands. The repo comes from the session's `workingDirectory`, validated through `isAllowedBasePath`.
+
+The older Octokit path in `services/github.ts` (repos, clone, push, remote) stays, but it needs a per-user token from Settings that most users never create. Prefer the gh-backed routes for anything new. Both clients surface the same four tabs: `components/github/GitHubPanel.tsx` as a dockable panel, and `GitHubCollabPanel.kt` in the Android DevTools GitHub tab.
+
 ## Rebuild / redeploy protocol (MANDATORY for agents)
 
 For Docker/backend redeploys, trigger `repair-bot`. **Never run `docker compose build` followed by `docker compose up -d --force-recreate` inside the WebUI container**; recreation kills the caller and has repeatedly broken deployments.
@@ -370,7 +375,33 @@ Provider CLIs inherit filtered `DOCKER_HOST`; keep `CLI_RUNNER_ACCESS` admin-onl
 
 If `docker ps --filter name=repair-bot` is empty, `plum-rebuild.sh` exits 3. Start it with `docker compose up -d repair-bot`.
 
+## Database safety
+
+The database is owned by exactly one process. On 2026-08-26 it was truncated by
+1278 pages — `messages`, `session_events` and the search index were gone — because
+a second connection reached the live file. `scripts/plum-maintenance.mjs` did that
+on every run, and an agent shell can do it at any time: the same file is reachable
+both directly under `/mnt/cache` and through the `/mnt/user` FUSE layer, and SQLite's
+locks do not carry across those two views.
+
+- **Never open `data/claude-webui.db` from a second process**, not even read-only.
+  Query it through the running server, or through a backup copy.
+- Backups run in-process (`services/backup.ts`, `VACUUM INTO` every 6h, verified
+  with `integrity_check` plus a row count). `POST /api/admin/backup` triggers one;
+  `plum-maintenance.mjs` asks for it over that route instead of opening the file.
+- Litestream (`plum-litestream`) replicates continuously to
+  `/mnt/user/backups/plum-code-litestream`, 10s sync, daily snapshot, 14 days of
+  point-in-time recovery. Its source mount **must** stay the direct
+  `/mnt/cache/...` path; pointing it at `/mnt/user` would recreate the exact
+  failure above. Restore: `litestream restore -config /etc/litestream.yml -o <out>
+/data/claude-webui.db` in a throwaway container.
+- `/health/ready` reads real rows from `sessions` and `messages` and runs
+  `quick_check` every 15 minutes. The previous `SELECT 1` touched no table and
+  reported healthy throughout the corruption.
+
 ## Removed paths (do not reintroduce)
+
+- `/api/automation`, `/api/tasks`, `/api/devices`, `/api/claude-settings`: four routers (~1,900 lines) with no caller in either client. `automation` was the control gateway's predecessor; `tasks` plus `services/tasks/` was the last of the removed orchestration/task-router stack. `addPatternToSettings` survived the claude-settings removal as `services/claudeSettings.ts` — the permission approval flow still writes through it. Their tables (`automation_tokens`, `session_goals`, `trusted_devices`, `orchestration_*`) are dropped by a migration in `db/index.ts`; all were empty. `session_delegations` stays: it has live callers.
 
 - Gemini provider, `~/.gemini`, and Gemini image service
 - Top-level GLM provider; GLM belongs to OpenCode
@@ -419,16 +450,19 @@ Jedes `session:compact`-Event startet serverseitig `packages/backend/src/service
 - Read-State ist pro Benutzer, Session und Chat persistent. Presence ist nur flüchtige Anzeige und darf den autoritativen Lesemarker nicht überschreiben.
 
 <!-- webui-managed: project-context:start -->
+
 # Project: plum-code-webui
 
 Web UI for Codex, OpenCode, Pi, and Claude Code agent harnesses
 
 ## Tech Stack
+
 Docker, Docker Compose
 
 **Monorepo** (pnpm)
 
 ## Commands
+
 - `pnpm dev` — dev
 - `pnpm run build` — build
 - `pnpm test` — test
@@ -438,5 +472,7 @@ Docker, Docker Compose
 - `pnpm run format` — format
 
 ## Key Directories
+
 packages/, scripts/
+
 <!-- webui-managed: project-context:end -->
