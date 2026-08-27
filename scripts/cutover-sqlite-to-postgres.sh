@@ -23,12 +23,19 @@ cd "$PROJECT_DIR"
 
 [ -f "$SOURCE" ] || { echo "FEHLER: $SOURCE fehlt."; exit 1; }
 
-# A -shm file means an open connection. Loading from underneath a live writer is
-# the exact mistake this whole exercise exists to avoid.
-if [ -e "${SOURCE}-shm" ]; then
-  echo "FEHLER: ${SOURCE}-shm existiert — es gibt noch einen offenen Schreiber."
+# Loading from underneath a live writer is the exact mistake this whole exercise
+# exists to avoid. A -shm file is NOT proof of one: SQLite removes it only on a
+# clean close of the last connection, so it survives a killed container and an
+# earlier version of this guard refused to run for twenty minutes because of a
+# leftover. An open descriptor is the real evidence.
+if ls -l /proc/*/fd/* 2>/dev/null | grep -q "$(basename "$SOURCE")"; then
+  echo "FEHLER: ein Prozess hält $SOURCE offen."
   echo "        Erst den alten Container ersetzen lassen, dann erneut ausführen."
   exit 1
+fi
+if [ -e "${SOURCE}-shm" ]; then
+  echo "Hinweis: ${SOURCE}-shm liegt noch da, aber niemand hat die Datei offen —"
+  echo "         Überbleibsel eines harten Stopps. Der Checkpoint unten räumt es weg."
 fi
 
 mkdir -p "$STAGE_DIR"
