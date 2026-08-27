@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,8 +14,9 @@ import { fileURLToPath } from 'node:url';
  * `await` only where a type actually collides, and an `await` in the wrong place
  * compiles cleanly while writing in the wrong order.
  *
- * These tests run against SQLite today and are meant to survive the port
- * unchanged, so the same assertions prove Postgres behaves identically.
+ * Each run gets its own Postgres schema. `search_path` points the server's
+ * every statement at it, so two runs on the same database cannot see each
+ * other's rows and neither can touch `public`, which holds the real data.
  *
  * The server runs as a child process rather than being imported, because
  * importing index.ts starts provider managers, watchdogs and file watchers in
@@ -66,9 +68,11 @@ export async function startTestServer(): Promise<TestServer> {
   const url = `http://127.0.0.1:${port}`;
 
   const userId = 'integration-user';
+  const schema = `it_${randomBytes(6).toString('hex')}`;
   const env = {
     ...process.env,
     NODE_ENV: 'development',
+    PGSCHEMA: schema,
     WEBUI_DATA_DIR: dataDir,
     WEBUI_CONFIG_HOME: configHome,
     PORT: String(port),
@@ -81,20 +85,27 @@ export async function startTestServer(): Promise<TestServer> {
     LOG_LEVEL: 'error',
   };
 
-  // Seed the user and a token before boot, so the first request is authenticated.
-  // Written to a file rather than passed with -e: node treats -e input as
-  // CommonJS unless told otherwise, and these are ESM imports.
+  // The schema, the user and a token are created before boot, so the first
+  // request is authenticated. Written to a file rather than passed with -e:
+  // node treats -e input as CommonJS unless told otherwise, and these are ESM
+  // imports.
   const seedScript = path.join(dataDir, 'seed.mts');
   fs.writeFileSync(
     seedScript,
     `
-    import { initDatabase, getDatabase } from '${path.join(backendRoot, 'src/db/index.js')}';
+    import { getPool, run as pgRun, closePool } from '${path.join(backendRoot, 'src/db/pg.js')}';
+    import { initDatabase } from '${path.join(backendRoot, 'src/db/index.js')}';
     import { createGatewayToken } from '${path.join(backendRoot, 'src/services/gateway/tokens.js')}';
-    initDatabase();
-    getDatabase()
-      .prepare('INSERT OR IGNORE INTO users (id,email,name,provider,provider_id,role) VALUES (?,?,?,?,?,?)')
-      .run('${userId}', 'it@example.test', 'IT', 'local', '${userId}', 'admin');
-    process.stdout.write(createGatewayToken('${userId}', 'integration', 'write').token);
+
+    await getPool().query('CREATE SCHEMA IF NOT EXISTS "${schema}"');
+    await initDatabase();
+    await pgRun(
+      'INSERT INTO users (id,email,name,provider,provider_id,role) VALUES (?,?,?,?,?,?) ON CONFLICT (id) DO NOTHING',
+      '${userId}', 'it@example.test', 'IT', 'local', '${userId}', 'admin'
+    );
+    const { token } = await createGatewayToken('${userId}', 'integration', 'write');
+    process.stdout.write(token);
+    await closePool();
     `
   );
   const seed = spawn(process.execPath, ['--import', 'tsx', seedScript], {
@@ -174,6 +185,16 @@ export async function startTestServer(): Promise<TestServer> {
           resolve(null);
         });
       });
+      // Dropped from a fresh connection: the server's pool is gone with the
+      // child process, and leaving the schema behind would accumulate one per
+      // test run in the shared database.
+      const { getPool, closePool } = await import('../db/pg.js');
+      try {
+        await getPool().query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      } finally {
+        await closePool();
+      }
+
       fs.rmSync(dataDir, { recursive: true, force: true });
       fs.rmSync(configHome, { recursive: true, force: true });
     },

@@ -57,7 +57,7 @@ if (!SOURCE) {
 const isFts = (name) => name.startsWith('messages_fts');
 
 /** Tables whose queries order by rowid, and so need a real column for it. */
-const ROWID_ORDERED = new Set(['messages', 'message_media', 'session_chats']);
+const ROWID_ORDERED = new Set(['messages', 'message_media', 'session_chats', 'session_events']);
 
 /**
  * SQLite is loosely typed and accepts almost any type name. Postgres is not, so

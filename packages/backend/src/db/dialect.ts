@@ -210,6 +210,10 @@ function replaceCall(
  */
 export function translateDialect(sql: string): string {
   let out = '';
+  // Aliases quoted along the way. A statement that selects `... AS lastActivity`
+  // usually also orders by it, and an unquoted `ORDER BY lastActivity` folds to
+  // `lastactivity`, which no longer matches the column the SELECT produced.
+  const quotedAliases = new Set<string>();
 
   for (const span of spans(sql)) {
     if (span.literal) {
@@ -227,19 +231,23 @@ export function translateDialect(sql: string): string {
     //
     // Only mixed-case names are quoted. An all-caps word after AS is a type in
     // a cast (`CAST(x AS INTEGER)`) and quoting it would break the statement.
-    text = text.replace(/\bAS\s+([A-Za-z_][A-Za-z0-9_]*)\b/g, (whole, name) => {
+    text = text.replace(/\bAS\s+([A-Za-z_][A-Za-z0-9_]*)\b/gi, (whole, name: string) => {
       const mixed = /[a-z]/.test(name) && /[A-Z]/.test(name);
-      return mixed ? `AS "${name}"` : whole;
+      if (!mixed) return whole;
+      quotedAliases.add(name);
+      return `AS "${name}"`;
     });
 
-    // `chat_id IS ?` is SQLite's null-safe equality, used so one query handles
-    // both "the default chat" (NULL) and a named one. Postgres allows IS only
-    // with NULL/TRUE/FALSE/UNKNOWN, so this is a syntax error rather than a
-    // wrong answer — every message query would have failed on the first call.
-    text = text.replace(/\bIS\s+\?/gi, 'IS NOT DISTINCT FROM ?');
+    // `chat_id IS ?` and `chat_id IS s.active_chat_id` are SQLite's null-safe
+    // equality, used so one query serves both "the default chat" (NULL) and a
+    // named one. Postgres allows IS only with NULL/TRUE/FALSE/UNKNOWN, so these
+    // are syntax errors rather than wrong answers — every message query would
+    // have failed on the first call.
+    text = text.replace(
+      /\bIS\s+(?!NOT\s+DISTINCT\b)(?!NULL\b)(?!NOT\s+NULL\b)(?!TRUE\b)(?!FALSE\b)(?!UNKNOWN\b)(\?|[A-Za-z_][A-Za-z0-9_.]*)/gi,
+      'IS NOT DISTINCT FROM $1'
+    );
 
-    // datetime(...) needs its arguments, which the span split may have cut in
-    // half; it is matched against the whole statement below instead.
     out += text;
   }
 
@@ -249,6 +257,24 @@ export function translateDialect(sql: string): string {
   // untranslated.
   out = replaceCall(out, 'datetime', translateDatetime);
   out = replaceCall(out, 'strftime', translateStrftime);
+
+  // Now that the aliases are known, quote the places that refer back to them.
+  // Only names this statement itself introduced are touched, so a real column
+  // that happens to be spelled the same is left alone.
+  if (quotedAliases.size) {
+    const names = [...quotedAliases].sort((a, b) => b.length - a.length).join('|');
+    const reference = new RegExp(`(^|[^."\\w])(${names})\\b(?!\\s*")`, 'g');
+    let requoted = '';
+    for (const span of spans(out)) {
+      requoted += span.literal
+        ? span.text
+        : span.text.replace(reference, (whole, prefix: string, name: string) =>
+            // `AS "name"` is already done; anything else referring to it is not.
+            whole.includes('"') ? whole : `${prefix}"${name}"`
+          );
+    }
+    out = requoted;
+  }
 
   return out;
 }

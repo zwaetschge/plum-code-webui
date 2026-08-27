@@ -1,3 +1,9 @@
+// First, and it has to stay first: it patches Express's router so a rejected
+// promise from an async handler reaches the error middleware instead of hanging
+// the request. The route modules below register their handlers when they are
+// imported, which happens before any statement in this file runs.
+import './middleware/asyncErrors.js';
+
 import express from 'express';
 import fs from 'fs';
 import { createServer } from 'http';

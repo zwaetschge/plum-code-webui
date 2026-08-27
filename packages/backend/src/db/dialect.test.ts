@@ -233,3 +233,71 @@ describe('translateDialect: identifier case', () => {
     );
   });
 });
+
+describe('translateDialect: IS against a column', () => {
+  it('rewrites a column-to-column comparison', () => {
+    // `unread_message.chat_id IS s.active_chat_id` is how one query serves both
+    // the default chat and a named one. Postgres reads the right-hand side as
+    // the start of IS NULL / IS TRUE and rejects it.
+    assert.equal(
+      translateDialect('SELECT 1 WHERE unread_message.chat_id IS s.active_chat_id'),
+      'SELECT 1 WHERE unread_message.chat_id IS NOT DISTINCT FROM s.active_chat_id'
+    );
+  });
+
+  it('leaves the forms Postgres does accept alone', () => {
+    const sql = 'SELECT 1 WHERE a IS NULL AND b IS NOT NULL AND c IS TRUE AND d IS FALSE';
+    assert.equal(translateDialect(sql), sql);
+  });
+
+  it('does not rewrite what it already rewrote', () => {
+    const sql = 'SELECT 1 WHERE a IS NOT DISTINCT FROM b';
+    assert.equal(translateDialect(sql), sql);
+  });
+
+  it('quotes a lower-case alias too', () => {
+    assert.equal(
+      translateDialect('SELECT user_id as userId FROM t'),
+      'SELECT user_id AS "userId" FROM t'
+    );
+  });
+});
+
+describe('translateDialect: references back to an alias', () => {
+  it('quotes an ORDER BY that names a quoted alias', () => {
+    // Quoting the alias without quoting the reference produces
+    // `column "lastactivity" does not exist` — the SELECT now yields
+    // `lastActivity` and the ORDER BY folds to lower case.
+    assert.equal(
+      translateDialect('SELECT x AS lastActivity FROM t ORDER BY lastActivity DESC'),
+      'SELECT x AS "lastActivity" FROM t ORDER BY "lastActivity" DESC'
+    );
+  });
+
+  it('quotes a GROUP BY the same way', () => {
+    assert.equal(
+      translateDialect('SELECT a AS userId, b FROM t GROUP BY userId'),
+      'SELECT a AS "userId", b FROM t GROUP BY "userId"'
+    );
+  });
+
+  it('leaves a qualified column of the same name alone', () => {
+    // `s.userId` is a column reference, not a reference to the output name.
+    assert.equal(
+      translateDialect('SELECT s.userId AS userId FROM t'),
+      'SELECT s.userId AS "userId" FROM t'
+    );
+  });
+
+  it('leaves the same word inside a literal alone', () => {
+    assert.equal(
+      translateDialect("SELECT a AS someName FROM t WHERE note = 'someName'"),
+      `SELECT a AS "someName" FROM t WHERE note = 'someName'`
+    );
+  });
+
+  it('only touches names this statement introduced', () => {
+    const sql = 'SELECT lastActivity FROM t ORDER BY lastActivity';
+    assert.equal(translateDialect(sql), sql);
+  });
+});

@@ -405,6 +405,7 @@ CREATE TABLE IF NOT EXISTS "session_events" (
   "summary" TEXT,
   "metadata_json" TEXT,
   "created_at" TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  "seq" BIGSERIAL NOT NULL,
   PRIMARY KEY ("id")
 );
 
@@ -920,6 +921,11 @@ CREATE INDEX IF NOT EXISTS "idx_messages_seq" ON "messages" ("seq");
 CREATE INDEX IF NOT EXISTS "idx_session_chats_seq" ON "session_chats" ("seq");
 
 -- 40 tables, 57 foreign keys, 86 indexes
+
+CREATE INDEX IF NOT EXISTS "idx_messages_seq" ON "messages" ("seq");
+CREATE INDEX IF NOT EXISTS "idx_message_media_seq" ON "message_media" ("seq");
+CREATE INDEX IF NOT EXISTS "idx_session_chats_seq" ON "session_chats" ("seq");
+CREATE INDEX IF NOT EXISTS "idx_session_events_seq" ON "session_events" ("seq");
 
 -- Replaces the FTS5 virtual table `messages_fts`. Generated rather than
 -- trigger-maintained: the SQLite side needed triggers to keep the shadow table
