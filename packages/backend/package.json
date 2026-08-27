@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "node scripts/normalize-esm-imports.mjs --check && tsc",
+    "build": "node scripts/normalize-esm-imports.mjs --check && tsc && node scripts/copy-build-assets.mjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "fix:esm-imports": "node scripts/normalize-esm-imports.mjs",

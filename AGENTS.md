@@ -478,19 +478,16 @@ Jedes `session:compact`-Event startet serverseitig `packages/backend/src/service
 - Read-State ist pro Benutzer, Session und Chat persistent. Presence ist nur flüchtige Anzeige und darf den autoritativen Lesemarker nicht überschreiben.
 
 <!-- webui-managed: project-context:start -->
-
 # Project: plum-code-webui
 
 Web UI for Codex, OpenCode, Pi, and Claude Code agent harnesses
 
 ## Tech Stack
-
 Docker, Docker Compose
 
 **Monorepo** (pnpm)
 
 ## Commands
-
 - `pnpm dev` — dev
 - `pnpm run build` — build
 - `pnpm test` — test
@@ -500,7 +497,5 @@ Docker, Docker Compose
 - `pnpm run format` — format
 
 ## Key Directories
-
 packages/, scripts/
-
 <!-- webui-managed: project-context:end -->

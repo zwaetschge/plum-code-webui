@@ -312,6 +312,52 @@ async function testDockerProxyReleaseContract(tempDir) {
   );
 }
 
+/**
+ * Every runtime file the backend reads next to its own module has to be copied
+ * into dist/, because tsc emits only what it compiles. Missing one is invisible
+ * in development — everything runs from src/ there — and fatal in the image:
+ * the server throws before it listens, the readiness gate rejects the release,
+ * and the rollback leaves a successful build looking like the problem.
+ */
+async function testRuntimeAssetsAreCopiedIntoDist() {
+  const backendSrc = path.join(projectDir, 'packages/backend/src');
+  // Two mechanisms are in play and both count: copy-build-assets.mjs for files
+  // that belong next to the compiled module, and the Dockerfile for the handful
+  // it copies out of src/ directly.
+  const copyScript = await readFile(
+    path.join(projectDir, 'packages/backend/scripts/copy-build-assets.mjs'),
+    'utf8'
+  );
+  const dockerfile = await readFile(path.join(projectDir, 'Dockerfile'), 'utf8');
+
+  const referenced = new Set();
+  const walk = async (dir) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full);
+        continue;
+      }
+      if (!entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) continue;
+      const source = await readFile(full, 'utf8');
+      for (const match of source.matchAll(/__dirname,\s*'([^']+\.[a-z]+)'/g)) {
+        referenced.add(path.posix.join(path.relative(backendSrc, dir), match[1]));
+      }
+    }
+  };
+  await walk(backendSrc);
+
+  const missing = [...referenced].filter((asset) => {
+    const base = path.posix.basename(asset);
+    return !copyScript.includes(asset) && !dockerfile.includes(base);
+  });
+  assert.deepEqual(
+    missing,
+    [],
+    'files read from __dirname must be listed in copy-build-assets.mjs'
+  );
+}
+
 async function testMaintenance(tempDir) {
   const dataDir = path.join(tempDir, 'data');
   const configDir = path.join(tempDir, 'config');
@@ -415,6 +461,7 @@ try {
   await testRebuildRollback(tempDir);
   await testHubProductionGuards(tempDir);
   await testDockerProxyReleaseContract(tempDir);
+  await testRuntimeAssetsAreCopiedIntoDist();
   await testMaintenance(tempDir);
   process.stdout.write('ops release regression tests passed\n');
 } finally {
