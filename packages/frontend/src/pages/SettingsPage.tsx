@@ -283,6 +283,7 @@ type GeneralSettingsTab =
   | 'codex'
   | 'claude'
   | 'zai'
+  | 'subagents'
   | 'pi'
   | 'oracle'
   | 'interface'
@@ -497,6 +498,13 @@ const GENERAL_SETTINGS_TABS: GeneralSettingsTabDescriptor[] = [
     description: 'GLM Coding Plan endpoint and model mapping.',
     icon: Globe2,
     sections: [{ id: 'zai-cli', label: 'Z.AI Code' }],
+  },
+  {
+    value: 'subagents',
+    label: 'Subagents',
+    description: 'Route agent models to other subscriptions.',
+    icon: Bot,
+    sections: [{ id: 'subagent-upstreams', label: 'Upstreams' }],
   },
   {
     value: 'opencode',
@@ -3230,6 +3238,30 @@ export function SettingsPage() {
                                   Z.AI Claude Code documentation
                                 </a>
                               </p>
+                            </CardContent>
+                          </Card>
+                        </section>
+                      </div>
+                    </TabsContent>
+
+                    {/* Subagent model routing */}
+                    <TabsContent value="subagents" className="settings-general-pane mt-0">
+                      <div className="settings-pane-column">
+                        <section id="subagent-upstreams">
+                          <Card className="border border-border/70">
+                            <CardHeader>
+                              <CardTitle className="text-base">Subagent-Modelle</CardTitle>
+                              <CardDescription>
+                                Claude-Sessions können Subagenten auf anderen Abos laufen lassen:
+                                Der Hauptagent bleibt auf dem Claude-Abo, ein Agent, dessen
+                                Modellfeld eine hier gelistete Modell-ID nennt, läuft über den
+                                zugehörigen Anbieter. GLM-Modelle routen automatisch über die
+                                Z.AI-Konfiguration; hier kommen weitere Anthropic-kompatible
+                                Anbieter dazu. Das Modell wählst du pro Agent unter Extensions →
+                                Agents.
+                              </CardDescription>
+                            </CardHeader>
+                            <CardContent>
                               <SubagentUpstreamsSection />
                             </CardContent>
                           </Card>
