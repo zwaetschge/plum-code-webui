@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material3.Scaffold
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -481,19 +483,23 @@ fun PlumNavRail(
     // Five labelled items need roughly 350dp; below that the labels go and the
     // rail narrows to icons so every destination still fits without scrolling.
     val short = isShortWindow() || LocalDensity.current.fontScale >= 1.5f
+    // Sized to its items and parked in the bottom-left corner: on a tablet held
+    // in two hands that is where the thumb actually reaches. A full-height pill
+    // put the destinations in the middle of the screen, out of reach.
     GlassPanel(
         modifier = modifier
-            .fillMaxHeight()
+            .wrapContentHeight()
             .width(if (short) 68.dp else 96.dp)
-            .padding(start = 10.dp, top = 10.dp, bottom = 10.dp),
+            .padding(start = 10.dp, bottom = 10.dp),
         radius = 26.dp,
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .wrapContentHeight()
                 .navigationBarsPadding()
                 .padding(vertical = if (short) 6.dp else 12.dp, horizontal = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(if (short) 2.dp else 6.dp, Alignment.CenterVertically),
+            verticalArrangement = Arrangement.spacedBy(if (short) 2.dp else 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             MainDestination.entries.forEach { destination ->
@@ -566,6 +572,13 @@ fun PlumNavScaffold(
     onNavigate: (MainDestination) -> Unit,
     badgeCount: Int = 0,
     floatingActionButton: @Composable (() -> Unit)? = null,
+    /**
+     * Optional title row for rail layouts. It spans the top starting at the very
+     * left edge, above the rail, so a screen title does not have to start after
+     * the rail's width. Ignored in the bottom-bar layout, where screens draw
+     * their own header inside the content.
+     */
+    header: (@Composable () -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     // Provided once at the app root, not here: screens collect their error
@@ -573,14 +586,40 @@ fun PlumNavScaffold(
     // different instance from the one they post into.
     val snackbarHostState = LocalPlumSnackbar.current
     if (isTabletWidth()) {
-        Row(Modifier.fillMaxSize()) {
-            PlumNavRail(selected, onNavigate, badgeCount = badgeCount)
+        // The header floats over the top-left corner instead of sitting in a row
+        // above everything: a real row also pushes the right-hand pane down, which
+        // left a dead band and a hard edge above the detail view. Panes that need
+        // to clear it get the inset through `content`'s PaddingValues and can
+        // apply it to just the columns that sit underneath.
+        Box(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxSize()) {
+            PlumNavRail(
+                selected,
+                onNavigate,
+                badgeCount = badgeCount,
+                // Bottom-left corner. The title floats over the space this leaves
+                // free at the top of the rail column, so neither has to move.
+                modifier = Modifier.align(Alignment.Bottom),
+            )
             // Without a Scaffold there is nothing applying window insets, so
             // the content would slide under the status bar.
-            Box(Modifier.weight(1f).statusBarsPadding()) {
+            // No status bar inset here on purpose. The bar is transparent and
+            // floats over the content: backdrops, gradients and glass panels run
+            // all the way to the top edge, and the inset is handed to the screen
+            // so it can offset the parts that must stay readable. Consuming it
+            // here instead cut a hard horizontal edge across the top of every
+            // pane that paints its own background.
+            Box(Modifier.weight(1f)) {
                 // Rail layouts have no bottom bar consuming the nav-bar inset,
                 // so hand it to the screen instead of a zero padding.
-                content(WindowInsets.navigationBars.asPaddingValues())
+                content(
+                    PaddingValues(
+                        top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                        bottom = WindowInsets.navigationBars
+                            .asPaddingValues()
+                            .calculateBottomPadding(),
+                    )
+                )
                 SnackbarHost(
                     snackbarHostState,
                     modifier = Modifier
@@ -598,6 +637,15 @@ fun PlumNavScaffold(
                             .padding(end = 22.dp, bottom = 22.dp),
                     ) { fab() }
                 }
+            }
+            }
+            header?.let { headerContent ->
+                Box(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .statusBarsPadding()
+                        .padding(start = 16.dp, top = 4.dp),
+                ) { headerContent() }
             }
         }
     } else {
@@ -618,9 +666,12 @@ fun PlumNavScaffold(
             Box(Modifier.fillMaxSize()) {
               // Everything drawn here is what the bar blurs.
               Box(Modifier.fillMaxSize().haze(hazeState)) {
+                // Same rule as the rail layout: the bar floats, and the screen
+                // gets the inset. Scaffold's own value is zero here because
+                // contentWindowInsets is cleared, so read the inset directly.
                 content(
                     PaddingValues(
-                        top = padding.calculateTopPadding(),
+                        top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
                         bottom = barInset + WindowInsets.navigationBars
                             .asPaddingValues()
                             .calculateBottomPadding(),

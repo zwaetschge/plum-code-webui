@@ -40,6 +40,10 @@ const connectSchema = z.object({
   port: z.coerce.number().int().min(1).max(65535).optional().default(5555),
   friendlyName: friendlyNameSchema,
   selectForSession: z.boolean().optional().default(true),
+  // Android hands out a fresh debug port on every wireless-debugging restart, so
+  // reconnecting the same phone would otherwise pile up one known entry per port.
+  // Carries the stale serial to drop once the new one is up.
+  replaceSerial: serialSchema.optional(),
 });
 
 const bindDeviceSchema = z.object({
@@ -370,7 +374,7 @@ router.post(
       throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
     }
 
-    const { sessionId, host, port, friendlyName, selectForSession } = parsed.data;
+    const { sessionId, host, port, friendlyName, selectForSession, replaceSerial } = parsed.data;
     if (sessionId) requireSession(sessionId, userId);
 
     const connect = await builderRequest<unknown>('POST', '/api/devices/connect', {
@@ -379,12 +383,28 @@ router.post(
       ...(friendlyName ? { friendlyName } : {}),
     });
     const selectedSerial = readSerial(connect) || `${host}:${port}`;
+
+    // Only after the new port answers, so a failed reconnect never loses the
+    // entry the user would need to try again.
+    let replacedSerial: string | undefined;
+    if (replaceSerial && replaceSerial !== selectedSerial) {
+      try {
+        await builderRequest<unknown>(
+          'DELETE',
+          `/api/devices/known/${encodeURIComponent(replaceSerial)}`
+        );
+        replacedSerial = replaceSerial;
+      } catch {
+        // The stale entry is cosmetic; a live connection matters more.
+      }
+    }
+
     if (sessionId && selectForSession) {
       bindSessionSerial(sessionId, userId, selectedSerial);
     }
 
     const devices = await loadSnapshot(sessionId, userId);
-    res.json({ success: true, data: { connect, selectedSerial, devices } });
+    res.json({ success: true, data: { connect, selectedSerial, replacedSerial, devices } });
   })
 );
 

@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ExitToApp
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.AdminPanelSettings
+import androidx.compose.material.icons.outlined.ViewColumn
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Brightness4
 import androidx.compose.material.icons.outlined.Cached
@@ -80,6 +81,8 @@ import com.claudewebui.app.ui.components.common.PlumBorder
 import com.claudewebui.app.ui.components.common.PlumNavScaffold
 import com.claudewebui.app.ui.components.common.PlumGreen
 import com.claudewebui.app.ui.components.common.PlumIconButton
+import com.claudewebui.app.ui.theme.LayoutPrefs
+import com.claudewebui.app.ui.theme.TwoPaneOption
 import com.claudewebui.app.ui.components.common.PlumMuted
 import com.claudewebui.app.ui.components.common.PlumRed
 import com.claudewebui.app.ui.components.common.PlumScreenHeader
@@ -106,6 +109,7 @@ fun SettingsScreen(
     onNavigateMain: (MainDestination) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
+    val twoPaneOption by LayoutPrefs.twoPane.collectAsState()
     val context = LocalContext.current
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showThemePicker by remember { mutableStateOf(false) }
@@ -207,6 +211,20 @@ fun SettingsScreen(
                                 state.theme.label,
                                 PlumMuted,
                                 onClick = { showThemePicker = true },
+                            )
+                            // The automatic breakpoint measures dp, so a raised
+                            // display zoom can hide the two-pane layout on a
+                            // screen that plainly has room for it.
+                            CompactSettingRow(
+                                Icons.Outlined.ViewColumn,
+                                "Two-pane layout",
+                                twoPaneOption.label + " · " + twoPaneOption.description,
+                                PlumMuted,
+                                onClick = {
+                                    val order = TwoPaneOption.entries
+                                    val next = order[(order.indexOf(twoPaneOption) + 1) % order.size]
+                                    LayoutPrefs.set(context, next)
+                                },
                             )
                         } },
                     )
@@ -310,6 +328,8 @@ fun SettingsScreen(
                         } },
                     )
                 }
+                item { GatewayTokensPanel(state = state, viewModel = viewModel) }
+                item { CodexPluginsPanel(state = state, viewModel = viewModel) }
                 item {
                     GlassPanel(
                         modifier = Modifier.fillMaxWidth().clickable { showLogoutDialog = true },

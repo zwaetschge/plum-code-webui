@@ -2,6 +2,8 @@ package com.claudewebui.app.data.repository
 
 import com.claudewebui.app.core.network.ApiClient
 import com.claudewebui.app.data.model.Category
+import com.claudewebui.app.data.model.CodexPlugin
+import com.claudewebui.app.data.model.GatewayToken
 import com.claudewebui.app.data.model.CLIProvider
 import com.claudewebui.app.data.model.CLIProviderConfig
 import com.claudewebui.app.data.model.CliLoginSession
@@ -56,6 +58,50 @@ class SettingsRepository(
             error(response.error?.message ?: "Failed to fetch settings")
         }
         response.data
+    }
+
+    // ---- Control gateway tokens ---------------------------------------------
+
+    suspend fun getGatewayTokens(): Result<List<GatewayToken>> = runCatching {
+        val response = api.getGatewayTokens()
+        if (!response.success) error(response.error?.message ?: "Failed to fetch tokens")
+        response.data.orEmpty()
+    }
+
+    /** The response carries the secret exactly once; it is never retrievable later. */
+    suspend fun createGatewayToken(name: String, scope: String): Result<GatewayToken> = runCatching {
+        val response = api.createGatewayToken(name, scope)
+        if (!response.success || response.data == null) {
+            error(response.error?.message ?: "Failed to create token")
+        }
+        response.data
+    }
+
+    suspend fun revokeGatewayToken(id: String): Result<Unit> = runCatching {
+        val response = api.revokeGatewayToken(id)
+        if (!response.success) error(response.error?.message ?: "Failed to revoke token")
+        Unit
+    }
+
+    // ---- Codex plugins -------------------------------------------------------
+
+    suspend fun getCodexPlugins(): Result<List<CodexPlugin>> = runCatching {
+        val response = api.getCodexPlugins()
+        if (!response.success) error(response.error?.message ?: "Failed to fetch plugins")
+        response.data.orEmpty()
+    }
+
+    suspend fun installCodexPlugin(pluginName: String, marketplaceId: String): Result<Unit> =
+        runCatching {
+            val response = api.installCodexPlugin(pluginName, marketplaceId)
+            if (!response.success) error(response.error?.message ?: "Failed to install plugin")
+            Unit
+        }
+
+    suspend fun setCodexPluginEnabled(id: String, enabled: Boolean): Result<Unit> = runCatching {
+        val response = api.setCodexPluginEnabled(id, enabled)
+        if (!response.success) error(response.error?.message ?: "Failed to update plugin")
+        Unit
     }
 
     /** Update settings with only the fields that changed. */

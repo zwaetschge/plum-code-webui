@@ -13,6 +13,8 @@ import com.claudewebui.app.data.model.Category
 import com.claudewebui.app.data.model.CLIProvider
 import com.claudewebui.app.data.model.CreateCategoryInput
 import com.claudewebui.app.data.model.CreateSessionInput
+import com.claudewebui.app.core.diagnostics.CrashReporter
+import com.claudewebui.app.data.model.CrashReportInput
 import com.claudewebui.app.data.model.Session
 import com.claudewebui.app.data.model.SessionMode
 import com.claudewebui.app.data.model.UpdateCategoryInput
@@ -70,6 +72,34 @@ class DashboardViewModel(
         loadData()
         loadTemplates()
         loadNotifications()
+        uploadPendingCrashReport()
+    }
+
+    /**
+     * Sends the trace from a previous crash, once. This runs here rather than in
+     * the crash handler itself because that handler executes in a dying process
+     * where an HTTP request would be cut off. Failure is silent and the file is
+     * kept, so the next start tries again.
+     */
+    private fun uploadPendingCrashReport() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val trace = CrashReporter.pendingReport(appContext) ?: return@launch
+            val sent = runCatching {
+                apiClient.reportCrash(
+                    CrashReportInput(
+                        appVersion = runCatching {
+                            appContext.packageManager
+                                .getPackageInfo(appContext.packageName, 0)
+                                .versionName
+                        }.getOrNull(),
+                        osVersion = CrashReporter.osDescription(),
+                        device = CrashReporter.deviceDescription(),
+                        stackTrace = trace,
+                    )
+                ).success
+            }.getOrDefault(false)
+            if (sent) CrashReporter.clearPendingReport(appContext)
+        }
     }
 
     // ── Notification centre ─────────────────────────────────────────────────
@@ -118,6 +148,24 @@ class DashboardViewModel(
             }
             runCatching { apiClient.markNotificationsRead(listOf(notification.id)) }
             loadNotifications()
+        }
+    }
+
+    // ── Discovered projects ─────────────────────────────────────────────────
+    // Checkouts the server found on disk. Opening one creates a session bound to
+    // that directory, so a phone can start work in an existing repo.
+
+    fun toggleDiscoveredProjects() {
+        val next = !_uiState.value.showDiscoveredProjects
+        _uiState.update { it.copy(showDiscoveredProjects = next) }
+        if (next && _uiState.value.discoveredProjects.isEmpty()) loadDiscoveredProjects()
+    }
+
+    fun loadDiscoveredProjects() {
+        viewModelScope.launch {
+            val projects = runCatching { apiClient.getDiscoveredProjects().data }
+                .getOrNull().orEmpty()
+            _uiState.update { it.copy(discoveredProjects = projects) }
         }
     }
 

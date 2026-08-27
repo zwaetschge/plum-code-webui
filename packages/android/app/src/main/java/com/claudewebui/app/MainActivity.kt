@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
@@ -26,6 +27,7 @@ import androidx.compose.material3.SnackbarHostState
 import com.claudewebui.app.ui.components.common.LocalPlumSnackbar
 import com.claudewebui.app.ui.components.common.PlumBackdrop
 import com.claudewebui.app.ui.theme.AppThemeStore
+import com.claudewebui.app.ui.theme.LayoutPrefs
 import com.claudewebui.app.ui.theme.ClaudeWebUITheme
 import com.claudewebui.app.ui.theme.LocalPlumPalette
 import com.claudewebui.app.ui.theme.paletteFor
@@ -61,10 +63,26 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Enable edge-to-edge display before setContent
-        enableEdgeToEdge()
+        // Edge-to-edge before setContent. The no-argument overload defaults to
+        // SystemBarStyle.auto, which picks its appearance from the *system* dark
+        // mode and paints a scrim behind the bars. Plum's palette is chosen in
+        // app settings and is usually dark even when the system is light, so
+        // that default could tint the status bar until the palette-driven
+        // DisposableEffect below replaced it. Start transparent instead.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.Transparent.toArgb()),
+            navigationBarStyle = SystemBarStyle.dark(Color.Transparent.toArgb()),
+        )
+        // Belt and braces for devices that keep painting an opaque bar anyway:
+        // measured on the iPlay tablet, both bars came out a flat #1A1A1A while
+        // the window itself was already full-screen. Setting the colours on the
+        // window directly is what actually makes the backdrop show through.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
         super.onCreate(savedInstanceState)
         AppThemeStore.initialize(this)
+        LayoutPrefs.initialize(this)
         incomingDeepLink = intent?.data?.toString()
 
         setContent {

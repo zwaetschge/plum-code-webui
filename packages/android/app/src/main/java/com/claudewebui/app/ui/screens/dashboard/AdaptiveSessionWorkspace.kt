@@ -131,17 +131,30 @@ fun AdaptiveSessionWorkspace(
                 // the backdrop at the top and bottom of the pane. The list floats
                 // on the same atmosphere as every other Plum surface.
                 modifier = Modifier
-                    .width(340.dp)
+                    .width(380.dp)
                     .fillMaxHeight()
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    // The pane has no background of its own, so it takes the
+                    // status bar inset here; the chat pane handles its own.
+                    .padding(top = padding.calculateTopPadding())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                // Title row. The actions used to share a row with the search field,
+                // which squeezed it to about 150dp and wrapped its placeholder onto
+                // a second line. They get their own row; the search gets the pane.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "Sessions",
                         color = PlumText,
-                        fontSize = 21.sp,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.size(9.dp))
+                    Text(
+                        "${state.sessions.size}",
+                        color = PlumMuted,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
                         modifier = Modifier.weight(1f),
                     )
                     // Approvals block the agent, so the feed has to be one tap
@@ -152,11 +165,11 @@ fun AdaptiveSessionWorkspace(
                             viewModel.loadNotifications()
                             showNotifications = true
                         },
-                        modifier = Modifier.size(40.dp),
+                        modifier = Modifier.size(38.dp),
                     )
-                    Spacer(Modifier.size(6.dp))
+                    Spacer(Modifier.size(4.dp))
                     PlumIconButton(Icons.Outlined.Add, "New session", onClick = { showCreate = true })
-                    Spacer(Modifier.size(6.dp))
+                    Spacer(Modifier.size(4.dp))
                     PlumIconButton(Icons.Outlined.Settings, "Settings", onClick = onNavigateToSettings)
                 }
                 DashboardSearchField(
@@ -166,6 +179,7 @@ fun AdaptiveSessionWorkspace(
                         "Search messages"
                     } else "Search sessions",
                     showShortcutHint = false,
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterPill(

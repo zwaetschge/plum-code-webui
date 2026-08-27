@@ -59,4 +59,10 @@ data class AndroidConnectInput(
     val host: String,
     val port: Int = 5555,
     val friendlyName: String? = null,
+    /**
+     * Serial to drop once the new port answers. Wireless debugging hands out a
+     * fresh port on every restart, which would otherwise leave one remembered
+     * entry per port for the same phone.
+     */
+    val replaceSerial: String? = null,
 )

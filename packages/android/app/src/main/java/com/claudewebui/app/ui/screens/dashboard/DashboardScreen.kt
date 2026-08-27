@@ -306,6 +306,21 @@ fun DashboardScreen(
                             onManage = viewModel::onCategoryManagerTapped,
                         )
                     }
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        DiscoveredProjectsRow(
+                            projects = state.discoveredProjects,
+                            expanded = state.showDiscoveredProjects,
+                            onToggle = viewModel::toggleDiscoveredProjects,
+                            onOpen = { project ->
+                                viewModel.createSession(
+                                    name = project.name,
+                                    workingDirectory = project.path,
+                                    provider = state.availableProviders.firstOrNull()
+                                        ?: CLIProvider.active.first(),
+                                )
+                            },
+                        )
+                    }
                 } else {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         SessionsHeader(
@@ -774,7 +789,11 @@ internal fun DashboardSearchField(
     TextField(
         value = value,
         onValueChange = onValueChange,
-        placeholder = { Text(placeholder, color = PlumMuted) },
+        // singleLine only constrains the value; the placeholder is a composable of
+        // its own and wrapped to two lines in the narrow tablet pane.
+        placeholder = {
+            Text(placeholder, color = PlumMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
         leadingIcon = { Icon(Icons.Outlined.Search, null, tint = PlumMuted) },
         trailingIcon = if (showShortcutHint) {
             {
@@ -1244,3 +1263,74 @@ private fun isRecentlyUpdated(updatedAt: String): Boolean = runCatching {
     val instant = java.time.Instant.parse(updatedAt)
     java.time.Duration.between(instant, java.time.Instant.now()).toHours() < 24
 }.getOrDefault(true)
+
+/**
+ * Checkouts the server found on disk that have no session yet. Collapsed by
+ * default: the list is only interesting when starting work in an existing repo,
+ * and loading it costs a directory walk on the server.
+ */
+@Composable
+private fun DiscoveredProjectsRow(
+    projects: List<com.claudewebui.app.data.model.DiscoveredProject>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onOpen: (com.claudewebui.app.data.model.DiscoveredProject) -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onToggle),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Discovered projects",
+                color = PlumText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                if (expanded) "Hide" else "Show",
+                color = PlumAccent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        if (expanded) {
+            if (projects.isEmpty()) {
+                Text("Nothing found on disk", color = PlumMuted, fontSize = 12.sp)
+            } else {
+                projects.forEach { project ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onOpen(project) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                project.name,
+                                color = PlumText,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                project.path,
+                                color = PlumMuted,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Text(
+                            if (project.hasSession) "open" else "new session",
+                            color = PlumAccent,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}

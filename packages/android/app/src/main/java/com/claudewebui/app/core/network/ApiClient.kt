@@ -1096,6 +1096,129 @@ class ApiClient {
             setBody(PushInput(workingDirectory, remote, branch, force))
         }.body()
 
+    // ── gh-backed: pull requests, CI runs, issues, releases ──────────────────
+
+    /** GET /api/github/cli/repo */
+    suspend fun getGitHubRepoInfo(workingDirectory: String): ApiResponse<GitHubRepoInfo> =
+        client.get(url("/api/github/cli/repo")) {
+            parameter("workingDirectory", workingDirectory)
+        }.body()
+
+    /** GET /api/github/pulls */
+    suspend fun getGitHubPullRequests(
+        workingDirectory: String,
+        state: String = "open",
+        limit: Int = 20,
+    ): ApiResponse<List<GitHubPullRequest>> =
+        client.get(url("/api/github/pulls")) {
+            parameter("workingDirectory", workingDirectory)
+            parameter("state", state)
+            parameter("limit", limit)
+        }.body()
+
+    /** POST /api/github/pulls */
+    suspend fun createGitHubPullRequest(input: CreatePullRequestInput): ApiResponse<CreatedUrl> =
+        client.post(url("/api/github/pulls")) { setBody(input) }.body()
+
+    /** POST /api/github/pulls/:number/merge */
+    suspend fun mergeGitHubPullRequest(
+        number: Int,
+        input: MergePullRequestInput,
+    ): ApiResponse<JsonElement> =
+        client.post(url("/api/github/pulls/$number/merge")) { setBody(input) }.body()
+
+    /** GET /api/github/runs */
+    suspend fun getGitHubRuns(
+        workingDirectory: String,
+        limit: Int = 20,
+    ): ApiResponse<List<GitHubWorkflowRun>> =
+        client.get(url("/api/github/runs")) {
+            parameter("workingDirectory", workingDirectory)
+            parameter("limit", limit)
+        }.body()
+
+    /** POST /api/github/runs/:id/rerun */
+    suspend fun rerunGitHubWorkflow(
+        runId: Long,
+        input: RerunWorkflowInput,
+    ): ApiResponse<JsonElement> =
+        client.post(url("/api/github/runs/$runId/rerun")) { setBody(input) }.body()
+
+    /** GET /api/github/issues */
+    suspend fun getGitHubIssues(
+        workingDirectory: String,
+        state: String = "open",
+        limit: Int = 20,
+    ): ApiResponse<List<GitHubIssue>> =
+        client.get(url("/api/github/issues")) {
+            parameter("workingDirectory", workingDirectory)
+            parameter("state", state)
+            parameter("limit", limit)
+        }.body()
+
+    /** POST /api/github/issues */
+    suspend fun createGitHubIssue(input: CreateIssueInput): ApiResponse<CreatedUrl> =
+        client.post(url("/api/github/issues")) { setBody(input) }.body()
+
+    /** GET /api/github/releases */
+    suspend fun getGitHubReleases(
+        workingDirectory: String,
+        limit: Int = 20,
+    ): ApiResponse<List<GitHubRelease>> =
+        client.get(url("/api/github/releases")) {
+            parameter("workingDirectory", workingDirectory)
+            parameter("limit", limit)
+        }.body()
+
+    // ========================================================================
+    // Control gateway tokens, discovered projects, Codex plugins
+    // (previously WebUI-only surfaces)
+    // ========================================================================
+
+    /** POST /api/app/crash-report — sent once on the start after a crash. */
+    suspend fun reportCrash(input: CrashReportInput): ApiResponse<JsonElement> =
+        client.post(url("/api/app/crash-report")) { setBody(input) }.body()
+
+    /** GET /api/gateway/tokens */
+    suspend fun getGatewayTokens(): ApiResponse<List<GatewayToken>> =
+        client.get(url("/api/gateway/tokens")).body()
+
+    /** POST /api/gateway/tokens — the only response that carries the secret. */
+    suspend fun createGatewayToken(
+        name: String,
+        scope: String = "write",
+    ): ApiResponse<GatewayToken> =
+        client.post(url("/api/gateway/tokens")) {
+            setBody(CreateGatewayTokenInput(name, scope))
+        }.body()
+
+    /** DELETE /api/gateway/tokens/:id */
+    suspend fun revokeGatewayToken(id: String): ApiResponse<JsonElement> =
+        client.delete(url("/api/gateway/tokens/$id")).body()
+
+    /** GET /api/projects */
+    suspend fun getDiscoveredProjects(): ApiResponse<List<DiscoveredProject>> =
+        client.get(url("/api/projects")).body()
+
+    /** GET /api/codex/plugins */
+    suspend fun getCodexPlugins(): ApiResponse<List<CodexPlugin>> =
+        client.get(url("/api/codex/plugins")).body()
+
+    /** POST /api/codex/plugins/:id — enable or disable. */
+    suspend fun setCodexPluginEnabled(id: String, enabled: Boolean): ApiResponse<JsonElement> =
+        client.post(url("/api/codex/plugins/$id")) {
+            setBody(CodexPluginToggleInput(enabled))
+        }.body()
+
+    /** POST /api/codex/plugins/install — admin-only on the server. */
+    suspend fun installCodexPlugin(
+        pluginName: String,
+        marketplaceId: String,
+    ): ApiResponse<JsonElement> =
+        client.post(url("/api/codex/plugins/install")) {
+            setBody(CodexPluginInstallInput(pluginName, marketplaceId))
+        }.body()
+
     // ========================================================================
     // Oracle browser
     // ========================================================================

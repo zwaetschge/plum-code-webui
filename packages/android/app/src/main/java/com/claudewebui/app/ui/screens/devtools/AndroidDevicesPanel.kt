@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -138,6 +139,17 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                 ) {
                     Text("Remembered", color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     known.forEach { device ->
+                        val host = device.host ?: device.serial.substringBefore(':')
+                        val knownPort =
+                            device.port
+                                ?: device.serial.substringAfter(':', "5555").toIntOrNull()
+                                ?: 5555
+                        // Wireless debugging changes the port on every restart, so the
+                        // remembered one is usually stale. Let it be corrected in place
+                        // instead of sending the user back through the pair flow.
+                        var portInput by remember(device.serial) {
+                            mutableStateOf(knownPort.toString())
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(
@@ -149,7 +161,7 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                                 )
                                 Text(
                                     listOfNotNull(
-                                        device.host?.let { h -> "$h:${device.port ?: 5555}" },
+                                        "$host:$knownPort",
                                         device.lastSeenAt?.take(19),
                                     ).joinToString(" · "),
                                     color = PlumMuted,
@@ -158,10 +170,19 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                                     overflow = TextOverflow.Ellipsis,
                                 )
                             }
-                            ActionText("Connect", busy) {
+                            OutlinedTextField(
+                                value = portInput,
+                                onValueChange = { portInput = it.filter(Char::isDigit) },
+                                label = { Text("Port") },
+                                singleLine = true,
+                                modifier = Modifier.width(96.dp),
+                            )
+                            ActionText("Connect", busy || portInput.isBlank()) {
                                 viewModel.connectDevice(
-                                    device.host ?: device.serial.substringBefore(':'),
-                                    device.port ?: device.serial.substringAfter(':', "5555").toIntOrNull() ?: 5555,
+                                    host,
+                                    portInput.toIntOrNull() ?: knownPort,
+                                    device.friendlyName,
+                                    device.serial,
                                 )
                             }
                             ActionText("Forget", busy) { viewModel.forgetDevice(device.serial) }

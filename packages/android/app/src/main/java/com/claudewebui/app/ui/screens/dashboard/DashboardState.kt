@@ -31,6 +31,9 @@ data class DashboardUiState(
     /** Durable cross-session notification feed. */
     val notifications: List<com.claudewebui.app.data.model.AppNotification> = emptyList(),
     val unreadNotifications: Int = 0,
+    /** Checkouts on disk that have no session yet — the WebUI's Discovered Projects. */
+    val discoveredProjects: List<com.claudewebui.app.data.model.DiscoveredProject> = emptyList(),
+    val showDiscoveredProjects: Boolean = false,
     val sessions: List<Session> = emptyList(),
     val filteredSessions: List<Session> = emptyList(),
     val categories: List<Category> = emptyList(),

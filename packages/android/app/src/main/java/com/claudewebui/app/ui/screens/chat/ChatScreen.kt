@@ -127,6 +127,7 @@ fun ChatScreen(
     )
     val uiState by viewModel.uiState.collectAsState()
     var showSessionSettings by remember { mutableStateOf(false) }
+    var showToolLog by remember { mutableStateOf(false) }
     val messages by viewModel.messages.collectAsState()
     val outboxItems by viewModel.outbox.collectAsState()
     val session by viewModel.session.collectAsState()
@@ -449,6 +450,7 @@ fun ChatScreen(
                 onNavigateToGit = { onNavigateToGit(displaySession?.workingDirectory ?: "") },
                 onNavigateToCheckpoints = { onNavigateToCheckpoints(sessionId) },
                 onToggleUsage = { viewModel.toggleUsageBanner() },
+                onOpenToolLog = { showToolLog = true },
                 onOpenSessionSettings = {
                     viewModel.loadAvailableModels()
                     showSessionSettings = true
@@ -906,6 +908,13 @@ fun ChatScreen(
         }
     }
 
+    if (showToolLog) {
+        ToolLogSheet(
+            tools = displayUiState.activeTools.values.sortedByDescending { it.timestamp },
+            onDismiss = { showToolLog = false },
+        )
+    }
+
     if (showSessionSettings) {
         displaySession?.let { session ->
             SessionSettingsSheet(
@@ -1053,6 +1062,7 @@ private fun ChatTopBar(
     onNavigateToGit: () -> Unit,
     onNavigateToCheckpoints: () -> Unit,
     onToggleUsage: () -> Unit,
+    onOpenToolLog: () -> Unit,
     onOpenSessionSettings: () -> Unit,
     onNavigateToNotes: () -> Unit,
     onNavigateToMemory: () -> Unit,
@@ -1327,6 +1337,15 @@ private fun ChatTopBar(
             // Model, account limits and context/token/cost all live behind
             // this toggle — the header stays as small as possible.
             ChatTab("Stats", Icons.Outlined.BarChart, uiState.showUsageBanner, Modifier.weight(1f), onToggleUsage)
+            // Mirrors the WebUI's Tool Log dock: every tool call of this session
+            // in one place, instead of only inline in the transcript.
+            ChatTab(
+                "Tools",
+                Icons.Outlined.Terminal,
+                uiState.activeTools.isNotEmpty(),
+                Modifier.weight(1f),
+                onOpenToolLog,
+            )
         }
     }
 }
@@ -2000,4 +2019,45 @@ private fun shareChatAttachment(context: Context, file: File, mimeType: String) 
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(intent, "Share attachment"))
+}
+
+/**
+ * Every tool call of this session in one list — the Android counterpart of the
+ * WebUI's Tool Log dock. Inline cards in the transcript answer "what is running
+ * now"; this answers "what has this session actually done".
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ToolLogSheet(
+    tools: List<com.claudewebui.app.data.model.ToolExecution>,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "Tool log",
+                color = PlumText,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            if (tools.isEmpty()) {
+                Text("No tool calls yet", color = PlumMuted, fontSize = 13.sp)
+            } else {
+                LazyColumn(
+                    Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(tools, key = { it.toolId }) { tool ->
+                        ToolExecutionCard(tool = tool)
+                    }
+                }
+            }
+        }
+    }
 }

@@ -7,6 +7,7 @@ import {
   Loader2,
   MonitorSmartphone,
   Play,
+  Plug,
   RefreshCw,
   Smartphone,
   Square,
@@ -35,12 +36,26 @@ interface AndroidDevicePanelProps {
 interface ConnectResult {
   connect: unknown;
   selectedSerial: string | null;
+  replacedSerial?: string;
   devices: AndroidDeviceSnapshot;
 }
 
 interface AndroidEmulatorStatus {
   status: 'stopped' | 'starting' | 'running' | 'error';
   vncUrl?: string | null;
+}
+
+function hostPortOf(device: AndroidLiveDevice | AndroidKnownDevice): {
+  host: string;
+  port: string;
+} | null {
+  const known = device as AndroidKnownDevice;
+  const serial = String(known.serial || '');
+  const match = /^(.+):(\d+)$/.exec(serial);
+  const host = String(known.host || match?.[1] || '').trim();
+  if (!host) return null;
+  const port = known.port ? String(known.port) : match?.[2] || '5555';
+  return { host, port };
 }
 
 function serialOf(device: AndroidLiveDevice | AndroidKnownDevice): string {
@@ -76,6 +91,7 @@ function Row({
   live,
   onSelect,
   onForget,
+  onReconnectPort,
   busy,
 }: {
   device: AndroidLiveDevice | AndroidKnownDevice;
@@ -83,55 +99,114 @@ function Row({
   live?: boolean;
   onSelect: (serial: string) => void;
   onForget?: (serial: string) => void;
+  onReconnectPort?: (device: AndroidKnownDevice, port: string) => void;
   busy?: boolean;
 }) {
   const serial = serialOf(device);
   const tone = live ? deviceTone(device) : 'idle';
   const Dot = selected ? CheckCircle2 : Circle;
+  const hostPort = onReconnectPort ? hostPortOf(device) : null;
+  const [portOpen, setPortOpen] = useState(false);
+  const [portValue, setPortValue] = useState(hostPort?.port || '5555');
+
+  const submitPort = () => {
+    const port = portValue.trim();
+    if (!port || !onReconnectPort) return;
+    onReconnectPort(device as AndroidKnownDevice, port);
+    setPortOpen(false);
+  };
+
   return (
     <div
       className={cn(
-        'flex items-center gap-2 rounded-md border px-2.5 py-2',
+        'rounded-md border px-2.5 py-2',
         selected ? 'border-primary/40 bg-primary/10' : 'border-border/45 bg-foreground/[0.02]'
       )}
     >
-      <Dot
-        className={cn(
-          'h-3.5 w-3.5 shrink-0',
-          selected && 'text-primary',
-          !selected && tone === 'live' && 'text-emerald-500',
-          !selected && tone === 'warn' && 'text-amber-500',
-          !selected && tone === 'idle' && 'text-muted-foreground'
-        )}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-xs font-semibold text-foreground">{titleOf(device)}</div>
-        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-          {subtitleOf(device) || 'No serial'}
+      <div className="flex items-center gap-2">
+        <Dot
+          className={cn(
+            'h-3.5 w-3.5 shrink-0',
+            selected && 'text-primary',
+            !selected && tone === 'live' && 'text-emerald-500',
+            !selected && tone === 'warn' && 'text-amber-500',
+            !selected && tone === 'idle' && 'text-muted-foreground'
+          )}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-semibold text-foreground">{titleOf(device)}</div>
+          <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            {subtitleOf(device) || 'No serial'}
+          </div>
         </div>
-      </div>
-      <Button
-        type="button"
-        variant={selected ? 'secondary' : 'ghost'}
-        size="sm"
-        className="h-7 px-2 text-[11px]"
-        disabled={!serial || selected || busy}
-        onClick={() => onSelect(serial)}
-      >
-        Use
-      </Button>
-      {onForget && (
         <Button
           type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-destructive"
-          disabled={!serial || busy}
-          onClick={() => onForget(serial)}
-          title="Forget device"
+          variant={selected ? 'secondary' : 'ghost'}
+          size="sm"
+          className="h-7 px-2 text-[11px]"
+          disabled={!serial || selected || busy}
+          onClick={() => onSelect(serial)}
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          Use
         </Button>
+        {hostPort && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={cn(
+              'h-7 w-7 text-muted-foreground hover:text-foreground',
+              portOpen && 'text-primary'
+            )}
+            disabled={busy}
+            onClick={() => {
+              setPortValue(hostPort.port);
+              setPortOpen((open) => !open);
+            }}
+            title="Reconnect on a new port"
+          >
+            <Plug className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {onForget && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            disabled={!serial || busy}
+            onClick={() => onForget(serial)}
+            title="Forget device"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+      {hostPort && portOpen && (
+        <div className="mt-2 flex items-center gap-2">
+          <span className="shrink-0 text-[11px] text-muted-foreground">{hostPort.host}:</span>
+          <Input
+            autoFocus
+            value={portValue}
+            onChange={(event) => setPortValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') submitPort();
+              if (event.key === 'Escape') setPortOpen(false);
+            }}
+            placeholder="New port"
+            inputMode="numeric"
+            className="h-7 flex-1 text-[11px]"
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            disabled={!portValue.trim() || busy}
+            onClick={submitPort}
+          >
+            Connect
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -338,6 +413,38 @@ export function AndroidDevicePanel({ sessionId, className }: AndroidDevicePanelP
     },
   });
 
+  // Wireless debugging picks a new port on every restart. Reconnect the phone we
+  // already paired with instead of walking the whole pair flow again.
+  const reconnectPortMutation = useMutation({
+    mutationFn: async ({ device, port }: { device: AndroidKnownDevice; port: string }) => {
+      const hostPort = hostPortOf(device);
+      if (!hostPort) throw new Error('Device has no host to reconnect to');
+      const response = await api.post<ApiResponse<ConnectResult>>('/api/android/devices/connect', {
+        sessionId,
+        host: hostPort.host,
+        port: Number(port),
+        friendlyName: device.friendlyName || undefined,
+        selectForSession: true,
+        replaceSerial: serialOf(device),
+      });
+      return response.data.data;
+    },
+    onSuccess: (data) => {
+      onSnapshot(data?.devices);
+      toast({
+        title: 'Reconnected',
+        description: data?.selectedSerial ? `Now on ${data.selectedSerial}` : undefined,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Reconnect failed',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    },
+  });
+
   const forgetMutation = useMutation({
     mutationFn: async (serial: string) => {
       await api.delete(`/api/android/devices/${encodeURIComponent(serial)}`);
@@ -367,6 +474,7 @@ export function AndroidDevicePanel({ sessionId, className }: AndroidDevicePanelP
     pairMutation.isPending ||
     connectMutation.isPending ||
     forgetMutation.isPending ||
+    reconnectPortMutation.isPending ||
     startEmulatorMutation.isPending ||
     stopEmulatorMutation.isPending;
 
@@ -541,6 +649,9 @@ export function AndroidDevicePanel({ sessionId, className }: AndroidDevicePanelP
                     selected={!!serial && serial === selectedSerial}
                     onSelect={(nextSerial) => selectMutation.mutate(nextSerial)}
                     onForget={(nextSerial) => forgetMutation.mutate(nextSerial)}
+                    onReconnectPort={(knownDevice, port) =>
+                      reconnectPortMutation.mutate({ device: knownDevice, port })
+                    }
                     busy={busy}
                   />
                 );

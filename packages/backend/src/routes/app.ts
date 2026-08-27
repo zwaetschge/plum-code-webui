@@ -4,7 +4,13 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from '../config.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
+import { z } from 'zod';
+import { AppError } from '../middleware/errorHandler.js';
+import { recordAudit } from '../utils/auditLog.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('app');
 
 /**
  * Android in-app update channel. The client's AppUpdateChecker has called
@@ -84,6 +90,62 @@ router.get('/download', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/vnd.android.package-archive');
   res.setHeader('Content-Disposition', 'attachment; filename="claude-webui.apk"');
   fs.createReadStream(APK_PATH).pipe(res);
+});
+
+/**
+ * Crash sink for the Android client.
+ *
+ * A crash on a phone left no trace anywhere: no Crashlytics, no local record,
+ * nothing on the server. The client writes the stack trace to disk in its
+ * uncaught-exception handler and posts it here on the next start, so a report
+ * survives the process that produced it.
+ *
+ * Stored as an audit entry rather than a new table: it is low volume, already
+ * has retention and an admin viewer, and a crash is exactly the kind of event
+ * that log is for.
+ */
+const crashReportSchema = z.object({
+  platform: z.string().max(40).default('android'),
+  appVersion: z.string().max(80).optional(),
+  osVersion: z.string().max(80).optional(),
+  device: z.string().max(120).optional(),
+  // Bounded so a pathological stack cannot fill the database.
+  stackTrace: z.string().min(1).max(20_000),
+  occurredAt: z.string().max(40).optional(),
+});
+
+router.post('/crash-report', requireAuth, (req: Request, res: Response) => {
+  const parsed = crashReportSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError('Invalid crash report', 400, 'VALIDATION_ERROR');
+  }
+  const userId = (req as AuthenticatedRequest).userId;
+  const report = parsed.data;
+
+  log.error('Client crash reported', {
+    platform: report.platform,
+    appVersion: report.appVersion,
+    device: report.device,
+    // Only the first line here; the full trace goes to the audit entry.
+    reason: report.stackTrace.split('\n')[0],
+  });
+
+  recordAudit({
+    actorUserId: userId,
+    action: 'client.crash',
+    resourceType: report.platform,
+    resourceId: report.appVersion ?? null,
+    ip: req.ip ?? null,
+    userAgent: req.get('user-agent') ?? null,
+    metadata: {
+      osVersion: report.osVersion ?? null,
+      device: report.device ?? null,
+      occurredAt: report.occurredAt ?? null,
+      stackTrace: report.stackTrace,
+    },
+  });
+
+  res.json({ success: true });
 });
 
 export default router;

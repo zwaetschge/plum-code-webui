@@ -8,6 +8,7 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import com.claudewebui.app.core.notifications.LocalNotificationManager
+import com.claudewebui.app.core.diagnostics.CrashReporter
 import com.claudewebui.app.core.security.TokenStore
 import com.claudewebui.app.widget.WidgetHub
 import com.claudewebui.app.widget.WidgetRefreshWorker
@@ -53,6 +54,10 @@ class ClaudeWebUIApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Before anything else, so a crash during the rest of startup is still
+        // caught and reported on the next launch.
+        CrashReporter.install(this)
 
         // Initialize secure token storage before anything else
         TokenStore.init(this)

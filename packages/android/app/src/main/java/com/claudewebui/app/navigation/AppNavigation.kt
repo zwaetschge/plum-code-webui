@@ -45,6 +45,7 @@ import com.claudewebui.app.ui.screens.chat.UsageViewModel
 import com.claudewebui.app.ui.components.common.WindowWidth
 import com.claudewebui.app.ui.components.common.rememberWindowWidth
 import com.claudewebui.app.ui.screens.dashboard.AdaptiveSessionWorkspace
+import com.claudewebui.app.ui.theme.LayoutPrefs
 import com.claudewebui.app.ui.screens.dashboard.DashboardScreen
 import com.claudewebui.app.ui.screens.filemanager.FileManagerScreen
 import com.claudewebui.app.ui.screens.library.LibraryScreen
@@ -236,7 +237,13 @@ fun AppNavigation(
             // On a tablet or unfolded device there is room for the session list
             // and the chat at once; pushing a full-screen chat there wastes half
             // the display and loses the list on every switch.
-            if (rememberWindowWidth() == WindowWidth.EXPANDED) {
+            val twoPaneOption by LayoutPrefs.twoPane.collectAsState()
+            if (
+                LayoutPrefs.shouldUseTwoPane(
+                    twoPaneOption,
+                    rememberWindowWidth() == WindowWidth.EXPANDED,
+                )
+            ) {
                 AdaptiveSessionWorkspace(
                     onNavigateToSettings = { navController.navigate(SETTINGS_GRAPH) },
                     onNavigateMain = { navController.navigateMain(it) },

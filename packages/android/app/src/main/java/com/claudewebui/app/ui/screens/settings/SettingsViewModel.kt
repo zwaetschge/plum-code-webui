@@ -19,6 +19,8 @@ import com.claudewebui.app.data.model.ConfigPlugin
 import com.claudewebui.app.data.model.ConfigSkill
 import com.claudewebui.app.data.model.CreateMcpServerInput
 import com.claudewebui.app.data.model.CustomAgent
+import com.claudewebui.app.data.model.CodexPlugin
+import com.claudewebui.app.data.model.GatewayToken
 import com.claudewebui.app.data.model.McpServer
 import com.claudewebui.app.data.model.McpServerType
 import com.claudewebui.app.data.model.OpenCodeProvider
@@ -104,6 +106,13 @@ data class SettingsUiState(
     val openCodeSaving: Boolean = false,
     val openCodeTestResults: Map<String, TestResult> = emptyMap(),
     val openCodeTestMessages: Map<String, String> = emptyMap(),
+
+    // Control gateway tokens and the Codex plugin catalogue — both were
+    // reachable only from the WebUI before.
+    val gatewayTokens: List<GatewayToken> = emptyList(),
+    val newGatewayTokenSecret: String? = null,
+    val codexPlugins: List<CodexPlugin> = emptyList(),
+    val parityBusy: Boolean = false,
 
     // MCP
     val mcpServers: List<McpServer> = emptyList(),
@@ -614,6 +623,95 @@ class SettingsViewModel(
                 notificationsEnabled = granted,
                 notificationsAllowedBySystem = allowedBySystem,
             )
+        }
+    }
+
+    // ── Control gateway tokens ──────────────────────────────────────────────
+    // A gateway token cannot manage gateway tokens, so this only ever works
+    // from a real signed-in session — same rule as the WebUI.
+
+    fun loadGatewayTokens() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(parityBusy = true) }
+            val tokens = settingsRepository.getGatewayTokens().getOrNull()
+            _uiState.update { it.copy(gatewayTokens = tokens.orEmpty(), parityBusy = false) }
+        }
+    }
+
+    fun createGatewayToken(name: String, readOnly: Boolean = false) {
+        val clean = name.trim()
+        if (clean.isEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(parityBusy = true, error = null) }
+            val result = settingsRepository.createGatewayToken(clean, if (readOnly) "read" else "write")
+            _uiState.update {
+                it.copy(
+                    // Shown once and never again; the server only stores a hash.
+                    newGatewayTokenSecret = result.getOrNull()?.token,
+                    error = result.exceptionOrNull()?.message ?: it.error,
+                    parityBusy = false,
+                )
+            }
+            loadGatewayTokens()
+        }
+    }
+
+    fun dismissGatewayTokenSecret() {
+        _uiState.update { it.copy(newGatewayTokenSecret = null) }
+    }
+
+    fun revokeGatewayToken(id: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(parityBusy = true, error = null) }
+            val result = settingsRepository.revokeGatewayToken(id)
+            _uiState.update {
+                it.copy(
+                    error = result.exceptionOrNull()?.message ?: it.error,
+                    toastMessage = if (result.isSuccess) "Token revoked" else it.toastMessage,
+                    parityBusy = false,
+                )
+            }
+            loadGatewayTokens()
+        }
+    }
+
+    // ── Codex plugins ───────────────────────────────────────────────────────
+
+    fun loadCodexPlugins() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(parityBusy = true) }
+            val plugins = settingsRepository.getCodexPlugins().getOrNull()
+            _uiState.update { it.copy(codexPlugins = plugins.orEmpty(), parityBusy = false) }
+        }
+    }
+
+    /** Server-side this is admin-only; a non-admin gets a 403 surfaced as an error. */
+    fun installCodexPlugin(pluginName: String, marketplaceId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(parityBusy = true, error = null) }
+            val result = settingsRepository.installCodexPlugin(pluginName, marketplaceId)
+            _uiState.update {
+                it.copy(
+                    error = result.exceptionOrNull()?.message ?: it.error,
+                    toastMessage = if (result.isSuccess) "Plugin installed" else it.toastMessage,
+                    parityBusy = false,
+                )
+            }
+            loadCodexPlugins()
+        }
+    }
+
+    fun setCodexPluginEnabled(id: String, enabled: Boolean) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(parityBusy = true, error = null) }
+            val result = settingsRepository.setCodexPluginEnabled(id, enabled)
+            _uiState.update {
+                it.copy(
+                    error = result.exceptionOrNull()?.message ?: it.error,
+                    parityBusy = false,
+                )
+            }
+            loadCodexPlugins()
         }
     }
 
