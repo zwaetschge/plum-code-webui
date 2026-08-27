@@ -4481,97 +4481,63 @@ function testMemoryOptimizerUsesConfigHomeAndStrictManagedPlaceholders() {
   assert.equal(hasExactManagedPlaceholderSequence(block0, 2), false);
 }
 
-function testLatestContextSnapshotOrdering() {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE session_events (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      session_id TEXT NOT NULL,
-      event_type TEXT NOT NULL,
-      provider TEXT,
-      model TEXT,
-      input_tokens INTEGER NOT NULL DEFAULT 0,
-      output_tokens INTEGER NOT NULL DEFAULT 0,
-      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-      cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
-      total_tokens INTEGER NOT NULL DEFAULT 0,
-      context_window INTEGER NOT NULL DEFAULT 0,
-      context_used_percent INTEGER NOT NULL DEFAULT 0,
-      context_exceeded INTEGER NOT NULL DEFAULT 0,
-      metadata_json TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+/**
+ * Two context snapshots written in the same second.
+ *
+ * `created_at` has one-second resolution, so ordering by it alone leaves the
+ * pair tied and the "latest" snapshot is whichever the planner happens to
+ * return. `seq` — the BIGSERIAL that replaced SQLite's rowid — breaks the tie by
+ * insertion order, which is what makes this deterministic.
+ */
+async function testLatestContextSnapshotOrdering() {
+  await pgRun(
+    `INSERT INTO users (id, email, name, provider, provider_id)
+     VALUES ('ctx-user', 'ctx@example.test', 'C', 'local', 'ctx-user')`
+  );
+  await pgRun(
+    `INSERT INTO sessions (id, user_id, name, working_directory)
+     VALUES ('ctx-session', 'ctx-user', 'Ctx', '/tmp')`
+  );
+
+  const createdAt = '2026-06-10 19:08:36';
+  for (const [id, total, percent] of [
+    ['ctx-old', 15, 1],
+    ['ctx-new', 28, 2],
+  ] as const) {
+    await pgRun(
+      `INSERT INTO session_events (
+         id, user_id, session_id, event_type, provider, model,
+         input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+         total_tokens, context_window, context_used_percent, context_exceeded,
+         metadata_json, created_at
+       ) VALUES (?, ?, ?, 'context_snapshot', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      'ctx-user',
+      'ctx-session',
+      'codex',
+      'gpt-5.5',
+      total - 5,
+      0,
+      5,
+      0,
+      total,
+      256_000,
+      percent,
+      0,
+      JSON.stringify({ cappedPercent: percent, totalCostUsd: percent / 10 }),
+      createdAt
     );
-  `);
+  }
 
-  const createdAt = '2026-06-10 19:08:36.123';
-  db.prepare(
-    `
-    INSERT INTO session_events (
-      id, user_id, session_id, event_type, provider, model,
-      input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-      total_tokens, context_window, context_used_percent, context_exceeded,
-      metadata_json, created_at
-    ) VALUES (?, ?, ?, 'context_snapshot', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `
-  ).run(
-    'ctx-old',
-    'user-1',
-    'session-1',
-    'codex',
-    'gpt-5.5',
-    10,
-    0,
-    5,
-    0,
-    15,
-    256_000,
-    1,
-    0,
-    JSON.stringify({ cappedPercent: 1, totalCostUsd: 0.1 }),
-    createdAt
-  );
-
-  db.prepare(
-    `
-    INSERT INTO session_events (
-      id, user_id, session_id, event_type, provider, model,
-      input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-      total_tokens, context_window, context_used_percent, context_exceeded,
-      metadata_json, created_at
-    ) VALUES (?, ?, ?, 'context_snapshot', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `
-  ).run(
-    'ctx-new',
-    'user-1',
-    'session-1',
-    'codex',
-    'gpt-5.5',
-    20,
-    0,
-    8,
-    0,
-    28,
-    256_000,
-    2,
-    0,
-    JSON.stringify({ cappedPercent: 2, totalCostUsd: 0.2 }),
-    createdAt
-  );
-
-  const latest = db
-    .prepare(
-      `
-      SELECT id, total_tokens as totalTokens, context_used_percent as contextUsedPercent
-      FROM session_events
+  const latest = (await pgGet(
+    `SELECT id, total_tokens as totalTokens, context_used_percent as contextUsedPercent
+       FROM session_events
       WHERE session_id = ? AND user_id = ? AND event_type = 'context_snapshot'
-      ORDER BY created_at DESC, rowid DESC
-      LIMIT 1
-    `
-    )
-    .get('session-1', 'user-1') as
-    | { id: string; totalTokens: number; contextUsedPercent: number }
-    | undefined;
+      ORDER BY created_at DESC, seq DESC
+      LIMIT 1`,
+    'ctx-session',
+    'ctx-user'
+  )) as { id: string; totalTokens: number; contextUsedPercent: number } | undefined;
 
   assert.equal(latest?.id, 'ctx-new');
   assert.equal(latest?.totalTokens, 28);
@@ -5572,7 +5538,7 @@ testOpenCodeQueueStateAndRuntime();
 testCodexQueueModeIsFifoAndSteeringPreservesAcceptedTurns();
 await testKimiQueueDrainsEveryWaitingFollowup();
 testMemoryOptimizerUsesConfigHomeAndStrictManagedPlaceholders();
-testLatestContextSnapshotOrdering();
+await testLatestContextSnapshotOrdering();
 await testCodexConfigSyncIdempotence();
 await testDefaultMcpServerSeeding();
 await testClaudeSettingsProviderIsolation();

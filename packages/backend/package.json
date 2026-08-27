@@ -40,9 +40,7 @@
     "test:message-pagination": "tsx scripts/message-pagination-regression-tests.ts",
     "test:analytics-settings": "pnpm --filter @plum-code-webui/shared run build && tsx scripts/analytics-settings-regression-tests.ts",
     "clean": "rm -rf dist",
-    "db:migrate": "tsx src/db/migrate.ts",
-    "usage:reconcile": "tsx scripts/reconcile-provider-usage-history.ts",
-    "usage:backfill-codex": "tsx scripts/backfill-codex-usage-history.ts"
+    "db:migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.23.0",
