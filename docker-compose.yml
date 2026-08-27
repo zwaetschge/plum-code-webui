@@ -148,7 +148,13 @@ services:
       # so an index scan starts missing rows a sequential scan still finds.
       - POSTGRES_INITDB_ARGS=--locale=C --encoding=UTF8
     volumes:
-      - ${POSTGRES_DIR:-./postgres}:/var/lib/postgresql/data
+      # A named volume, deliberately not a path under the project: the build
+      # context is the project directory, and Docker's legacy builder stats
+      # every entry in it before .dockerignore is applied. A Postgres data
+      # directory is mode 0700, so a bind mount here fails every build with
+      # `can't stat`. Set POSTGRES_DIR to a path outside the project if you
+      # want a bind mount.
+      - ${POSTGRES_DIR:-plum-postgres-data}:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${PGUSER:-plumcode} -d ${PGDATABASE:-plumcode}']
       interval: 10s
@@ -156,6 +162,9 @@ services:
       retries: 5
     networks:
       - default
+
+volumes:
+  plum-postgres-data:
 
 networks:
   default:
