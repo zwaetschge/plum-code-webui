@@ -24,6 +24,15 @@ services:
     environment:
       - NODE_ENV=production
       - TZ=${TZ:-Europe/Zurich}
+      # Postgres. The host must resolve on the compose network; the password has
+      # no default on purpose, so a misconfigured deployment fails at startup
+      # rather than silently reaching a database nobody meant to use.
+      - PGHOST=${PGHOST:-plum-postgres}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGDATABASE:-plumcode}
+      - PGUSER=${PGUSER:-plumcode}
+      - PGPASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      - PGPOOL_MAX=${PGPOOL_MAX:-10}
       - CODEX_WEBUI_SANDBOX_MODE=${CODEX_WEBUI_SANDBOX_MODE:-workspace-write}
       - CODEX_WEBUI_APPROVAL_POLICY=${CODEX_WEBUI_APPROVAL_POLICY:-on-request}
       # Shared Unix/provider homes are not a multi-tenant security boundary.
@@ -102,7 +111,7 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GOOGLE_CALLBACK_URL=${GOOGLE_CALLBACK_URL:-}
     volumes:
-      # SQLite, generated images, attachments
+      # Generated images, attachments, backups. The rows live in Postgres.
       - ${DATA_DIR:-./data}:/app/packages/backend/data
       # Per-CLI auth + state — survive container rebuilds
       - ${CONFIG_DIR:-./config}/claude:/home/node/.claude
@@ -119,6 +128,32 @@ services:
       timeout: 5s
       retries: 3
       start_period: 45s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - default
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: plum-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${PGDATABASE:-plumcode}
+      - POSTGRES_USER=${PGUSER:-plumcode}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      # Deterministic collation. The default follows the image's locale, and
+      # changing it under a populated database silently corrupts text indexes:
+      # existing entries keep the old ordering while new ones use the new one,
+      # so an index scan starts missing rows a sequential scan still finds.
+      - POSTGRES_INITDB_ARGS=--locale=C --encoding=UTF8
+    volumes:
+      - ${POSTGRES_DIR:-./postgres}:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${PGUSER:-plumcode} -d ${PGDATABASE:-plumcode}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - default
 
