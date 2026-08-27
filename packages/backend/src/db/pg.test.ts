@@ -68,10 +68,12 @@ test(
     await run('INSERT INTO pg_helper_test (id, n) VALUES (?, ?)', 'a', 1);
     await run('INSERT INTO pg_helper_test (id, n) VALUES (?, ?)', 'b', 2);
 
-    const one = await get<{ id: string }>('SELECT id FROM pg_helper_test WHERE id = ?', 'a');
+    const one = (await get('SELECT id FROM pg_helper_test WHERE id = ?', 'a')) as
+      | { id: string }
+      | undefined;
     assert.equal(one?.id, 'a');
 
-    const rows = await all<{ id: string }>('SELECT id FROM pg_helper_test ORDER BY id');
+    const rows = (await all('SELECT id FROM pg_helper_test ORDER BY id')) as { id: string }[];
     assert.deepEqual(
       rows.map((r) => r.id),
       ['a', 'b']
@@ -111,7 +113,9 @@ test(
     await run('TRUNCATE pg_tx_test');
     await transaction(async (tx) => {
       await tx.run('INSERT INTO pg_tx_test (id) VALUES (?)', 'y');
-      const seen = await tx.get<{ id: string }>('SELECT id FROM pg_tx_test WHERE id = ?', 'y');
+      const seen = (await tx.get('SELECT id FROM pg_tx_test WHERE id = ?', 'y')) as
+        | { id: string }
+        | undefined;
       assert.equal(seen?.id, 'y', 'reads inside the transaction see its own writes');
     });
     assert.equal((await all('SELECT id FROM pg_tx_test')).length, 1);

@@ -1,4 +1,4 @@
-import pg from 'pg';
+import { Pool, type PoolClient } from 'pg';
 
 import { createLogger } from '../utils/logger.js';
 
@@ -29,7 +29,7 @@ const log = createLogger('pg');
  * each query.
  */
 
-let pool: pg.Pool | null = null;
+let pool: Pool | null = null;
 
 export interface PgConfig {
   host: string;
@@ -51,10 +51,10 @@ export function readPgConfig(): PgConfig {
   };
 }
 
-export function getPool(): pg.Pool {
+export function getPool(): Pool {
   if (pool) return pool;
   const config = readPgConfig();
-  pool = new pg.Pool(config);
+  pool = new Pool(config);
   // An idle client that dies (a restart of the database, a dropped connection)
   // emits on the pool, and an unhandled 'error' event takes the process down.
   pool.on('error', (error) => log.error('Idle client error', { error: String(error) }));
@@ -115,32 +115,27 @@ export function convertPlaceholders(sql: string): string {
   return out;
 }
 
-type Queryable = Pick<pg.Pool, 'query'> | pg.PoolClient;
+type Queryable = Pick<Pool, 'query'> | PoolClient;
 
-async function execute<T extends pg.QueryResultRow>(
+async function execute(
   client: Queryable,
   sql: string,
   params: unknown[]
-): Promise<pg.QueryResult<T>> {
-  return client.query<T>(convertPlaceholders(sql), params);
+): Promise<{ rows: Record<string, unknown>[]; rowCount: number | null }> {
+  return client.query(convertPlaceholders(sql), params);
 }
 
 /** First row, or undefined — the shape `better-sqlite3`'s `.get()` returns. */
-export async function get<T extends pg.QueryResultRow = pg.QueryResultRow>(
+export async function get(
   sql: string,
   ...params: unknown[]
-): Promise<T | undefined> {
-  const result = await execute<T>(getPool(), sql, params);
-  return result.rows[0];
+): Promise<Record<string, unknown> | undefined> {
+  return (await execute(getPool(), sql, params)).rows[0];
 }
 
 /** All rows, like `.all()`. */
-export async function all<T extends pg.QueryResultRow = pg.QueryResultRow>(
-  sql: string,
-  ...params: unknown[]
-): Promise<T[]> {
-  const result = await execute<T>(getPool(), sql, params);
-  return result.rows;
+export async function all(sql: string, ...params: unknown[]): Promise<Record<string, unknown>[]> {
+  return (await execute(getPool(), sql, params)).rows;
 }
 
 /** Writes, like `.run()`; `changes` mirrors the field the callers already read. */
@@ -149,15 +144,18 @@ export async function run(sql: string, ...params: unknown[]): Promise<{ changes:
   return { changes: result.rowCount ?? 0 };
 }
 
+/**
+ * The same three methods, pinned to one client.
+ *
+ * Deliberately not generic. `pg` ships an ESM entry without declarations, so a
+ * generic constrained to its QueryResultRow resolves to two unrelated types in
+ * one file. The existing code already casts every read — `.get(...) as { ok:
+ * number } | undefined` — so returning rows and letting the caller name the
+ * shape matches what is there rather than adding a type dance around it.
+ */
 export interface TransactionScope {
-  get<T extends pg.QueryResultRow = pg.QueryResultRow>(
-    sql: string,
-    ...params: unknown[]
-  ): Promise<T | undefined>;
-  all<T extends pg.QueryResultRow = pg.QueryResultRow>(
-    sql: string,
-    ...params: unknown[]
-  ): Promise<T[]>;
+  get(sql: string, ...params: unknown[]): Promise<Record<string, unknown> | undefined>;
+  all(sql: string, ...params: unknown[]): Promise<Record<string, unknown>[]>;
   run(sql: string, ...params: unknown[]): Promise<{ changes: number }>;
 }
 
@@ -169,16 +167,20 @@ export interface TransactionScope {
 export async function transaction<T>(fn: (tx: TransactionScope) => Promise<T>): Promise<T> {
   const client = await getPool().connect();
   const scope: TransactionScope = {
-    get: async (sql, ...params) => (await execute(client, sql, params)).rows[0],
-    all: async (sql, ...params) => (await execute(client, sql, params)).rows,
-    run: async (sql, ...params) => ({
-      changes: (await execute(client, sql, params)).rowCount ?? 0,
-    }),
+    async get(sql, ...params) {
+      return (await execute(client, sql, params)).rows[0];
+    },
+    async all(sql, ...params) {
+      return (await execute(client, sql, params)).rows;
+    },
+    async run(sql, ...params) {
+      return { changes: (await execute(client, sql, params)).rowCount ?? 0 };
+    },
   };
 
   try {
     await client.query('BEGIN');
-    const result = await fn(scope as TransactionScope);
+    const result = await fn(scope);
     await client.query('COMMIT');
     return result;
   } catch (error) {

@@ -562,6 +562,19 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // Update user settings
+/**
+ * Settings rows are created lazily. GET has always done it, PUT never did — so a
+ * user who saved settings before ever loading them hit an UPDATE that matched no
+ * row, and the re-read afterwards had nothing to return. That surfaced as a 500
+ * on the very first save of a fresh account.
+ */
+function ensureSettingsRow(db: ReturnType<typeof getDatabase>, userId: string): void {
+  db.prepare(
+    `INSERT OR IGNORE INTO user_settings (user_id, theme, allowed_tools)
+     VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')`
+  ).run(userId);
+}
+
 router.put('/', requireAuth, (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const parsed = updateSettingsSchema.safeParse(req.body);
@@ -571,6 +584,7 @@ router.put('/', requireAuth, (req, res) => {
   }
 
   const db = getDatabase();
+  ensureSettingsRow(db, userId);
   const {
     defaultWorkingDir,
     allowedTools,
