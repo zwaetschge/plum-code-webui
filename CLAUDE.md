@@ -21,7 +21,7 @@ pnpm format:check           # prettier --check (CI)
 ./scripts/start-webui.sh    # dev helper: generates ephemeral SESSION_SECRET/JWT_SECRET, kills stale PIDs, logs to .logs/, writes PIDs to .pids/
 
 # Backend-specific (run from packages/backend)
-pnpm db:migrate             # apply SQLite migrations (better-sqlite3); target honors WEBUI_DATA_DIR
+pnpm db:migrate             # apply pending Postgres migrations; connection from PG* / POSTGRES_PASSWORD
 ```
 
 Dev ports: backend `3006`, frontend `5173`. Docker maps `4545:3001`; the container listens on `3001`.
@@ -34,7 +34,7 @@ Node `>=20`, pnpm `>=9`; the package manager is pinned to `pnpm@9.15.0`.
 
 | Package             | Purpose                                                                            |
 | ------------------- | ---------------------------------------------------------------------------------- |
-| `packages/backend`  | Express, Socket.IO, SQLite via better-sqlite3, and provider CLI process management |
+| `packages/backend`  | Express, Socket.IO, Postgres via `pg`, and provider CLI process management        |
 | `packages/frontend` | React 18, Vite, Radix UI, Tailwind, Zustand, and Socket.IO client                  |
 | `packages/shared`   | Shared TypeScript types, pricing, and provider-label logic                         |
 | `packages/desktop`  | Desktop shell wrapper                                                              |
@@ -44,7 +44,7 @@ Node `>=20`, pnpm `>=9`; the package manager is pinned to `pnpm@9.15.0`.
 
 Entry: `packages/backend/src/index.ts`. Routes are in `src/routes/`; services are in `src/services/`. Despite its name, `src/services/claude/ClaudeProcessManager.ts` manages provider lifecycles and forwards streaming events over Socket.IO:
 
-- **Codex**: runs `codex exec --json` once per turn. `translateCodexMessage` streams `item.delta`, `agent_message.delta`, `text.delta`, and `response.output_text.delta`, with `item.completed` fallback. `buildCodexContextPrefix()` prepends up to the last 40 SQLite turns, limited to 24k characters, as `[Prior conversation context]`; Codex has no native `--resume`.
+- **Codex**: runs `codex exec --json` once per turn. `translateCodexMessage` streams `item.delta`, `agent_message.delta`, `text.delta`, and `response.output_text.delta`, with `item.completed` fallback. `buildCodexContextPrefix()` prepends up to the last 40 stored turns, limited to 24k characters, as `[Prior conversation context]`; Codex has no native `--resume`.
 - **OpenCode**: per-user HTTP/SSE server with native streaming and resume. Config, data, OAuth, and account state are isolated under `~/.opencode/users/<sha256-user-key>`. Legacy global OAuth state is not assigned to users; affected users reconnect through the WebUI. It routes 75+ models, including `z-ai/glm-*` and Kimi.
 - **Pi**: persistent JSONL RPC using OpenCode connections and models, shared skills, converted agents, and the MCP bridge. Google Antigravity comes from the `pi-antigravity` extension (Pi dropped built-in support in 0.71.0); `resolvePiExtensionPaths()` provisions it and `PI_ANTIGRAVITY_MODELS` mirrors its catalog, because extension models never reach the provider registry. It needs a one-time `/login antigravity` per user and — per the package's own README — using it may violate Google's ToS.
 - **Kimi Code**: persistent `kimi acp` stdio with native resume, cancellation, streaming, and queued follow-ups. Do not regress to `kimi -p`.
@@ -54,7 +54,7 @@ Input may queue while a provider is active; interrupts cancel the current turn.
 
 Key server-to-client Socket.IO events are `session:output`, `session:message`, `session:thinking`, `session:tool_use`, `session:agent`, and `session:status`.
 
-**Auth:** Express sessions, JWT, Passport GitHub/Google OAuth, and a Basic Auth guard backed by SQLite `app_config`. Harness login routes are `/auth/codex`, `/auth/opencode`, `/auth/pi`, and `/auth/claude`; `/auth/providers` uses `isProviderAvailable()`.
+**Auth:** Express sessions, JWT, Passport GitHub/Google OAuth, and a Basic Auth guard backed by the `app_config` table. Harness login routes are `/auth/codex`, `/auth/opencode`, `/auth/pi`, and `/auth/claude`; `/auth/providers` uses `isProviderAvailable()`.
 
 **Admin/helper LLM:** `packages/backend/src/utils/adminLLM.ts` supplies one-shot internal completions, preferring Codex → OpenCode → Claude unless overridden by `ADMIN_LLM_PROVIDER`. `routes/git.ts` uses it at `/generate-commit-message`. Codex helper calls must retain `--ephemeral`.
 
@@ -123,13 +123,14 @@ Portable defaults `./data`, `./config`, and `./workspace` live beside the projec
 
 ### Basic Auth recovery
 
-Credentials are in `data/claude-webui.db`, table `app_config`, under `basic_auth_username`, `basic_auth_password` (bcrypt), and `basic_auth_enabled`.
+Credentials are in Postgres, table `app_config`, under `basic_auth_username`, `basic_auth_password` (bcrypt), and `basic_auth_enabled`.
 
 ```bash
-sqlite3 /mnt/cache/appdata/plum-code-webui/data/claude-webui.db \
-  "update app_config set value='NEW_USERNAME' where key='basic_auth_username'; \
-   update app_config set value='BCRYPT_HASH'    where key='basic_auth_password'; \
-   update app_config set value='true'           where key='basic_auth_enabled';"
+docker exec -i plum-postgres psql -U plumcode -d plumcode <<'SQL'
+update app_config set value='NEW_USERNAME' where key='basic_auth_username';
+update app_config set value='BCRYPT_HASH'  where key='basic_auth_password';
+update app_config set value='true'         where key='basic_auth_enabled';
+SQL
 ```
 
 Set `basic_auth_enabled` to `false` to disable it.

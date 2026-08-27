@@ -44,7 +44,7 @@ Harnesses ship in the container. `${CONFIG_DIR}` (default `./config`) bind-mount
 - UI/backend efforts: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. Codex 0.144.0 supports `ultra` natively for delegation-capable models including `gpt-5.6-sol` and `gpt-5.6-terra`; never normalize it to `max`.
 - Regular-effort GPT-5.6 sessions default to `agents.max_depth=1` and `agents.max_threads=1`; Codex CLI 0.144.0+ rejects `max_depth=0`. `ultra` and `CODEX_WEBUI_AGENT_MODE=parallel` retain parallel behavior. `CODEX_WEBUI_AGENT_MAX_DEPTH` and `CODEX_WEBUI_AGENT_MAX_THREADS` override both policies.
 - `translateCodexMessage` in `ClaudeProcessManager` maps `item.delta`, `agent_message.delta`, `text.delta`, and `response.output_text.delta` to `session:output`; older CLIs fall back to full `item.completed` output.
-- `buildCodexContextPrefix()` prepends up to 40 SQLite turns (≤24k characters) as `[Prior conversation context]`; Codex has no native `--resume`.
+- `buildCodexContextPrefix()` prepends up to 40 stored turns (≤24k characters) as `[Prior conversation context]`; Codex has no native `--resume`.
 - `codex exec` is single-shot. `respawnCodexProcess` must create a child per user message and reattach stdout/stderr handlers.
 
 ## OpenCode notes
@@ -375,29 +375,50 @@ Provider CLIs inherit filtered `DOCKER_HOST`; keep `CLI_RUNNER_ACCESS` admin-onl
 
 If `docker ps --filter name=repair-bot` is empty, `plum-rebuild.sh` exits 3. Start it with `docker compose up -d repair-bot`.
 
-## Database safety
+## Database
 
-The database is owned by exactly one process. On 2026-08-26 it was truncated by
-1278 pages — `messages`, `session_events` and the search index were gone — because
-a second connection reached the live file. `scripts/plum-maintenance.mjs` did that
-on every run, and an agent shell can do it at any time: the same file is reachable
-both directly under `/mnt/cache` and through the `/mnt/user` FUSE layer, and SQLite's
-locks do not carry across those two views.
+Rows live in Postgres 17 (`plum-postgres`), one database `plumcode`. The
+`data/` directory still holds what is genuinely files: generated images,
+attachments, backups.
 
-- **Never open `data/claude-webui.db` from a second process**, not even read-only.
-  Query it through the running server, or through a backup copy.
-- Backups run in-process (`services/backup.ts`, `VACUUM INTO` every 6h, verified
-  with `integrity_check` plus a row count). `POST /api/admin/backup` triggers one;
-  `plum-maintenance.mjs` asks for it over that route instead of opening the file.
-- Litestream (`plum-litestream`) replicates continuously to
-  `/mnt/user/backups/plum-code-litestream`, 10s sync, daily snapshot, 14 days of
-  point-in-time recovery. Its source mount **must** stay the direct
-  `/mnt/cache/...` path; pointing it at `/mnt/user` would recreate the exact
-  failure above. Restore: `litestream restore -config /etc/litestream.yml -o <out>
-/data/claude-webui.db` in a throwaway container.
-- `/health/ready` reads real rows from `sessions` and `messages` and runs
-  `quick_check` every 15 minutes. The previous `SELECT 1` touched no table and
-  reported healthy throughout the corruption.
+- `packages/backend/src/db/schema.sql` is the schema, applied idempotently on
+  every boot. Anything that changes it afterwards is a numbered entry in
+  `db/migrations.ts` with a row in `schema_migrations`. Regenerate the baseline
+  with `node scripts/sqlite-to-postgres.mjs --source <backup.db> --dry-run`.
+- `db/dialect.ts` translates the SQLite dialect the statements are written in —
+  `CURRENT_TIMESTAMP` to a formatted UTC string, `strftime` to `to_char`,
+  `IS ?` to `IS NOT DISTINCT FROM`, and mixed-case aliases get quoted because
+  Postgres folds unquoted identifiers to lower case. `node
+  scripts/lint-sql-dialect.mjs` must report nothing; it translates each
+  statement first, so it cannot drift from what the translator covers.
+- Timestamps are TEXT holding `YYYY-MM-DD HH:MM:SS` in UTC and booleans are
+  0/1 integers, both kept deliberately: 161 places compare those strings and
+  ~200 compare `= 1`. Moving to TIMESTAMPTZ and BOOLEAN is a semantic
+  migration, not a storage one.
+- `messages`, `message_media`, `session_chats` and `session_events` carry a
+  `seq BIGSERIAL` standing in for SQLite's rowid, which decides "the later row"
+  when two share a timestamp.
+- Full-text search is a generated `search_vector` column plus a GIN index, not
+  a shadow table. `buildFtsMatch` emits `token:*` terms; user input never
+  reaches the tsquery parser as an operator.
+- Seven triggers enforce invariants the routes also check — media and read-marker
+  ownership, the snapshot revision counter, upload release on message delete.
+  `pnpm --filter @plum-code-webui/backend run test:migrations` asserts they exist.
+
+### Backups
+
+- In-process (`services/backup.ts`), `pg_dump --format custom` every 6h,
+  verified with `pg_restore --list` before it counts as a backup. `POST
+  /api/admin/backup` triggers one; `plum-maintenance.mjs` asks over that route.
+- Postgres archives its WAL to `/mnt/user/backups/plum-code-wal` — a different
+  set of disks — so a dump plus the segments since gives point-in-time
+  recovery. Litestream is gone with SQLite; it has no Postgres equivalent.
+- `/health/ready` reads real rows from `sessions` and `messages`. The previous
+  `SELECT 1` touched no table and reported healthy throughout the 2026-08-26
+  corruption, when the SQLite file was truncated by 1278 pages because a second
+  process opened it. That failure mode does not survive the move — concurrent
+  readers are what a server is for — but the lesson that a health check must
+  read something does.
 
 ## Removed paths (do not reintroduce)
 
@@ -424,13 +445,13 @@ locks do not carry across those two views.
 ## Implemented optimisation baseline
 
 - Production uses compiled `node dist`, Node 22.22.3, pnpm 9.15.0, production-only backend dependencies, `COPY --chown`, and an init process.
-- `/health/live` is liveness; `/health/ready` checks SQLite, persistent data, config mounts, and frontend bundle.
-- Browser sessions use SQLite `http_sessions`; suspending, deleting, or password-resetting users revokes browser and WebSocket state.
+- `/health/live` is liveness; `/health/ready` checks Postgres, persistent data, config mounts, and frontend bundle.
+- Browser sessions use the `http_sessions` table; suspending, deleting, or password-resetting users revokes browser and WebSocket state.
 - OpenCode is isolated per user across process, SSE, config, data, and OAuth. Global OAuth state is not migrated; affected users reconnect once.
 - Startup reconciles stale `running` sessions. Child CLIs use process groups; shutdown escalates `SIGTERM` to `SIGKILL` for the process tree.
 - Codex reads only the final 16 MiB of large rollout JSONL files. OpenCode polls the current turn serially with abort/request timeouts.
 - Settings capability queries are tab-lazy; lists initially show 6 agents or 9 skills while search covers the full catalog.
-- `node scripts/plum-maintenance.mjs` creates an online SQLite backup, runs `quick_check`, uses mode `0600`, and prunes only managed artifacts under configured retention.
+- `node scripts/plum-maintenance.mjs` asks the server for a `pg_dump`, verifies it with `pg_restore --list`, uses mode `0600`, and prunes only managed artifacts under configured retention.
 
 ## Memory-Optimizer (selbstwartendes Gedächtnis)
 

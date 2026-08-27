@@ -204,7 +204,7 @@ in the browser.
 
 - **Express.js** - HTTP server
 - **Socket.IO** - Real-time communication
-- **SQLite** (better-sqlite3) - Database
+- **Postgres 17** (`pg`) - Database
 - **node-pty** - interactive CLI process management
 - **simple-git** - Git operations
 - **@octokit/rest** - GitHub API
@@ -292,7 +292,7 @@ bash scripts/plum-rebuild.sh
 
 The script writes `data/rebuild-trigger.json`, waits for `repair-bot` to rebuild and recreate the main container from outside, then runs a sanity check. The sidecar protects the previous image, requires candidate image identity plus `/health/ready`, and automatically rolls back a failed candidate. Use `--no-cache`, `--no-wait`, or `--timeout=N` when needed.
 
-Create and validate an online SQLite backup, then preview retention changes:
+Create and verify a Postgres backup, then preview retention changes:
 
 ```bash
 node scripts/plum-maintenance.mjs
@@ -367,7 +367,7 @@ packages/
 │   │   │   └── claude/   # Legacy folder name; owns Codex / OpenCode / Claude lifecycle
 │   │   ├── auth/         # Passport (GitHub, Google) + basic-auth + allowlist
 │   │   ├── middleware/   # CSP, rate limiting, error handling
-│   │   └── db/           # SQLite (better-sqlite3) + migrations
+│   │   └── db/           # Postgres schema, dialect translation, migrations
 ├── frontend/             # React 18 + Vite SPA
 │   ├── src/
 │   │   ├── components/

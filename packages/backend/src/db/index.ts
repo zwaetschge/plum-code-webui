@@ -51,17 +51,25 @@ export function getDataDirectory(): string {
  * idempotently; anything after it is a numbered migration with a row in
  * `schema_migrations` saying whether it ran.
  */
-export async function initDatabase(): Promise<void> {
-  if (!fs.existsSync(DATA_DIRECTORY)) {
-    fs.mkdirSync(DATA_DIRECTORY, { recursive: true });
-  }
-
+/**
+ * Applies the baseline schema. Separate from [initDatabase] so `pnpm
+ * db:migrate` can do the schema work without also starting the bootstrapping a
+ * booting server needs.
+ */
+export async function applySchema(): Promise<void> {
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   // One call: without parameters `pg` uses the simple query protocol, which
   // takes the whole file as a single implicit transaction. A statement-by-
   // statement loop would leave a half-created schema behind on failure.
   await getPool().query(schema);
+}
 
+export async function initDatabase(): Promise<void> {
+  if (!fs.existsSync(DATA_DIRECTORY)) {
+    fs.mkdirSync(DATA_DIRECTORY, { recursive: true });
+  }
+
+  await applySchema();
   await runPendingMigrations();
 
   await bootstrapAdmin();
