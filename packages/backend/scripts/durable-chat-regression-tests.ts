@@ -12,7 +12,11 @@ process.env.ENCRYPTION_KEY = 'durable-chat-regression-encryption-key-000';
 process.env.WEBUI_SUPPRESS_BOOTSTRAP_CREDENTIAL_LOG = '1';
 process.env.WEBUI_EXTERNAL_SKILL_SYNC = 'false';
 
-const { initDatabase } = await import('../src/db/index.js');
+const { useTestSchema, createTestSchema, dropTestSchema } = await import(
+  '../src/db/testing.js'
+);
+useTestSchema();
+const { all: pgAll, get: pgGet, run: pgRun } = await import('../src/db/pg.js');
 const { claimMessageDelivery, finishMessageDelivery, hashDeliveryPayload } =
   await import('../src/services/messageDelivery.js');
 const {
@@ -38,58 +42,49 @@ const {
 const { buildFtsMatch, escapeMessageSearchLike, sessionUnreadCountSelect } =
   await import('../src/routes/sessions.js');
 
-const database = initDatabase();
+await createTestSchema();
 for (const [id, email] of [
   ['owner', 'owner@example.test'],
   ['foreign', 'foreign@example.test'],
 ] as const) {
-  database
-    .prepare(
-      `INSERT INTO users (id, email, name, provider, provider_id, role, status)
-       VALUES (?, ?, ?, 'basic', ?, 'admin', 'active')`
-    )
-    .run(id, email, id, id);
+  await pgRun(
+    `INSERT INTO users (id, email, name, provider, provider_id, role, status)
+     VALUES (?, ?, ?, 'basic', ?, 'admin', 'active')`,
+    id,
+    email,
+    id,
+    id
+  );
 }
-database
-  .prepare(
-    `INSERT INTO sessions (id, user_id, name, working_directory, status)
+await pgRun(`INSERT INTO sessions (id, user_id, name, working_directory, status)
      VALUES ('delivery-session', 'owner', 'Delivery', '/tmp', 'stopped'),
             ('sync-session', 'owner', 'Sync', '/tmp', 'stopped'),
             ('foreign-session', 'foreign', 'Foreign', '/tmp', 'stopped')`
-  )
-  .run();
+);
 
-database
-  .prepare(
-    `INSERT INTO session_chats (id, session_id, title)
+await pgRun(
+  `INSERT INTO session_chats (id, session_id, title)
      VALUES ('chat-a', 'delivery-session', 'A'),
             ('chat-b', 'delivery-session', 'B'),
             ('foreign-chat', 'foreign-session', 'Foreign')`
-  )
-  .run();
-database
-  .prepare(`UPDATE sessions SET active_chat_id = 'chat-a' WHERE id = 'delivery-session'`)
-  .run();
+);
+await pgRun(`UPDATE sessions SET active_chat_id = 'chat-a' WHERE id = 'delivery-session'`);
 
 // Explicit sends stay bound to their intended owned chat. A stale outbox send
 // after another device switches threads is rejected instead of leaking into B.
-assert.equal(resolveSessionSendChatId('delivery-session', 'owner', 'chat-a', database), 'chat-a');
-assert.throws(
-  () => resolveSessionSendChatId('delivery-session', 'owner', 'foreign-chat', database),
+assert.equal(await resolveSessionSendChatId('delivery-session', 'owner', 'chat-a'), 'chat-a');
+await assert.rejects(
+  () => resolveSessionSendChatId('delivery-session', 'owner', 'foreign-chat'),
   /Chat not found in this session/
 );
-database
-  .prepare(`UPDATE sessions SET active_chat_id = 'chat-b' WHERE id = 'delivery-session'`)
-  .run();
+await pgRun(`UPDATE sessions SET active_chat_id = 'chat-b' WHERE id = 'delivery-session'`);
 assert.equal(
-  resolveSessionSendChatId('delivery-session', 'owner', 'chat-a', database),
+  await resolveSessionSendChatId('delivery-session', 'owner', 'chat-a'),
   'chat-a',
   'an explicit outbox target remains pinned even after another device switches active chat'
 );
-assert.equal(resolveSessionSendChatId('delivery-session', 'owner', undefined, database), 'chat-b');
-database
-  .prepare(`UPDATE sessions SET active_chat_id = 'chat-a' WHERE id = 'delivery-session'`)
-  .run();
+assert.equal(await resolveSessionSendChatId('delivery-session', 'owner', undefined), 'chat-b');
+await pgRun(`UPDATE sessions SET active_chat_id = 'chat-a' WHERE id = 'delivery-session'`);
 
 // Persistent delivery receipts return the exact terminal ACK and reject reuse
 // of the same id for a different semantic payload.
@@ -99,7 +94,7 @@ const payloadHash = hashDeliveryPayload({
   activeFollowupMode: 'queue',
 });
 assert.equal(
-  claimMessageDelivery('owner', 'delivery-session', 'delivery-1', payloadHash, database).kind,
+  (await claimMessageDelivery('owner', 'delivery-session', 'delivery-1', payloadHash)).kind,
   'claimed'
 );
 const accepted = {
@@ -110,29 +105,27 @@ const accepted = {
   disposition: 'dispatched' as const,
   highWatermark: 12,
 };
-database
-  .prepare(
-    `INSERT INTO messages (id, session_id, role, content)
+await pgRun(
+  `INSERT INTO messages (id, session_id, role, content)
      VALUES ('message-1', 'delivery-session', 'user', 'hello')`
-  )
-  .run();
-finishMessageDelivery('owner', 'delivery-session', 'delivery-1', accepted, database);
-const stored = claimMessageDelivery(
+);
+await finishMessageDelivery('owner', 'delivery-session', 'delivery-1', accepted);
+const stored = await claimMessageDelivery(
   'owner',
   'delivery-session',
   'delivery-1',
-  payloadHash,
-  database
+  payloadHash
 );
 assert.equal(stored.kind, 'stored');
 if (stored.kind === 'stored') assert.deepEqual(stored.acknowledgement, accepted);
 assert.equal(
-  claimMessageDelivery(
-    'owner',
-    'delivery-session',
-    'delivery-1',
-    hashDeliveryPayload({ sessionId: 'delivery-session', message: 'different' }),
-    database
+  (
+    await claimMessageDelivery(
+      'owner',
+      'delivery-session',
+      'delivery-1',
+      hashDeliveryPayload({ sessionId: 'delivery-session', message: 'different' })
+    )
   ).kind,
   'conflict'
 );
@@ -141,23 +134,20 @@ assert.equal(
 // messages.client_message_id instead of permitting a second provider dispatch.
 const crashHash = hashDeliveryPayload({ sessionId: 'delivery-session', message: 'crash turn' });
 assert.equal(
-  claimMessageDelivery('owner', 'delivery-session', 'crash-id', crashHash, database).kind,
+  (await claimMessageDelivery('owner', 'delivery-session', 'crash-id', crashHash)).kind,
   'claimed'
 );
-database
-  .prepare(
-    `INSERT INTO messages (
+await pgRun(
+  `INSERT INTO messages (
        id, session_id, role, content, client_message_id, event_sequence
      ) VALUES ('crash-message', 'delivery-session', 'user', 'crash turn', 'crash-id', 31)`
-  )
-  .run();
+);
 let providerDispatches = 0;
-const retryClaim = claimMessageDelivery(
+const retryClaim = await claimMessageDelivery(
   'owner',
   'delivery-session',
   'crash-id',
-  crashHash,
-  database
+  crashHash
 );
 if (retryClaim.kind === 'claimed') providerDispatches += 1;
 assert.equal(providerDispatches, 0);
@@ -169,93 +159,83 @@ if (retryClaim.kind === 'stored' && retryClaim.acknowledgement.status === 'accep
 // Sequences reserve 256-value blocks: 600 events need three DB reservations,
 // remain strictly monotone, and expose a safe restart gap instead of 600 writes.
 resetSessionSequenceAllocatorForTests();
-const sequences = Array.from({ length: 600 }, () =>
-  nextSessionEventSequence('sync-session', database)
-);
+// Sequentially, not Promise.all: the point is that 600 consecutive
+// reservations stay monotone, and issuing them concurrently would test the
+// opposite.
+const sequences: number[] = [];
+for (let i = 0; i < 600; i++) {
+  sequences.push(await nextSessionEventSequence('sync-session'));
+}
 assert.ok(sequences.every((value, index) => index === 0 || value > sequences[index - 1]!));
 assert.equal(
   (
-    database
-      .prepare(`SELECT event_sequence AS value FROM sessions WHERE id = 'sync-session'`)
-      .get() as { value: number }
+    (await pgGet(
+      `SELECT event_sequence AS value FROM sessions WHERE id = 'sync-session'`
+    )) as { value: number }
   ).value,
   768
 );
-assert.equal(getSessionSyncState('sync-session', 'owner', database).highWatermark, 600);
+assert.equal((await getSessionSyncState('sync-session', 'owner')).highWatermark, 600);
 resetSessionSequenceAllocatorForTests();
-assert.equal(getSessionSyncState('sync-session', 'owner', database).highWatermark, 768);
-assert.equal(nextSessionEventSequence('sync-session', database), 769);
+assert.equal((await getSessionSyncState('sync-session', 'owner')).highWatermark, 768);
+assert.equal((await nextSessionEventSequence('sync-session')), 769);
 
 // Snapshot revisions include insert/update/delete, and persisted read markers
 // count only later assistant messages in the selected chat.
-const revisionBefore = getMessageHistorySnapshot('sync-session', 'owner', null, database).revision;
-database
-  .prepare(
-    `INSERT INTO messages (id, session_id, role, content)
+const revisionBefore = (await getMessageHistorySnapshot('sync-session', 'owner', null)).revision;
+await pgRun(
+  `INSERT INTO messages (id, session_id, role, content)
      VALUES ('read-1', 'sync-session', 'assistant', 'one'),
             ('read-2', 'sync-session', 'user', 'two'),
             ('read-3', 'sync-session', 'assistant', 'three')`
-  )
-  .run();
-database.prepare(`UPDATE messages SET content = 'one edited' WHERE id = 'read-1'`).run();
-database.prepare(`DELETE FROM messages WHERE id = 'read-2'`).run();
+);
+await pgGet(`UPDATE messages SET content = 'one edited' WHERE id = 'read-1'`);
+await pgRun(`DELETE FROM messages WHERE id = 'read-2'`);
 assert.equal(
-  getMessageHistorySnapshot('sync-session', 'owner', null, database).revision,
+  (await getMessageHistorySnapshot('sync-session', 'owner', null)).revision,
   revisionBefore + 5
 );
-assert.equal(getSessionReadState('owner', 'sync-session', null, database).unreadCount, 2);
+assert.equal((await getSessionReadState('owner', 'sync-session', null)).unreadCount, 2);
 assert.equal(
-  setSessionReadState(
-    'owner',
-    'sync-session',
-    { chatId: null, lastReadMessageId: 'read-1' },
-    database
+  (
+    await setSessionReadState('owner', 'sync-session', {
+      chatId: null,
+      lastReadMessageId: 'read-1',
+    })
   ).unreadCount,
   1
 );
-assert.throws(
-  () => setSessionReadState('foreign', 'sync-session', { lastReadMessageId: 'read-3' }, database),
+await assert.rejects(
+  () => setSessionReadState('foreign', 'sync-session', { lastReadMessageId: 'read-3' }),
   /Session not found/
 );
-database
-  .prepare(
-    `INSERT INTO sessions (id, user_id, name, working_directory, status)
+await pgRun(
+  `INSERT INTO sessions (id, user_id, name, working_directory, status)
      VALUES ('list-session', 'owner', 'List', '/tmp', 'stopped')`
-  )
-  .run();
-database
-  .prepare(
-    `INSERT INTO messages (id, session_id, role, content)
+);
+await pgRun(
+  `INSERT INTO messages (id, session_id, role, content)
      VALUES ('list-1', 'list-session', 'assistant', 'first'),
             ('list-2', 'list-session', 'assistant', 'second')`
-  )
-  .run();
-setSessionReadState(
-  'owner',
-  'list-session',
-  { chatId: null, lastReadMessageId: 'list-1' },
-  database
 );
-const listCounts = database
-  .prepare(
-    `SELECT s.id, ${sessionUnreadCountSelect('s')}
+await setSessionReadState('owner', 'list-session', {
+  chatId: null,
+  lastReadMessageId: 'list-1',
+});
+const listCounts = (await pgAll(
+  `SELECT s.id, ${sessionUnreadCountSelect('s')}
        FROM sessions s
       WHERE s.user_id = 'owner' AND s.id IN ('sync-session', 'list-session')
       ORDER BY s.id`
-  )
-  .all() as Array<{ id: string; unreadCount: number }>;
+)) as Array<{ id: string; unreadCount: number }>;
 assert.deepEqual(listCounts, [
   { id: 'list-session', unreadCount: 1 },
   { id: 'sync-session', unreadCount: 1 },
 ]);
-assert.throws(
+await assert.rejects(
   () =>
-    database
-      .prepare(
-        `INSERT INTO session_reads (user_id, session_id, chat_key, last_read_message_id)
-         VALUES ('foreign', 'sync-session', '', 'read-1')`
-      )
-      .run(),
+    pgRun(`INSERT INTO session_reads (user_id, session_id, chat_key, last_read_message_id)
+         VALUES ('foreign', 'sync-session', '', 'read-1')`),
   /session read ownership mismatch/
 );
 
@@ -273,13 +253,12 @@ const upload = await createChatUpload(
     byteSize: bytes.length,
     sha256: createHash('sha256').update(bytes).digest('hex'),
     chunkSize,
-  },
-  database
+  }
 );
 assert.equal(upload.filename, 'proof.bin');
 assert.equal(upload.totalChunks, 3);
-assert.throws(
-  () => getChatUpload('foreign', 'delivery-session', upload.id, database),
+await assert.rejects(
+  () => getChatUpload('foreign', 'delivery-session', upload.id),
   (error) => error instanceof ChatUploadError && error.statusCode === 404
 );
 
@@ -305,8 +284,7 @@ await assert.rejects(
       start: chunks[1]!.start,
       end: chunks[1]!.start + chunks[1]!.bytes.length - 1,
       total: bytes.length,
-    },
-    database
+    }
   ),
   /SHA-256/
 );
@@ -319,8 +297,7 @@ for (const index of [1, 0, 2]) {
     index,
     chunk.bytes,
     chunk.sha,
-    { start: chunk.start, end: chunk.start + chunk.bytes.length - 1, total: bytes.length },
-    database
+    { start: chunk.start, end: chunk.start + chunk.bytes.length - 1, total: bytes.length }
   );
   if (index === 1) {
     // Repeating an identical chunk is idempotent and does not inflate progress.
@@ -331,43 +308,37 @@ for (const index of [1, 0, 2]) {
       index,
       chunk.bytes,
       chunk.sha,
-      { start: chunk.start, end: chunk.start + chunk.bytes.length - 1, total: bytes.length },
-      database
+      { start: chunk.start, end: chunk.start + chunk.bytes.length - 1, total: bytes.length }
     );
     assert.equal(duplicate.receivedBytes, result.receivedBytes);
   }
 }
-assert.equal(getChatUpload('owner', 'delivery-session', upload.id, database).status, 'complete');
+assert.equal((await getChatUpload('owner', 'delivery-session', upload.id)).status, 'complete');
 const staged = await resolveChatUploads(
   'owner',
   'delivery-session',
   [upload.id],
-  'delivery-a',
-  database
+  'delivery-a'
 );
 assert.equal(Buffer.from(staged[0]!.data, 'base64').equals(bytes), true);
 await assert.rejects(
-  resolveChatUploads('owner', 'delivery-session', [upload.id], 'delivery-b', database),
+  resolveChatUploads('owner', 'delivery-session', [upload.id], 'delivery-b'),
   /reserved/
 );
-releaseChatUploadReservations('owner', 'delivery-session', [upload.id], 'delivery-a', database);
-await resolveChatUploads('owner', 'delivery-session', [upload.id], 'delivery-b', database);
-database
-  .prepare(
-    `INSERT INTO messages (id, session_id, role, content, client_message_id)
+await releaseChatUploadReservations('owner', 'delivery-session', [upload.id], 'delivery-a');
+await resolveChatUploads('owner', 'delivery-session', [upload.id], 'delivery-b');
+await pgRun(`INSERT INTO messages (id, session_id, role, content, client_message_id)
      VALUES ('upload-message', 'delivery-session', 'user', 'with upload', 'delivery-b')`
-  )
-  .run();
-markChatUploadsConsumed(
+);
+await markChatUploadsConsumed(
   'owner',
   'delivery-session',
   [upload.id],
   'upload-message',
-  'delivery-b',
-  database
+  'delivery-b'
 );
 await assert.rejects(
-  resolveChatUploads('owner', 'delivery-session', [upload.id], 'delivery-b', database),
+  resolveChatUploads('owner', 'delivery-session', [upload.id], 'delivery-b'),
   /already attached/
 );
 
@@ -386,8 +357,7 @@ const cancelled = await createChatUpload(
     byteSize: chunkSize,
     sha256: createHash('sha256').update(Buffer.alloc(chunkSize, 7)).digest('hex'),
     chunkSize,
-  },
-  database
+  }
 );
 const cancelBytes = Buffer.alloc(chunkSize, 7);
 await putChatUploadChunk(
@@ -397,11 +367,10 @@ await putChatUploadChunk(
   0,
   cancelBytes,
   createHash('sha256').update(cancelBytes).digest('hex'),
-  { start: 0, end: cancelBytes.length - 1, total: cancelBytes.length },
-  database
+  { start: 0, end: cancelBytes.length - 1, total: cancelBytes.length }
 );
 assert.equal(
-  (await cancelChatUpload('owner', 'delivery-session', cancelled.id, database)).status,
+  (await cancelChatUpload('owner', 'delivery-session', cancelled.id)).status,
   'cancelled'
 );
 assert.equal(
@@ -417,17 +386,17 @@ const expired = await createChatUpload(
     byteSize: chunkSize,
     sha256: createHash('sha256').update(Buffer.alloc(chunkSize)).digest('hex'),
     chunkSize,
-  },
-  database
+  }
 );
-database
-  .prepare(`UPDATE chat_uploads SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?`)
-  .run(expired.id);
-assert.throws(
-  () => getChatUpload('owner', 'delivery-session', expired.id, database),
+await pgRun(
+  `UPDATE chat_uploads SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?`,
+  expired.id
+);
+await assert.rejects(
+  () => getChatUpload('owner', 'delivery-session', expired.id),
   (error) => error instanceof ChatUploadError && error.code === 'UPLOAD_EXPIRED'
 );
-await cleanupExpiredChatUploads(database);
+await cleanupExpiredChatUploads();
 for (
   let retry = 0;
   retry < 30 && fs.existsSync(path.join(process.env.CHAT_UPLOAD_DIR!, userSegment, expired.id));
@@ -444,8 +413,7 @@ await assert.rejects(
   createChatUpload(
     'owner',
     'delivery-session',
-    { filename: 'huge', byteSize: 25 * 1024 * 1024 + 1, sha256: 'a'.repeat(64) },
-    database
+    { filename: 'huge', byteSize: 25 * 1024 * 1024 + 1, sha256: 'a'.repeat(64) }
   ),
   /25 MB/
 );
@@ -455,8 +423,7 @@ await assert.rejects(
     'owner',
     'delivery-session',
     Array.from({ length: 11 }, () => randomUUID()),
-    'delivery-too-many',
-    database
+    'delivery-too-many'
   ),
   (error) => error instanceof ChatUploadError && error.code === 'TOO_MANY_UPLOADS'
 );
@@ -465,16 +432,11 @@ await assert.rejects(
 // These intentionally have no files: an ENOENT would prove the check was late.
 const aggregateUploadIds = [randomUUID(), randomUUID()];
 for (const [index, id] of aggregateUploadIds.entries()) {
-  database
-    .prepare(
-      `INSERT INTO chat_uploads (
+  await pgRun(`INSERT INTO chat_uploads (
          id, user_id, session_id, filename, mime_type, byte_size, sha256,
          chunk_size, total_chunks, received_bytes, status, expires_at
        ) VALUES (?, 'owner', 'delivery-session', ?, 'application/octet-stream', ?, ?,
-                 4194304, ?, ?, 'complete', '2099-01-01T00:00:00.000Z')`
-    )
-    .run(
-      id,
+                 4194304, ?, ?, 'complete', '2099-01-01T00:00:00.000Z')`, id,
       `aggregate-${index}.bin`,
       index === 0 ? 20 * 1024 * 1024 : 13 * 1024 * 1024,
       'a'.repeat(64),
@@ -487,39 +449,41 @@ await assert.rejects(
     'owner',
     'delivery-session',
     aggregateUploadIds,
-    'delivery-aggregate',
-    database
+    'delivery-aggregate'
   ),
   (error) => error instanceof ChatUploadError && error.code === 'UPLOAD_TOTAL_TOO_LARGE'
 );
 
-// FTS syntax is never forwarded verbatim; every token becomes a quoted prefix.
-assert.equal(buildFtsMatch('foo* OR (bar "'), '"foo"* AND "OR"* AND "bar"*');
+// Search syntax is never forwarded verbatim. Words are extracted and rebuilt as
+// prefix terms, so `*`, `OR`, parentheses and an unterminated quote reach the
+// tsquery parser as nothing at all.
+assert.equal(buildFtsMatch('foo* OR (bar "'), 'foo:* & OR:* & bar:*');
 assert.equal(buildFtsMatch('***'), null);
 assert.equal(escapeMessageSearchLike('100%_done\\next'), '100\\%\\_done\\\\next');
-database
-  .prepare(
-    `INSERT INTO messages (id, session_id, role, content)
+await pgRun(`INSERT INTO messages (id, session_id, role, content)
      VALUES ('fts-long', 'sync-session', 'assistant', ?),
-            ('fts-percent', 'sync-session', 'assistant', 'literal 100%_done value')`
-  )
-  .run(`${'prefix '.repeat(2_000)}rareNeedle ${'suffix '.repeat(2_000)}`);
-const ftsPreview = database
-  .prepare(
-    `SELECT substr(snippet(messages_fts, 0, '', '', ' … ', 64), 1, 2000) AS content
-       FROM messages_fts
-      WHERE messages_fts.content MATCH ?`
-  )
-  .get(buildFtsMatch('rareNeedle')) as { content: string };
+            ('fts-percent', 'sync-session', 'assistant', 'literal 100%_done value')`, `${'prefix '.repeat(2_000)}rareNeedle ${'suffix '.repeat(2_000)}`);
+// The FTS5 shadow table is gone; the same preview now comes from ts_headline
+// over the generated search_vector column.
+const ftsPreview = (await pgGet(
+  `SELECT substr(
+            ts_headline('simple', content, to_tsquery('simple', ?),
+                        'StartSel=,StopSel=,MaxWords=64,MinWords=16,MaxFragments=1'),
+            1, 2000
+          ) AS content
+     FROM messages
+    WHERE search_vector @@ to_tsquery('simple', ?)`,
+  buildFtsMatch('rareNeedle'),
+  buildFtsMatch('rareNeedle')
+)) as { content: string };
 assert.ok(ftsPreview.content.includes('rareNeedle'));
 assert.ok(ftsPreview.content.length <= 2000);
 const escapedLikeCount = (
-  database
-    .prepare(`SELECT COUNT(*) AS count FROM messages WHERE content LIKE ? ESCAPE '\\'`)
-    .get(`%${escapeMessageSearchLike('100%_done')}%`) as { count: number }
+  await pgGet(`SELECT COUNT(*) AS count FROM messages WHERE content LIKE ? ESCAPE '\\'`, `%${escapeMessageSearchLike('100%_done')}%`) as { count: number }
 ).count;
 assert.equal(escapedLikeCount, 1);
 
-database.close();
 fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+await dropTestSchema();
+
 console.log('durable chat regression tests passed');

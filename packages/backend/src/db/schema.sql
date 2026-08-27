@@ -934,3 +934,128 @@ ALTER TABLE "messages" ADD COLUMN IF NOT EXISTS "search_vector" tsvector
   GENERATED ALWAYS AS (to_tsvector('simple', coalesce("content", ''))) STORED;
 CREATE INDEX IF NOT EXISTS "idx_messages_search_vector"
   ON "messages" USING GIN ("search_vector");
+
+-- Invariants the SQLite schema enforced with triggers.
+--
+-- These are not decoration: two of them are the reason a direct SQL write
+-- cannot rebind a media row to another user's session, and three maintain the
+-- revision counter that message-history resume compares against. They lived in
+-- the boot-time migration block, so they were re-created on every start and
+-- never appeared in a backup — which is why a copy of the database has none of
+-- them and the ported code silently stopped counting revisions.
+--
+-- The three FTS5 sync triggers are deliberately absent: the generated
+-- search_vector column replaces them, and a generated column cannot fall out of
+-- step the way a trigger-maintained shadow table can.
+
+-- Ownership: media belongs to the message, the message's session, and that
+-- session's user. Enforced here as well as in the route, so a future direct
+-- writer cannot bypass it.
+CREATE OR REPLACE FUNCTION assert_message_media_ownership() RETURNS trigger AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM messages m
+      JOIN sessions s ON s.id = m.session_id
+     WHERE m.id = NEW.message_id
+       AND m.session_id = NEW.session_id
+       AND s.user_id = NEW.user_id
+  ) THEN
+    RAISE EXCEPTION 'message media ownership mismatch';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_message_media_validate_ownership ON message_media;
+CREATE TRIGGER trg_message_media_validate_ownership
+  BEFORE INSERT ON message_media
+  FOR EACH ROW EXECUTE FUNCTION assert_message_media_ownership();
+
+-- A read marker must belong to the user's own session, and must point at a
+-- message in that session and chat. Otherwise one user's marker could silently
+-- mark another's conversation as read.
+CREATE OR REPLACE FUNCTION assert_session_read_ownership() RETURNS trigger AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM sessions s
+     WHERE s.id = NEW.session_id AND s.user_id = NEW.user_id
+  ) OR (
+    NEW.last_read_message_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM messages m
+       WHERE m.id = NEW.last_read_message_id
+         AND m.session_id = NEW.session_id
+         AND COALESCE(m.chat_id, '') = NEW.chat_key
+    )
+  ) THEN
+    RAISE EXCEPTION 'session read ownership mismatch';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_session_reads_validate ON session_reads;
+CREATE TRIGGER trg_session_reads_validate
+  BEFORE INSERT OR UPDATE ON session_reads
+  FOR EACH ROW EXECUTE FUNCTION assert_session_read_ownership();
+
+-- Message history revisions deliberately count edits and deletes as well as
+-- inserts: a client that resumes has to notice a message that changed, not only
+-- one that arrived. `sessions.updated_at` is left alone on purpose, so this does
+-- not reorder the dashboard.
+CREATE OR REPLACE FUNCTION bump_snapshot_revision() RETURNS trigger AS $$
+BEGIN
+  UPDATE sessions
+     SET snapshot_revision = snapshot_revision + 1
+   WHERE id = COALESCE(NEW.session_id, OLD.session_id);
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_messages_snapshot_insert ON messages;
+CREATE TRIGGER trg_messages_snapshot_insert
+  AFTER INSERT ON messages
+  FOR EACH ROW EXECUTE FUNCTION bump_snapshot_revision();
+
+DROP TRIGGER IF EXISTS trg_messages_snapshot_update ON messages;
+CREATE TRIGGER trg_messages_snapshot_update
+  AFTER UPDATE OF role, content, chat_id, client_message_id ON messages
+  FOR EACH ROW EXECUTE FUNCTION bump_snapshot_revision();
+
+DROP TRIGGER IF EXISTS trg_messages_snapshot_delete ON messages;
+CREATE TRIGGER trg_messages_snapshot_delete
+  AFTER DELETE ON messages
+  FOR EACH ROW EXECUTE FUNCTION bump_snapshot_revision();
+
+-- A removed message releases the uploads it consumed, so they are not left
+-- reserved against a message that no longer exists.
+CREATE OR REPLACE FUNCTION cancel_consumed_uploads() RETURNS trigger AS $$
+BEGIN
+  UPDATE chat_uploads
+     SET status = 'cancelled',
+         reserved_delivery_id = NULL,
+         error = 'Consumed message removed',
+         updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+   WHERE consumed_message_id = OLD.id;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_messages_cancel_consumed_uploads ON messages;
+CREATE TRIGGER trg_messages_cancel_consumed_uploads
+  BEFORE DELETE ON messages
+  FOR EACH ROW EXECUTE FUNCTION cancel_consumed_uploads();
+
+-- `sessions.category` was added by ALTER TABLE and never got a foreign key, so
+-- ON DELETE SET NULL is enforced here instead.
+CREATE OR REPLACE FUNCTION clear_deleted_session_category() RETURNS trigger AS $$
+BEGIN
+  UPDATE sessions SET category = NULL WHERE category = OLD.id;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_session_categories_after_delete ON session_categories;
+CREATE TRIGGER trg_session_categories_after_delete
+  AFTER DELETE ON session_categories
+  FOR EACH ROW EXECUTE FUNCTION clear_deleted_session_category();

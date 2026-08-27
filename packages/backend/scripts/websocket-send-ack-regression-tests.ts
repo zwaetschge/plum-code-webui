@@ -27,40 +27,34 @@ process.env.WEBUI_DATA_DIR = temporaryDirectory;
 process.env.WEBUI_SUPPRESS_BOOTSTRAP_CREDENTIAL_LOG = '1';
 process.env.WEBUI_EXTERNAL_SKILL_SYNC = 'false';
 
-const { initDatabase } = await import('../src/db/index.js');
+const { useTestSchema, createTestSchema, dropTestSchema } = await import(
+  '../src/db/testing.js'
+);
+useTestSchema();
 const { getProcessManager, setupWebSocket } = await import('../src/websocket/index.js');
+const { all: pgAll, get: pgGet, run: pgRun } = await import('../src/db/pg.js');
 
-const database = initDatabase();
-database
-  .prepare(
-    `INSERT INTO users (id, email, name, provider, provider_id, role, status)
+await createTestSchema();
+await pgRun(
+  `INSERT INTO users (id, email, name, provider, provider_id, role, status)
      VALUES ('send-user', 'send@example.test', 'Send Test', 'basic', 'send-user', 'admin', 'active')`
-  )
-  .run();
-database
-  .prepare(
-    `INSERT INTO users (id, email, name, provider, provider_id, role, status)
+);
+await pgRun(
+  `INSERT INTO users (id, email, name, provider, provider_id, role, status)
      VALUES ('other-user', 'other@example.test', 'Other', 'basic', 'other-user', 'user', 'active')`
-  )
-  .run();
-database
-  .prepare(
-    `INSERT INTO sessions (id, user_id, name, working_directory, status)
+);
+await pgRun(
+  `INSERT INTO sessions (id, user_id, name, working_directory, status)
      VALUES ('other-session', 'other-user', 'Other session', '/tmp', 'stopped')`
-  )
-  .run();
-database
-  .prepare(
-    `INSERT INTO sessions (id, user_id, name, working_directory, status)
+);
+await pgRun(
+  `INSERT INTO sessions (id, user_id, name, working_directory, status)
      VALUES ('send-session', 'send-user', 'Send session', '/tmp', 'stopped')`
-  )
-  .run();
-database
-  .prepare(
-    `INSERT INTO messages (id, session_id, role, content)
+);
+await pgRun(
+  `INSERT INTO messages (id, session_id, role, content)
      VALUES ('presence-marker', 'send-session', 'assistant', 'read me')`
-  )
-  .run();
+);
 
 const httpServer = createServer();
 const ioServer = setupWebSocket(httpServer);
@@ -204,18 +198,14 @@ assert.equal(presenceSnapshot.total, 1);
 assert.equal(presenceSnapshot.viewers[0]?.deviceId, 'phone-1');
 assert.equal(presenceSnapshot.viewers[0]?.label, 'Vale phone');
 assert.equal(
-  database
-    .prepare(
-      `SELECT 1 FROM session_reads
-        WHERE user_id = 'send-user' AND session_id = 'send-session'`
-    )
-    .get(),
+  await pgGet(`SELECT 1 FROM session_reads
+        WHERE user_id = 'send-user' AND session_id = 'send-session'`),
   undefined
 );
 
 // A known reconnect gap must require REST and must not expose a cursor the
 // client could persist before applying that snapshot.
-database.prepare(`UPDATE sessions SET event_sequence = 10 WHERE id = 'send-session'`).run();
+await pgRun(`UPDATE sessions SET event_sequence = 10 WHERE id = 'send-session'`);
 const resync = new Promise<{
   needsFullResync?: boolean;
   highWatermark?: number;
@@ -238,7 +228,7 @@ assert.match(
   'known replay gaps must expose neither truncated items nor an unapplied high watermark'
 );
 const sequencedHelper = managerSource.match(
-  /private emitBufferedEvent<[\s\S]*?\n {2}private compactActivityText/
+  /private (?:async )?emitBufferedEvent<[\s\S]*?\n {2}private compactActivityText/
 )?.[0];
 assert.ok(sequencedHelper, 'sequenced buffered-event helper should remain present');
 assert.ok(
@@ -252,12 +242,12 @@ assert.match(
 );
 assert.match(
   managerSource,
-  /const targetChatId = resolveSessionSendChatId[^]*?recordedChatId = targetChatId/,
+  /const targetChatId = await resolveSessionSendChatId[^]*?recordedChatId = targetChatId/,
   'user rows should stay pinned to one resolved chat'
 );
 assert.match(
   managerSource,
-  /const chatId = proc\?\.currentChatId \?\? getSessionSyncState/,
+  /const chatId = proc\?\.currentChatId \?\? \(await getSessionSyncState/,
   'provider output should use the pinned turn chat instead of a later active-chat switch'
 );
 assert.match(
@@ -269,7 +259,8 @@ assert.match(
 reconnected.close();
 await new Promise<void>((resolve) => ioServer.close(() => resolve()));
 await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-database.close();
 fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+
+await dropTestSchema();
 
 console.log('websocket send acknowledgement regression tests passed');
