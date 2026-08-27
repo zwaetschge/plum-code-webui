@@ -65,6 +65,7 @@
     "passport": "^0.7.0",
     "passport-github2": "^0.1.12",
     "passport-google-oauth20": "^2.0.0",
+    "pg": "^8.23.0",
     "simple-git": "^3.36.0",
     "socket.io": "^4.8.1",
     "uuid": "^11.1.1",
