@@ -177,6 +177,14 @@ async function main() {
   });
   await client.connect();
 
+  // Optional target schema, used by the test harness to keep a run's tables away
+  // from the real ones.
+  const schema = process.env.PGSCHEMA;
+  if (schema) {
+    await client.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+    await client.query(`SET search_path TO "${schema}"`);
+  }
+
   console.log(`Creating ${tables.length} tables…`);
   // Foreign keys reference tables that may not exist yet, so defer enforcement
   // until the whole schema is in place.

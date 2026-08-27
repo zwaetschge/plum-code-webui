@@ -48,9 +48,32 @@ function isPrepareCall(node) {
   );
 }
 
+/** The function, method or arrow whose body contains `node`. */
+function enclosingFunction(node) {
+  let current = node.parent;
+  while (current) {
+    if (
+      ts.isFunctionDeclaration(current) ||
+      ts.isFunctionExpression(current) ||
+      ts.isArrowFunction(current) ||
+      ts.isMethodDeclaration(current)
+    ) {
+      return current;
+    }
+    current = current.parent;
+  }
+  return null;
+}
+
+function hasAsyncModifier(fn) {
+  return (fn.modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
+}
+
 function analyse(sourceFile, text) {
   const edits = [];
   const manual = [];
+  const asCasts = [];
+  const asyncTargets = new Set();
 
   const visit = (node) => {
     // db.prepare(SQL).get(args)
@@ -65,8 +88,21 @@ function analyse(sourceFile, text) {
       if (sql) {
         const sqlText = text.slice(sql.pos, sql.end).trim();
         const callArgs = node.arguments.map((a) => text.slice(a.pos, a.end).trim());
-        const replacement = `await ${METHOD_MAP[node.expression.name.text]}(${[sqlText, ...callArgs].join(', ')})`;
+        // Parenthesised: the result is often immediately cast or a property is
+        // read off it, and `await x as T` parses as `await (x as T)`.
+        const replacement = `(await ${METHOD_MAP[node.expression.name.text]}(${[sqlText, ...callArgs].join(', ')}))`;
         edits.push({ start: node.getStart(sourceFile), end: node.end, replacement });
+
+        // The helpers return Record<string, unknown>; the existing casts go
+        // straight to a row interface, which TypeScript refuses without a step
+        // through unknown.
+        if (ts.isAsExpression(node.parent)) {
+          asCasts.push({ start: node.parent.type.getStart(sourceFile) });
+        }
+
+        // A handler that gained an await has to be async.
+        const fn = enclosingFunction(node);
+        if (fn && !hasAsyncModifier(fn)) asyncTargets.add(fn);
       }
       return;
     }
@@ -97,7 +133,57 @@ function analyse(sourceFile, text) {
   };
 
   ts.forEachChild(sourceFile, visit);
-  return { edits, manual };
+
+  // `as T` -> `as unknown as T`
+  for (const cast of asCasts) {
+    edits.push({ start: cast.start, end: cast.start, replacement: 'unknown as ' });
+  }
+
+  // `(req, res) => {` -> `async (req, res) => {`, and a declared return type
+  // has to become a Promise or TypeScript rejects the function outright.
+  for (const fn of asyncTargets) {
+    const start = fn.getStart(sourceFile);
+    edits.push({ start, end: start, replacement: 'async ' });
+
+    if (fn.type && !/^Promise</.test(text.slice(fn.type.pos, fn.type.end).trim())) {
+      edits.push({
+        start: fn.type.getStart(sourceFile),
+        end: fn.type.getStart(sourceFile),
+        replacement: 'Promise<',
+      });
+      edits.push({ start: fn.type.end, end: fn.type.end, replacement: '>' });
+    }
+  }
+
+  // `const db = getDatabase();` is dead once every call on it was rewritten.
+  // The exceptions are the three things this codemod does not touch — a
+  // transaction, exec() or pragma() still needs the handle — so a file keeping
+  // any of those keeps its declarations too.
+  const keepsHandle = /\.(transaction|exec|pragma)\(/.test(text);
+  const deadDbDecls = [];
+  if (!keepsHandle) {
+    const findDead = (node) => {
+      if (
+        ts.isVariableStatement(node) &&
+        node.declarationList.declarations.length === 1 &&
+        node.declarationList.declarations[0].initializer &&
+        /getDatabase\(\)$/.test(
+          text
+            .slice(
+              node.declarationList.declarations[0].initializer.pos,
+              node.declarationList.declarations[0].initializer.end
+            )
+            .trim()
+        )
+      ) {
+        deadDbDecls.push({ start: node.getStart(sourceFile), end: node.end });
+      }
+      ts.forEachChild(node, findDead);
+    };
+    ts.forEachChild(sourceFile, findDead);
+  }
+
+  return { edits, manual, deadDbDecls };
 }
 
 let totalEdits = 0;
@@ -106,11 +192,14 @@ const summary = [];
 for (const file of files) {
   const text = fs.readFileSync(file, 'utf8');
   const sourceFile = ts.createSourceFile(file, text, ts.ScriptTarget.ES2022, true);
-  const { edits, manual } = analyse(sourceFile, text);
+  const { edits, manual, deadDbDecls } = analyse(sourceFile, text);
 
   if (WRITE && edits.length) {
     // Back to front so earlier offsets stay valid.
     let out = text;
+    for (const dead of deadDbDecls) {
+      edits.push({ start: dead.start, end: dead.end, replacement: '' });
+    }
     for (const edit of edits.sort((a, b) => b.start - a.start)) {
       out = out.slice(0, edit.start) + edit.replacement + out.slice(edit.end);
     }
