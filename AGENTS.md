@@ -410,9 +410,13 @@ attachments, backups.
 - In-process (`services/backup.ts`), `pg_dump --format custom` every 6h,
   verified with `pg_restore --list` before it counts as a backup. `POST
   /api/admin/backup` triggers one; `plum-maintenance.mjs` asks over that route.
-- Postgres archives its WAL to `/mnt/user/backups/plum-code-wal` — a different
-  set of disks — so a dump plus the segments since gives point-in-time
-  recovery. Litestream is gone with SQLite; it has no Postgres equivalent.
+- Litestream is gone with SQLite; it has no Postgres equivalent. WAL archiving
+  is the replacement and is deliberately **not** enabled: `archive_mode=on`
+  without a working destination is worse than none, because Postgres will not
+  recycle a segment until it has been archived and `pg_wal` grows until the
+  cache NVMe is full. Enabling it needs a retention step first — with
+  `archive_timeout` forcing a segment every few minutes, an unpruned archive
+  grows by gigabytes a day. Recovery today is the verified dump.
 - `/health/ready` reads real rows from `sessions` and `messages`. The previous
   `SELECT 1` touched no table and reported healthy throughout the 2026-08-26
   corruption, when the SQLite file was truncated by 1278 pages because a second
