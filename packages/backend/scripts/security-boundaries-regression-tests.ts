@@ -6,7 +6,6 @@ import Database from 'better-sqlite3';
 import authRouter from '../src/routes/auth.js';
 import basicAuthRouter from '../src/routes/basic-auth.js';
 import claudeConfigRouter from '../src/routes/claude-config.js';
-import claudeSettingsRouter from '../src/routes/claude-settings.js';
 import cliToolsRouter from '../src/routes/cli-tools.js';
 import mcpRouter from '../src/routes/mcp.js';
 import settingsRouter from '../src/routes/settings.js';
@@ -82,14 +81,8 @@ function testAdminMutationBoundaries(): void {
     [cliToolsRouter, '/:id/execute', 'post'],
     [settingsRouter, '/integrations', 'put'],
     [basicAuthRouter, '/toggle', 'put'],
-    [claudeSettingsRouter, '/global', 'get'],
   ] as const) {
     assertAdminGuard(router, routePath, method);
-  }
-
-  for (const routePath of ['/add-pattern', '/remove-pattern']) {
-    const names = middlewareNames(claudeSettingsRouter, routePath, 'post');
-    assert.ok(names.includes('requireAdminForGlobalScope'));
   }
 }
 

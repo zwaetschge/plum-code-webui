@@ -89,7 +89,6 @@ import {
   updateProviderSchema,
 } from '../src/routes/sessions.js';
 import { resolveMemoryDirectory } from '../src/routes/memories.js';
-import { buildTaskProxyHeaders, isTaskHookSecretValid } from '../src/routes/tasks.js';
 import {
   buildCodexSessionIconCommand,
   generateSessionIconImage,
@@ -3711,16 +3710,6 @@ function testSessionCookiePolicyBlocksCrossSiteMutationByDefault() {
   assert.equal(production.maxAge, 7 * 24 * 60 * 60 * 1000);
 }
 
-function testInternalTaskEndpointsRequireSharedHookSecret() {
-  assert.equal(isTaskHookSecretValid('shared-secret', 'shared-secret'), true);
-  assert.equal(isTaskHookSecretValid('', 'shared-secret'), false);
-  assert.equal(isTaskHookSecretValid('wrong-secret', 'shared-secret'), false);
-  assert.deepEqual(buildTaskProxyHeaders('shared-secret'), {
-    'Content-Type': 'application/json',
-    'X-Webui-Hook-Secret': 'shared-secret',
-  });
-}
-
 function testCommandFileRootsStayInsideAllowedBasePaths() {
   assert.throws(
     () => resolveAllowedCommandPath('/etc'),
@@ -5648,7 +5637,6 @@ testClaudeAndZaiProcessEnvironmentsAreIsolated();
 testDeviceAppearanceSettingsAreNotAccountPersisted();
 testMemoryDirectoryRejectsWorkingDirectoriesOutsideAllowedBases();
 testSessionCookiePolicyBlocksCrossSiteMutationByDefault();
-testInternalTaskEndpointsRequireSharedHookSecret();
 testCommandFileRootsStayInsideAllowedBasePaths();
 testSessionIconGenerationUsesProviderIndependentCodexImagegenCommand();
 testSessionIconPromptIsPlainImagePrompt();

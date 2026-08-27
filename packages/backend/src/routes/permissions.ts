@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'crypto';
 import { z } from 'zod';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
-import { addPatternToSettings } from './claude-settings.js';
+import { addPatternToSettings } from '../services/claudeSettings.js';
 import { getDatabase } from '../db/index.js';
 import { config } from '../config.js';
 import { opencodeServer } from '../services/opencode/OpencodeServer.js';
