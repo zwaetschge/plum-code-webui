@@ -63,8 +63,22 @@ function awaitTarget(sourceFile, position, checker) {
   let holder = node;
   if (ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) {
     holder = node.parent.expression;
-  } else if (ts.isIdentifier(node)) {
-    holder = node;
+  } else if (
+    ts.isIdentifier(node) &&
+    ts.isCallExpression(node.parent) &&
+    node.parent.expression === node
+  ) {
+    // The diagnostic points at the callee — `getAppConfig(k)` reports on
+    // `getAppConfig` — so the promise is the call, not the name.
+    holder = node.parent;
+  } else if (
+    ts.isIdentifier(node) &&
+    ts.isPropertyAccessExpression(node.parent) &&
+    ts.isCallExpression(node.parent.parent) &&
+    node.parent.parent.expression === node.parent
+  ) {
+    // The same, one level out: `this.getSettings()` reports on `getSettings`.
+    holder = node.parent.parent;
   }
 
   if (ts.isCallExpression(holder) || ts.isAwaitExpression(holder.parent)) {
@@ -133,11 +147,18 @@ for (let round = 1; round <= 8; round++) {
       perFile.get(sourceFile.fileName).push(edit);
     };
 
-    // missing-await
+    // missing-await, in all the shapes the compiler words it:
+    //   a property read off a promise                        (2339)
+    //   a promise where a value is expected                  (2740, 2739)
+    //   a promise passed as an argument                      (2345)
+    //   a promise compared to a value                        (2367)
+    //   a promise used as a condition, always truthy         (2801)
+    //   an operator applied to a promise                     (2365)
     if (
-      (diagnostic.code === 2339 || diagnostic.code === 2740 || diagnostic.code === 2739) &&
-      /\bPromise</.test(message)
+      [2339, 2740, 2739, 2367, 2801, 2365].includes(diagnostic.code) ||
+      (diagnostic.code === 2345 && /^Argument of type 'Promise</.test(message))
     ) {
+      if (!/\bPromise</.test(message)) continue;
       const target = awaitTarget(sourceFile, diagnostic.start, prog.getTypeChecker());
       if (!target) continue;
       const targetFile = target.getSourceFile();
@@ -154,6 +175,18 @@ for (let round = 1; round <= 8; round++) {
         const edit = asyncEdit(fn, targetFile);
         if (edit) perFile.get(targetFile.fileName).push(edit);
       }
+      continue;
+    }
+
+    // An async function whose declared return type was never wrapped.
+    if (diagnostic.code === 1064) {
+      const node = nodeAt(sourceFile, diagnostic.start);
+      const fn = node && (ts.isFunctionLike(node) ? node : enclosingFunction(node));
+      const type = fn?.type;
+      if (!type) continue;
+      const start = type.getStart(sourceFile);
+      push({ start, end: start, replacement: 'Promise<' });
+      push({ start: type.end, end: type.end, replacement: '>' });
       continue;
     }
 

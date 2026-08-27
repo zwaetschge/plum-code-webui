@@ -219,6 +219,19 @@ export function translateDialect(sql: string): string {
 
     let text = span.text.replace(/\bCURRENT_TIMESTAMP\b/gi, UTC_TIMESTAMP);
 
+    // Postgres folds an unquoted identifier to lower case, so `AS createdAt`
+    // returns a column named `createdat` and every `row.createdAt` in the
+    // codebase reads undefined. SQLite preserved the case, so ~370 aliases were
+    // written this way and every one of them would have failed silently —
+    // no error, just missing fields.
+    //
+    // Only mixed-case names are quoted. An all-caps word after AS is a type in
+    // a cast (`CAST(x AS INTEGER)`) and quoting it would break the statement.
+    text = text.replace(/\bAS\s+([A-Za-z_][A-Za-z0-9_]*)\b/g, (whole, name) => {
+      const mixed = /[a-z]/.test(name) && /[A-Z]/.test(name);
+      return mixed ? `AS "${name}"` : whole;
+    });
+
     // `chat_id IS ?` is SQLite's null-safe equality, used so one query handles
     // both "the default chat" (NULL) and a named one. Postgres allows IS only
     // with NULL/TRUE/FALSE/UNKNOWN, so this is a syntax error rather than a

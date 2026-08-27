@@ -1,29 +1,33 @@
-import { get as pgGet, run as pgRun } from '../db/pg.js';
+import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import Database from 'better-sqlite3';
+import { promisify } from 'util';
 
-import { getDatabasePath } from '../db/index.js';
+import { getDataDirectory } from '../db/index.js';
+import { readPgConfig } from '../db/pg.js';
 import { createLogger } from '../utils/logger.js';
 
+const execFileAsync = promisify(execFile);
 const log = createLogger('backup');
 
 /**
- * Backups taken through the connection the server already holds.
+ * Backups via `pg_dump`, taken from inside the server process.
  *
- * The previous approach — `scripts/plum-maintenance.mjs` opening its own
- * connection and calling `.backup()` — is what makes this dangerous. A second
- * process attaching to a live WAL database has to coordinate through file locks
- * and the shared-memory index, and on Unraid the same file is reachable both
- * directly under /mnt/cache and through the /mnt/user FUSE layer. Two processes
- * opening it through different views cannot see each other's locks. A
- * half-finished checkpoint then truncates the main file, which is exactly the
- * damage found on 2026-08-26: the header claimed 57153 pages, the file held
- * 55875, and every page of `messages` past that point was gone.
+ * Under SQLite this was `VACUUM INTO` on the connection the server already
+ * held, and the reason was specific: a second process attaching to a live WAL
+ * database has to coordinate through file locks and a shared-memory index, and
+ * on Unraid the same file is reachable both directly under /mnt/cache and
+ * through the /mnt/user FUSE layer, where two openers cannot see each other's
+ * locks. A half-finished checkpoint truncated the main file on 2026-08-26: the
+ * header claimed 57153 pages, the file held 55875, and every page of `messages`
+ * past that point was gone.
  *
- * `VACUUM INTO` runs inside this process, on the one connection that owns the
- * database, and writes a fresh, defragmented file. No second connection, no
- * lock negotiation, and the result is consistent by construction.
+ * That hazard does not survive the move. Postgres is a server; concurrent
+ * readers are what it is for, and `pg_dump` takes a consistent snapshot without
+ * blocking writers or touching the data files. What is kept is the part that
+ * mattered independently of the storage engine: the backup is verified before
+ * it counts as one, and a failed verification leaves the file on disk as
+ * evidence.
  */
 
 export interface BackupResult {
@@ -35,10 +39,10 @@ export interface BackupResult {
 }
 
 const BACKUP_PREFIX = 'backup-';
-const BACKUP_SUFFIX = '.db';
+const BACKUP_SUFFIX = '.dump';
 
 function backupDirectory(): string {
-  const dir = path.join(path.dirname(getDatabasePath()), 'backups');
+  const dir = path.join(getDataDirectory(), 'backups');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -48,34 +52,33 @@ function timestamp(now: Date): string {
 }
 
 /**
- * Verification opens the *copy*, never the live file — a fresh connection to a
- * file nobody else holds is safe, and an unverified backup is not a backup.
+ * Reads the archive back with `pg_restore --list`.
+ *
+ * An unverified backup is not a backup. This is the equivalent of the old
+ * integrity check plus the row counts that went with it: the listing is the
+ * dump's own table of contents, so it proves the archive is readable *and* that
+ * it contains the tables — a truncated or empty dump fails both. The two tables
+ * named are the ones that were unreadable while the old health check still
+ * reported "ok".
  */
 async function verify(filePath: string): Promise<{ ok: boolean; detail?: string }> {
-  let copy: Database.Database | null = null;
   try {
-    copy = new Database(filePath, { readonly: true, fileMustExist: true });
-    const row = copy.prepare('PRAGMA integrity_check(1)').get() as
-      | { integrity_check?: string }
-      | undefined;
-    const verdict = row?.integrity_check ?? 'no result';
-    if (verdict !== 'ok') return { ok: false, detail: verdict.slice(0, 200) };
-
-    // Structure alone is not enough: an empty file passes integrity_check.
-    const sessions = (await pgGet('SELECT COUNT(*) AS c FROM sessions')) as unknown as {
-      c: number;
-    };
-    const messages = (await pgGet('SELECT COUNT(*) AS c FROM messages')) as unknown as {
-      c: number;
-    };
-    return { ok: true, detail: `${sessions.c} sessions, ${messages.c} messages` };
+    const { stdout } = await execFileAsync('pg_restore', ['--list', filePath], {
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    const tables = stdout.match(/^\d+;.*TABLE DATA /gm)?.length ?? 0;
+    const missing = ['sessions', 'messages'].filter(
+      (table) => !new RegExp(`TABLE DATA public ${table} `).test(stdout)
+    );
+    if (missing.length) {
+      return { ok: false, detail: `dump is missing ${missing.join(', ')}` };
+    }
+    return { ok: true, detail: `${tables} tables` };
   } catch (error) {
     return {
       ok: false,
       detail: error instanceof Error ? error.message.slice(0, 200) : 'unreadable',
     };
-  } finally {
-    copy?.close();
   }
 }
 
@@ -83,10 +86,33 @@ export async function createBackup(now: Date = new Date()): Promise<BackupResult
   const startedAt = Date.now();
   const target = path.join(backupDirectory(), `${BACKUP_PREFIX}${timestamp(now)}${BACKUP_SUFFIX}`);
 
-  // VACUUM INTO refuses to overwrite, which is the behaviour we want.
   if (fs.existsSync(target)) fs.rmSync(target);
 
-  await pgRun('VACUUM INTO ?', target);
+  const pg = readPgConfig();
+  // The custom format is compressed and lets pg_restore select individual
+  // tables, which is what a partial recovery actually needs. The password goes
+  // through the environment rather than the connection string so it stays out
+  // of the process list.
+  await execFileAsync(
+    'pg_dump',
+    [
+      '--host',
+      pg.host,
+      '--port',
+      String(pg.port),
+      '--username',
+      pg.user,
+      '--dbname',
+      pg.database,
+      '--format',
+      'custom',
+      '--compress',
+      '6',
+      '--file',
+      target,
+    ],
+    { env: { ...process.env, PGPASSWORD: pg.password }, maxBuffer: 32 * 1024 * 1024 }
+  );
 
   const bytes = fs.statSync(target).size;
   const verification = await verify(target);

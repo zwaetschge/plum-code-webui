@@ -169,33 +169,33 @@ export interface DiscordRuntimeSettings {
 }
 
 export class DiscordIntegrationService {
-  getRuntimeSettings(): DiscordRuntimeSettings {
+  async getRuntimeSettings(): Promise<DiscordRuntimeSettings> {
     const envWebhook = normalizeOptionalText(process.env.DISCORD_WEBHOOK_URL, 2048);
     const envBotToken = normalizeBotTokenText(process.env.DISCORD_BOT_TOKEN);
     const envChannelId = normalizeOptionalText(process.env.DISCORD_CHANNEL_ID, 40);
-    const storedWebhook = safeDecrypt(getAppConfig(CONFIG_KEYS.webhookUrl));
-    const storedBotToken = safeDecrypt(getAppConfig(CONFIG_KEYS.botToken));
+    const storedWebhook = safeDecrypt(await getAppConfig(CONFIG_KEYS.webhookUrl));
+    const storedBotToken = safeDecrypt(await getAppConfig(CONFIG_KEYS.botToken));
     const envEnabled = parseBoolean(process.env.DISCORD_ALERTS_ENABLED);
-    const storedEnabled = parseBoolean(getAppConfig(CONFIG_KEYS.enabled));
+    const storedEnabled = parseBoolean(await getAppConfig(CONFIG_KEYS.enabled));
     const configuredTransport =
-      process.env.DISCORD_ALERT_TRANSPORT || getAppConfig(CONFIG_KEYS.transport);
+      process.env.DISCORD_ALERT_TRANSPORT || (await getAppConfig(CONFIG_KEYS.transport));
     const minSeverity = parseSeverity(
-      process.env.DISCORD_ALERT_MIN_SEVERITY || getAppConfig(CONFIG_KEYS.minSeverity)
+      process.env.DISCORD_ALERT_MIN_SEVERITY || (await getAppConfig(CONFIG_KEYS.minSeverity))
     );
     const gatewayMode = parseGatewayMode(
-      process.env.DISCORD_GATEWAY_MODE || getAppConfig(CONFIG_KEYS.gatewayMode)
+      process.env.DISCORD_GATEWAY_MODE || (await getAppConfig(CONFIG_KEYS.gatewayMode))
     );
     const maintenancePolicy = parseMaintenancePolicy(
-      process.env.DISCORD_MAINTENANCE_POLICY || getAppConfig(CONFIG_KEYS.maintenancePolicy)
+      process.env.DISCORD_MAINTENANCE_POLICY || (await getAppConfig(CONFIG_KEYS.maintenancePolicy))
     );
     const inboundJobsEnabled =
       parseBoolean(process.env.DISCORD_INBOUND_JOBS_ENABLED) ??
-      parseBoolean(getAppConfig(CONFIG_KEYS.inboundJobsEnabled)) ??
+      parseBoolean(await getAppConfig(CONFIG_KEYS.inboundJobsEnabled)) ??
       false;
     const webhookUrl = envWebhook || normalizeOptionalText(storedWebhook, 2048);
     const botToken = envBotToken || normalizeBotTokenText(storedBotToken);
     const channelId =
-      envChannelId || normalizeOptionalText(getAppConfig(CONFIG_KEYS.channelId), 40);
+      envChannelId || normalizeOptionalText(await getAppConfig(CONFIG_KEYS.channelId), 40);
     const transport = configuredTransport
       ? parseTransport(configuredTransport)
       : webhookUrl && !botToken
@@ -217,11 +217,11 @@ export class DiscordIntegrationService {
       maintenancePolicy,
       inboundJobsEnabled,
       channelLabel: normalizeOptionalText(
-        process.env.DISCORD_CHANNEL_LABEL || getAppConfig(CONFIG_KEYS.channelLabel),
+        process.env.DISCORD_CHANNEL_LABEL || (await getAppConfig(CONFIG_KEYS.channelLabel)),
         80
       ),
       criticalRoleId: normalizeOptionalText(
-        process.env.DISCORD_CRITICAL_ROLE_ID || getAppConfig(CONFIG_KEYS.criticalRoleId),
+        process.env.DISCORD_CRITICAL_ROLE_ID || (await getAppConfig(CONFIG_KEYS.criticalRoleId)),
         40
       ),
       configured,
@@ -229,7 +229,7 @@ export class DiscordIntegrationService {
   }
 
   async getSettings(): Promise<DiscordIntegrationSettings> {
-    const runtime = this.getRuntimeSettings();
+    const runtime = await this.getRuntimeSettings();
 
     const counts = (await pgGet(`SELECT
            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,

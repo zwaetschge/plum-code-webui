@@ -95,12 +95,12 @@ function rowToOutboxItem(row: Record<string, unknown>): DiscordOutboxItem {
   };
 }
 
-function buildPayload(input: QueueAlertInput): {
+async function buildPayload(input: QueueAlertInput): Promise<{
   title: string;
   summary: string;
   payload: DiscordWebhookPayload;
-} {
-  const runtime = discordIntegrationService.getRuntimeSettings();
+}> {
+  const runtime = await discordIntegrationService.getRuntimeSettings();
   const title = redactDiscordTitle(input.title || input.eventType);
   const summary = redactDiscordText(input.summary || 'No summary provided.');
   const fields: DiscordEmbedField[] = [
@@ -166,13 +166,13 @@ export class DiscordNotifierService {
       return null;
     }
 
-    const runtime = discordIntegrationService.getRuntimeSettings();
+    const runtime = await discordIntegrationService.getRuntimeSettings();
     if (!runtime.configured) {
       return null;
     }
 
     const id = nanoid();
-    const { title, summary, payload } = buildPayload(input);
+    const { title, summary, payload } = await buildPayload(input);
     await pgRun(
       `INSERT INTO discord_outbox
           (id, user_id, session_id, event_type, severity, status, title, summary, payload_json)

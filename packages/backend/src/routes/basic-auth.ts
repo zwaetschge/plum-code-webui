@@ -36,8 +36,8 @@ const changeCredentialsSchema = z.object({
 });
 
 // Check if basic auth is enabled
-router.get('/status', (_req, res) => {
-  const enabled = getAppConfig('basic_auth_enabled');
+router.get('/status', async (_req, res) => {
+  const enabled = await getAppConfig('basic_auth_enabled');
   res.json({
     success: true,
     data: {
@@ -57,7 +57,7 @@ router.post('/login', rateLimiters.strict, async (req, res) => {
   const { username, password } = parsed.data;
 
   // Check if basic auth is enabled
-  const enabled = getAppConfig('basic_auth_enabled');
+  const enabled = await getAppConfig('basic_auth_enabled');
   if (enabled !== 'true') {
     throw new AppError('Basic authentication is disabled', 403, 'AUTH_DISABLED');
   }
@@ -158,7 +158,7 @@ router.get('/credentials', requireAuth, async (req, res) => {
   const row = (await pgGet('SELECT name FROM users WHERE id = ?', userId)) as unknown as
     | { name: string | null }
     | undefined;
-  const enabled = getAppConfig('basic_auth_enabled');
+  const enabled = await getAppConfig('basic_auth_enabled');
 
   res.json({
     success: true,
@@ -201,7 +201,7 @@ router.put('/credentials', requireAuth, async (req, res) => {
       userId
     );
     // Keep legacy app_config in sync for the admin account so the single-credential initializer stays consistent
-    if (getAppConfig('basic_auth_username') === userRow.name) {
+    if ((await getAppConfig('basic_auth_username')) === userRow.name) {
       setAppConfig('basic_auth_username', newUsername);
     }
   }
@@ -213,7 +213,7 @@ router.put('/credentials', requireAuth, async (req, res) => {
       hashedPassword,
       userId
     );
-    if (getAppConfig('basic_auth_username') === (newUsername || userRow.name)) {
+    if ((await getAppConfig('basic_auth_username')) === (newUsername || userRow.name)) {
       setAppConfig('basic_auth_password', hashedPassword);
     }
   }

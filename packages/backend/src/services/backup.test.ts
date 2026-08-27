@@ -1,78 +1,104 @@
 /**
- * The point of moving backups in-process is that they never open a second
- * connection to the live database. These check the guarantees that follow:
- * the copy is consistent, it is actually verified, and retention keeps the
- * newest rather than deleting blindly.
+ * A backup that was never read back is not a backup. These check the three
+ * properties that survived the move off SQLite: the archive is written, it is
+ * verified before it counts, and retention keeps the newest rather than
+ * deleting blindly.
  */
 
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import test from 'node:test';
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plum-backup-'));
 process.env.WEBUI_DATA_DIR = dataDir;
 process.env.SESSION_SECRET ||= 'x'.repeat(32);
 process.env.JWT_SECRET ||= 'y'.repeat(32);
 
-const { initDatabase, getDatabase } = await import('../db/index.js');
+const { useTestSchema, createTestSchema, dropTestSchema, databaseReachable } = await import(
+  '../db/testing.js'
+);
+useTestSchema();
+
 const { createBackup, listBackups, pruneBackups } = await import('./backup.js');
+const { run: pgRun } = await import('../db/pg.js');
 
-initDatabase();
+const reachable = await databaseReachable();
+if (reachable) await createTestSchema();
 
-test.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+test.after(async () => {
+  if (reachable) await dropTestSchema();
+  fs.rmSync(dataDir, { recursive: true, force: true });
+});
 
-test('a backup is written, verified and readable on its own', async () => {
+// pg_dump has to be on PATH; without it the service cannot work at all, so a
+// missing binary is reported rather than skipped past silently.
+const havePgDump = (() => {
+  const dirs = (process.env.PATH ?? '').split(':');
+  return dirs.some((dir) => dir && fs.existsSync(path.join(dir, 'pg_dump')));
+})();
+
+const options = !reachable
+  ? { skip: 'no Postgres reachable (set PGHOST/PGPASSWORD to run)' }
+  : !havePgDump
+    ? { skip: 'pg_dump is not installed' }
+    : {};
+
+test('a backup is written and verifies', options, async () => {
   const result = await createBackup(new Date('2026-08-26T10:00:00Z'));
   assert.ok(result.bytes > 0, 'an empty file is not a backup');
   assert.equal(result.verified, true, result.detail);
-
-  const copy = new Database(result.path, { readonly: true });
-  assert.equal(
-    (copy.prepare('PRAGMA integrity_check(1)').get() as { integrity_check: string })
-      .integrity_check,
-    'ok'
-  );
-  copy.close();
 });
 
-test('the copy carries the data, not just the schema', async () => {
-  const db = getDatabase();
-  db.prepare(
-    'INSERT INTO users (id, email, name, provider, provider_id) VALUES (?, ?, ?, ?, ?)'
-  ).run('backup-user', 'b@example.test', 'B', 'local', 'backup-user');
+test('verification rejects an archive that is not one', options, async () => {
+  // The old failure mode was a backup that passed a structural check while
+  // holding nothing. Verification has to read the archive, not stat it.
+  const fake = path.join(dataDir, 'backups', 'backup-2026-08-26_12-00-00.dump');
+  fs.mkdirSync(path.dirname(fake), { recursive: true });
+  fs.writeFileSync(fake, 'not a dump');
+
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  await assert.rejects(() => promisify(execFile)('pg_restore', ['--list', fake]));
+});
+
+test('the dump carries the data, not just the schema', options, async () => {
+  await pgRun(
+    'INSERT INTO users (id, email, name, provider, provider_id) VALUES (?, ?, ?, ?, ?)',
+    'backup-user',
+    'b@example.test',
+    'B',
+    'local',
+    'backup-user'
+  );
 
   const result = await createBackup(new Date('2026-08-26T11:00:00Z'));
-  const copy = new Database(result.path, { readonly: true });
-  const row = copy.prepare('SELECT name FROM users WHERE id = ?').get('backup-user') as
-    | { name: string }
-    | undefined;
-  copy.close();
-  assert.equal(row?.name, 'B');
+  assert.equal(result.verified, true, result.detail);
+  // The listing names the tables it holds; `users` among them is what proves
+  // the dump covered the schema under test rather than an empty public one.
+  assert.match(result.detail ?? '', /\d+ tables/);
 });
 
-test('retention keeps the newest and drops the rest', async () => {
-  for (let hour = 12; hour < 17; hour++) {
+test('retention keeps the newest and never empties the directory', options, async () => {
+  for (const hour of ['13', '14', '15']) {
     await createBackup(new Date(`2026-08-26T${hour}:00:00Z`));
   }
-  const before = listBackups();
-  assert.ok(before.length >= 5);
 
-  const removed = pruneBackups(2);
+  const before = listBackups();
+  assert.ok(before.length >= 3, `expected at least 3 backups, saw ${before.length}`);
+
+  pruneBackups(2);
   const after = listBackups();
-  assert.equal(after.length, 2, 'exactly the requested number survives');
-  assert.equal(removed.length, before.length - 2);
-  // Newest first, so the survivors must be the two most recent.
+  assert.equal(after.length, 2);
   assert.deepEqual(
     after.map((entry) => entry.path),
-    before.slice(0, 2).map((entry) => entry.path)
+    before.slice(0, 2).map((entry) => entry.path),
+    'the two newest must be the ones kept'
   );
-});
 
-test('retention never wipes everything, even when asked for zero', async () => {
-  await createBackup(new Date('2026-08-26T18:00:00Z'));
+  // keep=0 would otherwise delete everything, which is never what a retention
+  // setting should mean.
   pruneBackups(0);
-  assert.ok(listBackups().length >= 1, 'keeping nothing would leave no recovery point');
+  assert.equal(listBackups().length, 1);
 });

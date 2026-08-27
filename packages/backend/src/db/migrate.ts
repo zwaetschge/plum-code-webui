@@ -6,11 +6,11 @@
  * "migrating" is simply initializing the database once and exiting. The
  * target file honors WEBUI_DATA_DIR; the default is packages/backend/data.
  */
-import { initDatabase, getDatabasePath } from './index.js';
+import { initDatabase, getDataDirectory } from './index.js';
 
 try {
   initDatabase();
-  console.log(`[db:migrate] Migrations applied to ${getDatabasePath()}`);
+  console.log(`[db:migrate] Migrations applied to ${getDataDirectory()}`);
   process.exit(0);
 } catch (err) {
   console.error('[db:migrate] Migration failed:', err);

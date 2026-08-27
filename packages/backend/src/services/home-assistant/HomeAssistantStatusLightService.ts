@@ -143,8 +143,8 @@ export class HomeAssistantStatusLightService {
   private readonly activeAnimations = new Map<string, ActiveAnimation>();
   private generation = 0;
 
-  getSettings(): HomeAssistantIntegrationSettings {
-    const storedUrl = getAppConfig(CONFIG_KEYS.baseUrl)?.trim() || '';
+  async getSettings(): Promise<HomeAssistantIntegrationSettings> {
+    const storedUrl = (await getAppConfig(CONFIG_KEYS.baseUrl))?.trim() || '';
     const envUrl = process.env.HOME_ASSISTANT_URL?.trim() || '';
     const storedToken = getAppConfig(CONFIG_KEYS.accessToken);
     const envToken = process.env.HOME_ASSISTANT_TOKEN?.trim() || '';
@@ -153,7 +153,7 @@ export class HomeAssistantStatusLightService {
     const configured = Boolean(baseUrl && accessTokenConfigured);
 
     return {
-      enabled: parseBoolean(getAppConfig(CONFIG_KEYS.enabled), configured),
+      enabled: parseBoolean(await getAppConfig(CONFIG_KEYS.enabled), configured),
       configured,
       baseUrl,
       baseUrlFromEnv: !storedUrl && Boolean(envUrl),
@@ -162,18 +162,20 @@ export class HomeAssistantStatusLightService {
     };
   }
 
-  updateSettings(input: HomeAssistantIntegrationSettingsUpdate): HomeAssistantIntegrationSettings {
+  async updateSettings(
+    input: HomeAssistantIntegrationSettingsUpdate
+  ): Promise<HomeAssistantIntegrationSettings> {
     if (input.baseUrl !== undefined) {
-      setAppConfig(CONFIG_KEYS.baseUrl, normalizeHomeAssistantUrl(input.baseUrl));
+      await setAppConfig(CONFIG_KEYS.baseUrl, normalizeHomeAssistantUrl(input.baseUrl));
     }
     if (input.accessToken !== undefined && input.accessToken.trim()) {
-      setAppConfig(CONFIG_KEYS.accessToken, safeEncrypt(input.accessToken.trim()) || '');
+      await setAppConfig(CONFIG_KEYS.accessToken, safeEncrypt(input.accessToken.trim()) || '');
     }
     if (input.clearAccessToken) {
-      setAppConfig(CONFIG_KEYS.accessToken, '');
+      await setAppConfig(CONFIG_KEYS.accessToken, '');
     }
     if (input.enabled !== undefined) {
-      setAppConfig(CONFIG_KEYS.enabled, input.enabled ? 'true' : 'false');
+      await setAppConfig(CONFIG_KEYS.enabled, input.enabled ? 'true' : 'false');
     }
     return this.getSettings();
   }
@@ -182,7 +184,7 @@ export class HomeAssistantStatusLightService {
     baseUrl?: string;
     accessToken?: string;
   }): Promise<HomeAssistantConnectionTest> {
-    const connection = this.resolveConnection(overrides);
+    const connection = await this.resolveConnection(overrides);
     const [config, states] = await Promise.all([
       this.request<Record<string, unknown>>(connection, '/api/config'),
       this.request<HomeAssistantState[]>(connection, '/api/states'),
@@ -197,7 +199,7 @@ export class HomeAssistantStatusLightService {
 
   async listLights(): Promise<HomeAssistantLightEntity[]> {
     const states = await this.request<HomeAssistantState[]>(
-      this.resolveConnection(),
+      await this.resolveConnection(),
       '/api/states'
     );
     return states
@@ -217,14 +219,14 @@ export class HomeAssistantStatusLightService {
     if (!isHomeAssistantLightEntityId(entityId)) {
       throw new Error('Entity must be a Home Assistant light.* entity');
     }
-    const state = await this.getState(this.resolveConnection(), entityId);
+    const state = await this.getState(await this.resolveConnection(), entityId);
     if (state.state === 'unavailable') {
       throw new Error(`${entityId} is currently unavailable`);
     }
   }
 
   async notifySession(sessionId: string, status: HomeAssistantStatus): Promise<void> {
-    const settings = this.getSettings();
+    const settings = await this.getSettings();
     if (!settings.enabled || !settings.configured) return;
     const row = (await pgGet(
       'SELECT home_assistant_entity_id as entityId FROM sessions WHERE id = ?',
@@ -254,9 +256,12 @@ export class HomeAssistantStatusLightService {
     await this.startAnimation(row.entityId, status);
   }
 
-  private resolveConnection(overrides?: { baseUrl?: string; accessToken?: string }): Connection {
-    const storedUrl = getAppConfig(CONFIG_KEYS.baseUrl)?.trim() || '';
-    const storedToken = safeDecrypt(getAppConfig(CONFIG_KEYS.accessToken))?.trim() || '';
+  private async resolveConnection(overrides?: {
+    baseUrl?: string;
+    accessToken?: string;
+  }): Promise<Connection> {
+    const storedUrl = (await getAppConfig(CONFIG_KEYS.baseUrl))?.trim() || '';
+    const storedToken = safeDecrypt(await getAppConfig(CONFIG_KEYS.accessToken))?.trim() || '';
     const baseUrl = normalizeHomeAssistantUrl(
       overrides?.baseUrl || storedUrl || process.env.HOME_ASSISTANT_URL || ''
     );
@@ -314,7 +319,7 @@ export class HomeAssistantStatusLightService {
   }
 
   private async startAnimation(entityId: string, status: HomeAssistantStatus): Promise<void> {
-    const connection = this.resolveConnection();
+    const connection = await this.resolveConnection();
     const generation = ++this.generation;
     const existing = this.activeAnimations.get(entityId);
     const originalState = existing?.originalState ?? (await this.getState(connection, entityId));

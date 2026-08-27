@@ -168,14 +168,12 @@ describe('translateDialect: nested arguments', () => {
       translateDialect(
         "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.session_id = s.id), s.updated_at)) AS activityAt"
       ),
-      `SELECT to_char((COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.session_id = s.id), s.updated_at))::timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS activityAt`
+      `SELECT to_char((COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.session_id = s.id), s.updated_at))::timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "activityAt"`
     );
   });
 
   it('translates two calls in one statement', () => {
-    const out = translateDialect(
-      "SELECT strftime('%Y-%m', a), strftime('%Y-%m', b) FROM t"
-    );
+    const out = translateDialect("SELECT strftime('%Y-%m', a), strftime('%Y-%m', b) FROM t");
     assert.equal(out.match(/to_char/g)?.length, 2);
     assert.ok(!/strftime/.test(out));
   });
@@ -198,6 +196,40 @@ describe('translateDialect: null-safe equality', () => {
     assert.equal(
       translateDialect("INSERT INTO t (note) VALUES ('what IS ?')"),
       "INSERT INTO t (note) VALUES ('what IS ?')"
+    );
+  });
+});
+
+describe('translateDialect: identifier case', () => {
+  it('quotes a mixed-case alias so the column keeps its name', () => {
+    // Unquoted, Postgres returns `tokenhash` and every `row.tokenHash` in the
+    // codebase reads undefined — no error, just a missing field.
+    assert.equal(
+      translateDialect('SELECT token_hash AS tokenHash FROM gateway_tokens'),
+      'SELECT token_hash AS "tokenHash" FROM gateway_tokens'
+    );
+  });
+
+  it('leaves a cast alone', () => {
+    // An all-caps word after AS is a type, and quoting it is a syntax error.
+    const sql = 'SELECT CAST(strftime AS INTEGER) FROM t';
+    assert.equal(translateDialect(sql), sql);
+  });
+
+  it('leaves an all-lowercase alias alone', () => {
+    const sql = 'SELECT COUNT(*) AS count FROM t';
+    assert.equal(translateDialect(sql), sql);
+  });
+
+  it('does not double-quote an alias that is already quoted', () => {
+    const sql = 'SELECT a AS "createdAt" FROM t';
+    assert.equal(translateDialect(sql), sql);
+  });
+
+  it('leaves the word inside a literal alone', () => {
+    assert.equal(
+      translateDialect("INSERT INTO t (note) VALUES ('AS someThing')"),
+      "INSERT INTO t (note) VALUES ('AS someThing')"
     );
   });
 });

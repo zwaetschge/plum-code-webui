@@ -14,7 +14,7 @@ import type {
   FileAttachmentData,
 } from '@plum-code-webui/shared';
 
-import { getDatabasePath } from '../db/index.js';
+import { getDataDirectory } from '../db/index.js';
 import { MAX_CHAT_MEDIA_BYTES } from './chatMedia.js';
 
 const DEFAULT_CHUNK_BYTES = 1024 * 1024;
@@ -60,7 +60,7 @@ export class ChatUploadError extends Error {
 function storageRoot(): string {
   return process.env.CHAT_UPLOAD_DIR
     ? path.resolve(process.env.CHAT_UPLOAD_DIR)
-    : path.join(path.dirname(getDatabasePath()), 'chat-uploads');
+    : path.join(getDataDirectory(), 'chat-uploads');
 }
 
 function userSegment(userId: string): string {

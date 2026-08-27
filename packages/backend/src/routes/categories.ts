@@ -1,5 +1,9 @@
-import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
-import { getDatabase } from '../db/index.js';
+import {
+  get as pgGet,
+  all as pgAll,
+  run as pgRun,
+  transaction as pgTransaction,
+} from '../db/pg.js';
 import { Router } from 'express';
 import { nanoid } from 'nanoid';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
@@ -218,13 +222,15 @@ router.post('/reorder', requireAuth, async (req, res) => {
   }
 
   try {
-    const db = getDatabase();
-    const updateStmt = db.prepare(
-      `UPDATE session_categories SET sort_order = ? WHERE id = ? AND user_id = ?`
-    );
-
-    categoryIds.forEach((categoryId, index) => {
-      updateStmt.run(index, categoryId, authReq.userId);
+    await pgTransaction(async (tx) => {
+      for (const [index, categoryId] of categoryIds.entries()) {
+        await tx.run(
+          `UPDATE session_categories SET sort_order = ? WHERE id = ? AND user_id = ?`,
+          index,
+          categoryId,
+          authReq.userId
+        );
+      }
     });
 
     const categories = (await pgAll(

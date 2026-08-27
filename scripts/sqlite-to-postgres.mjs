@@ -129,9 +129,14 @@ function buildForeignKeys(db, table) {
     const onDelete =
       fk.on_delete && fk.on_delete !== 'NO ACTION' ? ` ON DELETE ${fk.on_delete}` : '';
     const name = `fk_${table}_${fk.from}`;
+    // Postgres has no ADD CONSTRAINT IF NOT EXISTS, and the schema is applied on
+    // every boot — without the guard the second start fails on the first key.
     statements.push(
-      `ALTER TABLE "${table}" ADD CONSTRAINT "${name}" ` +
-        `FOREIGN KEY ("${fk.from}") REFERENCES "${fk.table}" ("${fk.to}")${onDelete};`
+      `DO $$ BEGIN\n` +
+        `  ALTER TABLE "${table}" ADD CONSTRAINT "${name}" ` +
+        `FOREIGN KEY ("${fk.from}") REFERENCES "${fk.table}" ("${fk.to}")${onDelete};\n` +
+        `EXCEPTION WHEN duplicate_object THEN NULL;\n` +
+        `END $$;`
     );
   }
   return statements;

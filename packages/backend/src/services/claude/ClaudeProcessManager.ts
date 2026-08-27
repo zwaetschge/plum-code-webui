@@ -25,7 +25,6 @@ import type {
 } from '@plum-code-webui/shared';
 import { estimateModelCost } from '@plum-code-webui/shared';
 import {
-  getDatabase,
   insertUsageHistoryTurn,
   insertUsageSubagentTurns,
   usageHistoryTurnExists,
@@ -2344,12 +2343,14 @@ async function describeImagesWithCodex(opts: {
     prompt,
   ];
 
+  const integrationEnv = await buildIntegrationEnv();
+
   return await new Promise<string | null>((resolve) => {
     const child = spawnManagedProcess(providerConfig.command, args, {
       cwd: opts.cwd,
       env: {
         ...process.env,
-        ...buildIntegrationEnv(),
+        ...integrationEnv,
         CODEX_HOME: codexHome,
         WEBUI_SESSION_ID: opts.sessionId,
         WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
@@ -4176,7 +4177,7 @@ Discord Main Gateway:
       // already-booked turn would double-count proc.totalCostUsd even though the
       // INSERT itself is a no-op.
       const turnId = proc.currentUsageTurnId;
-      if (turnId && usageHistoryTurnExists(getDatabase(), sessionId, proc.cliProvider, turnId)) {
+      if (turnId && (await usageHistoryTurnExists(sessionId, proc.cliProvider, turnId))) {
         return;
       }
       const rootThreadId = await this.resolveCodexRootThreadId(sessionId, proc);
@@ -4549,7 +4550,7 @@ Discord Main Gateway:
       const persistedSessionId = session.claude_session_id || undefined;
       const shouldInjectStaticBootstrap = shouldInjectCodexStaticBootstrap(persistedSessionId);
       const extraEnv: Record<string, string> = {
-        ...buildIntegrationEnv(),
+        ...(await buildIntegrationEnv()),
         ...(await buildAndroidDeviceEnvForSession(sessionId, userId)),
       };
       const child = spawnManagedProcess(providerConfig.command, ['acp'], {
@@ -4925,7 +4926,7 @@ Discord Main Gateway:
     }
     extraEnv.WEBUI_SESSION_MODE = effectiveMode;
     extraEnv.WEBUI_CONFIG_HOME = configHome;
-    Object.assign(extraEnv, buildIntegrationEnv());
+    Object.assign(extraEnv, await buildIntegrationEnv());
     Object.assign(extraEnv, await buildAndroidDeviceEnvForSession(sessionId, userId));
     // Use regular spawn for CLI providers
     const proc: ChildProcess = spawnManagedProcess(providerConfig.command, args, {
@@ -7104,7 +7105,7 @@ Discord Main Gateway:
     } catch {
       // Ignore
     }
-    Object.assign(extraEnv, buildIntegrationEnv());
+    Object.assign(extraEnv, await buildIntegrationEnv());
     Object.assign(extraEnv, await buildAndroidDeviceEnvForSession(sessionId, proc.userId));
 
     proc.codexDescendantUsageBaseline = await this.readCodexDescendantUsage(resumeSessionId);
@@ -7436,13 +7437,16 @@ Discord Main Gateway:
     return estimate.cost;
   }
 
-  private flushSubagentUsage(sessionId: string, proc: ClaudeProcess, turnId: string): void {
+  private async flushSubagentUsage(
+    sessionId: string,
+    proc: ClaudeProcess,
+    turnId: string
+  ): Promise<void> {
     const pending = proc.pendingSubagentUsage;
     proc.pendingSubagentUsage = undefined;
     if (!pending || pending.length === 0) return;
     try {
-      const written = insertUsageSubagentTurns(
-        getDatabase(),
+      const written = await insertUsageSubagentTurns(
         pending.map((row) => ({
           userId: proc.userId,
           sessionId,
@@ -8894,7 +8898,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     args.push('-p', turn.messageForClaude);
 
     const extraEnv: Record<string, string> = {};
-    Object.assign(extraEnv, buildIntegrationEnv());
+    Object.assign(extraEnv, await buildIntegrationEnv());
     Object.assign(extraEnv, await buildAndroidDeviceEnvForSession(sessionId, proc.userId));
 
     console.log(

@@ -125,7 +125,7 @@ export class DiscordOutboxWorker {
     )) as unknown as OutboxRow | undefined;
     if (!row) return { sent: false, error: 'Outbox item not found' };
 
-    const runtime = discordIntegrationService.getRuntimeSettings();
+    const runtime = await discordIntegrationService.getRuntimeSettings();
     if (!runtime.configured) {
       const error =
         runtime.transport === 'bot'

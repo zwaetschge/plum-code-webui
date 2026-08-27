@@ -59,6 +59,20 @@ export function getPool(): Pool {
   // An idle client that dies (a restart of the database, a dropped connection)
   // emits on the pool, and an unhandled 'error' event takes the process down.
   pool.on('error', (error) => log.error('Idle client error', { error: String(error) }));
+
+  // PGSCHEMA gives a test run its own tables in the same database. It is set
+  // per connection rather than once, because the pool opens new clients
+  // whenever it needs them and a client without it would silently read and
+  // write `public` — the real data.
+  const schema = process.env.PGSCHEMA;
+  if (schema) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(schema)) {
+      throw new Error(`PGSCHEMA is not a valid identifier: ${schema}`);
+    }
+    pool.on('connect', (client) => {
+      void client.query(`SET search_path TO "${schema}"`);
+    });
+  }
   log.info('Postgres pool created', {
     host: config.host,
     database: config.database,

@@ -4,106 +4,89 @@
  * readable — the three things the old bare try/catch blocks could not offer.
  */
 
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import Database from 'better-sqlite3';
+import test from 'node:test';
 
-import {
-  hasMigrationRun,
-  listAppliedMigrations,
-  markMigrationApplied,
-  runMigration,
-} from './migrations.js';
+const { useTestSchema, createTestSchema, dropTestSchema, databaseReachable } = await import(
+  './testing.js'
+);
+useTestSchema();
 
-function memoryDb() {
-  return new Database(':memory:');
-}
+const { hasMigrationRun, listAppliedMigrations, markMigrationApplied, runMigration } = await import(
+  './migrations.js'
+);
+const { transaction: pgTransaction, get: pgGet } = await import('./pg.js');
 
-test('a migration runs once and is recorded', () => {
-  const db = memoryDb();
-  let runs = 0;
-  assert.equal(
-    runMigration(db, 'm1', () => {
-      runs += 1;
-    }),
-    true
-  );
-  assert.equal(runs, 1);
-  assert.equal(hasMigrationRun(db, 'm1'), true);
-  db.close();
+const reachable = await databaseReachable();
+if (reachable) await createTestSchema();
+test.after(async () => {
+  if (reachable) await dropTestSchema();
 });
 
-test('a second call is a no-op', () => {
-  const db = memoryDb();
-  let runs = 0;
-  runMigration(db, 'm1', () => {
-    runs += 1;
+const options = reachable
+  ? {}
+  : { skip: 'no Postgres reachable (set PGHOST/PGPASSWORD to run)' };
+
+test('a migration runs once and is recorded', options, async () => {
+  const migration = {
+    id: 'm1',
+    statements: ['CREATE TABLE IF NOT EXISTS t1 (v TEXT)'],
+  };
+
+  assert.equal(await runMigration(migration), true);
+  assert.equal(await hasMigrationRun('m1'), true);
+
+  // Second call is a no-op: if it ran again the CREATE would still succeed
+  // because of IF NOT EXISTS, so the return value is what proves it.
+  assert.equal(await runMigration(migration), false);
+});
+
+test('a failing migration is rolled back and left unrecorded', options, async () => {
+  const migration = {
+    id: 'm2',
+    statements: ['CREATE TABLE t2 (v TEXT)', 'THIS IS NOT SQL'],
+  };
+
+  await assert.rejects(() => runMigration(migration));
+
+  // Unrecorded, so the next boot retries it rather than treating the failure
+  // as done.
+  assert.equal(await hasMigrationRun('m2'), false);
+  // And undone: the table created before the failing statement is gone too.
+  const table = await pgGet(
+    `SELECT 1 FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_name = 't2'`
+  );
+  assert.equal(table, undefined);
+});
+
+test('a migration can be marked applied without running', options, async () => {
+  await markMigrationApplied('m3');
+  assert.equal(await hasMigrationRun('m3'), true);
+
+  // Marking twice must not raise.
+  await markMigrationApplied('m3');
+  assert.equal(await hasMigrationRun('m3'), true);
+});
+
+test('applied migrations are listed', options, async () => {
+  await markMigrationApplied('m4');
+  const ids = (await listAppliedMigrations()).map((m) => m.id);
+  assert.ok(ids.includes('m4'), ids.join(', '));
+});
+
+test('the bookkeeping shares the migration transaction', options, async () => {
+  // Written inside the same transaction, so a row and its record cannot
+  // disagree.
+  await runMigration({
+    id: 'm5',
+    statements: [`INSERT INTO app_config (key, value) VALUES ('m5-probe', 'yes')`],
   });
-  assert.equal(
-    runMigration(db, 'm1', () => {
-      runs += 1;
-    }),
-    false
-  );
-  assert.equal(runs, 1, 'the body must not run twice');
-  db.close();
-});
 
-test('a failing migration rolls back and stays unrecorded', () => {
-  const db = memoryDb();
-  db.exec('CREATE TABLE t (v TEXT)');
-
-  assert.throws(() =>
-    runMigration(db, 'bad', (database) => {
-      database.prepare('INSERT INTO t (v) VALUES (?)').run('written');
-      throw new Error('boom');
-    })
-  );
-
-  const rows = db.prepare('SELECT COUNT(*) AS c FROM t').get() as { c: number };
-  assert.equal(rows.c, 0, 'partial work must not survive');
-  assert.equal(hasMigrationRun(db, 'bad'), false, 'so the next boot retries it');
-  db.close();
-});
-
-test('a retried migration can succeed later', () => {
-  const db = memoryDb();
-  let attempt = 0;
-  assert.throws(() =>
-    runMigration(db, 'flaky', () => {
-      attempt += 1;
-      throw new Error('first attempt fails');
-    })
-  );
-  assert.equal(
-    runMigration(db, 'flaky', () => {
-      attempt += 1;
-    }),
-    true
-  );
-  assert.equal(attempt, 2);
-  db.close();
-});
-
-test('already-applied steps can be back-filled without running', () => {
-  const db = memoryDb();
-  markMigrationApplied(db, 'legacy');
-  let runs = 0;
-  assert.equal(
-    runMigration(db, 'legacy', () => {
-      runs += 1;
-    }),
-    false
-  );
-  assert.equal(runs, 0, 'existing deployments must not re-run old steps');
-  db.close();
-});
-
-test('applied migrations are listable', () => {
-  const db = memoryDb();
-  runMigration(db, 'a', () => {});
-  runMigration(db, 'b', () => {});
-  const ids = listAppliedMigrations(db).map((m) => m.id);
-  assert.deepEqual(ids.sort(), ['a', 'b']);
-  db.close();
+  const value = await pgTransaction(async (tx) => {
+    const row = await tx.get(`SELECT value FROM app_config WHERE key = 'm5-probe'`);
+    const record = await tx.get(`SELECT 1 FROM schema_migrations WHERE id = 'm5'`);
+    return row && record ? row.value : null;
+  });
+  assert.equal(value, 'yes');
 });

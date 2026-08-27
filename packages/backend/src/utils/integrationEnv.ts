@@ -1,6 +1,6 @@
 import { getAppConfig } from '../db/index.js';
 
-export function buildIntegrationEnv(): Record<string, string> {
+export async function buildIntegrationEnv(): Promise<Record<string, string>> {
   const env: Record<string, string> = {};
   const chromiumPath = process.env.CHROME_BIN || '/usr/local/bin/plum-chromium';
   env.CHROME_BIN = chromiumPath;
@@ -14,18 +14,18 @@ export function buildIntegrationEnv(): Record<string, string> {
   env.PUPPETEER_SKIP_DOWNLOAD = process.env.PUPPETEER_SKIP_DOWNLOAD || '1';
   env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD || '1';
 
-  const comfyuiUrl = getAppConfig('comfyui_url');
+  const comfyuiUrl = await getAppConfig('comfyui_url');
   if (comfyuiUrl) {
     env.COMFYUI_URL = comfyuiUrl;
   }
-  const loraTesterUrl = getAppConfig('lora_tester_url');
+  const loraTesterUrl = await getAppConfig('lora_tester_url');
   if (loraTesterUrl) {
     env.LORA_TESTER_URL = loraTesterUrl;
   }
   // OPENAI_API_KEY enables scripts/openai-image.sh inside CLI sessions. Source priority:
   //   1. app_config.openai_api_key
   //   2. parent process env
-  const openaiKey = getAppConfig('openai_api_key') || process.env.OPENAI_API_KEY;
+  const openaiKey = (await getAppConfig('openai_api_key')) || process.env.OPENAI_API_KEY;
   if (openaiKey) {
     env.OPENAI_API_KEY = openaiKey;
   }

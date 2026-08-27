@@ -5,7 +5,7 @@ import { mkdir, open, readFile, realpath, rename, stat, unlink, writeFile } from
 import path from 'node:path';
 
 import type { ChatMedia, ChatMediaSource } from '@plum-code-webui/shared';
-import { getDatabasePath } from '../db/index.js';
+import { getDataDirectory } from '../db/index.js';
 
 export const MAX_CHAT_MEDIA_BYTES = 25 * 1024 * 1024;
 
@@ -93,7 +93,7 @@ interface PreparedChatMedia {
 export function chatMediaStorageDirectory(): string {
   return process.env.CHAT_MEDIA_DIR
     ? path.resolve(process.env.CHAT_MEDIA_DIR)
-    : path.join(path.dirname(getDatabasePath()), 'chat-media');
+    : path.join(getDataDirectory(), 'chat-media');
 }
 
 function userStorageSegment(userId: string): string {

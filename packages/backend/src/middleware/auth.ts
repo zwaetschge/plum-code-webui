@@ -33,7 +33,11 @@ async function getUserRoleStatus(userId: string): Promise<{ role: string; status
  * Splitting this out (instead of merging into requireAuth) keeps the fast path hot
  * while making the guard explicit at the route level.
  */
-export async function requireActive(req: Request, _res: Response, next: NextFunction): Promise<void> {
+export async function requireActive(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> {
   const userId = (req as AuthenticatedRequest).userId;
   if (!userId) throw new AppError('Authentication required', 401, 'AUTH_REQUIRED');
   const info = await getUserRoleStatus(userId);

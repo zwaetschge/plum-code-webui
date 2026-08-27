@@ -653,7 +653,7 @@ export class OpencodeServer {
       const commandEnv = buildOpenCodeCommandEnv();
       const env = {
         ...buildOpenCodeServerProcessEnv(commandEnv),
-        ...buildIntegrationEnv(),
+        ...(await buildIntegrationEnv()),
         ...(await buildOpenCodeProviderCredentialEnv(userId)),
         OPENCODE_CONFIG_DIR: this.tenantPaths?.configDir || commandEnv.OPENCODE_CONFIG_DIR || '',
         OPENCODE_DATA_DIR: this.tenantPaths?.dataDir || commandEnv.OPENCODE_DATA_DIR || '',

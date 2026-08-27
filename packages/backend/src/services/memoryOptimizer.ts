@@ -27,7 +27,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-import { getDatabasePath } from '../db/index.js';
+import { getDataDirectory } from '../db/index.js';
 import { runAdminLLM } from '../utils/adminLLM.js';
 import { resolveConfigHome } from '../utils/configPaths.js';
 
@@ -57,7 +57,7 @@ interface OptimizerState {
 }
 
 function optimizerDir(): string {
-  return path.join(path.dirname(getDatabasePath()), 'memory-optimizer');
+  return path.join(getDataDirectory(), 'memory-optimizer');
 }
 
 function stateFilePath(): string {
