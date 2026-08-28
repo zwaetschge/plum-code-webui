@@ -81,6 +81,15 @@ Harnesses ship in the container. `${CONFIG_DIR}` (default `./config`) bind-mount
 - Per-user `enabledCliProviders` controls new-session/switch menus; existing sessions remain visible.
 - Startup migrates `claudeApi` to `zaiApi`, reattributes those users’ legacy Claude/GLM sessions to `zai`, and reattributes GLM usage without changing genuine OpenCode usage.
 
+## Subagent layer (mixed providers)
+
+Two independent mechanisms let one session combine subscriptions:
+
+1. **Model router** (`services/modelRouter.ts`, mounted at `/model-router`): Claude-transport sessions get `ANTHROPIC_BASE_URL` pointing at a per-session token URL. Anthropic models pass through byte-transparently with the user's OAuth; a non-Anthropic model in an agent's frontmatter resolves against the user's subagent upstreams (Settings → General → Subagents → Upstreams; `GET/PUT /api/settings/subagent-upstreams`), then the built-in Z.AI fallback for `glm-*`. Routed usage books immediately per request and is subtracted from the surrounding Claude turn. Kill switch: `MODEL_ROUTER_DISABLED=1`.
+2. **CLI subagents** (`scripts/mcp-servers/subagents.mjs`, registered as MCP server `subagents` for all harnesses): any session — Claude Code, Codex, OpenCode, Pi — can call `run_subagent` to spawn another provider CLI as a headless one-shot worker (`codex exec --json`, `claude -p --output-format json`, `opencode run`). Entries (label, provider, model) are per user in Settings → General → Subagents → CLI-Subagenten (`GET/PUT /api/settings/cli-subagents`). The bridge fetches config from `GET /api/settings/internal/cli-subagents` (hook secret + session id) and books usage via `POST /api/settings/internal/cli-subagents/usage`.
+   - OpenCode children need the caller's tenant provisioning: the internal endpoint runs `ensureOpenCodeTenantDirectories` + `syncProviderLinks` and returns `OPENCODE_CONFIG_DIR`/`OPENCODE_DATA_DIR` plus credential env; z-ai model ids follow the coding endpoint catalog (`z-ai/glm-5.2` today, no 5.3 there).
+   - Spawned children get stdin `ignore` (codex/opencode wait for stdin EOF otherwise), `PLUM_SUBAGENT_DEPTH` limits delegation to one level, and codex/opencode children have `ANTHROPIC_*` router overrides stripped while claude children keep them (nested GLM routing).
+
 ## Admin / helper LLM
 
 `packages/backend/src/utils/adminLLM.ts` provides one-shot internal completions, not interactive sessions.

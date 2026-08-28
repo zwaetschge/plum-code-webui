@@ -13,16 +13,16 @@ import { get as pgGet, run as pgRun } from '../db/pg.js';
  * The actual ComfyUI HTTP communication lives in `services/comfyui/`.
  */
 
-import { Router, type Request, type Response, type NextFunction } from 'express';
+import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import path from 'node:path';
 import { mkdir, readFile, unlink } from 'node:fs/promises';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
+import { requireHookSecret } from '../middleware/hookSecret.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
-import { config } from '../config.js';
 import {
   comfyui,
   listWorkflows,
@@ -32,28 +32,6 @@ import {
 } from '../services/comfyui/index.js';
 
 const router = Router();
-
-// Internal MCP endpoint mounted BEFORE requireAuth so the hook-secret guard runs
-// in isolation. Spawned-CLI subprocesses (ComfyUI MCP) call this with the same
-// X-Webui-Hook-Secret header used by the permission-prompt hook. The session id
-// supplies user attribution so jobs land in the right account's usage history.
-function requireHookSecret(req: Request, res: Response, next: NextFunction): void {
-  const provided = req.header('x-webui-hook-secret') || '';
-  const expected = config.hookSecret;
-  if (!expected) {
-    res
-      .status(503)
-      .json({ success: false, error: { code: 'NO_HOOK', message: 'hook secret unconfigured' } });
-    return;
-  }
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    res.status(401).json({ success: false, error: { code: 'UNAUTH', message: 'invalid secret' } });
-    return;
-  }
-  next();
-}
 
 // Apply requireAuth only to non-internal paths. /internal/* uses hook-secret auth.
 router.use((req, res, next) => {

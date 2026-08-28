@@ -119,6 +119,7 @@ import { HomeAssistantSettingsCard } from '@/components/integrations/HomeAssista
 import { CliDeviceLoginDialog } from '@/components/settings/CliDeviceLoginDialog';
 import { GatewayTokensPanel } from '@/components/settings/GatewayTokensPanel';
 import { SubagentUpstreamsSection } from '@/components/settings/SubagentUpstreamsSection';
+import { CliSubagentsSection } from '@/components/settings/CliSubagentsSection';
 import { ProviderLoginsPanel } from '@/components/settings/ProviderLoginsPanel';
 
 interface PluginInfo {
@@ -504,7 +505,10 @@ const GENERAL_SETTINGS_TABS: GeneralSettingsTabDescriptor[] = [
     label: 'Subagents',
     description: 'Route agent models to other subscriptions.',
     icon: Bot,
-    sections: [{ id: 'subagent-upstreams', label: 'Upstreams' }],
+    sections: [
+      { id: 'subagent-upstreams', label: 'Upstreams' },
+      { id: 'cli-subagents', label: 'CLI-Subagenten' },
+    ],
   },
   {
     value: 'opencode',
@@ -3263,6 +3267,22 @@ export function SettingsPage() {
                             </CardHeader>
                             <CardContent>
                               <SubagentUpstreamsSection />
+                            </CardContent>
+                          </Card>
+                        </section>
+                        <section id="cli-subagents">
+                          <Card className="border border-border/70">
+                            <CardHeader>
+                              <CardTitle className="text-base">CLI-Subagenten</CardTitle>
+                              <CardDescription>
+                                Delegation über Harness-Grenzen hinweg: Jede Session kann per
+                                MCP-Tool <code>run_subagent</code> einen anderen Provider-CLI als
+                                Einmal-Worker starten — unabhängig davon, welcher Provider die
+                                Session selbst fährt.
+                              </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                              <CliSubagentsSection />
                             </CardContent>
                           </Card>
                         </section>

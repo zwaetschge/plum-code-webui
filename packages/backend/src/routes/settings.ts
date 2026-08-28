@@ -2,8 +2,9 @@ import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
-import { getAppConfig, setAppConfig } from '../db/index.js';
+import { getAppConfig, setAppConfig, insertUsageHistoryTurn } from '../db/index.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { requireHookSecret } from '../middleware/hookSecret.js';
 import { nanoid } from 'nanoid';
 
 import { safeEncrypt, safeDecrypt } from '../utils/encryption.js';
@@ -20,8 +21,14 @@ import type {
   OracleBrowserSettings,
   AnalyticsSettings,
 } from '@plum-code-webui/shared';
-import { DEFAULT_ANALYTICS_HIDDEN_LIMIT_METRICS } from '@plum-code-webui/shared';
+import { DEFAULT_ANALYTICS_HIDDEN_LIMIT_METRICS, estimateModelCost } from '@plum-code-webui/shared';
 import { parseOracleBrowserSettings } from '../utils/oracleSettings.js';
+import {
+  ensureOpenCodeTenantDirectories,
+  resolveOpenCodeTenantPaths,
+} from '../services/opencode/tenantPaths.js';
+import { buildOpenCodeProviderCredentialEnv } from '../utils/opencodeProviderKeys.js';
+import { syncProviderLinks } from '../utils/providerLinks.js';
 
 const router = Router();
 
@@ -1116,6 +1123,214 @@ router.get('/subagent-models', requireAuth, async (req, res) => {
   }
 
   res.json({ success: true, data: groups });
+});
+
+/**
+ * CLI subagents: which provider CLIs the `subagents` MCP bridge may spawn as
+ * one-shot workers from inside any harness. This is the second half of the
+ * subagent layer — the model router above swaps the API endpoint under a
+ * Claude-transport agent, while these entries let ANY harness (Claude Code,
+ * Codex, OpenCode, Pi) delegate a task to a whole other CLI: Codex can spawn
+ * `opencode run -m z-ai/glm-5.3`, Claude can spawn `codex exec`, and so on.
+ *
+ * No secrets live here — the spawned CLIs use their own shared logins under
+ * ~/.codex, ~/.claude, ~/.opencode.
+ */
+export type CliSubagentProvider = 'codex' | 'claude' | 'opencode';
+
+export interface CliSubagentEntry {
+  id: string;
+  label: string;
+  provider: CliSubagentProvider;
+  /** Optional model override. OpenCode expects `provider/model` ids. */
+  model: string;
+  enabled: boolean;
+}
+
+const DEFAULT_CLI_SUBAGENTS: CliSubagentEntry[] = [
+  { id: 'codex', label: 'Codex', provider: 'codex', model: '', enabled: true },
+  { id: 'claude', label: 'Claude', provider: 'claude', model: '', enabled: true },
+  { id: 'opencode', label: 'OpenCode', provider: 'opencode', model: '', enabled: true },
+];
+
+const cliSubagentSchema = z.object({
+  id: z.string().min(1).max(64).optional(),
+  label: z.string().trim().min(1).max(40),
+  provider: z.enum(['codex', 'claude', 'opencode']),
+  model: z.string().trim().max(120).optional().default(''),
+  enabled: z.boolean().optional().default(true),
+});
+
+const cliSubagentsSchema = z.array(cliSubagentSchema).max(20);
+
+export async function getCliSubagentsForUser(userId: string): Promise<CliSubagentEntry[]> {
+  const row = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
+  const settings = safeJsonParse<Record<string, unknown>>(row?.settings_json, {});
+  const raw = settings.cliSubagents;
+  // Unset means "never configured" and gets working defaults; an empty array
+  // is an explicit "no CLI subagents".
+  if (!Array.isArray(raw)) return DEFAULT_CLI_SUBAGENTS;
+
+  const entries: CliSubagentEntry[] = [];
+  for (const entry of raw as Array<Record<string, unknown>>) {
+    if (entry.provider !== 'codex' && entry.provider !== 'claude' && entry.provider !== 'opencode')
+      continue;
+    entries.push({
+      id: String(entry.id ?? ''),
+      label: String(entry.label ?? entry.provider),
+      provider: entry.provider,
+      model: typeof entry.model === 'string' ? entry.model : '',
+      enabled: entry.enabled !== false,
+    });
+  }
+  return entries;
+}
+
+router.get('/cli-subagents', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  res.json({ success: true, data: await getCliSubagentsForUser(userId) });
+});
+
+router.put('/cli-subagents', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const parsed = cliSubagentsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError('Invalid CLI subagent configuration', 400, 'VALIDATION_ERROR');
+  }
+
+  const stored: CliSubagentEntry[] = parsed.data.map((entry) => ({
+    id: entry.id || nanoid(),
+    label: entry.label,
+    provider: entry.provider,
+    model: entry.model,
+    enabled: entry.enabled,
+  }));
+
+  const row = (await pgGet(
+    'SELECT settings_json FROM user_settings WHERE user_id = ?',
+    userId
+  )) as unknown as { settings_json: string | null } | undefined;
+  const settings = safeJsonParse<Record<string, unknown>>(row?.settings_json, {});
+  settings.cliSubagents = stored;
+  await ensureSettingsRow(userId);
+  await pgRun(
+    'UPDATE user_settings SET settings_json = ? WHERE user_id = ?',
+    JSON.stringify(settings),
+    userId
+  );
+
+  res.json({ success: true, data: stored });
+});
+
+async function resolveInternalSessionUser(req: Parameters<typeof requireHookSecret>[0]) {
+  const sessionId = req.header('x-webui-session-id') || '';
+  if (!sessionId) return null;
+  const row = (await pgGet('SELECT user_id FROM sessions WHERE id = ?', sessionId)) as unknown as
+    | { user_id: string }
+    | undefined;
+  return row?.user_id ? { sessionId, userId: row.user_id } : null;
+}
+
+// The subagents MCP bridge (a child of a spawned CLI) fetches the calling
+// user's entries with the hook secret; the session id supplies attribution.
+router.get('/internal/cli-subagents', requireHookSecret, async (req, res) => {
+  const resolved = await resolveInternalSessionUser(req);
+  if (!resolved) {
+    res.status(403).json({
+      success: false,
+      error: { code: 'INVALID_SESSION', message: 'Unknown WebUI session identity' },
+    });
+    return;
+  }
+  const entries = (await getCliSubagentsForUser(resolved.userId)).filter((e) => e.enabled);
+
+  // OpenCode auth is per WebUI user: providers like z-ai only exist through
+  // the generated tenant opencode.json, and API keys are injected as env —
+  // the same provisioning `opencode serve` and the provider test use. Without
+  // it a spawned `opencode run` has no logins and no z-ai models at all.
+  // This stays inside the container; the bridge holds the hook secret.
+  const env: Record<string, Record<string, string>> = {};
+  if (entries.some((entry) => entry.provider === 'opencode')) {
+    try {
+      const tenant = resolveOpenCodeTenantPaths(resolved.userId);
+      ensureOpenCodeTenantDirectories(tenant);
+      await syncProviderLinks({
+        quiet: true,
+        userId: resolved.userId,
+        opencodeConfigPath: `${tenant.configDir}/opencode.json`,
+        opencodeAgentsDir: `${tenant.configDir}/agents`,
+      });
+      const credentialEnv = await buildOpenCodeProviderCredentialEnv(resolved.userId);
+      env.opencode = {
+        ...(credentialEnv as Record<string, string>),
+        OPENCODE_CONFIG_DIR: tenant.configDir,
+        OPENCODE_DATA_DIR: tenant.dataDir,
+      };
+    } catch (error) {
+      // A failed opencode provisioning must not take codex/claude down with it.
+      console.warn('[cli-subagents] opencode tenant provisioning failed:', String(error));
+    }
+  }
+
+  res.json({ success: true, data: { entries, env } });
+});
+
+const cliSubagentUsageSchema = z.object({
+  provider: z.enum(['codex', 'claude', 'opencode']),
+  model: z.string().trim().min(1).max(120),
+  inputTokens: z.number().int().min(0).default(0),
+  outputTokens: z.number().int().min(0).default(0),
+  cacheReadTokens: z.number().int().min(0).default(0),
+  cacheCreationTokens: z.number().int().min(0).default(0),
+});
+
+// One usage row per completed CLI-subagent run, attributed to the calling
+// session's owner. The spawned CLI is not a WebUI session, so this is the only
+// place its tokens can enter the analytics.
+router.post('/internal/cli-subagents/usage', requireHookSecret, async (req, res) => {
+  const resolved = await resolveInternalSessionUser(req);
+  if (!resolved) {
+    res.status(403).json({
+      success: false,
+      error: { code: 'INVALID_SESSION', message: 'Unknown WebUI session identity' },
+    });
+    return;
+  }
+  const parsed = cliSubagentUsageSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: parsed.error.message },
+    });
+    return;
+  }
+  const usage = parsed.data;
+  const totalTokens =
+    usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+  if (totalTokens > 0) {
+    await insertUsageHistoryTurn({
+      userId: resolved.userId,
+      sessionId: resolved.sessionId,
+      provider: usage.provider,
+      turnId: `cli-subagent-${nanoid()}`,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheCreationTokens: usage.cacheCreationTokens,
+      totalTokens,
+      costUsd: estimateModelCost(usage.model, {
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadTokens,
+        cacheCreationTokens: usage.cacheCreationTokens,
+      }).cost,
+      model: usage.model,
+    });
+  }
+  res.json({ success: true });
 });
 
 router.get('/zai-api', requireAuth, async (req, res) => {
