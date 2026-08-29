@@ -23,6 +23,7 @@ import type {
 } from '@plum-code-webui/shared';
 import { DEFAULT_ANALYTICS_HIDDEN_LIMIT_METRICS, estimateModelCost } from '@plum-code-webui/shared';
 import { parseOracleBrowserSettings } from '../utils/oracleSettings.js';
+import { KIMI_CODING_MODELS, hasKimiCodingCredentials } from '../utils/kimiUsage.js';
 import {
   ensureOpenCodeTenantDirectories,
   resolveOpenCodeTenantPaths,
@@ -1116,6 +1117,11 @@ router.get('/subagent-models', requireAuth, async (req, res) => {
 
   if (await getZaiApiConfigForUser(userId)) {
     groups.push({ group: 'Z.AI (GLM subscription)', models: ['glm-5.3', 'glm-5.1', 'glm-4.7'] });
+  }
+  // The shared Kimi Code login doubles as an Anthropic-compatible upstream
+  // (api.kimi.com/coding), so an existing `kimi login` is all it takes.
+  if (await hasKimiCodingCredentials()) {
+    groups.push({ group: 'Kimi (Coding subscription)', models: [...KIMI_CODING_MODELS] });
   }
   for (const upstream of await getSubagentUpstreamsForUser(userId)) {
     const models = upstream.models.filter((model) => !model.endsWith('*'));

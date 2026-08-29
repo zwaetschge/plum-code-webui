@@ -3715,6 +3715,12 @@ export function SessionPage() {
       : null;
     const surfaceValueLabel = sessionSurface === 'task' ? 'Task' : 'Code';
     const SurfaceIcon = sessionSurface === 'task' ? ListTodo : Code2;
+    // Z.AI sessions talk to the Z.AI endpoint directly (no model router), so
+    // only GLM targets are reachable there; claude sessions can use them all.
+    const routableSubagentGroups =
+      sessionProvider === 'zai'
+        ? subagentModelGroups.filter((group) => group.group.startsWith('Z.AI'))
+        : subagentModelGroups;
 
     return (
       <div className={cn('session-runtime-controls', variant === 'mobile' && 'is-mobile')}>
@@ -3846,7 +3852,7 @@ export function SessionPage() {
                     ))}
                   </optgroup>
                 )}
-                {subagentModelGroups.map((group) => (
+                {routableSubagentGroups.map((group) => (
                   <optgroup key={group.group} label={group.group}>
                     {group.models.map((model) => (
                       <option key={`sub-${group.group}-${model}`} value={model}>
@@ -3857,7 +3863,7 @@ export function SessionPage() {
                 ))}
                 {session.subagentModel &&
                   !modelOptions.includes(session.subagentModel) &&
-                  !subagentModelGroups.some((group) =>
+                  !routableSubagentGroups.some((group) =>
                     group.models.includes(session.subagentModel as string)
                   ) && <option value={session.subagentModel}>{session.subagentModel}</option>}
               </select>
