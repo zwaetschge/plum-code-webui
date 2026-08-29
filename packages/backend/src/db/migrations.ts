@@ -66,6 +66,13 @@ const MIGRATIONS: Migration[] = [
          ON messages (session_id, chat_id, seq) WHERE role = 'assistant'`,
     ],
   },
+  {
+    // Per-session subagent model override for Claude-transport sessions. The
+    // value goes out as CLAUDE_CODE_SUBAGENT_MODEL at CLI spawn, so one session
+    // can run its subagents on GLM while another stays fully on Claude.
+    id: '003-session-subagent-model',
+    statements: [`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS subagent_model TEXT DEFAULT NULL`],
+  },
 ];
 
 async function ensureTable(): Promise<void> {

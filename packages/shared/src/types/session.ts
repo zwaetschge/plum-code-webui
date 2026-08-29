@@ -93,6 +93,8 @@ export interface Session {
   cliModel: string | null;
   cliReasoning: string | null;
   cliServiceTier: CodexServiceTier | null;
+  /** Model forced onto this session's subagents (CLAUDE_CODE_SUBAGENT_MODEL); null = agent definitions decide. */
+  subagentModel?: string | null;
   category: string | null;
   mode: string | null;
   surface: SessionSurface;

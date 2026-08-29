@@ -154,6 +154,19 @@ async function buildClaudeTransportEnv(
     provider === 'zai' ? await getZaiApiConfigForUser(userId) : null
   );
 
+  // Per-session subagent model: the session row overrides what subagents run
+  // on, without touching agent definitions. The CLI reads the variable for
+  // every Task-tool spawn whose agent does not pin its own model.
+  if (sessionId) {
+    const row = (await pgGet(
+      'SELECT subagent_model as subagentModel FROM sessions WHERE id = ?',
+      sessionId
+    )) as { subagentModel?: string | null } | undefined;
+    if (row?.subagentModel) {
+      env.CLAUDE_CODE_SUBAGENT_MODEL = row.subagentModel;
+    }
+  }
+
   // Mixed subagents: a claude session gets its base URL pointed at the model
   // router, so a subagent whose definition names a routed model (glm-*, or
   // anything the user configured under Settings -> Subagent upstreams) runs on

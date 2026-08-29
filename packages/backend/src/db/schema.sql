@@ -483,6 +483,7 @@ CREATE TABLE IF NOT EXISTS "sessions" (
   "cli_model" TEXT DEFAULT NULL,
   "cli_reasoning" TEXT DEFAULT NULL,
   "cli_service_tier" TEXT DEFAULT NULL,
+  "subagent_model" TEXT DEFAULT NULL,
   "android_device_serial" TEXT DEFAULT NULL,
   "icon_path" TEXT DEFAULT NULL,
   "icon_source" TEXT DEFAULT NULL,

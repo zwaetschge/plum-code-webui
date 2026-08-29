@@ -31,6 +31,8 @@ export const CLAUDE_PROVIDER_OVERRIDE_ENV_KEYS = [
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   'API_TIMEOUT_MS',
   'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+  // Session-scoped: set from the sessions row at spawn, never inherited.
+  'CLAUDE_CODE_SUBAGENT_MODEL',
 ] as const;
 
 export const WEBUI_DEFAULT_MCP_SERVERS: Record<string, ClaudeMcpServer> = {

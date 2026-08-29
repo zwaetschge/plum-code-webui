@@ -95,6 +95,10 @@ const updateSessionReasoningSchema = z.object({
   reasoning: z.string().trim().min(1).max(50).nullable().optional(),
 });
 
+const updateSessionSubagentModelSchema = z.object({
+  model: z.string().trim().min(1).max(200).nullable().optional(),
+});
+
 const updateSessionServiceTierSchema = z.object({
   serviceTier: z.enum(['fast']).nullable().optional(),
 });
@@ -431,6 +435,7 @@ async function selectSessionById(
               s.active_chat_id as activeChatId,
               s.cli_model as cliModel, s.cli_reasoning as cliReasoning,
               s.cli_service_tier as cliServiceTier,
+              s.subagent_model as subagentModel,
               s.design_style_skill as designStyleSkill,
               s.writing_style_skill as writingStyleSkill,
               s.android_device_serial as androidDeviceSerial,
@@ -984,6 +989,7 @@ router.get('/', requireAuth, async (req, res) => {
               s.active_chat_id as activeChatId,
               s.cli_model as cliModel, s.cli_reasoning as cliReasoning,
               s.cli_service_tier as cliServiceTier,
+              s.subagent_model as subagentModel,
               s.design_style_skill as designStyleSkill,
               s.writing_style_skill as writingStyleSkill,
               s.android_device_serial as androidDeviceSerial,
@@ -1689,6 +1695,56 @@ router.patch('/:id/model', requireAuth, async (req, res) => {
   const model = parsed.data.model?.trim() || null;
   await pgRun(
     'UPDATE sessions SET cli_model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    model,
+    req.params.id
+  );
+
+  const processManager = getProcessManager();
+  if (processManager.isSessionRunning(req.params.id as string)) {
+    await processManager.restartSession(req.params.id as string, userId, {
+      preserveNativeContext: true,
+    });
+  }
+
+  const updatedSession = (await selectSessionById(req.params.id as string, userId)) as Record<
+    string,
+    unknown
+  >;
+
+  res.json({
+    success: true,
+    data: await attachRuntimeAndTelemetry({
+      ...updatedSession,
+      starred: Boolean(updatedSession.starred),
+    }),
+  });
+});
+
+// Per-session subagent model override. The value is exported to the Claude CLI
+// as CLAUDE_CODE_SUBAGENT_MODEL at spawn; a routed model id (glm-*, or one of
+// the configured upstream patterns) sends this session's subagents through the
+// model router while the main agent stays on the session's own subscription.
+router.patch('/:id/subagent-model', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const parsed = updateSessionSubagentModelSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    throw new AppError('Invalid subagent model', 400, 'VALIDATION_ERROR');
+  }
+
+  const session = (await pgGet(
+    'SELECT id, cli_provider as cliProvider FROM sessions WHERE id = ? AND user_id = ?',
+    req.params.id,
+    userId
+  )) as unknown as { id: string; cliProvider: string } | undefined;
+
+  if (!session) {
+    throw new AppError('Session not found', 404, 'NOT_FOUND');
+  }
+
+  const model = parsed.data.model?.trim() || null;
+  await pgRun(
+    'UPDATE sessions SET subagent_model = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
     model,
     req.params.id
   );

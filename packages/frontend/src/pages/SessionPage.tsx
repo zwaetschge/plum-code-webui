@@ -2193,6 +2193,45 @@ export function SessionPage() {
     },
   });
 
+  // Routable subagent model groups (Z.AI + custom upstreams). Only fetched for
+  // Claude-transport sessions — the override rides on CLAUDE_CODE_SUBAGENT_MODEL.
+  const isClaudeTransportSession = sessionProvider === 'claude' || sessionProvider === 'zai';
+  const { data: subagentModelGroups = [] } = useQuery({
+    queryKey: ['subagent-models'],
+    queryFn: async () => {
+      const response = await api.get<{
+        success: boolean;
+        data: Array<{ group: string; models: string[] }>;
+      }>('/api/settings/subagent-models');
+      return response.data.data;
+    },
+    enabled: isClaudeTransportSession,
+  });
+
+  const sessionSubagentModelMutation = useMutation({
+    mutationFn: async (model: string | null) => {
+      const response = await api.patch<ApiResponse<Session>>(
+        `/api/sessions/${id}/subagent-model`,
+        { model }
+      );
+      return response.data;
+    },
+    onSuccess: (data) => {
+      if (data.success && data.data && id) {
+        queryClient.setQueryData(['session', id], data.data);
+        useSessionStore.getState().updateSession(id, data.data);
+        queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        toast({
+          title: 'Subagent model updated',
+          description:
+            session?.status === 'running'
+              ? 'The running session was reloaded; new subagents use the selected model.'
+              : 'Subagents will use the selected model when the session starts.',
+        });
+      }
+    },
+  });
+
   const sessionReasoningMutation = useMutation({
     mutationFn: async (reasoning: string | null) => {
       const response = await api.patch<ApiResponse<Session>>(`/api/sessions/${id}/reasoning`, {
@@ -3777,6 +3816,53 @@ export function SessionPage() {
             </select>
           ),
         })}
+
+        {isClaudeTransportSession &&
+          renderRuntimeField({
+            id: fieldId('subagent-model'),
+            label: 'Subagents',
+            value: session.subagentModel || 'Default',
+            icon: <Network className="h-3.5 w-3.5" />,
+            children: (
+              <select
+                id={fieldId('subagent-model')}
+                className="session-runtime-select"
+                value={session.subagentModel ?? '__default__'}
+                onChange={(event) =>
+                  sessionSubagentModelMutation.mutate(
+                    event.target.value === '__default__' ? null : event.target.value
+                  )
+                }
+                aria-label="Subagent model"
+                disabled={sessionSubagentModelMutation.isPending}
+              >
+                <option value="__default__">Default (Agent-Definition)</option>
+                {sessionProvider === 'claude' && modelOptions.length > 0 && (
+                  <optgroup label="Anthropic">
+                    {modelOptions.map((model) => (
+                      <option key={`sub-${model}`} value={model}>
+                        {modelLabels[model] || model}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {subagentModelGroups.map((group) => (
+                  <optgroup key={group.group} label={group.group}>
+                    {group.models.map((model) => (
+                      <option key={`sub-${group.group}-${model}`} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+                {session.subagentModel &&
+                  !modelOptions.includes(session.subagentModel) &&
+                  !subagentModelGroups.some((group) =>
+                    group.models.includes(session.subagentModel as string)
+                  ) && <option value={session.subagentModel}>{session.subagentModel}</option>}
+              </select>
+            ),
+          })}
 
         {showReasoningControls &&
           renderRuntimeField({
