@@ -5135,31 +5135,6 @@ html.dark .aurora-grain,
   z-index: 30;
 }
 
-/* Frosted zone behind the whole composer area. The transcript scrolls through
-   it blurred — including the wrap padding and the drop-files hint line, where
-   it previously collided crisp with the UI — and the mask feathers the blur
-   out toward the transcript above. One fixed-size region, cheap enough to
-   keep in every engine. */
-.session-chat-layered .composer-wrap::before {
-  content: '';
-  position: absolute;
-  inset: -28px 0 0;
-  z-index: -1;
-  pointer-events: none;
-  backdrop-filter: blur(16px) saturate(150%);
-  -webkit-backdrop-filter: blur(16px) saturate(150%);
-  /* Feathered on three sides: without the horizontal fade the blur rectangle
-     ends in a visible vertical seam at the chat column's edges. */
-  mask-image:
-    linear-gradient(to top, black, black 62%, transparent),
-    linear-gradient(to right, transparent, black 48px, black calc(100% - 48px), transparent);
-  mask-composite: intersect;
-  -webkit-mask-image:
-    linear-gradient(to top, black, black 62%, transparent),
-    linear-gradient(to right, transparent, black 48px, black calc(100% - 48px), transparent);
-  -webkit-mask-composite: source-in;
-}
-
 /* --- Chat scroll viewport — overlay fades that do not mask sticky controls --- */
 .chat-scroll-shell {
   position: relative;
