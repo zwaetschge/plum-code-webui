@@ -5207,12 +5207,12 @@ html.dark .aurora-grain,
 .session-global-edge-fade-bottom {
   bottom: 0;
   height: calc(var(--chat-input-h, 112px) + 64px);
-  /* Stays a shadow at the screen edge, but no longer paints the composer's
-     backdrop opaque — the bar needs visible content behind it to look glassy. */
+  /* Shadow only. The composer draws its own glass on top; this gradient must
+     stay dense enough to keep the screen edge calm, but it is never blurred. */
   background: linear-gradient(
     to top,
-    hsl(var(--background) / 0.58),
-    hsl(var(--background) / 0.2) 46%,
+    hsl(var(--background) / 0.72),
+    hsl(var(--background) / 0.3) 46%,
     transparent
   );
 }
@@ -11956,6 +11956,17 @@ html.plum-engine-gecko body * {
   backdrop-filter: none !important;
 }
 
+/* The ban above uses `*`, which matches elements but not pseudo-elements — the
+ * composer's old ::before overlay slipped through it and was the only live blur
+ * on the page in Gecko, spanning the full screen edge. The bar itself is the
+ * surface that is supposed to be glass, so it gets the one live filter and the
+ * edge gets none. Higher specificity than the ban, so !important still loses.
+ */
+html.plum-engine-gecko body .chat-composer-form {
+  -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
+  backdrop-filter: blur(20px) saturate(150%) !important;
+}
+
 /* Large glass surfaces use optical glass in Gecko. The layered translucency
  * keeps the waves visible without asking Firefox to blur a moving full-screen
  * backdrop for every card on every frame. */
@@ -12020,10 +12031,6 @@ html.plum-engine-gecko body .pl-thinking-turn .ai-body {
 
 html.plum-engine-gecko body .chat-composer-form {
   border-color: hsl(var(--foreground) / 0.18) !important;
-  background:
-    radial-gradient(circle at 16% -8%, hsl(var(--primary) / 0.16), transparent 42%),
-    radial-gradient(circle at 82% -10%, hsl(var(--accent) / 0.12), transparent 38%),
-    linear-gradient(155deg, hsl(var(--card) / 0.34), hsl(var(--background) / 0.2)) !important;
   box-shadow:
     inset 0 1px 0 hsl(var(--foreground) / 0.14),
     inset 0 -22px 42px hsl(var(--background) / 0.1),
