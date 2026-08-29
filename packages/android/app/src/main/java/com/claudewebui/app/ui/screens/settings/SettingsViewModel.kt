@@ -11,6 +11,7 @@ import com.claudewebui.app.data.model.AuthUser
 import com.claudewebui.app.data.model.CreateCustomAgentInput
 import com.claudewebui.app.data.model.CLIProviderConfig
 import com.claudewebui.app.data.model.CliLoginSession
+import com.claudewebui.app.data.model.CliSubagentEntry
 import com.claudewebui.app.data.model.ConfigAgent
 import com.claudewebui.app.data.model.ConfigDocument
 import com.claudewebui.app.data.model.ConfigItemKind
@@ -22,6 +23,9 @@ import com.claudewebui.app.data.model.CustomAgent
 import com.claudewebui.app.data.model.CodexPlugin
 import com.claudewebui.app.data.model.GatewayToken
 import com.claudewebui.app.data.model.McpServer
+import com.claudewebui.app.data.model.SaveSubagentUpstreamInput
+import com.claudewebui.app.data.model.SubagentModelGroup
+import com.claudewebui.app.data.model.SubagentUpstream
 import com.claudewebui.app.data.model.McpServerType
 import com.claudewebui.app.data.model.OpenCodeProvider
 import com.claudewebui.app.data.model.SlashCommand
@@ -113,6 +117,14 @@ data class SettingsUiState(
     val newGatewayTokenSecret: String? = null,
     val codexPlugins: List<CodexPlugin> = emptyList(),
     val parityBusy: Boolean = false,
+
+    // Subagent layer: endpoint-swapping upstreams and cross-harness CLI
+    // workers. Both were WebUI-only, so a phone could see delegation happen
+    // but not configure who may be delegated to.
+    val subagentUpstreams: List<SubagentUpstream> = emptyList(),
+    val subagentModelGroups: List<SubagentModelGroup> = emptyList(),
+    val cliSubagents: List<CliSubagentEntry> = emptyList(),
+    val subagentBusy: Boolean = false,
 
     // MCP
     val mcpServers: List<McpServer> = emptyList(),
@@ -698,6 +710,130 @@ class SettingsViewModel(
                 )
             }
             loadCodexPlugins()
+        }
+    }
+
+    // ── Subagent layer ──────────────────────────────────────────────────────
+
+    fun loadSubagents() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(subagentBusy = true) }
+            val upstreams = settingsRepository.getSubagentUpstreams().getOrNull()
+            val groups = settingsRepository.getSubagentModels().getOrNull()
+            val entries = settingsRepository.getCliSubagents().getOrNull()
+            _uiState.update {
+                it.copy(
+                    subagentUpstreams = upstreams ?: it.subagentUpstreams,
+                    subagentModelGroups = groups ?: it.subagentModelGroups,
+                    cliSubagents = entries ?: it.cliSubagents,
+                    subagentBusy = false,
+                )
+            }
+        }
+    }
+
+    /**
+     * The list is replaced wholesale, so every existing upstream is sent back
+     * by id without a token — that is what tells the server to keep the stored
+     * one, since it never hands a token to a client.
+     */
+    fun addSubagentUpstream(label: String, baseUrl: String, authToken: String, models: String) {
+        val cleanLabel = label.trim()
+        val cleanUrl = baseUrl.trim().trimEnd('/')
+        val cleanToken = authToken.trim()
+        val modelList = models.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }
+        if (cleanLabel.isEmpty() || cleanUrl.isEmpty() || cleanToken.isEmpty() || modelList.isEmpty()) {
+            _uiState.update { it.copy(error = "Label, endpoint, token and at least one model are required") }
+            return
+        }
+        val next = _uiState.value.subagentUpstreams.map { it.toKeepInput() } +
+            SaveSubagentUpstreamInput(
+                label = cleanLabel,
+                baseUrl = cleanUrl,
+                authToken = cleanToken,
+                models = modelList,
+            )
+        persistSubagentUpstreams(next, "Upstream added")
+    }
+
+    fun removeSubagentUpstream(id: String) {
+        val next = _uiState.value.subagentUpstreams
+            .filter { it.id != id }
+            .map { it.toKeepInput() }
+        persistSubagentUpstreams(next, "Upstream removed")
+    }
+
+    private fun SubagentUpstream.toKeepInput() = SaveSubagentUpstreamInput(
+        id = id,
+        label = label,
+        baseUrl = baseUrl,
+        authToken = null,
+        models = models,
+    )
+
+    private fun persistSubagentUpstreams(next: List<SaveSubagentUpstreamInput>, toast: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(subagentBusy = true, error = null) }
+            val result = settingsRepository.saveSubagentUpstreams(next)
+            _uiState.update {
+                it.copy(
+                    subagentUpstreams = result.getOrNull() ?: it.subagentUpstreams,
+                    error = result.exceptionOrNull()?.message ?: it.error,
+                    toastMessage = if (result.isSuccess) toast else it.toastMessage,
+                    subagentBusy = false,
+                )
+            }
+            // The model picker groups follow the upstream list.
+            if (result.isSuccess) {
+                val groups = settingsRepository.getSubagentModels().getOrNull()
+                if (groups != null) _uiState.update { it.copy(subagentModelGroups = groups) }
+            }
+        }
+    }
+
+    fun addCliSubagent(provider: String, label: String, model: String) {
+        val entry = CliSubagentEntry(
+            label = label.trim().ifEmpty { provider.replaceFirstChar { c -> c.uppercase() } },
+            provider = provider,
+            model = model.trim(),
+            enabled = true,
+        )
+        persistCliSubagents(_uiState.value.cliSubagents + entry, "Subagent added")
+    }
+
+    fun setCliSubagentEnabled(id: String, enabled: Boolean) {
+        val next = _uiState.value.cliSubagents.map {
+            if (it.id == id) it.copy(enabled = enabled) else it
+        }
+        persistCliSubagents(next, null)
+    }
+
+    fun setCliSubagentModel(id: String, model: String) {
+        val next = _uiState.value.cliSubagents.map {
+            if (it.id == id) it.copy(model = model.trim()) else it
+        }
+        persistCliSubagents(next, "Model saved")
+    }
+
+    fun removeCliSubagent(id: String) {
+        persistCliSubagents(_uiState.value.cliSubagents.filter { it.id != id }, "Subagent removed")
+    }
+
+    private fun persistCliSubagents(next: List<CliSubagentEntry>, toast: String?) {
+        viewModelScope.launch {
+            // Optimistic: the row reflects the tap immediately, and the server
+            // response replaces it a moment later (new rows gain their id here).
+            _uiState.update { it.copy(cliSubagents = next, subagentBusy = true, error = null) }
+            val result = settingsRepository.saveCliSubagents(next)
+            _uiState.update {
+                it.copy(
+                    cliSubagents = result.getOrNull() ?: it.cliSubagents,
+                    error = result.exceptionOrNull()?.message ?: it.error,
+                    toastMessage = if (result.isSuccess && toast != null) toast else it.toastMessage,
+                    subagentBusy = false,
+                )
+            }
+            if (result.isFailure) loadSubagents()
         }
     }
 

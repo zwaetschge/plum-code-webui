@@ -330,6 +330,8 @@ fun SettingsScreen(
                 }
                 item { GatewayTokensPanel(state = state, viewModel = viewModel) }
                 item { CodexPluginsPanel(state = state, viewModel = viewModel) }
+                item { SubagentUpstreamsPanel(state = state, viewModel = viewModel) }
+                item { CliSubagentsPanel(state = state, viewModel = viewModel) }
                 item {
                     GlassPanel(
                         modifier = Modifier.fillMaxWidth().clickable { showLogoutDialog = true },

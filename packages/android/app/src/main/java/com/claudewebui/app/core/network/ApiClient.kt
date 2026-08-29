@@ -803,6 +803,32 @@ class ApiClient {
     suspend fun deleteZaiApi(): ApiResponse<Unit> =
         client.delete(url("/api/settings/zai-api")).body()
 
+    // ---- Subagent layer ----------------------------------------------------
+    // Upstreams swap the API endpoint under a Claude-transport agent; CLI
+    // subagents let any harness spawn a whole other provider CLI as a one-shot
+    // worker. Tokens travel up only — the server never sends one back.
+
+    suspend fun getSubagentUpstreams(): ApiResponse<List<SubagentUpstream>> =
+        client.get(url("/api/settings/subagent-upstreams")).body()
+
+    /** PUT replaces the whole list; omit authToken to keep the stored one. */
+    suspend fun saveSubagentUpstreams(
+        input: List<SaveSubagentUpstreamInput>,
+    ): ApiResponse<List<SubagentUpstream>> =
+        client.put(url("/api/settings/subagent-upstreams")) { setBody(input) }.body()
+
+    /** GET /api/settings/subagent-models — the groups an agent picker offers. */
+    suspend fun getSubagentModels(): ApiResponse<List<SubagentModelGroup>> =
+        client.get(url("/api/settings/subagent-models")).body()
+
+    suspend fun getCliSubagents(): ApiResponse<List<CliSubagentEntry>> =
+        client.get(url("/api/settings/cli-subagents")).body()
+
+    suspend fun saveCliSubagents(
+        input: List<CliSubagentEntry>,
+    ): ApiResponse<List<CliSubagentEntry>> =
+        client.put(url("/api/settings/cli-subagents")) { setBody(input) }.body()
+
     suspend fun getOpenCodeProviders(): ApiResponse<List<OpenCodeProvider>> =
         client.get(url("/api/opencode/providers")).body()
 

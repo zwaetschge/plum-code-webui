@@ -7,6 +7,7 @@ import com.claudewebui.app.data.model.GatewayToken
 import com.claudewebui.app.data.model.CLIProvider
 import com.claudewebui.app.data.model.CLIProviderConfig
 import com.claudewebui.app.data.model.CliLoginSession
+import com.claudewebui.app.data.model.CliSubagentEntry
 import com.claudewebui.app.data.model.ConfigAgent
 import com.claudewebui.app.data.model.ConfigDocument
 import com.claudewebui.app.data.model.ConfigItemKind
@@ -18,6 +19,9 @@ import com.claudewebui.app.data.model.CreateCustomAgentInput
 import com.claudewebui.app.data.model.CreateMcpServerInput
 import com.claudewebui.app.data.model.CustomAgent
 import com.claudewebui.app.data.model.McpServer
+import com.claudewebui.app.data.model.SaveSubagentUpstreamInput
+import com.claudewebui.app.data.model.SubagentModelGroup
+import com.claudewebui.app.data.model.SubagentUpstream
 import com.claudewebui.app.data.model.McpTestResult
 import com.claudewebui.app.data.model.OpenCodeProvider
 import com.claudewebui.app.data.model.OpenCodeProviderTest
@@ -102,6 +106,43 @@ class SettingsRepository(
         val response = api.setCodexPluginEnabled(id, enabled)
         if (!response.success) error(response.error?.message ?: "Failed to update plugin")
         Unit
+    }
+
+    // ---- Subagent layer ------------------------------------------------------
+
+    suspend fun getSubagentUpstreams(): Result<List<SubagentUpstream>> = runCatching {
+        val response = api.getSubagentUpstreams()
+        if (!response.success) error(response.error?.message ?: "Failed to fetch upstreams")
+        response.data.orEmpty()
+    }
+
+    /** Replaces the whole list; entries without a token keep the stored one. */
+    suspend fun saveSubagentUpstreams(
+        input: List<SaveSubagentUpstreamInput>,
+    ): Result<List<SubagentUpstream>> = runCatching {
+        val response = api.saveSubagentUpstreams(input)
+        if (!response.success) error(response.error?.message ?: "Failed to save upstreams")
+        response.data.orEmpty()
+    }
+
+    suspend fun getSubagentModels(): Result<List<SubagentModelGroup>> = runCatching {
+        val response = api.getSubagentModels()
+        if (!response.success) error(response.error?.message ?: "Failed to fetch models")
+        response.data.orEmpty()
+    }
+
+    suspend fun getCliSubagents(): Result<List<CliSubagentEntry>> = runCatching {
+        val response = api.getCliSubagents()
+        if (!response.success) error(response.error?.message ?: "Failed to fetch subagents")
+        response.data.orEmpty()
+    }
+
+    suspend fun saveCliSubagents(
+        input: List<CliSubagentEntry>,
+    ): Result<List<CliSubagentEntry>> = runCatching {
+        val response = api.saveCliSubagents(input)
+        if (!response.success) error(response.error?.message ?: "Failed to save subagents")
+        response.data.orEmpty()
     }
 
     /** Update settings with only the fields that changed. */
