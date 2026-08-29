@@ -30,6 +30,7 @@ import {
 } from '../services/opencode/tenantPaths.js';
 import { buildOpenCodeProviderCredentialEnv } from '../utils/opencodeProviderKeys.js';
 import { syncProviderLinks } from '../utils/providerLinks.js';
+import { syncPiConfig } from '../utils/piConfig.js';
 
 const router = Router();
 
@@ -1142,7 +1143,7 @@ router.get('/subagent-models', requireAuth, async (req, res) => {
  * No secrets live here — the spawned CLIs use their own shared logins under
  * ~/.codex, ~/.claude, ~/.opencode.
  */
-export type CliSubagentProvider = 'codex' | 'claude' | 'opencode';
+export type CliSubagentProvider = 'codex' | 'claude' | 'opencode' | 'pi';
 
 export interface CliSubagentEntry {
   id: string;
@@ -1157,12 +1158,13 @@ const DEFAULT_CLI_SUBAGENTS: CliSubagentEntry[] = [
   { id: 'codex', label: 'Codex', provider: 'codex', model: '', enabled: true },
   { id: 'claude', label: 'Claude', provider: 'claude', model: '', enabled: true },
   { id: 'opencode', label: 'OpenCode', provider: 'opencode', model: '', enabled: true },
+  { id: 'pi', label: 'Pi', provider: 'pi', model: '', enabled: true },
 ];
 
 const cliSubagentSchema = z.object({
   id: z.string().min(1).max(64).optional(),
   label: z.string().trim().min(1).max(40),
-  provider: z.enum(['codex', 'claude', 'opencode']),
+  provider: z.enum(['codex', 'claude', 'opencode', 'pi']),
   model: z.string().trim().max(120).optional().default(''),
   enabled: z.boolean().optional().default(true),
 });
@@ -1182,7 +1184,12 @@ export async function getCliSubagentsForUser(userId: string): Promise<CliSubagen
 
   const entries: CliSubagentEntry[] = [];
   for (const entry of raw as Array<Record<string, unknown>>) {
-    if (entry.provider !== 'codex' && entry.provider !== 'claude' && entry.provider !== 'opencode')
+    if (
+      entry.provider !== 'codex' &&
+      entry.provider !== 'claude' &&
+      entry.provider !== 'opencode' &&
+      entry.provider !== 'pi'
+    )
       continue;
     entries.push({
       id: String(entry.id ?? ''),
@@ -1259,7 +1266,7 @@ router.get('/internal/cli-subagents', requireHookSecret, async (req, res) => {
   // it a spawned `opencode run` has no logins and no z-ai models at all.
   // This stays inside the container; the bridge holds the hook secret.
   const env: Record<string, Record<string, string>> = {};
-  if (entries.some((entry) => entry.provider === 'opencode')) {
+  if (entries.some((entry) => entry.provider === 'opencode' || entry.provider === 'pi')) {
     try {
       const tenant = resolveOpenCodeTenantPaths(resolved.userId);
       ensureOpenCodeTenantDirectories(tenant);
@@ -1275,9 +1282,26 @@ router.get('/internal/cli-subagents', requireHookSecret, async (req, res) => {
         OPENCODE_CONFIG_DIR: tenant.configDir,
         OPENCODE_DATA_DIR: tenant.dataDir,
       };
+
     } catch (error) {
       // A failed opencode provisioning must not take codex/claude down with it.
       console.warn('[cli-subagents] opencode tenant provisioning failed:', String(error));
+    }
+  }
+  if (entries.some((entry) => entry.provider === 'pi')) {
+    try {
+      // Same provisioning a Pi session gets: per-user agent dir with providers
+      // (models.json), MCP config and extensions. PI_CODING_AGENT_DIR is how
+      // the pi CLI finds it; without it a spawned `pi -p` has no logins.
+      const piSync = await syncPiConfig(resolved.userId);
+      env.pi = {
+        ...((await buildOpenCodeProviderCredentialEnv(resolved.userId)) as Record<string, string>),
+        PI_CODING_AGENT_DIR: piSync.agentDir,
+        PI_TELEMETRY: '0',
+        PI_SKIP_VERSION_CHECK: '1',
+      };
+    } catch (error) {
+      console.warn('[cli-subagents] pi provisioning failed:', String(error));
     }
   }
 
@@ -1285,7 +1309,7 @@ router.get('/internal/cli-subagents', requireHookSecret, async (req, res) => {
 });
 
 const cliSubagentUsageSchema = z.object({
-  provider: z.enum(['codex', 'claude', 'opencode']),
+  provider: z.enum(['codex', 'claude', 'opencode', 'pi']),
   model: z.string().trim().min(1).max(120),
   inputTokens: z.number().int().min(0).default(0),
   outputTokens: z.number().int().min(0).default(0),

@@ -16,7 +16,7 @@ import { Switch } from '../ui/switch';
  * No secrets here; the spawned CLIs use their own shared logins.
  */
 
-const PROVIDERS = ['codex', 'claude', 'opencode'] as const;
+const PROVIDERS = ['codex', 'claude', 'opencode', 'pi'] as const;
 type CliProvider = (typeof PROVIDERS)[number];
 
 interface CliSubagentEntry {

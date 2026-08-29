@@ -68,7 +68,7 @@ function asText(payload, isError = false) {
 // ---------------------------------------------------------------------------
 // Configuration
 
-const KNOWN_PROVIDERS = ['codex', 'claude', 'opencode'];
+const KNOWN_PROVIDERS = ['codex', 'claude', 'opencode', 'pi'];
 
 const FALLBACK_ENTRIES = KNOWN_PROVIDERS.map((provider) => ({
   id: provider,
@@ -151,6 +151,13 @@ function buildInvocation(provider, prompt, model) {
       return {
         command: 'opencode',
         args: ['run', ...(model ? ['-m', model] : []), prompt],
+      };
+    case 'pi':
+      // --print is pi's non-interactive mode; --no-session keeps one-shot
+      // workers out of the session store. --model accepts provider/id ids.
+      return {
+        command: 'pi',
+        args: ['-p', '--no-session', ...(model ? ['--model', model] : []), prompt],
       };
     default:
       return null;
@@ -317,7 +324,7 @@ const TOOLS = [
         subagent: {
           type: 'string',
           description:
-            'Which subagent to run: a configured label or a bare provider (codex, claude, opencode). See list_subagents.',
+            'Which subagent to run: a configured label or a bare provider (codex, claude, opencode, pi). See list_subagents.',
         },
         prompt: {
           type: 'string',
