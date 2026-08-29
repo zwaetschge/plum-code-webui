@@ -7,6 +7,9 @@
  *   (codex exec --json --full-auto, claude -p --output-format json, opencode run)
  * - a codex/opencode child must NOT inherit ANTHROPIC_* router overrides,
  *   while a claude child keeps them (that's how nested GLM routing works)
+ * - a `zai` child runs the claude binary but on the Z.AI endpoint the backend
+ *   injects, never on the inherited Anthropic/router upstream, and books its
+ *   usage as provider zai — it must not fall back to Anthropic unconfigured
  * - completed runs book their token usage against the calling session once
  * - the depth guard refuses delegation from inside a delegated run
  */
@@ -89,6 +92,7 @@ function writeFakeCli(dir: string, name: string, stdout: string): string {
     '    ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN ?? null,',
     '    PLUM_SUBAGENT_DEPTH: process.env.PLUM_SUBAGENT_DEPTH ?? null,',
     '    OPENCODE_CONFIG_DIR: process.env.OPENCODE_CONFIG_DIR ?? null,',
+    '    ANTHROPIC_DEFAULT_SONNET_MODEL: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL ?? null,',
     '  },',
     '}));',
     `process.stdout.write(${JSON.stringify(stdout)});`,
@@ -108,16 +112,29 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
   const work = mkdtempSync(path.join(os.tmpdir(), 'subagents-work-'));
 
   const codexStdout = [
-    JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'codex says hi' } }),
+    JSON.stringify({
+      type: 'item.completed',
+      item: { type: 'agent_message', text: 'codex says hi' },
+    }),
     JSON.stringify({
       type: 'turn.completed',
-      usage: { input_tokens: 100, cached_input_tokens: 20, output_tokens: 30, reasoning_output_tokens: 5 },
+      usage: {
+        input_tokens: 100,
+        cached_input_tokens: 20,
+        output_tokens: 30,
+        reasoning_output_tokens: 5,
+      },
     }),
   ].join('\n');
   const claudeStdout = JSON.stringify({
     type: 'result',
     result: 'claude says hi',
-    usage: { input_tokens: 11, output_tokens: 7, cache_read_input_tokens: 2, cache_creation_input_tokens: 1 },
+    usage: {
+      input_tokens: 11,
+      output_tokens: 7,
+      cache_read_input_tokens: 2,
+      cache_creation_input_tokens: 1,
+    },
     modelUsage: { 'glm-5.3': {} },
   });
   const codexRecord = writeFakeCli(bin, 'codex', codexStdout);
@@ -142,12 +159,27 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
             data: {
               entries: [
                 { id: '1', label: 'Codex', provider: 'codex', model: '', enabled: true },
-                { id: '2', label: 'GLM', provider: 'opencode', model: 'z-ai/glm-5.3', enabled: true },
+                {
+                  id: '2',
+                  label: 'GLM',
+                  provider: 'opencode',
+                  model: 'z-ai/glm-5.3',
+                  enabled: true,
+                },
                 { id: '3', label: 'Claude', provider: 'claude', model: '', enabled: true },
+                { id: '4', label: 'Z.AI', provider: 'zai', model: '', enabled: true },
               ],
               // OpenCode auth lives in per-user tenant dirs; the bridge must
-              // forward these to opencode children only.
-              env: { opencode: { OPENCODE_CONFIG_DIR: '/tenant/config' } },
+              // forward these to opencode children only. The zai block is the
+              // user's Z.AI endpoint, which replaces the inherited upstream.
+              env: {
+                opencode: { OPENCODE_CONFIG_DIR: '/tenant/config' },
+                zai: {
+                  ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+                  ANTHROPIC_AUTH_TOKEN: 'zai-token',
+                  ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3',
+                },
+              },
             },
           })
         );
@@ -183,10 +215,10 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
     assert.equal(init.result.serverInfo.name, 'plum-subagents');
 
     const tools = await mcp.call('tools/list');
-    assert.deepEqual(
-      tools.result.tools.map((t: { name: string }) => t.name).sort(),
-      ['list_subagents', 'run_subagent']
-    );
+    assert.deepEqual(tools.result.tools.map((t: { name: string }) => t.name).sort(), [
+      'list_subagents',
+      'run_subagent',
+    ]);
 
     const listed = await mcp.call('tools/call', { name: 'list_subagents', arguments: {} });
     const listedText = toolText(listed);
@@ -249,12 +281,31 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
     assert.equal(claudeSeen.env.ANTHROPIC_BASE_URL, baseEnv.ANTHROPIC_BASE_URL);
     assert.equal(claudeSeen.env.ANTHROPIC_AUTH_TOKEN, 'router-bearer');
 
-    // Usage: codex and claude book (opencode has no usage output in v1).
+    // Z.AI: the claude binary, but pointed at the user's Z.AI endpoint instead
+    // of the inherited router — a GLM subagent stays in the Claude harness.
+    const zaiRun = await mcp.call('tools/call', {
+      name: 'run_subagent',
+      arguments: { subagent: 'Z.AI', prompt: 'glm please', working_directory: work },
+    });
+    assert.match(toolText(zaiRun), /claude says hi/);
+    const zaiSeen = JSON.parse(readFileSync(claudeRecord, 'utf8'));
+    assert.deepEqual(zaiSeen.argv, [
+      '-p',
+      '--output-format',
+      'json',
+      '--dangerously-skip-permissions',
+      'glm please',
+    ]);
+    assert.equal(zaiSeen.env.ANTHROPIC_BASE_URL, 'https://api.z.ai/api/anthropic');
+    assert.equal(zaiSeen.env.ANTHROPIC_AUTH_TOKEN, 'zai-token');
+    assert.equal(zaiSeen.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.3');
+
+    // Usage: codex, claude and zai book (opencode has no usage output in v1).
     // bookUsage is fire-and-forget, so give the posts a beat to land.
-    for (let i = 0; i < 50 && usagePosts.length < 2; i++) {
+    for (let i = 0; i < 50 && usagePosts.length < 3; i++) {
       await new Promise((r) => setTimeout(r, 100));
     }
-    assert.equal(usagePosts.length, 2);
+    assert.equal(usagePosts.length, 3);
     const codexUsage = usagePosts.find((p) => p.provider === 'codex');
     assert.deepEqual(codexUsage, {
       provider: 'codex',
@@ -274,16 +325,48 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
       cacheCreationTokens: 1,
     });
 
+    const zaiUsage = usagePosts.find((p) => p.provider === 'zai');
+    assert.deepEqual(zaiUsage, {
+      provider: 'zai',
+      model: 'glm-5.3',
+      inputTokens: 11,
+      outputTokens: 7,
+      cacheReadTokens: 2,
+      cacheCreationTokens: 1,
+    });
+
     // Unknown subagent fails with the configured labels, not a crash.
     const unknown = await mcp.call('tools/call', {
       name: 'run_subagent',
       arguments: { subagent: 'nope', prompt: 'x' },
     });
     assert.equal(unknown.result.isError, true);
-    assert.match(toolText(unknown), /Configured: Codex, GLM, Claude/);
+    assert.match(toolText(unknown), /Configured: Codex, GLM, Claude, Z.AI/);
   } finally {
     mcp.close();
     backend.close();
+  }
+
+  // Without a backend the bridge falls back to the bare providers, which has
+  // no Z.AI endpoint. Running zai then must refuse rather than quietly spend the
+  // Anthropic subscription under a GLM label.
+  // Empty rather than absent: the bridge also reads the parent process environ,
+  // so an unset secret would leak in from whatever session runs this test.
+  const unconfigured = startMcp({
+    PATH: baseEnv.PATH,
+    WEBUI_HOOK_SECRET: '',
+    WEBUI_SESSION_ID: '',
+  });
+  try {
+    await unconfigured.call('initialize', { protocolVersion: '2024-11-05' });
+    const refused = await unconfigured.call('tools/call', {
+      name: 'run_subagent',
+      arguments: { subagent: 'zai', prompt: 'glm please', working_directory: work },
+    });
+    assert.equal(refused.result.isError, true);
+    assert.match(toolText(refused), /needs a Z\.AI endpoint/);
+  } finally {
+    unconfigured.close();
   }
 
   // Depth guard: inside a delegated run, further delegation is refused before

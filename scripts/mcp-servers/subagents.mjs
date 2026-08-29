@@ -7,6 +7,12 @@
 // can spawn `codex exec`, and so on. The spawned CLIs use the shared logins
 // under ~/.codex, ~/.claude, ~/.opencode — no credentials pass through here.
 //
+// `zai` is the one provider that is not its own binary: it runs the Claude CLI
+// against the user's Z.AI endpoint, which is how the WebUI's second Claude
+// transport works. A GLM subagent therefore stays inside the Claude harness
+// instead of being handed to OpenCode. Its endpoint and token arrive as env
+// from the backend, same channel as the OpenCode tenant credentials.
+//
 // Which subagents exist (label, provider, model) is configured per WebUI user
 // in Settings → General → Subagents and fetched from the backend with the
 // hook secret. Without backend access the bare providers remain usable.
@@ -68,7 +74,23 @@ function asText(payload, isError = false) {
 // ---------------------------------------------------------------------------
 // Configuration
 
-const KNOWN_PROVIDERS = ['codex', 'claude', 'opencode', 'pi'];
+const KNOWN_PROVIDERS = ['codex', 'claude', 'opencode', 'pi', 'zai'];
+
+// Which binary a provider actually spawns. Only `zai` differs from its name.
+const PROVIDER_BINARY = { zai: 'claude' };
+const binaryFor = (provider) => PROVIDER_BINARY[provider] || provider;
+
+// Set by a Z.AI or model-router session and never valid for a child that is
+// not deliberately pointed at the same upstream.
+const CLAUDE_UPSTREAM_ENV_KEYS = [
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'API_TIMEOUT_MS',
+];
 
 const FALLBACK_ENTRIES = KNOWN_PROVIDERS.map((provider) => ({
   id: provider,
@@ -136,6 +158,7 @@ function buildInvocation(provider, prompt, model) {
         ],
       };
     case 'claude':
+    case 'zai':
       return {
         command: 'claude',
         args: [
@@ -165,12 +188,14 @@ function buildInvocation(provider, prompt, model) {
 }
 
 function buildChildEnv(provider, providerEnv) {
-  const env = {
-    ...RUNTIME_ENV,
-    ...(providerEnv?.[provider] || {}),
-    PLUM_SUBAGENT_DEPTH: String(SUBAGENT_DEPTH + 1),
-  };
-  if (provider !== 'claude') {
+  const env = { ...RUNTIME_ENV };
+
+  if (provider === 'zai') {
+    // The child must talk to Z.AI and nothing else, so whatever upstream the
+    // calling session carried is replaced wholesale rather than merged. The
+    // backend only sends this block when the user actually has Z.AI configured.
+    for (const key of CLAUDE_UPSTREAM_ENV_KEYS) delete env[key];
+  } else if (provider !== 'claude') {
     // The calling session may carry model-router overrides for the Claude
     // transport. A codex/opencode child must not inherit them: opencode's
     // anthropic provider would otherwise send its traffic through a router
@@ -179,7 +204,12 @@ function buildChildEnv(provider, providerEnv) {
     delete env.ANTHROPIC_AUTH_TOKEN;
     delete env.ANTHROPIC_API_KEY;
   }
-  return env;
+
+  return {
+    ...env,
+    ...(providerEnv?.[provider] || {}),
+    PLUM_SUBAGENT_DEPTH: String(SUBAGENT_DEPTH + 1),
+  };
 }
 
 function runChild(invocation, { cwd, env, timeoutMs }) {
@@ -317,14 +347,14 @@ const TOOLS = [
   {
     name: 'run_subagent',
     description:
-      'Delegate a task to another provider CLI as a headless one-shot subagent (e.g. Codex, Claude Code, or OpenCode with a GLM/Kimi model). The subagent runs in the given working directory with full tool access and returns its final answer. Use this instead of the built-in subagent when the task should run on a different provider or subscription.',
+      'Delegate a task to another provider CLI as a headless one-shot subagent (e.g. Codex, Claude Code, the Z.AI/GLM harness, or OpenCode). The subagent runs in the given working directory with full tool access and returns its final answer. Use this instead of the built-in subagent when the task should run on a different provider or subscription. For GLM work prefer the "zai" subagent: it is the Claude harness pointed at Z.AI, not OpenCode.',
     inputSchema: {
       type: 'object',
       properties: {
         subagent: {
           type: 'string',
           description:
-            'Which subagent to run: a configured label or a bare provider (codex, claude, opencode, pi). See list_subagents.',
+            'Which subagent to run: a configured label or a bare provider (codex, claude, zai, opencode, pi). See list_subagents.',
         },
         prompt: {
           type: 'string',
@@ -357,7 +387,7 @@ async function handleListSubagents() {
       subagent: entry.label,
       provider: entry.provider,
       model: entry.model || '(provider default)',
-      installed: cliAvailable(entry.provider),
+      installed: cliAvailable(binaryFor(entry.provider)),
     })),
     note: 'Call run_subagent with the subagent label (or bare provider name) and a self-contained prompt.',
   });
@@ -383,6 +413,15 @@ async function handleRunSubagent(args) {
   if (!entry) {
     const available = entries.map((e) => e.label).join(', ') || '(none configured)';
     return asText(`Unknown subagent "${requested}". Configured: ${available}`, true);
+  }
+
+  if (entry.provider === 'zai' && !providerEnv?.zai?.ANTHROPIC_BASE_URL) {
+    // Falling through would run the Claude CLI on the Anthropic subscription
+    // while calling itself a GLM worker. Better to say so.
+    return asText(
+      'The zai subagent needs a Z.AI endpoint. Configure it under Settings → General → Z.AI API.',
+      true
+    );
   }
 
   const model = String(args.model || '').trim() || entry.model || '';
@@ -423,11 +462,18 @@ async function handleRunSubagent(args) {
     text = parsed.text;
     usage = parsed.usage;
     usageModel = model || 'gpt-5.5';
-  } else if (entry.provider === 'claude') {
+  } else if (entry.provider === 'claude' || entry.provider === 'zai') {
     const parsed = parseClaudeJson(result.stdout);
     text = parsed.text;
     usage = parsed.usage;
-    usageModel = model || parsed.model || 'claude';
+    // An empty model still lands on GLM: the Z.AI env maps the opus/sonnet/haiku
+    // aliases. Report the mapped id so the usage row is priced as GLM instead of
+    // being attributed to Anthropic.
+    const zaiDefault =
+      providerEnv?.zai?.ANTHROPIC_DEFAULT_SONNET_MODEL ||
+      providerEnv?.zai?.ANTHROPIC_DEFAULT_OPUS_MODEL ||
+      'glm';
+    usageModel = model || parsed.model || (entry.provider === 'zai' ? zaiDefault : 'claude');
   } else {
     text = result.stdout.trim();
   }

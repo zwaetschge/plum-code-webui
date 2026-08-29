@@ -13,10 +13,12 @@ import { Switch } from '../ui/switch';
  * cross-harness delegation, as opposed to the upstream list above which swaps
  * the API endpoint underneath Claude-transport agents.
  *
- * No secrets here; the spawned CLIs use their own shared logins.
+ * No secrets here; the spawned CLIs use their own shared logins. The exception
+ * is `zai`, which runs the Claude CLI against the Z.AI endpoint configured
+ * above — the backend injects that endpoint at spawn time.
  */
 
-const PROVIDERS = ['codex', 'claude', 'opencode', 'pi'] as const;
+const PROVIDERS = ['codex', 'claude', 'zai', 'opencode', 'pi'] as const;
 type CliProvider = (typeof PROVIDERS)[number];
 
 interface CliSubagentEntry {
@@ -40,7 +42,9 @@ export function CliSubagentsSection() {
   const { data: stored } = useQuery({
     queryKey: ['cli-subagents'],
     queryFn: async () => {
-      const response = await api.get<ApiEnvelope<CliSubagentEntry[]>>('/api/settings/cli-subagents');
+      const response = await api.get<ApiEnvelope<CliSubagentEntry[]>>(
+        '/api/settings/cli-subagents'
+      );
       return response.data.data;
     },
   });
@@ -86,10 +90,15 @@ export function CliSubagentsSection() {
         <p className="mt-1 text-xs text-muted-foreground">
           Jede Session (egal ob Claude Code, Codex, OpenCode oder Pi) kann über das MCP-Tool{' '}
           <code>run_subagent</code> einen dieser CLIs als Einmal-Worker starten — z.&nbsp;B. Codex
-          delegiert an OpenCode mit <code>z-ai/glm-5.2</code>, oder Claude delegiert an Codex. Der
-          Worker arbeitet im selben Verzeichnis und nutzt das jeweilige eigene Abo/Login. Modell
-          leer lassen für den Provider-Default; OpenCode erwartet{' '}
-          <code>anbieter/modell</code>-IDs.
+          delegiert an Claude, oder Claude delegiert an Codex. Der Worker arbeitet im selben
+          Verzeichnis und nutzt das jeweilige eigene Abo/Login. Modell leer lassen für den
+          Provider-Default; OpenCode erwartet <code>anbieter/modell</code>-IDs.
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          <code>zai</code> ist kein eigenes CLI: Es startet das Claude-CLI gegen deinen
+          Z.AI-Endpunkt (dieselbe zweite Claude-Transportschicht wie eine Z.AI-Session). GLM-Worker
+          bleiben damit im Claude-Harnisch mit Skills, Agents und MCP, statt über OpenCode zu
+          laufen. Ohne konfigurierte Z.AI-API wird der Eintrag beim Start ausgeblendet.
         </p>
       </div>
 
@@ -144,12 +153,16 @@ export function CliSubagentsSection() {
           variant="outline"
           size="sm"
           onClick={() =>
-            setRows([...edited, { label: '', provider: 'opencode', model: '', enabled: true }])
+            setRows([...edited, { label: '', provider: 'zai', model: '', enabled: true }])
           }
         >
           <Plus className="mr-1 h-4 w-4" /> Subagent hinzufügen
         </Button>
-        <Button size="sm" disabled={rows === null || save.isPending} onClick={() => save.mutate(edited)}>
+        <Button
+          size="sm"
+          disabled={rows === null || save.isPending}
+          onClick={() => save.mutate(edited)}
+        >
           {save.isPending ? 'Speichern…' : 'Speichern'}
         </Button>
       </div>

@@ -1154,16 +1154,29 @@ router.get('/subagent-models', requireAuth, async (req, res) => {
  * Codex, OpenCode, Pi) delegate a task to a whole other CLI: Codex can spawn
  * `opencode run -m z-ai/glm-5.3`, Claude can spawn `codex exec`, and so on.
  *
- * No secrets live here — the spawned CLIs use their own shared logins under
- * ~/.codex, ~/.claude, ~/.opencode.
+ * The spawned CLIs use their own shared logins under ~/.codex, ~/.claude,
+ * ~/.opencode. The one exception is `zai`: it runs the *Claude* CLI against
+ * the user's Z.AI endpoint — the same second Claude transport a Z.AI session
+ * uses — so its endpoint and token are injected as env below.
  */
-export type CliSubagentProvider = 'codex' | 'claude' | 'opencode' | 'pi';
+export type CliSubagentProvider = 'codex' | 'claude' | 'opencode' | 'pi' | 'zai';
+
+const CLI_SUBAGENT_PROVIDERS = new Set<CliSubagentProvider>([
+  'codex',
+  'claude',
+  'opencode',
+  'pi',
+  'zai',
+]);
 
 export interface CliSubagentEntry {
   id: string;
   label: string;
   provider: CliSubagentProvider;
-  /** Optional model override. OpenCode expects `provider/model` ids. */
+  /**
+   * Optional model override. OpenCode expects `provider/model` ids; `zai`
+   * takes a bare GLM id and falls back to the configured opus/sonnet mapping.
+   */
   model: string;
   enabled: boolean;
 }
@@ -1173,12 +1186,15 @@ const DEFAULT_CLI_SUBAGENTS: CliSubagentEntry[] = [
   { id: 'claude', label: 'Claude', provider: 'claude', model: '', enabled: true },
   { id: 'opencode', label: 'OpenCode', provider: 'opencode', model: '', enabled: true },
   { id: 'pi', label: 'Pi', provider: 'pi', model: '', enabled: true },
+  // Dropped again by the internal route when the user has no Z.AI endpoint,
+  // so an unconfigured account never gets a GLM-labelled Anthropic worker.
+  { id: 'zai', label: 'Z.AI', provider: 'zai', model: '', enabled: true },
 ];
 
 const cliSubagentSchema = z.object({
   id: z.string().min(1).max(64).optional(),
   label: z.string().trim().min(1).max(40),
-  provider: z.enum(['codex', 'claude', 'opencode', 'pi']),
+  provider: z.enum(['codex', 'claude', 'opencode', 'pi', 'zai']),
   model: z.string().trim().max(120).optional().default(''),
   enabled: z.boolean().optional().default(true),
 });
@@ -1198,17 +1214,13 @@ export async function getCliSubagentsForUser(userId: string): Promise<CliSubagen
 
   const entries: CliSubagentEntry[] = [];
   for (const entry of raw as Array<Record<string, unknown>>) {
-    if (
-      entry.provider !== 'codex' &&
-      entry.provider !== 'claude' &&
-      entry.provider !== 'opencode' &&
-      entry.provider !== 'pi'
-    )
-      continue;
+    if (typeof entry.provider !== 'string') continue;
+    if (!CLI_SUBAGENT_PROVIDERS.has(entry.provider as CliSubagentProvider)) continue;
+    const provider = entry.provider as CliSubagentProvider;
     entries.push({
       id: String(entry.id ?? ''),
-      label: String(entry.label ?? entry.provider),
-      provider: entry.provider,
+      label: String(entry.label ?? provider),
+      provider,
       model: typeof entry.model === 'string' ? entry.model : '',
       enabled: entry.enabled !== false,
     });
@@ -1272,7 +1284,7 @@ router.get('/internal/cli-subagents', requireHookSecret, async (req, res) => {
     });
     return;
   }
-  const entries = (await getCliSubagentsForUser(resolved.userId)).filter((e) => e.enabled);
+  let entries = (await getCliSubagentsForUser(resolved.userId)).filter((e) => e.enabled);
 
   // OpenCode auth is per WebUI user: providers like z-ai only exist through
   // the generated tenant opencode.json, and API keys are injected as env —
@@ -1296,12 +1308,26 @@ router.get('/internal/cli-subagents', requireHookSecret, async (req, res) => {
         OPENCODE_CONFIG_DIR: tenant.configDir,
         OPENCODE_DATA_DIR: tenant.dataDir,
       };
-
     } catch (error) {
       // A failed opencode provisioning must not take codex/claude down with it.
       console.warn('[cli-subagents] opencode tenant provisioning failed:', String(error));
     }
   }
+  // Z.AI runs the Claude CLI against the user's Z.AI endpoint instead of the
+  // Anthropic subscription — the same transport a `zai` WebUI session uses, so
+  // GLM subagents keep the Claude harness (skills, agents, MCP, tool loop)
+  // rather than being handed to OpenCode. Without a configured endpoint the
+  // entry is dropped: a `zai` worker that silently fell back to Anthropic would
+  // bill the wrong subscription under a GLM label.
+  if (entries.some((entry) => entry.provider === 'zai')) {
+    const zaiConfig = await getZaiApiConfigForUser(resolved.userId);
+    if (zaiConfig) {
+      env.zai = buildClaudeApiEnv(zaiConfig);
+    } else {
+      entries = entries.filter((entry) => entry.provider !== 'zai');
+    }
+  }
+
   if (entries.some((entry) => entry.provider === 'pi')) {
     try {
       // Same provisioning a Pi session gets: per-user agent dir with providers
@@ -1323,7 +1349,7 @@ router.get('/internal/cli-subagents', requireHookSecret, async (req, res) => {
 });
 
 const cliSubagentUsageSchema = z.object({
-  provider: z.enum(['codex', 'claude', 'opencode', 'pi']),
+  provider: z.enum(['codex', 'claude', 'opencode', 'pi', 'zai']),
   model: z.string().trim().min(1).max(120),
   inputTokens: z.number().int().min(0).default(0),
   outputTokens: z.number().int().min(0).default(0),
