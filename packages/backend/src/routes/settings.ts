@@ -1116,8 +1116,22 @@ router.get('/subagent-models', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const groups: Array<{ group: string; models: string[] }> = [];
 
-  if (await getZaiApiConfigForUser(userId)) {
-    groups.push({ group: 'Z.AI (GLM subscription)', models: ['glm-5.3', 'glm-5.1', 'glm-4.7'] });
+  const zaiConfig = await getZaiApiConfigForUser(userId);
+  if (zaiConfig) {
+    // The same GLM ids the Z.AI harness actually runs: the user's configured
+    // opus/sonnet/haiku mappings. Only unmapped setups get a generic fallback.
+    const mapped = getClaudeApiModelLabels(zaiConfig);
+    const models = [
+      ...new Set(
+        (['opus', 'sonnet', 'haiku'] as const)
+          .map((alias) => mapped?.[alias])
+          .filter((model): model is string => Boolean(model))
+      ),
+    ];
+    groups.push({
+      group: 'Z.AI (GLM subscription)',
+      models: models.length > 0 ? models : ['glm-5.3', 'glm-5.1', 'glm-4.7'],
+    });
   }
   // The shared Kimi Code login doubles as an Anthropic-compatible upstream
   // (api.kimi.com/coding), so an existing `kimi login` is all it takes.
