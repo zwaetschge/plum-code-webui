@@ -5207,10 +5207,12 @@ html.dark .aurora-grain,
 .session-global-edge-fade-bottom {
   bottom: 0;
   height: calc(var(--chat-input-h, 112px) + 64px);
+  /* Stays a shadow at the screen edge, but no longer paints the composer's
+     backdrop opaque — the bar needs visible content behind it to look glassy. */
   background: linear-gradient(
     to top,
-    hsl(var(--background) / 0.76),
-    hsl(var(--background) / 0.36) 46%,
+    hsl(var(--background) / 0.58),
+    hsl(var(--background) / 0.2) 46%,
     transparent
   );
 }
@@ -5620,10 +5622,6 @@ html.dark .aurora-grain,
   overflow: visible;
   padding: 6px;
   border: 1px solid hsl(var(--foreground) / 0.12);
-  background:
-    linear-gradient(180deg, hsl(var(--card) / 0.68), hsl(var(--background) / 0.52)),
-    radial-gradient(circle at 18% 0%, hsl(var(--primary) / 0.14), transparent 36%),
-    radial-gradient(circle at 78% 0%, hsl(var(--accent) / 0.12), transparent 34%);
   backdrop-filter: blur(20px) saturate(150%);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
   box-shadow:
@@ -5639,6 +5637,18 @@ html.dark .aurora-grain,
 .chat-composer-form.is-task-composer {
   border-radius: 20px;
   padding: 7px;
+}
+
+/* The bar carries the glass, not the screen edge. `html.dark .glass-chrome`
+   out-specifies a single class, so without matching its specificity the dark
+   theme flattens the composer to 3% white and there is no layered surface left
+   for the backdrop blur to sit under. */
+.chat-composer-form.glass-chrome,
+html.dark .chat-composer-form.glass-chrome {
+  background:
+    linear-gradient(180deg, hsl(var(--card) / 0.62), hsl(var(--background) / 0.42)),
+    radial-gradient(circle at 18% 0%, hsl(var(--primary) / 0.16), transparent 36%),
+    radial-gradient(circle at 78% 0%, hsl(var(--accent) / 0.14), transparent 34%);
 }
 
 .chat-composer-form:focus-within {
