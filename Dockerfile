@@ -55,12 +55,15 @@ LABEL org.opencontainers.image.vendor="Plum Code WebUI"
 # (codex's Rust binary, opencode's Go binary) run on Alpine's musl libc —
 # without these, the npm postinstall hits SIGILL when verifying the binary.
 # blender-headless powers the built-in Blender MCP for background asset generation.
+# py3-numpy is not optional: Blender's io_scene_gltf2 addon imports numpy at
+# registration, and without it export_scene.gltf simply does not exist -- which
+# breaks the glTF handoff from Blender to Godot.
 # `apk upgrade` first: the base image freezes its package set at its own build
 # date, so imagemagick, libssh, openexr and python3 shipped with published CVE
 # fixes already available in the repository. The image scan gates the pipeline
 # on exactly those.
 RUN apk upgrade --no-cache && \
-    apk add --no-cache git bash docker-cli docker-cli-compose curl openssh-client unzip imagemagick gcompat libstdc++ libgcc python3 py3-pip pipx ripgrep py3-httpx jq coreutils tzdata chromium chromium-chromedriver nss freetype harfbuzz font-noto font-noto-cjk ttf-freefont xvfb blender-headless github-cli postgresql17-client
+    apk add --no-cache git bash docker-cli docker-cli-compose curl openssh-client unzip imagemagick gcompat libstdc++ libgcc python3 py3-pip py3-numpy pipx ripgrep py3-httpx jq coreutils tzdata chromium chromium-chromedriver nss freetype harfbuzz font-noto font-noto-cjk ttf-freefont xvfb blender-headless github-cli postgresql17-client
 
 # User-writable npm prefix: the `node` user must be able to upgrade the AI CLIs
 # at runtime (see services/cli-updates.ts). Mounted volume overlays this path.
@@ -76,6 +79,9 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PUPPETEER_SKIP_DOWNLOAD=1
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
 ENV BLENDER_BIN=blender-headless
+# Left empty on purpose: the official Godot build is glibc-linked and cannot run
+# on musl, so the Godot MCP falls back to the plum-godot container
+# (docker/godot/Dockerfile). Set this only for a musl-compatible binary.
 ENV GODOT_BIN=
 ENV XDG_RUNTIME_DIR=/tmp/runtime-node
 # Bake pinned fallback CLIs outside the persistent npm-global mount. Runtime

@@ -209,8 +209,29 @@ The **android-builder** MCP builds, installs, launches, and tests Android applic
 
 Zero-dependency bridges are registered in `~/.claude/settings.json` and mirrored to other providers for new sessions:
 
-- **godot** (`scripts/mcp-servers/godot.mjs`): `godot_info`, `godot_create_project`, `godot_list_project`, `godot_validate_project`, `godot_run_gdscript`, `godot_export_project`. Scaffolding and inspection work without an editor; validation, scripts, and exports require `GODOT_BIN` or `godot`/`godot4` on `PATH`.
+- **godot** (`scripts/mcp-servers/godot.mjs`): `godot_info`, `godot_create_project`, `godot_list_project`, `godot_validate_project`, `godot_run_gdscript`, `godot_export_project`, `godot_import_assets`, `godot_add_android_preset`, `godot_export_android`.
 - **blender** (`scripts/mcp-servers/blender.mjs`): `blender_info`, `blender_run_python`, `blender_create_asset`, `blender_inspect_file`, `blender_render_preview`. The image installs `blender-headless` and defaults `BLENDER_BIN=blender-headless`; supported outputs include `.blend`, `.glb`, `.gltf`, `.obj`, `.stl`, and `.fbx`.
+
+### The Godot engine container
+
+The WebUI image is Alpine/musl and the official Godot build is glibc-linked, so the engine cannot run in this container — `gcompat` is not enough. `docker/godot/Dockerfile` builds `plum-godot:latest` (Godot 4.7.2 on `eclipse-temurin:17-jdk-noble`) with export templates, the Android SDK, build-tools, `apksigner`, a debug keystore, and pre-patched editor settings for the SDK/JDK paths:
+
+```bash
+docker build -t plum-godot:latest docker/godot     # no --progress flag: legacy builder, no buildx
+```
+
+`godot.mjs` runs every engine command as a one-shot `docker run` through `docker-socket-proxy` (`docker exec` is blocked there by design). Because the sibling container's volumes are resolved by the **host** daemon, the bridge reads its own mount table with `docker inspect $(hostname)` and re-mounts each host source at the destination path we know it by, so paths are identical on both sides.
+
+- **Project paths must live under a shared bind mount** (`/mnt/user`, `/mnt/cache`, `/workspace`). `/tmp` is invisible to the engine, so `godot_run_gdscript` puts its scratch script inside the project when running in docker mode.
+- `GODOT_BIN` is intentionally empty; a local binary would be preferred if one existed. `GODOT_DOCKER_IMAGE` and `GODOT_DOCKER_DISABLED` override the fallback.
+- `godot_add_android_preset` writes `export_presets.cfg` (GUI-authored but CLI-read) **and** sets `rendering/textures/vram_compression/import_etc2_astc=true`, which the exporter hard-requires and which has no CLI flag.
+- `godot_export_android` returns the APK path. The engine container has no adb, so install through android-builder. That container mounts different host paths, so **stage the APK somewhere both see** (for example `/mnt/user/Zwischenspeicher/`). The Godot 4 launcher activity is `com.godot.game.GodotAppLauncher`.
+
+### Blender to Godot
+
+`py3-numpy` is installed in the WebUI image because Blender's `io_scene_gltf2` addon imports numpy at registration; without it `bpy.ops.export_scene.gltf` does not exist and the handoff silently has no exporter. Note that `hasattr(bpy.ops.export_scene, "gltf")` cannot detect this — `bpy.ops` namespaces resolve lazily. Probe with `"gltf" in dir(bpy.ops.export_scene)`.
+
+Export `.glb` from Blender into the Godot project (`.blend` import would need Blender reachable from the engine container, and it is not), then `godot_import_assets`. Blender is Z-up and Godot Y-up; the glTF exporter converts, so do not add a compensating rotation.
 
 Godot projects should use the `game-engines` skill and android-builder for phone verification.
 

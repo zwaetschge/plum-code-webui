@@ -291,8 +291,10 @@ New Android env: none; the app degrades gracefully when server features are unco
 ### `godot`
 
 - Script: `scripts/mcp-servers/godot.mjs`.
-- Tools: `godot_info`, `godot_create_project`, `godot_list_project`, `godot_validate_project`, `godot_run_gdscript`, `godot_export_project`.
-- Scaffolding/inspection need no binary; validation, editor scripts, and export require `GODOT_BIN` or `godot`/`godot4` on `PATH`.
+- Tools: `godot_info`, `godot_create_project`, `godot_list_project`, `godot_validate_project`, `godot_run_gdscript`, `godot_export_project`, `godot_import_assets`, `godot_add_android_preset`, `godot_export_android`.
+- The engine runs in `plum-godot:latest` (`docker build -t plum-godot:latest docker/godot`), not in this container: the WebUI image is musl and the official Godot build is glibc. Commands go out as one-shot `docker run` through the socket proxy; `docker exec` is blocked.
+- Project paths must sit under a shared bind mount (`/mnt/user`, `/mnt/cache`, `/workspace`); `/tmp` is not visible to the engine.
+- Android: `godot_add_android_preset` also sets the mandatory `import_etc2_astc` project setting. `godot_export_android` returns the APK path; install it with android-builder after staging it where that container can see it, and launch `com.godot.game.GodotAppLauncher`.
 - Use `game-engines` (legacy `game-engine-godot`) for scene/resource/input/export architecture and `android-builder` for Android verification.
 
 ### `blender`
