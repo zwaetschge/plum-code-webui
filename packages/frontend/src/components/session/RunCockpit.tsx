@@ -233,6 +233,37 @@ export function RunCockpit({
     refetchInterval: isLive ? 4000 : 10000,
   });
 
+  // Which whole CLIs this session may hand work to through the `subagents` MCP
+  // tool. Independent of the provider running the session and of the Claude
+  // model router, so it is listed for every harness — otherwise a configured
+  // target (pi, say) is invisible until it happens to be running.
+  const { data: cliSubagents = [] } = useQuery({
+    queryKey: ['cli-subagents'],
+    queryFn: async () => {
+      try {
+        const response = await api.get<
+          ApiResponse<Array<{ label: string; provider: string; enabled: boolean }>>
+        >('/api/settings/cli-subagents');
+        return response.data.data ?? [];
+      } catch {
+        return [];
+      }
+    },
+    staleTime: 60_000,
+  });
+
+  const delegationTargets = useMemo(
+    () => [
+      ...new Set(
+        cliSubagents
+          .filter((entry) => entry.enabled)
+          .map((entry) => entry.provider)
+          .filter(Boolean)
+      ),
+    ],
+    [cliSubagents]
+  );
+
   const changedFiles = useMemo(() => {
     if (!gitStatus) return [];
     return Array.from(
@@ -440,7 +471,18 @@ export function RunCockpit({
         <Section title="Subagents" icon={<Brain className="h-3.5 w-3.5" />}>
           {agents.length === 0 ? (
             <div className="rounded-md border border-border/45 bg-foreground/[0.02] px-3 py-2 text-xs text-muted-foreground">
-              Empty
+              {delegationTargets.length > 0 ? (
+                <>
+                  <span>Keiner läuft. Delegierbar per </span>
+                  <code className="text-[11px]">run_subagent</code>
+                  <span>:</span>
+                  <span className="mt-1 block font-medium text-foreground/80">
+                    {delegationTargets.join(' · ')}
+                  </span>
+                </>
+              ) : (
+                'Empty'
+              )}
             </div>
           ) : (
             <div className="space-y-2">
