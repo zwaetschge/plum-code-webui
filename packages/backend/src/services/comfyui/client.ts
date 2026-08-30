@@ -52,6 +52,36 @@ export class ComfyUIError extends Error {
   }
 }
 
+/**
+ * Turn ComfyUI's node_errors blob into one line. Model files get moved and
+ * renamed on the ComfyUI side without warning, and `value_not_in_list` on a
+ * checkpoint/LoRA field is by far the most common way a workflow that shipped
+ * working stops working; naming the node and the value makes that a one-look fix.
+ */
+function summarizePromptRejection(body: string): string {
+  if (!body) return '';
+  try {
+    const parsed = JSON.parse(body) as {
+      error?: { message?: string };
+      node_errors?: Record<
+        string,
+        { class_type?: string; errors?: Array<{ message?: string; details?: string }> }
+      >;
+    };
+    const parts: string[] = [];
+    for (const [nodeId, node] of Object.entries(parsed.node_errors || {})) {
+      for (const err of node.errors || []) {
+        const what = [err.message, err.details].filter(Boolean).join(' - ');
+        parts.push(`node ${nodeId} (${node.class_type || 'unknown'}) ${what}`);
+      }
+    }
+    if (parts.length) return parts.slice(0, 3).join('; ');
+    return parsed.error?.message || '';
+  } catch {
+    return body.slice(0, 200);
+  }
+}
+
 export class ComfyUIClient {
   constructor(private readonly baseUrl: string) {
     // Strip trailing slash so URL building is consistent.
@@ -73,8 +103,12 @@ export class ComfyUIClient {
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
+      // A bare "rejected (400)" costs whoever sees it a round trip to ComfyUI's
+      // own log. The interesting part -- which node, which field, which value --
+      // is already in the body, so lift it into the message.
+      const reason = summarizePromptRejection(text);
       throw new ComfyUIError(
-        `ComfyUI /prompt rejected (${resp.status})`,
+        `ComfyUI /prompt rejected (${resp.status})${reason ? `: ${reason}` : ''}`,
         resp.status,
         text.slice(0, 1000)
       );

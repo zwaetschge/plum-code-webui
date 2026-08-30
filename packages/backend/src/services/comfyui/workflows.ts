@@ -382,7 +382,7 @@ const FLUX2_KLEIN_T2I_TEMPLATE: Workflow = {
   },
   '129': {
     inputs: {
-      lora_name: 'f2k/9b/concept/klein_9B_Turbo_r128.safetensors',
+      lora_name: 'f2k/concept/klein_9B_Turbo_r128.safetensors',
       strength_model: 1,
       model: ['100', 0],
     },
@@ -479,7 +479,7 @@ const FLUX2_KLEIN_EDIT_TEMPLATE: Workflow = {
   },
   '15': {
     inputs: {
-      lora_name: 'f2k/9b/concept/klein_9B_Turbo_r128.safetensors',
+      lora_name: 'f2k/concept/klein_9B_Turbo_r128.safetensors',
       strength_model: 1,
       model: ['12', 0],
     },
@@ -942,7 +942,7 @@ const F2K_EDIT_TEMPLATE: Workflow = {
   },
   '15': {
     inputs: {
-      lora_name: 'f2k/9b/concept/klein_9B_Turbo_r128.safetensors',
+      lora_name: 'f2k/concept/klein_9B_Turbo_r128.safetensors',
       strength_model: 1,
       model: ['12', 0],
     },
@@ -1112,7 +1112,7 @@ const F2K_INPAINT_TEMPLATE: Workflow = {
   },
   '15': {
     inputs: {
-      lora_name: 'f2k/9b/concept/klein_9B_Turbo_r128.safetensors',
+      lora_name: 'f2k/concept/klein_9B_Turbo_r128.safetensors',
       strength_model: 1,
       model: ['12', 0],
     },
