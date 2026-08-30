@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -175,6 +176,9 @@ const EMPTY_AGENT_RUNS: SubagentRun[] = [];
 const IDLE_ACTIVITY: ActivityState = { type: 'idle' };
 type WorkspaceSheetPanel = Exclude<DockablePanel, 'files' | 'tools'>;
 type MobileSheetPanel = WorkspaceSheetPanel | 'settings';
+const CLI_SUBAGENT_OFF = '__off__';
+const CLI_SUBAGENT_DEFAULT_MODEL = '__default__';
+
 interface CliSubagentSummary {
   id: string;
   label: string;
@@ -2262,7 +2266,7 @@ export function SessionPage() {
     staleTime: 60_000,
   });
 
-  const cliSubagentToggleMutation = useMutation({
+  const cliSubagentsSaveMutation = useMutation({
     mutationFn: async (next: CliSubagentSummary[]) => {
       const response = await api.put<ApiResponse<CliSubagentSummary[]>>(
         '/api/settings/cli-subagents',
@@ -2285,16 +2289,24 @@ export function SessionPage() {
     },
   });
 
-  const toggleCliSubagent = useCallback(
-    (entryId: string) => {
-      if (cliSubagentToggleMutation.isPending) return;
-      cliSubagentToggleMutation.mutate(
-        cliSubagents.map((entry) =>
-          entry.id === entryId ? { ...entry, enabled: !entry.enabled } : entry
-        )
+  /**
+   * One control per delegable CLI: off, provider default, or a specific model.
+   * A worker's model is worth choosing per task -- pi alone routes a couple of
+   * dozen -- so the pick belongs next to the switch, not only in Settings.
+   */
+  const applyCliSubagentChoice = useCallback(
+    (entryId: string, choice: string) => {
+      if (cliSubagentsSaveMutation.isPending) return;
+      cliSubagentsSaveMutation.mutate(
+        cliSubagents.map((entry) => {
+          if (entry.id !== entryId) return entry;
+          if (choice === CLI_SUBAGENT_OFF) return { ...entry, enabled: false };
+          if (choice === CLI_SUBAGENT_DEFAULT_MODEL) return { ...entry, enabled: true, model: '' };
+          return { ...entry, enabled: true, model: choice };
+        })
       );
     },
-    [cliSubagents, cliSubagentToggleMutation]
+    [cliSubagents, cliSubagentsSaveMutation]
   );
 
   const sessionReasoningMutation = useMutation({
@@ -3747,6 +3759,52 @@ export function SessionPage() {
     </label>
   );
 
+  const renderCliSubagentField = (entry: CliSubagentSummary) => {
+    // The worker runs the provider's own CLI, so its model catalogue is exactly
+    // the one that provider offers a session -- pi's is the long one.
+    const providerInfo = cliProviders?.find((provider) => provider.id === entry.provider);
+    const models = providerInfo?.models ?? [];
+    const labels = providerInfo?.modelLabels ?? {};
+    const providerDefault = providerInfo?.defaultModel;
+    const selected = !entry.enabled ? CLI_SUBAGENT_OFF : entry.model || CLI_SUBAGENT_DEFAULT_MODEL;
+    const displayValue = !entry.enabled
+      ? 'Aus'
+      : entry.model
+        ? labels[entry.model] || entry.model
+        : `Default${providerDefault ? ` · ${labels[providerDefault] || providerDefault}` : ''}`;
+
+    return renderRuntimeField({
+      id: `cli-subagent-${entry.id || entry.provider}`,
+      label: entry.label || entry.provider,
+      value: displayValue,
+      icon: <Network className="h-3.5 w-3.5" />,
+      children: (
+        <select
+          id={`cli-subagent-${entry.id || entry.provider}`}
+          className="session-runtime-select"
+          value={selected}
+          onChange={(event) => applyCliSubagentChoice(entry.id, event.target.value)}
+          aria-label={`Subagent ${entry.label || entry.provider}`}
+          disabled={cliSubagentsSaveMutation.isPending}
+        >
+          <option value={CLI_SUBAGENT_OFF}>Aus (nicht delegierbar)</option>
+          <option value={CLI_SUBAGENT_DEFAULT_MODEL}>
+            Default
+            {providerDefault ? ` (${labels[providerDefault] || providerDefault})` : ''}
+          </option>
+          {models.map((model) => (
+            <option key={`${entry.id}-${model}`} value={model}>
+              {labels[model] || model}
+            </option>
+          ))}
+          {entry.model && !models.includes(entry.model) && (
+            <option value={entry.model}>{entry.model}</option>
+          )}
+        </select>
+      ),
+    });
+  };
+
   const renderSessionRuntimeControls = (variant: 'sidebar' | 'mobile' = 'sidebar') => {
     const fieldId = (name: string) => `session-runtime-${variant}-${name}`;
     const activeMode =
@@ -5075,19 +5133,14 @@ export function SessionPage() {
                       Keine CLI-Subagenten konfiguriert. Einstellungen &rarr; Subagenten.
                     </p>
                   ) : (
-                    cliSubagents.map((entry) =>
-                      renderSideMenuItem({
-                        id: `cli-subagent-${entry.id || entry.provider}`,
-                        label: entry.label || entry.provider,
-                        icon: <Network className="h-3.5 w-3.5" />,
-                        onClick: () => toggleCliSubagent(entry.id),
-                        active: entry.enabled,
-                        disabled: cliSubagentToggleMutation.isPending,
-                        title: entry.enabled
-                          ? `${entry.label} ist per run_subagent delegierbar - klicken zum Deaktivieren`
-                          : `${entry.label} aktivieren, damit run_subagent daran delegieren darf`,
-                        nested: true,
-                      })
+                    !rightDockCollapsed && (
+                      <div className="session-runtime-controls">
+                        {cliSubagents.map((entry) => (
+                          <Fragment key={entry.id || entry.provider}>
+                            {renderCliSubagentField(entry)}
+                          </Fragment>
+                        ))}
+                      </div>
                     )
                   )}
                 </>
