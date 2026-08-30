@@ -90,6 +90,18 @@ const COMMON_PROPS = {
   },
 };
 
+// Both `input_image` and `mask` pass the backend's ownership gate, which exists
+// so ComfyUI cannot be turned into a file-exfiltration relay. The gate accepts
+// exactly two roots, and naming them here saves the agent a failed call.
+const IMAGE_PATH_PROP = {
+  type: 'string',
+  description:
+    "Absolute path under this session's workspace `.claude-webui-attachments/` (or `.claude-webui-images/`), " +
+    'or an owned Plum-generated image path/URL (`/generated/<uuid>.png`). Any other path is rejected — ' +
+    'copy the file into `.claude-webui-attachments/` first. PNG/JPEG/WebP/GIF up to 25 MB.',
+  minLength: 1,
+};
+
 const TOOLS = [
   {
     name: 'generate_image',
@@ -128,11 +140,49 @@ const TOOLS = [
       required: ['prompt', 'input_image'],
       properties: {
         ...COMMON_PROPS,
-        input_image: {
-          type: 'string',
+        input_image: IMAGE_PATH_PROP,
+      },
+    },
+  },
+  {
+    name: 'inpaint_image',
+    description: [
+      'Masked edit: repaint ONLY the white area of `mask` and leave every other pixel bit-identical.',
+      'This is the tool for surgical work — remove an object, replace a background, change one garment —',
+      'because `edit_image` re-renders the whole frame and silently shifts everything else.',
+      'Build the mask yourself with ImageMagick (same size as the source, white = repaint, black = keep),',
+      'write it next to the source under .claude-webui-attachments/, then pass both paths here.',
+      'After this tool returns, paste the `display_markdown` field into your reply.',
+    ].join(' '),
+    inputSchema: {
+      type: 'object',
+      required: ['prompt', 'input_image', 'mask'],
+      properties: {
+        ...COMMON_PROPS,
+        input_image: IMAGE_PATH_PROP,
+        mask: {
+          ...IMAGE_PATH_PROP,
           description:
-            'Reference image from this session: an absolute path under .claude-webui-attachments/. Owned Plum-generated image paths are also accepted. Arbitrary local paths and unowned ComfyUI filenames are rejected. PNG/JPEG/WebP/GIF up to 25 MB.',
-          minLength: 1,
+            'Greyscale mask, same pixel dimensions as `input_image`: white = repaint, black = keep. ' +
+            IMAGE_PATH_PROP.description,
+        },
+        mask_blend_pixels: {
+          type: 'number',
+          description:
+            'Feather width of the seam in pixels (default 32). Raise it when the transition shows, lower it for hard edges like text.',
+          minimum: 0,
+          maximum: 256,
+        },
+        mask_expand_pixels: {
+          type: 'number',
+          description:
+            'Grow the mask outward before repainting (default 0). Use 4-16 when a hard ImageMagick threshold sits exactly on the object edge and leaves a halo.',
+          minimum: 0,
+          maximum: 512,
+        },
+        mask_invert: {
+          type: 'boolean',
+          description: 'Repaint the black area instead of the white one.',
         },
       },
     },
@@ -143,6 +193,7 @@ const WORKFLOW_BY_TOOL = {
   generate_image: 'krea2-t2i',
   generate_image_quality: 'flux2-klein-t2i',
   edit_image: 'f2k-edit',
+  inpaint_image: 'f2k-inpaint',
 };
 
 // Discovery + guidance tools, following the official Comfy MCP conventions
@@ -179,6 +230,20 @@ const PROMPTING_GUIDE = [
   '## edit_image — Flux.2 Klein image-to-image (ReferenceLatent)',
   '- `input_image` is required; the prompt describes the desired RESULT, not the change delta.',
   '- Keep the prompt aligned with what should stay: unmentioned traits may drift.',
+  '- It re-renders the WHOLE frame. Nothing is preserved exactly, not even untouched regions,',
+  '  and the canvas may be resized by a few pixels. For a targeted change use `inpaint_image`.',
+  '',
+  '## inpaint_image — masked crop & stitch (surgical edits)',
+  '- Everything outside the mask is copied from the source, so the change is auditable:',
+  '  `magick compare -metric AE source result null:` should report only the masked pixels.',
+  '- The prompt describes what belongs INSIDE the mask, plus enough context to blend',
+  '  ("weathered brick wall, same afternoon light"), not the edit instruction.',
+  '- Build the mask with ImageMagick, e.g. a region: ',
+  '  `magick -size WxH xc:black -fill white -draw "roundrectangle x1,y1 x2,y2 12,12" mask.png`,',
+  '  or from colour: `magick src.png -fuzz 18% -fill white -opaque "#3a5f2b" -fill black +opaque white mask.png`.',
+  '- Blur the mask (`-blur 0x8`) OR raise `mask_blend_pixels`; doing both over-softens the seam.',
+  '- If a thin halo of the old content survives, raise `mask_expand_pixels` to 8-16.',
+  '- Very small masks still render at working resolution, so a 60px mask is fine.',
   '',
   '## General',
   '- megapixel "0.5" for chat previews, "1.0"–"2.0" for final quality.',
@@ -257,6 +322,12 @@ async function runTool(name, args) {
   if (typeof args?.cfg === 'number') params.cfg = args.cfg;
   if (args?.sampler_name) params.sampler_name = args.sampler_name;
   if (args?.input_image) params.input_image = args.input_image;
+  if (args?.mask) params.mask = args.mask;
+  if (typeof args?.mask_blend_pixels === 'number')
+    params.mask_blend_pixels = args.mask_blend_pixels;
+  if (typeof args?.mask_expand_pixels === 'number')
+    params.mask_expand_pixels = args.mask_expand_pixels;
+  if (typeof args?.mask_invert === 'boolean') params.mask_invert = args.mask_invert;
   log('submit', { tool: name, workflow, prompt: prompt.slice(0, 80) });
 
   const data = await callBackend(workflow, params);

@@ -277,19 +277,42 @@ class ComfyUIOrchestrator {
     // Keyed off the workflow's own declaration rather than a hard-coded id:
     // naming one edit workflow here meant the next one silently skipped the
     // ownership check on the uploaded image.
-    if (!WORKFLOWS[workflowId].requiresInputImage) return params;
-    const value = params.input_image;
-    if (!value) return params;
+    const meta = WORKFLOWS[workflowId];
+    let resolved = params;
+    if (meta.requiresInputImage && params.input_image) {
+      resolved = {
+        ...resolved,
+        input_image: await this.materializeImage(client, userId, params.input_image, 'input image'),
+      };
+    }
+    // The mask travels the same road as the image: same ownership gate, same
+    // upload. A mask ComfyUI cannot find is worse than a missing image — the
+    // graph still runs and repaints the wrong region.
+    if (meta.requiresMask && params.mask) {
+      resolved = {
+        ...resolved,
+        mask: await this.materializeImage(client, userId, params.mask, 'mask image'),
+      };
+    }
+    return resolved;
+  }
 
+  /** Resolve one owned filename-or-path into a filename inside ComfyUI's `/input/`. */
+  private async materializeImage(
+    client: ComfyUIClient,
+    userId: string,
+    value: string,
+    label: string
+  ): Promise<string> {
     // Pure filenames are accepted only when this user uploaded the image via
     // Plum's authenticated upload endpoint during the current process life.
     if (!value.includes('/') && !value.includes('\\')) {
       const upload = this.uploadedInputs.get(value);
       if (!upload || upload.userId !== userId || upload.expiresAt < Date.now()) {
         this.uploadedInputs.delete(value);
-        throw new Error('input image is not owned by this user or has expired');
+        throw new Error(`${label} is not owned by this user or has expired`);
       }
-      return params;
+      return value;
     }
 
     // Paths may reference only this user's session attachments or a generated
@@ -307,19 +330,19 @@ class ComfyUIOrchestrator {
       abs = await realpath(candidate);
       info = await stat(abs);
     } catch {
-      throw new Error('input image does not exist');
+      throw new Error(`${label} does not exist`);
     }
     if (!info.isFile()) {
-      throw new Error('input image is not a file');
+      throw new Error(`${label} is not a file`);
     }
-    if (info.size > MAX_INPUT_IMAGE_BYTES) throw new Error('input image exceeds 25 MB');
+    if (info.size > MAX_INPUT_IMAGE_BYTES) throw new Error(`${label} exceeds 25 MB`);
     if (!(await this.isOwnedInputPath(abs, userId))) {
-      throw new Error('input image path is outside owned attachments or generated images');
+      throw new Error(`${label} path is outside owned attachments or generated images`);
     }
 
     const bytes = await readFile(abs);
     const mime = detectImageMime(bytes);
-    if (!mime) throw new Error('input file is not a supported image');
+    if (!mime) throw new Error(`${label} is not a supported image file`);
     const extension =
       mime === 'image/jpeg'
         ? '.jpg'
@@ -332,8 +355,8 @@ class ComfyUIOrchestrator {
       contentType: mime,
       overwrite: false,
     });
-    console.log(`[comfyui] uploaded owned input image → ComfyUI /input/${uploaded.name}`);
-    return { ...params, input_image: uploaded.name };
+    console.log(`[comfyui] uploaded owned ${label} → ComfyUI /input/${uploaded.name}`);
+    return uploaded.name;
   }
 
   private async isOwnedInputPath(filePath: string, userId: string): Promise<boolean> {
@@ -491,6 +514,7 @@ function extractSeed(
     case 'krea2-t2i':
       return workflow['30:3']?.inputs?.seed;
     case 'f2k-edit':
+    case 'f2k-inpaint':
       return workflow['7']?.inputs?.seed;
   }
 }

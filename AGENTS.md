@@ -215,7 +215,7 @@ Claude-backed MCP servers are registered under `mcpServers` in `config/claude/se
 | --- | --- | --- | --- | --- |
 | Codex `$imagegen` | `$imagegen ...` or natural image hint | gpt-image-2 | Codex plan limits | ad-hoc single images |
 | `openai-image.sh` | `bash /app/scripts/openai-image.sh ...` | gpt-image-2/1 | OpenAI API | reproducible batches and fixed filenames |
-| ComfyUI MCP tools | `generate_image` / `_quality` / `edit_image` | Z-Image / Flux.2 Klein | local GPU | offline batches and style control |
+| ComfyUI MCP tools | `generate_image` / `_quality` / `edit_image` / `inpaint_image` | Z-Image / Flux.2 Klein | local GPU | offline batches, style control, masked edits |
 
 - `/app/scripts/openai-image.sh` uses `curl + jq + base64`; `generate` and `edit` accept `--prompt`, `--output`, `--model`, `--size`, `--quality`, `--n`, and `--background`.
 - `buildIntegrationEnv()` exports `OPENAI_API_KEY` from `app_config.openai_api_key`, then process env. The script refuses to run without it.
@@ -229,7 +229,9 @@ The WebUI talks directly to ComfyUI without a LoRA Tester sidecar. Workflows/set
 - `generate_image`: Z-Image Turbo, about 5s/image, 9 steps, `dpmpp_2m_sde`, qwen3_4b CLIP.
 - `generate_image_quality`: Flux.2 Klein 9B, Turbo LoRA, TeaCache, 8 steps, `euler`, `SamplerCustomAdvanced`.
 - `edit_image`: Flux.2 Klein with ReferenceLatent. Accept only current-user session attachments such as `.claude-webui-attachments/` or owned generated images. `materializeInputImage()` validates ownership, real path, image type, and 25 MB limit. Bare ComfyUI filenames work only for that user’s Plum upload during the current process lifetime; arbitrary host paths fail closed.
-- Common overrides: `prompt`, `negative_prompt`, `seed`, `steps`, `cfg`, `sampler_name`, `aspect_ratio`, `megapixel`; edit-only: `input_image`; REST-only: `unet`, `clip`, `vae`, `lora_name`, `lora_strength`, `teacache_threshold`, `filename_prefix`.
+- `inpaint_image`: Flux.2 Klein through `InpaintCropImproved` → KSampler → `InpaintStitchImproved`. Repaints only the white area of `mask`; everything beyond mask plus `mask_blend_pixels` feather is copied from the source unchanged, and the output keeps the source resolution. `mask` passes the same ownership gate as `input_image`. Use it instead of `edit_image` whenever the rest of the frame must survive — `edit_image` re-renders everything and may resize the canvas by a few pixels.
+- Masked workflow: build the mask with the container's ImageMagick (`magick -size WxH xc:black -fill white -draw ...`), write it under `.claude-webui-attachments/`, inpaint, then verify the edge with `magick compare`. That closes the loop between deterministic editing and generative fill.
+- Common overrides: `prompt`, `negative_prompt`, `seed`, `steps`, `cfg`, `sampler_name`, `aspect_ratio`, `megapixel`; edit-only: `input_image`; inpaint-only: `mask`, `mask_blend_pixels`, `mask_expand_pixels`, `mask_invert`; REST-only: `unet`, `clip`, `vae`, `lora_name`, `lora_strength`, `teacache_threshold`, `filename_prefix`.
 - MCP inherits `WEBUI_HOOK_SECRET` and `WEBUI_SESSION_ID`, sending `X-Webui-Hook-Secret` and `X-Webui-Session-Id`; session ID identifies the analytics user.
 - URL: `app_config.comfyui_url` → `$COMFYUI_URL` → `http://192.168.1.23:8188`. Settings → Integrations tests `/system_stats`; the orchestrator rereads settings per job.
 - PNG output: `data/generated/<uuid>.png`, served as `/generated/<uuid>.png` behind passport auth. MCP returns `display_markdown` as `![alt](/generated/<uuid>.png)`.

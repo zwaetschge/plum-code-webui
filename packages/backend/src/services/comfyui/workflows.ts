@@ -19,7 +19,8 @@ export type WorkflowId =
   | 'flux2-klein-t2i'
   | 'flux2-klein-edit'
   | 'krea2-t2i'
-  | 'f2k-edit';
+  | 'f2k-edit'
+  | 'f2k-inpaint';
 
 export const VALID_ASPECTS = [
   '1:1 (Perfect Square)',
@@ -60,6 +61,15 @@ export interface WorkflowParams {
   teacache_threshold?: number;
   // Image-edit workflow only — filename already uploaded to ComfyUI's `/input/`.
   input_image?: string;
+  // Inpaint workflow only — greyscale mask, same filename rules as `input_image`.
+  // White = repaint, black = keep. Resolved through the same ownership check.
+  mask?: string;
+  // Mask shaping, applied before the crop. `blend` feathers the seam, `expand`
+  // grows the mask outward (useful when a hard ImageMagick threshold sits
+  // exactly on the object edge and would otherwise leave a halo).
+  mask_blend_pixels?: number;
+  mask_expand_pixels?: number;
+  mask_invert?: boolean;
   // Output prefix for ComfyUI's SaveImage node.
   filename_prefix?: string;
 }
@@ -73,6 +83,7 @@ interface WorkflowMeta {
     Pick<WorkflowParams, 'steps' | 'cfg' | 'megapixel' | 'aspect_ratio' | 'sampler_name'>
   > & { scheduler?: string };
   requiresInputImage: boolean;
+  requiresMask?: boolean;
 }
 
 export const WORKFLOWS: Record<WorkflowId, WorkflowMeta> = {
@@ -155,6 +166,28 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowMeta> = {
       scheduler: 'simple',
     },
     requiresInputImage: true,
+  },
+  'f2k-inpaint': {
+    id: 'f2k-inpaint',
+    title: 'Flux.2 Klein (masked inpaint, crop & stitch)',
+    description:
+      'Masked edit via Flux.2 Klein 9B + Turbo LoRA. Crops the masked region at ' +
+      'working resolution, repaints only there, and stitches it back, so every ' +
+      'pixel outside the mask survives bit-identical — unlike `f2k-edit`, which ' +
+      're-renders the whole frame. Needs `input_image` and `mask` ' +
+      '(white = repaint). Output keeps the source resolution; `megapixel` and ' +
+      '`aspect_ratio` are ignored.',
+    kind: 'edit',
+    defaults: {
+      steps: 8,
+      cfg: 1,
+      megapixel: '2.0',
+      aspect_ratio: '1:1 (Perfect Square)',
+      sampler_name: 'euler',
+      scheduler: 'simple',
+    },
+    requiresInputImage: true,
+    requiresMask: true,
   },
 };
 
@@ -969,12 +1002,237 @@ const F2K_EDIT_TEMPLATE: Workflow = {
   },
 };
 
+// Masked inpaint. Same model stack as F2K_EDIT_TEMPLATE, but the diffusion path
+// runs on a crop around the mask instead of the whole frame:
+//   10 LoadImage ─┐
+//   20 LoadImageMask ─┴→ 21 InpaintCropImproved → (stitcher, crop, cropped mask)
+//                                 crop → VAEEncode → ReferenceLatent → KSampler
+//                                 → VAEDecode → 22 InpaintStitchImproved(stitcher)
+// The stitcher replays the recorded geometry, so pixels outside the (feathered)
+// mask come straight from the source. No ImageScaleToTotalPixels here — the
+// output must keep the source resolution, which is the whole point.
+const F2K_INPAINT_TEMPLATE: Workflow = {
+  '1': {
+    inputs: {
+      vae_name: 'flux2-vae.safetensors',
+    },
+    class_type: 'VAELoader',
+    _meta: {
+      title: 'Load VAE',
+    },
+  },
+  '2': {
+    inputs: {
+      text: 'a photograph',
+      clip: ['4', 0],
+    },
+    class_type: 'CLIPTextEncode',
+    _meta: {
+      title: 'CLIP Text Encode (Positive Prompt)',
+    },
+  },
+  '3': {
+    inputs: {
+      text: '',
+      clip: ['4', 0],
+    },
+    class_type: 'CLIPTextEncode',
+    _meta: {
+      title: 'CLIP Text Encode (Negative - unused at CFG 1)',
+    },
+  },
+  '4': {
+    inputs: {
+      clip_name: 'qwen_3_8b_fp8mixed.safetensors',
+      type: 'flux2',
+      device: 'default',
+    },
+    class_type: 'CLIPLoader',
+    _meta: {
+      title: 'Load CLIP',
+    },
+  },
+  '7': {
+    inputs: {
+      seed: 310778855344884,
+      steps: 8,
+      cfg: 1,
+      sampler_name: 'euler',
+      scheduler: 'simple',
+      denoise: 1,
+      model: ['15', 0],
+      positive: ['9:77', 0],
+      negative: ['9:76', 0],
+      latent_image: ['8', 0],
+    },
+    class_type: 'KSampler',
+    _meta: {
+      title: 'KSampler',
+    },
+  },
+  '8': {
+    inputs: {
+      width: ['16', 0],
+      height: ['16', 1],
+      batch_size: 1,
+    },
+    class_type: 'EmptyFlux2LatentImage',
+    _meta: {
+      title: 'Empty Flux 2 Latent',
+    },
+  },
+  '10': {
+    inputs: {
+      image: 'input.png',
+    },
+    class_type: 'LoadImage',
+    _meta: {
+      title: 'Load Image',
+    },
+  },
+  '11': {
+    inputs: {
+      filename_prefix: 'ComfyUI',
+      images: ['22', 0],
+    },
+    class_type: 'SaveImage',
+    _meta: {
+      title: 'Save Image',
+    },
+  },
+  '12': {
+    inputs: {
+      unet_name: 'flux-2-klein-base-9b.safetensors',
+      weight_dtype: 'default',
+    },
+    class_type: 'UNETLoader',
+    _meta: {
+      title: 'Load Diffusion Model',
+    },
+  },
+  '15': {
+    inputs: {
+      lora_name: 'f2k/9b/concept/klein_9B_Turbo_r128.safetensors',
+      strength_model: 1,
+      model: ['12', 0],
+    },
+    class_type: 'LoraLoaderModelOnly',
+    _meta: {
+      title: 'Turbo LoRA (fest)',
+    },
+  },
+  '16': {
+    inputs: {
+      image: ['21', 1],
+    },
+    class_type: 'GetImageSize',
+    _meta: {
+      title: 'Get Image Size (of crop)',
+    },
+  },
+  '20': {
+    inputs: {
+      image: 'mask.png',
+      channel: 'red',
+    },
+    class_type: 'LoadImageMask',
+    _meta: {
+      title: 'Load Mask',
+    },
+  },
+  '21': {
+    inputs: {
+      image: ['10', 0],
+      mask: ['20', 0],
+      downscale_algorithm: 'bilinear',
+      upscale_algorithm: 'bicubic',
+      preresize: false,
+      preresize_mode: 'ensure minimum resolution',
+      preresize_min_width: 1024,
+      preresize_min_height: 1024,
+      preresize_max_width: 16384,
+      preresize_max_height: 16384,
+      mask_fill_holes: true,
+      mask_expand_pixels: 0,
+      mask_invert: false,
+      mask_blend_pixels: 32,
+      mask_hipass_filter: 0.1,
+      extend_for_outpainting: false,
+      extend_up_factor: 1,
+      extend_down_factor: 1,
+      extend_left_factor: 1,
+      extend_right_factor: 1,
+      context_from_mask_extend_factor: 1.2,
+      output_resize_to_target_size: true,
+      output_target_width: 1024,
+      output_target_height: 1024,
+      output_padding: '32',
+      device_mode: 'gpu (much faster)',
+    },
+    class_type: 'InpaintCropImproved',
+    _meta: {
+      title: 'Inpaint Crop',
+    },
+  },
+  '22': {
+    inputs: {
+      stitcher: ['21', 0],
+      inpainted_image: ['79', 0],
+    },
+    class_type: 'InpaintStitchImproved',
+    _meta: {
+      title: 'Inpaint Stitch',
+    },
+  },
+  '79': {
+    inputs: {
+      samples: ['7', 0],
+      vae: ['1', 0],
+    },
+    class_type: 'VAEDecode',
+    _meta: {
+      title: 'VAE Decode',
+    },
+  },
+  '9:78': {
+    inputs: {
+      pixels: ['21', 1],
+      vae: ['1', 0],
+    },
+    class_type: 'VAEEncode',
+    _meta: {
+      title: 'VAE Encode',
+    },
+  },
+  '9:77': {
+    inputs: {
+      conditioning: ['2', 0],
+      latent: ['9:78', 0],
+    },
+    class_type: 'ReferenceLatent',
+    _meta: {
+      title: 'ReferenceLatent',
+    },
+  },
+  '9:76': {
+    inputs: {
+      conditioning: ['3', 0],
+      latent: ['9:78', 0],
+    },
+    class_type: 'ReferenceLatent',
+    _meta: {
+      title: 'ReferenceLatent',
+    },
+  },
+};
+
 const TEMPLATES: Record<WorkflowId, Workflow> = {
   'z-image-turbo': Z_IMAGE_TURBO_TEMPLATE,
   'flux2-klein-t2i': FLUX2_KLEIN_T2I_TEMPLATE,
   'flux2-klein-edit': FLUX2_KLEIN_EDIT_TEMPLATE,
   'krea2-t2i': KREA2_T2I_TEMPLATE,
   'f2k-edit': F2K_EDIT_TEMPLATE,
+  'f2k-inpaint': F2K_INPAINT_TEMPLATE,
 };
 
 // Per-workflow map: which node holds which parameter. Each entry is
@@ -1046,6 +1304,28 @@ const PARAM_MAP: Record<
     lora_name: ['15', 'lora_name'],
     lora_strength: ['15', 'strength_model'],
     input_image: ['10', 'image'],
+    filename_prefix: ['11', 'filename_prefix'],
+  },
+  'f2k-inpaint': {
+    prompt: ['2', 'text'],
+    negative_prompt: ['3', 'text'],
+    seed: ['7', 'seed'],
+    steps: ['7', 'steps'],
+    cfg: ['7', 'cfg'],
+    sampler_name: ['7', 'sampler_name'],
+    scheduler: ['7', 'scheduler'],
+    // Deliberately no `megapixel` / `aspect_ratio`: the crop sizes itself from
+    // the mask and the stitch restores the source frame.
+    unet: ['12', 'unet_name'],
+    clip: ['4', 'clip_name'],
+    vae: ['1', 'vae_name'],
+    lora_name: ['15', 'lora_name'],
+    lora_strength: ['15', 'strength_model'],
+    input_image: ['10', 'image'],
+    mask: ['20', 'image'],
+    mask_blend_pixels: ['21', 'mask_blend_pixels'],
+    mask_expand_pixels: ['21', 'mask_expand_pixels'],
+    mask_invert: ['21', 'mask_invert'],
     filename_prefix: ['11', 'filename_prefix'],
   },
   'flux2-klein-edit': {
@@ -1139,6 +1419,21 @@ export function validateParams(
   }
   if (meta.requiresInputImage && !params.input_image) {
     return { ok: false, error: `${id} requires input_image (filename uploaded to ComfyUI)` };
+  }
+  if (meta.requiresMask && !params.mask) {
+    return { ok: false, error: `${id} requires mask (greyscale image, white = repaint)` };
+  }
+  if (
+    params.mask_blend_pixels !== undefined &&
+    (params.mask_blend_pixels < 0 || params.mask_blend_pixels > 256)
+  ) {
+    return { ok: false, error: 'mask_blend_pixels must be 0-256' };
+  }
+  if (
+    params.mask_expand_pixels !== undefined &&
+    (params.mask_expand_pixels < 0 || params.mask_expand_pixels > 512)
+  ) {
+    return { ok: false, error: 'mask_expand_pixels must be 0-512' };
   }
   if (params.steps !== undefined && (params.steps < 1 || params.steps > 60)) {
     return { ok: false, error: 'steps must be 1-60' };

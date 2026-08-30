@@ -179,7 +179,8 @@ The WebUI connects directly to ComfyUI; there is no LoRA Tester sidecar.
 - REST: `GET /api/comfyui/workflows`, `GET/PUT /api/comfyui/settings`, `GET /api/comfyui/test`, `POST /api/comfyui/upload-image`, `POST /api/comfyui/generate`, `GET /api/comfyui/generation/:id`, and `POST /api/comfyui/internal/generate`.
 - Workflows:
   - `krea2-t2i` (**default T2I**): Krea2 Turbo FP8, qwen3vl_4b CLIP, 8 steps, `euler`/`simple`; prompt refinement and LoRA trigger slots are disabled, so prompts are verbatim.
-  - `f2k-edit` (**default edit**): Flux.2 Klein 9B, Turbo LoRA, dual `ReferenceLatent`; requires uploaded `input_image`.
+  - `f2k-edit` (**default edit**): Flux.2 Klein 9B, Turbo LoRA, dual `ReferenceLatent`; requires uploaded `input_image`. Re-renders the whole frame.
+  - `f2k-inpaint` (**masked edit**): same model stack plus `InpaintCropImproved`/`InpaintStitchImproved`; requires `input_image` **and** `mask` (white = repaint). Only the mask plus its feather changes, and the source resolution is preserved, so `megapixel`/`aspect_ratio` are ignored.
   - `z-image-turbo`: Z-Image Turbo, qwen3_4b CLIP, about 5 seconds, 9 steps, `dpmpp_2m_sde`.
   - `flux2-klein-t2i`: Flux.2 Klein 9B, Turbo LoRA, TeaCache, 8 steps, `euler`, `SamplerCustomAdvanced`.
   - `flux2-klein-edit`: older TeaCache/tiled-VAE edit variant retained for existing callers.
@@ -187,7 +188,7 @@ The WebUI connects directly to ComfyUI; there is no LoRA Tester sidecar.
 `krea2-t2i` `ResolutionSelector` labels aspect ratios differently from Flux (`1:1 (Square)` versus `1:1 (Perfect Square)`). `workflows.ts` translates input values: an unknown combo value is **not** rejected by ComfyUI, and can report success without an image.
 
 - URL resolution: `app_config.comfyui_url` → `$COMFYUI_URL` → `http://192.168.1.23:8188`; settings are re-read for every job.
-- `scripts/mcp-servers/comfyui.mjs` exposes `generate_image`, `generate_image_quality`, and `edit_image`, calling `POST /api/comfyui/internal/generate` with inherited `WEBUI_HOOK_SECRET`.
+- `scripts/mcp-servers/comfyui.mjs` exposes `generate_image`, `generate_image_quality`, `edit_image`, and `inpaint_image`, calling `POST /api/comfyui/internal/generate` with inherited `WEBUI_HOOK_SECRET`.
 - `/generated/*.png` requires Passport session authentication.
 
 MCP tools bind at CLI spawn; start a new session after registration changes. URL changes apply to new jobs immediately.

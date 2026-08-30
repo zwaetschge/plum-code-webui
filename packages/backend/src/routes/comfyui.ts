@@ -45,6 +45,7 @@ const WORKFLOW_IDS = [
   'flux2-klein-edit',
   'krea2-t2i',
   'f2k-edit',
+  'f2k-inpaint',
 ] as const;
 
 const paramsSchema = z.object({
@@ -64,6 +65,10 @@ const paramsSchema = z.object({
   lora_strength: z.number().min(0).max(2).optional(),
   teacache_threshold: z.number().min(0).max(1).optional(),
   input_image: z.string().max(512).optional(),
+  mask: z.string().max(512).optional(),
+  mask_blend_pixels: z.number().min(0).max(256).optional(),
+  mask_expand_pixels: z.number().min(0).max(512).optional(),
+  mask_invert: z.boolean().optional(),
   filename_prefix: z.string().max(128).optional(),
 });
 
