@@ -3759,7 +3759,11 @@ export function SessionPage() {
     </label>
   );
 
-  const renderCliSubagentField = (entry: CliSubagentSummary) => {
+  const renderCliSubagentField = (
+    entry: CliSubagentSummary,
+    variant: 'sidebar' | 'mobile' = 'sidebar'
+  ) => {
+    const fieldKey = `${variant === 'mobile' ? 'mobile-' : ''}cli-subagent-${entry.id || entry.provider}`;
     // The worker runs the provider's own CLI, so its model catalogue is exactly
     // the one that provider offers a session -- pi's is the long one.
     const providerInfo = cliProviders?.find((provider) => provider.id === entry.provider);
@@ -3774,13 +3778,13 @@ export function SessionPage() {
         : `Default${providerDefault ? ` · ${labels[providerDefault] || providerDefault}` : ''}`;
 
     return renderRuntimeField({
-      id: `cli-subagent-${entry.id || entry.provider}`,
+      id: fieldKey,
       label: entry.label || entry.provider,
       value: displayValue,
       icon: <Network className="h-3.5 w-3.5" />,
       children: (
         <select
-          id={`cli-subagent-${entry.id || entry.provider}`}
+          id={fieldKey}
           className="session-runtime-select"
           value={selected}
           onChange={(event) => applyCliSubagentChoice(entry.id, event.target.value)}
@@ -3949,7 +3953,7 @@ export function SessionPage() {
         {isClaudeTransportSession &&
           renderRuntimeField({
             id: fieldId('subagent-model'),
-            label: 'Subagent model',
+            label: 'Task agent model',
             value: session.subagentModel || 'Default',
             icon: <Network className="h-3.5 w-3.5" />,
             children: (
@@ -3962,7 +3966,7 @@ export function SessionPage() {
                     event.target.value === '__default__' ? null : event.target.value
                   )
                 }
-                aria-label="Subagent model"
+                aria-label="Task agent model"
                 disabled={sessionSubagentModelMutation.isPending}
               >
                 <option value="__default__">Default (Agent-Definition)</option>
@@ -4328,6 +4332,20 @@ export function SessionPage() {
             </div>
             <div className="session-runtime-mobile-card">
               {renderSessionRuntimeControls('mobile')}
+              {cliSubagents.length > 0 && (
+                <>
+                  <p className="mt-2 px-1 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                    Delegierbar per run_subagent
+                  </p>
+                  <div className="session-runtime-controls is-mobile">
+                    {cliSubagents.map((entry) => (
+                      <Fragment key={`mobile-${entry.id || entry.provider}`}>
+                        {renderCliSubagentField(entry, 'mobile')}
+                      </Fragment>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
             {/* The right dock is desktop-only, so the chat switcher gets its
                 own slot here instead of being unreachable on a phone. */}
@@ -5123,7 +5141,7 @@ export function SessionPage() {
 
             {renderSideMenuGroup({
               id: 'subagents',
-              label: 'Subagents',
+              label: 'CLI subagents',
               icon: <Brain className="h-3.5 w-3.5" />,
               badge: cliSubagents.filter((entry) => entry.enabled).length,
               children: (
@@ -5134,13 +5152,18 @@ export function SessionPage() {
                     </p>
                   ) : (
                     !rightDockCollapsed && (
-                      <div className="session-runtime-controls">
-                        {cliSubagents.map((entry) => (
-                          <Fragment key={entry.id || entry.provider}>
-                            {renderCliSubagentField(entry)}
-                          </Fragment>
-                        ))}
-                      </div>
+                      <>
+                        <p className="px-3 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                          Delegierbar per run_subagent
+                        </p>
+                        <div className="session-runtime-controls">
+                          {cliSubagents.map((entry) => (
+                            <Fragment key={entry.id || entry.provider}>
+                              {renderCliSubagentField(entry)}
+                            </Fragment>
+                          ))}
+                        </div>
+                      </>
                     )
                   )}
                 </>
