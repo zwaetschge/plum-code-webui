@@ -469,20 +469,26 @@ export function RunCockpit({
 
       <div ref={agentsRef}>
         <Section title="Subagents" icon={<Brain className="h-3.5 w-3.5" />}>
+          {/* The delegable CLIs are a property of the account, not of the run, so
+              they stay listed while agents are running -- otherwise the whole
+              list disappears the moment the first subagent starts. */}
+          <div className="mb-2 rounded-md border border-border/45 bg-foreground/[0.02] px-3 py-2 text-xs text-muted-foreground">
+            {delegationTargets.length > 0 ? (
+              <>
+                <span>Delegierbar per </span>
+                <code className="text-[11px]">run_subagent</code>
+                <span>:</span>
+                <span className="mt-1 block font-medium text-foreground/80">
+                  {delegationTargets.join(' · ')}
+                </span>
+              </>
+            ) : (
+              'Keine CLI-Subagenten aktiviert'
+            )}
+          </div>
           {agents.length === 0 ? (
             <div className="rounded-md border border-border/45 bg-foreground/[0.02] px-3 py-2 text-xs text-muted-foreground">
-              {delegationTargets.length > 0 ? (
-                <>
-                  <span>Keiner läuft. Delegierbar per </span>
-                  <code className="text-[11px]">run_subagent</code>
-                  <span>:</span>
-                  <span className="mt-1 block font-medium text-foreground/80">
-                    {delegationTargets.join(' · ')}
-                  </span>
-                </>
-              ) : (
-                'Empty'
-              )}
+              Keiner läuft.
             </div>
           ) : (
             <div className="space-y-2">

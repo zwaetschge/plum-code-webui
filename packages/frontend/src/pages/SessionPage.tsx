@@ -175,7 +175,22 @@ const EMPTY_AGENT_RUNS: SubagentRun[] = [];
 const IDLE_ACTIVITY: ActivityState = { type: 'idle' };
 type WorkspaceSheetPanel = Exclude<DockablePanel, 'files' | 'tools'>;
 type MobileSheetPanel = WorkspaceSheetPanel | 'settings';
-type RightMenuGroupId = 'chat' | 'session' | 'view' | 'runtime' | 'styles' | 'workspace';
+interface CliSubagentSummary {
+  id: string;
+  label: string;
+  provider: string;
+  model?: string;
+  enabled: boolean;
+}
+
+type RightMenuGroupId =
+  | 'chat'
+  | 'session'
+  | 'view'
+  | 'runtime'
+  | 'subagents'
+  | 'styles'
+  | 'workspace';
 const DOCKED_PANEL_KEYS: WorkspaceSheetPanel[] = [
   'tasks',
   'mesh',
@@ -196,6 +211,7 @@ const DEFAULT_RIGHT_MENU_GROUPS: Record<RightMenuGroupId, boolean> = {
   session: true,
   view: true,
   runtime: true,
+  subagents: true,
   styles: true,
   workspace: false,
 };
@@ -2210,10 +2226,9 @@ export function SessionPage() {
 
   const sessionSubagentModelMutation = useMutation({
     mutationFn: async (model: string | null) => {
-      const response = await api.patch<ApiResponse<Session>>(
-        `/api/sessions/${id}/subagent-model`,
-        { model }
-      );
+      const response = await api.patch<ApiResponse<Session>>(`/api/sessions/${id}/subagent-model`, {
+        model,
+      });
       return response.data;
     },
     onSuccess: (data) => {
@@ -2231,6 +2246,56 @@ export function SessionPage() {
       }
     },
   });
+
+  // Whole CLIs this account may hand work to through the `subagents` MCP tool.
+  // Independent of the provider running the session and of the model router
+  // above, so it is listed for every harness -- otherwise a configured target
+  // (pi, say) has no surface at all until it happens to be running.
+  const { data: cliSubagents = [] } = useQuery({
+    queryKey: ['cli-subagents'],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<CliSubagentSummary[]>>(
+        '/api/settings/cli-subagents'
+      );
+      return response.data.data ?? [];
+    },
+    staleTime: 60_000,
+  });
+
+  const cliSubagentToggleMutation = useMutation({
+    mutationFn: async (next: CliSubagentSummary[]) => {
+      const response = await api.put<ApiResponse<CliSubagentSummary[]>>(
+        '/api/settings/cli-subagents',
+        next.map((entry) => ({
+          id: entry.id,
+          label: entry.label,
+          provider: entry.provider,
+          model: entry.model ?? '',
+          enabled: entry.enabled,
+        }))
+      );
+      return response.data.data ?? [];
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['cli-subagents'], data);
+      toast({
+        title: 'Subagenten aktualisiert',
+        description: 'Neue Sessions und neu gestartete Harnesses nutzen die Auswahl.',
+      });
+    },
+  });
+
+  const toggleCliSubagent = useCallback(
+    (entryId: string) => {
+      if (cliSubagentToggleMutation.isPending) return;
+      cliSubagentToggleMutation.mutate(
+        cliSubagents.map((entry) =>
+          entry.id === entryId ? { ...entry, enabled: !entry.enabled } : entry
+        )
+      );
+    },
+    [cliSubagents, cliSubagentToggleMutation]
+  );
 
   const sessionReasoningMutation = useMutation({
     mutationFn: async (reasoning: string | null) => {
@@ -3826,7 +3891,7 @@ export function SessionPage() {
         {isClaudeTransportSession &&
           renderRuntimeField({
             id: fieldId('subagent-model'),
-            label: 'Subagents',
+            label: 'Subagent model',
             value: session.subagentModel || 'Default',
             icon: <Network className="h-3.5 w-3.5" />,
             children: (
@@ -4996,6 +5061,37 @@ export function SessionPage() {
               label: 'Runtime',
               icon: <Sparkles className="h-3.5 w-3.5" />,
               children: <>{!rightDockCollapsed && renderSessionRuntimeControls('sidebar')}</>,
+            })}
+
+            {renderSideMenuGroup({
+              id: 'subagents',
+              label: 'Subagents',
+              icon: <Brain className="h-3.5 w-3.5" />,
+              badge: cliSubagents.filter((entry) => entry.enabled).length,
+              children: (
+                <>
+                  {cliSubagents.length === 0 ? (
+                    <p className="px-3 py-1.5 text-[11px] leading-snug text-muted-foreground">
+                      Keine CLI-Subagenten konfiguriert. Einstellungen &rarr; Subagenten.
+                    </p>
+                  ) : (
+                    cliSubagents.map((entry) =>
+                      renderSideMenuItem({
+                        id: `cli-subagent-${entry.id || entry.provider}`,
+                        label: entry.label || entry.provider,
+                        icon: <Network className="h-3.5 w-3.5" />,
+                        onClick: () => toggleCliSubagent(entry.id),
+                        active: entry.enabled,
+                        disabled: cliSubagentToggleMutation.isPending,
+                        title: entry.enabled
+                          ? `${entry.label} ist per run_subagent delegierbar - klicken zum Deaktivieren`
+                          : `${entry.label} aktivieren, damit run_subagent daran delegieren darf`,
+                        nested: true,
+                      })
+                    )
+                  )}
+                </>
+              ),
             })}
 
             {renderSideMenuGroup({
