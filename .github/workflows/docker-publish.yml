@@ -25,6 +25,8 @@ jobs:
     env:
       SESSION_SECRET: ci-session-secret-ci-session-secret-0001
       JWT_SECRET: ci-jwt-secret-ci-jwt-secret-000000001
+      ENCRYPTION_KEY: ci-encryption-key-ci-encryption-key-0001
+      POSTGRES_PASSWORD: ci-postgres-password
       IMAGEMAGICK_BIN: convert
       PGHOST: 127.0.0.1
       PGUSER: plumcode

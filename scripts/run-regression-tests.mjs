@@ -357,6 +357,17 @@ export async function runRegressionSuites(
 }
 
 async function main() {
+  // Integration-test child processes resolve shared through its package exports,
+  // which point at dist. A fresh checkout has no previous build to resolve.
+  const sharedBuild = runCommand({
+    name: 'build shared test dependency',
+    command: 'pnpm',
+    args: ['--filter', '@plum-code-webui/shared', 'run', 'build'],
+  });
+  if (sharedBuild !== 0) {
+    process.exitCode = sharedBuild;
+    return;
+  }
   const { failures } = await runRegressionSuites();
   if (failures.length > 0) {
     console.error(

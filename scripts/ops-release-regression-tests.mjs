@@ -262,6 +262,7 @@ async function testDockerProxyReleaseContract(tempDir) {
         ...process.env,
         SESSION_SECRET: 's'.repeat(48),
         JWT_SECRET: 'j'.repeat(48),
+        ENCRYPTION_KEY: 'e'.repeat(48),
         POSTGRES_PASSWORD: 'p'.repeat(24),
       },
     }
@@ -291,6 +292,7 @@ async function testDockerProxyReleaseContract(tempDir) {
         ...process.env,
         SESSION_SECRET: 's'.repeat(48),
         JWT_SECRET: 'j'.repeat(48),
+        ENCRYPTION_KEY: 'e'.repeat(48),
         POSTGRES_PASSWORD: '',
       },
     }
