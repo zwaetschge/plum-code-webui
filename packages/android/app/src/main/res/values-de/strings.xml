@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Plum Code</string>
+    <string name="widget_label">Sitzungen und Agenten</string>
+    <string name="widget_description">Aktive Sitzungen, arbeitende Agenten und ausstehende Freigaben auf einen Blick.</string>
+    <string name="widget_label_approvals">Freigaben</string>
+    <string name="widget_desc_approvals">Ausstehende Freigabeanfragen — tippe auf einen Eintrag, um die Sitzung zu öffnen und zu erlauben.</string>
+    <string name="widget_label_quick_glance">Kurzüberblick</string>
+    <string name="widget_desc_quick_glance">Kompaktstatus: laufende Sitzungen, ausstehende Freigaben, heutige Tokens und Kosten.</string>
+    <string name="widget_label_tokens_today">Tokens heute</string>
+    <string name="widget_desc_tokens_today">Heutiger Tokenverbrauch nach Eingabe, Ausgabe und Cache-Lesezugriffen.</string>
+    <string name="widget_label_cost_today">Kosten</string>
+    <string name="widget_desc_cost_today">API-Gegenwert des Verbrauchs heute und diese Woche sowie Anzahl der Anfragen.</string>
+    <string name="widget_label_providers">Verbrauch nach Anbieter</string>
+    <string name="widget_desc_providers">Verbrauch dieser Woche nach Anbieter: Codex, OpenCode, Pi, Claude und weitere.</string>
+    <string name="widget_label_models">Verbrauch nach Modell</string>
+    <string name="widget_desc_models">Meistgenutzte Modelle dieser Woche nach Kosten und Tokens.</string>
+    <string name="widget_label_limits">Anbieterlimits</string>
+    <string name="widget_desc_limits">Aktuelle Kontingentbalken — zeigt den verbrauchten Anteil des Limits jedes Anbieters.</string>
+    <string name="widget_label_week_chart">Aktivität der letzten 7 Tage</string>
+    <string name="widget_desc_week_chart">Balkendiagramm des täglichen Tokenverbrauchs der letzten sieben Tage.</string>
+    <string name="widget_label_top_sessions">Top-Sitzungen</string>
+    <string name="widget_desc_top_sessions">Teuerste Sitzungen dieser Woche nach Kosten und Tokens.</string>
+    <string name="widget_chart_description">Diagramm des täglichen Tokenverbrauchs</string>
+    <string name="tile_label">Plum Code</string>
+</resources>

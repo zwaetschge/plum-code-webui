@@ -15,6 +15,23 @@ data class WearApproval(
     val requestId: String,
 )
 
+/**
+ * A question the agent is blocked on, mirrored from the phone.
+ *
+ * [answerable] is false when the request needs more than one tap can express —
+ * several questions, free text, or multi-select. Those show up as a prompt with
+ * only a Dismiss button; the phone is where they get answered.
+ */
+data class WearQuestion(
+    val sessionId: String,
+    val sessionName: String,
+    val requestId: String,
+    val providerSessionId: String,
+    val prompt: String,
+    val options: List<String>,
+    val answerable: Boolean,
+)
+
 data class WearSnapshot(
     val updatedAtMs: Long = 0,
     val running: Int = 0,
@@ -22,6 +39,7 @@ data class WearSnapshot(
     val costToday: Double = 0.0,
     val requestsToday: Long = 0,
     val approvals: List<WearApproval> = emptyList(),
+    val questions: List<WearQuestion> = emptyList(),
 )
 
 /**
@@ -34,6 +52,7 @@ object WearSnapshotStore {
 
     const val PATH_SNAPSHOT = "/plum/snapshot"
     const val PATH_APPROVAL_RESPONSE = "/plum/approval-response"
+    const val PATH_QUESTION_RESPONSE = "/plum/question-response"
     const val KEY_JSON = "json"
 
     private const val PREFS = "wear_snapshot"
@@ -57,13 +76,20 @@ object WearSnapshotStore {
                 Wearable.getDataClient(context).dataItems,
                 3, TimeUnit.SECONDS,
             )
-            var json: String? = null
-            items.forEach { item ->
-                if (item.uri.path == PATH_SNAPSHOT) {
-                    json = DataMapItem.fromDataItem(item).dataMap.getString(KEY_JSON)
+            // release() in a finally: a malformed item threw out of the loop
+            // and leaked the buffer, and DataItemBuffer is a shared native
+            // allocation the Wear service does not reclaim for us.
+            val json = try {
+                var found: String? = null
+                items.forEach { item ->
+                    if (item.uri.path == PATH_SNAPSHOT) {
+                        found = DataMapItem.fromDataItem(item).dataMap.getString(KEY_JSON)
+                    }
                 }
+                found
+            } finally {
+                items.release()
             }
-            items.release()
             json?.also { cache(context, it) }
             parse(json)
         }.getOrElse { cached(context) }
@@ -87,6 +113,28 @@ object WearSnapshotStore {
                     )
                 }
             }
+            val questions = buildList {
+                val array = root.optJSONArray("questions")
+                for (i in 0 until (array?.length() ?: 0)) {
+                    val entry = array!!.optJSONObject(i) ?: continue
+                    val labels = entry.optJSONArray("options")
+                    add(
+                        WearQuestion(
+                            sessionId = entry.optString("sessionId"),
+                            sessionName = entry.optString("sessionName"),
+                            requestId = entry.optString("requestId"),
+                            providerSessionId = entry.optString("providerSessionId"),
+                            prompt = entry.optString("prompt"),
+                            options = buildList {
+                                for (j in 0 until (labels?.length() ?: 0)) {
+                                    add(labels!!.optString(j))
+                                }
+                            },
+                            answerable = entry.optBoolean("answerable", false),
+                        )
+                    )
+                }
+            }
             WearSnapshot(
                 updatedAtMs = root.optLong("updatedAtMs"),
                 running = root.optInt("running"),
@@ -94,6 +142,7 @@ object WearSnapshotStore {
                 costToday = root.optDouble("costToday", 0.0),
                 requestsToday = root.optLong("requestsToday"),
                 approvals = approvals,
+                questions = questions,
             )
         }.getOrDefault(WearSnapshot())
     }

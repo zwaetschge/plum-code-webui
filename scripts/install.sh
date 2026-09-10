@@ -134,11 +134,14 @@ prompt TZ "IANA timezone for backend/CLI jobs" "$TZ_DEFAULT"
 WEBUI_SHM_SIZE="$(get_existing WEBUI_SHM_SIZE)"
 WEBUI_SHM_SIZE="${WEBUI_SHM_SIZE:-1gb}"
 
+# Match docker-compose.yml. A fresh install writing danger-full-access/never
+# into .env silently overrode the safer compose defaults for everyone who never
+# revisited the file.
 CODEX_WEBUI_SANDBOX_MODE="$(get_existing CODEX_WEBUI_SANDBOX_MODE)"
-CODEX_WEBUI_SANDBOX_MODE="${CODEX_WEBUI_SANDBOX_MODE:-danger-full-access}"
+CODEX_WEBUI_SANDBOX_MODE="${CODEX_WEBUI_SANDBOX_MODE:-workspace-write}"
 
 CODEX_WEBUI_APPROVAL_POLICY="$(get_existing CODEX_WEBUI_APPROVAL_POLICY)"
-CODEX_WEBUI_APPROVAL_POLICY="${CODEX_WEBUI_APPROVAL_POLICY:-never}"
+CODEX_WEBUI_APPROVAL_POLICY="${CODEX_WEBUI_APPROVAL_POLICY:-on-request}"
 
 CHROMIUM_WRAPPER_DEFAULT=/usr/local/bin/plum-chromium
 CHROME_BIN="$(get_existing CHROME_BIN)"
@@ -201,6 +204,28 @@ else
   ok "Keeping existing JWT_SECRET"
 fi
 
+# docker-compose.yml hard-requires this (PGPASSWORD=${POSTGRES_PASSWORD:?...}),
+# so an .env without it makes every `docker compose up` fail before it starts.
+POSTGRES_PASSWORD="$(get_existing POSTGRES_PASSWORD)"
+if [[ -z "$POSTGRES_PASSWORD" ]]; then
+  # No base64: the value is interpolated into compose and psql URLs, and "/" or
+  # "+" in a password is a reliable source of confusing connection failures.
+  POSTGRES_PASSWORD="$(openssl rand -hex 32)"
+  ok "Generated POSTGRES_PASSWORD"
+else
+  ok "Keeping existing POSTGRES_PASSWORD"
+fi
+
+# Encrypts stored provider credentials. It must exist and must never change
+# afterwards, or the Z.AI token and provider API keys become undecryptable.
+ENCRYPTION_KEY="$(get_existing ENCRYPTION_KEY)"
+if [[ -z "$ENCRYPTION_KEY" ]]; then
+  ENCRYPTION_KEY="$(openssl rand -base64 48 | tr -d '\n')"
+  ok "Generated ENCRYPTION_KEY"
+else
+  ok "Keeping existing ENCRYPTION_KEY"
+fi
+
 # --- write .env -----------------------------------------------------------
 step "Writing $ENV_FILE"
 
@@ -227,7 +252,7 @@ PUPPETEER_SKIP_DOWNLOAD=${PUPPETEER_SKIP_DOWNLOAD}
 PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=${PUPPETEER_SKIP_CHROMIUM_DOWNLOAD}
 AUTH_ALLOWED_EMAILS=${AUTH_ALLOWED_EMAILS}
 SEED_ADMIN_EMAIL=${SEED_ADMIN_EMAIL}
-ENCRYPTION_KEY=$(get_existing ENCRYPTION_KEY)
+ENCRYPTION_KEY=${ENCRYPTION_KEY}
 
 WORKSPACE_DIR=${WORKSPACE_DIR}
 DATA_DIR=${DATA_DIR}
@@ -236,6 +261,7 @@ ALLOWED_BASE_PATHS=${EXISTING_ENV[ALLOWED_BASE_PATHS]:-/workspace}
 
 SESSION_SECRET=${SESSION_SECRET}
 JWT_SECRET=${JWT_SECRET}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 
 # Optional: CLI providers and integrations
 CLI_PROVIDER_CLAUDE_MODELS=$(get_existing CLI_PROVIDER_CLAUDE_MODELS)
@@ -272,6 +298,25 @@ GOOGLE_CLIENT_ID=$(get_existing GOOGLE_CLIENT_ID)
 GOOGLE_CLIENT_SECRET=$(get_existing GOOGLE_CLIENT_SECRET)
 GOOGLE_CALLBACK_URL=$(get_existing GOOGLE_CALLBACK_URL)
 ENV
+
+# Carry over anything this script does not know about. Re-running the installer
+# used to silently drop keys added by hand or by a newer compose file
+# (DOCKER_PROXY_*, REPAIR_BOT_*, WEBUI_SKILLS_DIRS, ...), which turned a routine
+# re-run into a broken deployment.
+preserved=0
+for key in "${!EXISTING_ENV[@]}"; do
+  if ! grep -q "^${key}=" "$ENV_FILE"; then
+    if [[ $preserved -eq 0 ]]; then
+      printf '\n# Preserved from the previous .env (not managed by install.sh)\n' >> "$ENV_FILE"
+      preserved=1
+    fi
+    printf '%s=%s\n' "$key" "${EXISTING_ENV[$key]}" >> "$ENV_FILE"
+  fi
+done
+if [[ $preserved -eq 1 ]]; then
+  ok "Preserved additional keys from the previous .env"
+fi
+
 ok "Wrote .env (mode 600)"
 
 # --- create host dirs the compose volumes will need -----------------------

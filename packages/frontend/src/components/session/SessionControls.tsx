@@ -251,9 +251,12 @@ export function ContextPopover({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
 
-  const { activeSessionId, sessions } = useSessionStore();
+  // Two narrow selectors instead of the whole store: this popover is mounted for
+  // the entire session view, and subscribing to the store object woke it for
+  // every streaming flush and every tool event of every session.
+  const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const resolvedSessionId = sessionId || activeSessionId;
-  const activeSession = sessions.find((s) => s.id === resolvedSessionId);
+  const activeSession = useSessionStore((s) => s.sessions.find((x) => x.id === resolvedSessionId));
   const provider: CLIProvider = sessionProvider || activeSession?.cliProvider || 'codex';
   const effectiveModel =
     cleanModelId(sessionRuntimeModel) ||

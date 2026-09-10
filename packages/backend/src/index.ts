@@ -14,7 +14,8 @@ import { config } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-import { initDatabase } from './db/index.js';
+import { backfillKimiUsageHistory, initDatabase } from './db/index.js';
+import { refreshOpenCodeModelsCache } from './utils/opencodeCatalog.js';
 import { setupPassport } from './auth/passport.js';
 import { setupWebSocket } from './websocket/index.js';
 import { errorHandler, requestIdMiddleware } from './middleware/errorHandler.js';
@@ -178,8 +179,27 @@ function registerGracefulShutdown(
 async function main() {
   installProcessGuards();
 
-  // Initialize database
-  initDatabase();
+  // Initialize database. This must be awaited: without it a connection or
+  // migration failure only ever showed up as an unhandled rejection while the
+  // server went on to bind its port and pass health checks with no database.
+  try {
+    await initDatabase();
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    console.error('[CRITICAL] Database initialization failed:', err.stack || err.message);
+    console.error(
+      '[CRITICAL] Check PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD and that Postgres is reachable.'
+    );
+    process.exit(1);
+  }
+  // Deliberately not awaited and deliberately not inside initDatabase(): this
+  // is a catch-up pass over native Kimi ledgers on disk, and nothing the server
+  // serves depends on it. Boot — and with it the readiness probe the rebuild
+  // robot waits on — used to sit through the whole scan.
+  void backfillKimiUsageHistory().catch((error) =>
+    console.warn('[DB] Kimi usage backfill failed:', error)
+  );
+
   try {
     const removedUploads = await cleanupExpiredChatUploads();
     if (removedUploads > 0) {
@@ -214,6 +234,9 @@ async function main() {
     console.warn('[skills] startup reconciliation skipped:', err);
   }
   await syncProviderLinks();
+  // models.dev limits feed Pi's per-model context windows; fetched at most
+  // daily and never awaited on the startup path.
+  void refreshOpenCodeModelsCache();
 
   const app = express();
 
@@ -295,9 +318,13 @@ async function main() {
         if (config.allowedOrigins.includes(normalizedOrigin)) {
           return callback(null, true);
         }
-        // Reject unauthorized origins
+        // Reject unauthorized origins. Passing an Error here makes the cors
+        // middleware hand it to the error handler, which turns a routine
+        // cross-origin rejection into a 500 and buries real errors in the log.
+        // `false` omits the CORS headers instead, which is what actually blocks
+        // the browser, and lets the request finish with its normal status.
         console.warn(`CORS: Rejected request from unauthorized origin: ${origin}`);
-        callback(new Error('Not allowed by CORS'));
+        callback(null, false);
       },
       credentials: true,
     })

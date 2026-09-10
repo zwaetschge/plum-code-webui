@@ -17,13 +17,10 @@ val databaseModule = module {
             AppDatabase::class.java,
             AppDatabase.DATABASE_NAME
         )
-            .addMigrations(
-                AppDatabase.MIGRATION_2_3,
-                AppDatabase.MIGRATION_3_4,
-                AppDatabase.MIGRATION_4_5,
-                AppDatabase.MIGRATION_5_6,
-            )
-            .fallbackToDestructiveMigration()
+            // No destructive fallback. The outbox in this database holds messages
+            // the user typed and the server has not acknowledged, so wiping it to
+            // survive a version jump would delete their work without a word.
+            .addMigrations(*AppDatabase.ALL_MIGRATIONS)
             .build()
     }
 

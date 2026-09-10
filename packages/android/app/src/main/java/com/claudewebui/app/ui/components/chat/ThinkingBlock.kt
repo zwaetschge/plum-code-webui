@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -30,20 +33,21 @@ fun ThinkingBlock(
     modifier: Modifier = Modifier,
     initiallyExpanded: Boolean = false,
 ) {
+    val componentTokens = PlumTheme.tokens
     var expanded by remember { mutableStateOf(initiallyExpanded) }
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
 
     val chevronAngle by animateFloatAsState(
         targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        animationSpec = tween(componentTokens.motion.medium, easing = FastOutSlowInEasing),
         label = "chevron",
     )
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.sm))
             .background(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
             ),
@@ -53,9 +57,9 @@ fun ThinkingBlock(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { expanded = !expanded }
-                .padding(horizontal = 12.dp, vertical = 9.dp),
+                .padding(horizontal = componentTokens.spacing.md, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
         ) {
             // Brain icon with subtle pulse when showing thinking indicator
             Icon(
@@ -66,7 +70,7 @@ fun ThinkingBlock(
             )
 
             Text(
-                text = "Thinking",
+                text = stringResource(R.string.component_thinking),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 fontWeight = FontWeight.Medium,
@@ -78,7 +82,7 @@ fun ThinkingBlock(
                 thinking.trim().split(Regex("\\s+")).size
             }
             Text(
-                text = "$wordCount words",
+                text = stringResource(R.string.component_word_count, wordCount),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                 fontSize = 10.sp,
@@ -87,10 +91,10 @@ fun ThinkingBlock(
             // Expand chevron
             Icon(
                 imageVector = Icons.Outlined.ChevronRight,
-                contentDescription = if (expanded) "Collapse thinking" else "Expand thinking",
+                contentDescription = if (expanded) stringResource(R.string.component_collapse_thinking) else stringResource(R.string.component_expand_thinking),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 modifier = Modifier
-                    .size(16.dp)
+                    .size(componentTokens.sizing.iconSm)
                     .rotate(chevronAngle),
             )
         }
@@ -99,11 +103,11 @@ fun ThinkingBlock(
         AnimatedVisibility(
             visible = expanded,
             enter = expandVertically(
-                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                animationSpec = tween(componentTokens.motion.medium, easing = FastOutSlowInEasing),
                 expandFrom = Alignment.Top,
-            ) + fadeIn(animationSpec = tween(180)),
+            ) + fadeIn(animationSpec = tween(componentTokens.motion.fast)),
             exit = shrinkVertically(
-                animationSpec = tween(180, easing = FastOutSlowInEasing),
+                animationSpec = tween(componentTokens.motion.fast, easing = FastOutSlowInEasing),
                 shrinkTowards = Alignment.Top,
             ) + fadeOut(animationSpec = tween(120)),
         ) {
@@ -116,13 +120,13 @@ fun ThinkingBlock(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 4.dp),
+                        .padding(start = componentTokens.spacing.md, end = componentTokens.spacing.md, top = componentTokens.spacing.compact, bottom = componentTokens.spacing.xs),
                 ) {
                     // Left accent line
                     Box(
                         modifier = Modifier
                             .fillMaxHeight()
-                            .width(2.dp)
+                            .width(componentTokens.spacing.xxs)
                             .align(Alignment.TopStart)
                             .background(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
@@ -139,7 +143,7 @@ fun ThinkingBlock(
                             fontSize = 13.sp,
                         ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                        modifier = Modifier.padding(start = 10.dp),
+                        modifier = Modifier.padding(start = componentTokens.spacing.compact),
                     )
                 }
 
@@ -147,7 +151,7 @@ fun ThinkingBlock(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.inline),
                     horizontalArrangement = Arrangement.End,
                 ) {
                     TextButton(
@@ -155,18 +159,18 @@ fun ThinkingBlock(
                             clipboard.setText(AnnotatedString(thinking))
                             copied = true
                         },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        contentPadding = PaddingValues(horizontal = componentTokens.spacing.sm, vertical = componentTokens.spacing.xs),
                     ) {
                         Icon(
                             imageVector = if (copied) Icons.Outlined.CheckCircle else Icons.Outlined.ContentCopy,
-                            contentDescription = "Copy thinking",
+                            contentDescription = stringResource(R.string.component_copy_thinking),
                             modifier = Modifier.size(13.dp),
                             tint = if (copied) Color(0xFF22C55E)
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(componentTokens.spacing.xs))
                         Text(
-                            text = if (copied) "Copied" else "Copy",
+                            text = if (copied) stringResource(R.string.component_copied) else stringResource(R.string.component_copy),
                             style = MaterialTheme.typography.labelSmall,
                             color = if (copied) Color(0xFF22C55E)
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),

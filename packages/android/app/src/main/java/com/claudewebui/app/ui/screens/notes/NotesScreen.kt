@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.notes
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -62,6 +63,11 @@ fun NotesScreen(
     viewModel: NotesViewModel,
     onNavigateBack: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
 
     PlumBackdrop {
@@ -76,17 +82,17 @@ fun NotesScreen(
                     horizontal = if (isTabletWidth()) 40.dp else 16.dp,
                     vertical = 4.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             ) {
                 item {
                     PlumScreenHeader(
-                        title = "Notes",
-                        subtitle = "Scratch space for this session",
+                        title = screenResources.getString(R.string.notes_notes_70440),
+                        subtitle = screenResources.getString(R.string.notes_scratch_space_for_this_session_2aad1),
                         actions = {
-                            PlumIconButton(Icons.Outlined.Add, "New note", viewModel::startNew)
+                            PlumIconButton(Icons.Outlined.Add, screenResources.getString(R.string.notes_new_note_2b7b0), viewModel::startNew)
                             PlumIconButton(
                                 Icons.AutoMirrored.Outlined.ArrowBack,
-                                "Back",
+                                screenResources.getString(R.string.notes_back_b52b3),
                                 onNavigateBack,
                             )
                         },
@@ -97,13 +103,13 @@ fun NotesScreen(
                     item {
                         GlassPanel(Modifier.fillMaxWidth(), radius = 18.dp) {
                             Column(
-                                Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                Modifier.padding(screenTokens.spacing.cozy),
+                                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact),
                             ) {
                                 OutlinedTextField(
                                     value = state.draftTitle,
                                     onValueChange = viewModel::onTitleChange,
-                                    label = { Text("Title") },
+                                    label = { Text(screenResources.getString(R.string.notes_title_768e0)) },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = OutlinedTextFieldDefaults.colors(
@@ -114,7 +120,7 @@ fun NotesScreen(
                                 OutlinedTextField(
                                     value = state.draftContent,
                                     onValueChange = viewModel::onContentChange,
-                                    label = { Text("Note") },
+                                    label = { Text(screenResources.getString(R.string.notes_note_2c924)) },
                                     modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp),
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = PlumAccent,
@@ -123,13 +129,13 @@ fun NotesScreen(
                                 )
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        if (state.isSaving) "Saving…" else "Saved automatically",
+                                        if (state.isSaving) screenResources.getString(R.string.notes_saving_56a22) else screenResources.getString(R.string.notes_saved_automatically_5bee9),
                                         color = PlumMuted,
                                         fontSize = 11.sp,
                                         modifier = Modifier.weight(1f),
                                     )
                                     Text(
-                                        "Done",
+                                        screenResources.getString(R.string.notes_done_e9b45),
                                         color = PlumText,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
@@ -137,7 +143,7 @@ fun NotesScreen(
                                             .clip(RoundedCornerShape(50))
                                             .background(PlumAccent.copy(alpha = .18f))
                                             .clickable(onClick = viewModel::closeEditor)
-                                            .padding(horizontal = 16.dp, vertical = 9.dp),
+                                            .padding(horizontal = screenTokens.spacing.lg, vertical = 9.dp),
                                     )
                                 }
                             }
@@ -158,9 +164,9 @@ fun NotesScreen(
                                 Modifier.fillMaxWidth().padding(28.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
-                                Text("No notes yet", color = PlumText, fontWeight = FontWeight.SemiBold)
+                                Text(screenResources.getString(R.string.notes_no_notes_yet_d2a1e), color = PlumText, fontWeight = FontWeight.SemiBold)
                                 Text(
-                                    "Tap + to jot something down for this session.",
+                                    screenResources.getString(R.string.notes_tap_to_jot_something_down_for_this_session_22b60),
                                     color = PlumMuted,
                                     fontSize = 12.sp,
                                 )
@@ -183,14 +189,14 @@ fun NotesScreen(
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(screenTokens.radius.md))
                                 .background(PlumSubtleFill)
-                                .padding(12.dp),
+                                .padding(screenTokens.spacing.md),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(message, color = PlumRed, fontSize = 12.sp, modifier = Modifier.weight(1f))
                             Text(
-                                "Dismiss",
+                                screenResources.getString(R.string.notes_dismiss_70afe),
                                 color = PlumAccent,
                                 fontSize = 12.sp,
                                 modifier = Modifier.clickable(onClick = viewModel::dismissError),
@@ -210,21 +216,26 @@ private fun NoteRow(
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     GlassPanel(Modifier.fillMaxWidth(), radius = 16.dp) {
         Row(
-            Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(14.dp),
+            Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(screenTokens.spacing.cozy),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    note.title.ifBlank { "Untitled" },
+                    note.title.ifBlank { screenResources.getString(R.string.notes_untitled_62152) },
                     color = PlumText,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    note.content.ifBlank { "Empty" },
+                    note.content.ifBlank { screenResources.getString(R.string.notes_empty_3159f) },
                     color = PlumMuted,
                     fontSize = 12.sp,
                     maxLines = 2,
@@ -233,23 +244,23 @@ private fun NoteRow(
             }
             Icon(
                 Icons.Outlined.PushPin,
-                if (note.isPinned) "Unpin" else "Pin",
+                if (note.isPinned) screenResources.getString(R.string.notes_unpin_2eba6) else screenResources.getString(R.string.notes_pin_9c918),
                 tint = if (note.isPinned) PlumAccent else PlumMuted,
                 modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .size(screenTokens.sizing.touchTarget)
+                    .clip(RoundedCornerShape(screenTokens.radius.chip))
                     .clickable(onClick = onTogglePin)
-                    .padding(7.dp),
+                    .padding(screenTokens.spacing.cozy),
             )
             Icon(
                 Icons.Outlined.Delete,
-                "Delete",
+                screenResources.getString(R.string.notes_delete_f6fdb),
                 tint = PlumRed,
                 modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .size(screenTokens.sizing.touchTarget)
+                    .clip(RoundedCornerShape(screenTokens.radius.chip))
                     .clickable(onClick = onDelete)
-                    .padding(7.dp),
+                    .padding(screenTokens.spacing.cozy),
             )
         }
     }

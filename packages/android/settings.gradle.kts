@@ -23,3 +23,4 @@ dependencyResolutionManagement {
 rootProject.name = "ClaudeCode"
 include(":app")
 include(":wear")
+include(":baselineprofile")

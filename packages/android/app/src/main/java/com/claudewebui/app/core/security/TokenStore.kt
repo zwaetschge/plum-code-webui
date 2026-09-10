@@ -18,7 +18,6 @@ object TokenStore {
 
     private const val PREFS_NAME = "claude_webui_secure_prefs"
     private const val KEY_JWT_TOKEN = "jwt_token"
-    private const val KEY_REFRESH_TOKEN = "refresh_token"
     private const val KEY_SERVER_URL = "server_url"
     private const val KEY_USER_ID = "user_id"
     private const val KEY_MOBILE_AUTH_STATE = "mobile_auth_state"
@@ -27,8 +26,16 @@ object TokenStore {
     /** Plain prefs for values that are not secrets. See [PLAIN_PREFS_NAME]. */
     private const val PLAIN_PREFS_NAME = "claude_webui_prefs"
 
-    private lateinit var prefs: SharedPreferences
+    private var prefs: SharedPreferences? = null
     private lateinit var plainPrefs: SharedPreferences
+
+    /**
+     * Where secrets go when the encrypted store cannot be opened at all. RAM
+     * only: a token written to plain prefs would survive on disk and end up in
+     * a device backup, which is exactly what the encrypted store exists to
+     * prevent. The cost is that the emergency session ends with the process.
+     */
+    private val volatileSecrets = mutableMapOf<String, String>()
 
     /**
      * True when the encrypted store had to be reset because its keyset could no
@@ -36,6 +43,15 @@ object TokenStore {
      * instead of silently showing first-run setup.
      */
     var wasResetOnStartup: Boolean = false
+        private set
+
+    /**
+     * True when even a reset could not produce a usable encrypted store, so
+     * secrets are being held in memory for this process only. The app still
+     * runs and still knows its server address; the user signs in again on the
+     * next launch.
+     */
+    var isEmergencyMode: Boolean = false
         private set
 
     /**
@@ -49,7 +65,11 @@ object TokenStore {
      *
      * 1. A failure resets the encrypted store instead of propagating, so the app
      *    starts rather than crashing or half-working.
-     * 2. The server URL lives in plain prefs. It is not a secret — it is already
+     * 2. If even that fails, secrets fall back to memory ([isEmergencyMode])
+     *    rather than throwing out of `Application.onCreate` — a device whose
+     *    Keystore is wedged got an unrecoverable crash loop before, with no way
+     *    to reach the setup screen.
+     * 3. The server URL lives in plain prefs. It is not a secret — it is already
      *    stored unencrypted in `recent_servers` — so losing the keyset now costs
      *    a sign-in, not the connection setup.
      */
@@ -78,36 +98,53 @@ object TokenStore {
         null
     }
 
-    private fun resetAndOpenEncrypted(context: Context): SharedPreferences {
+    private fun resetAndOpenEncrypted(context: Context): SharedPreferences? {
         wasResetOnStartup = true
         // Drop the unreadable payload so a fresh keyset can be generated.
         context.deleteSharedPreferences(PREFS_NAME)
-        return openEncrypted(context)
-            ?: throw IllegalStateException("Encrypted preferences unavailable after reset")
+        val reopened = openEncrypted(context)
+        if (reopened == null) {
+            isEmergencyMode = true
+            Log.e(TAG, "Encrypted preferences unavailable after reset; secrets kept in memory only")
+        }
+        return reopened
+    }
+
+    // --- Secret accessors ---
+    // Every secret goes through these three so the in-memory fallback is not
+    // something each call site has to remember.
+
+    private fun secret(key: String): String? =
+        prefs?.let { runCatching { it.getString(key, null) }.getOrNull() } ?: volatileSecrets[key]
+
+    private fun putSecret(vararg entries: Pair<String, String>) {
+        val store = prefs
+        if (store == null) {
+            entries.forEach { (key, value) -> volatileSecrets[key] = value }
+            return
+        }
+        store.edit().apply { entries.forEach { (key, value) -> putString(key, value) } }.apply()
+    }
+
+    private fun removeSecret(vararg keys: String) {
+        val store = prefs
+        if (store == null) {
+            keys.forEach { volatileSecrets.remove(it) }
+            return
+        }
+        store.edit().apply { keys.forEach { remove(it) } }.apply()
     }
 
     // --- JWT Token ---
 
-    fun getToken(): String? = prefs.getString(KEY_JWT_TOKEN, null)
+    fun getToken(): String? = secret(KEY_JWT_TOKEN)
 
     fun setToken(token: String) {
-        prefs.edit().putString(KEY_JWT_TOKEN, token).apply()
+        putSecret(KEY_JWT_TOKEN to token)
     }
 
     fun clearToken() {
-        prefs.edit().remove(KEY_JWT_TOKEN).apply()
-    }
-
-    // --- Refresh Token ---
-
-    fun getRefreshToken(): String? = prefs.getString(KEY_REFRESH_TOKEN, null)
-
-    fun setRefreshToken(token: String) {
-        prefs.edit().putString(KEY_REFRESH_TOKEN, token).apply()
-    }
-
-    fun clearRefreshToken() {
-        prefs.edit().remove(KEY_REFRESH_TOKEN).apply()
+        removeSecret(KEY_JWT_TOKEN)
     }
 
     // --- Server URL (deliberately not encrypted; see init) ---
@@ -115,7 +152,7 @@ object TokenStore {
     fun getServerUrl(): String? {
         plainPrefs.getString(KEY_SERVER_URL, null)?.let { return it }
         // Carry over installations that stored it in the encrypted file.
-        val legacy = runCatching { prefs.getString(KEY_SERVER_URL, null) }.getOrNull()
+        val legacy = secret(KEY_SERVER_URL)
         if (legacy != null) plainPrefs.edit().putString(KEY_SERVER_URL, legacy).apply()
         return legacy
     }
@@ -126,30 +163,27 @@ object TokenStore {
 
     // --- User ID ---
 
-    fun getUserId(): String? = prefs.getString(KEY_USER_ID, null)
+    fun getUserId(): String? = secret(KEY_USER_ID)
 
     fun setUserId(userId: String) {
-        prefs.edit().putString(KEY_USER_ID, userId).apply()
+        putSecret(KEY_USER_ID to userId)
     }
 
     // --- Pending mobile SSO handoff ---
 
     fun setPendingMobileAuth(state: String, verifier: String) {
-        prefs.edit()
-            .putString(KEY_MOBILE_AUTH_STATE, state)
-            .putString(KEY_MOBILE_AUTH_VERIFIER, verifier)
-            .apply()
+        putSecret(
+            KEY_MOBILE_AUTH_STATE to state,
+            KEY_MOBILE_AUTH_VERIFIER to verifier,
+        )
     }
 
-    fun getPendingMobileAuthState(): String? = prefs.getString(KEY_MOBILE_AUTH_STATE, null)
+    fun getPendingMobileAuthState(): String? = secret(KEY_MOBILE_AUTH_STATE)
 
-    fun getPendingMobileAuthVerifier(): String? = prefs.getString(KEY_MOBILE_AUTH_VERIFIER, null)
+    fun getPendingMobileAuthVerifier(): String? = secret(KEY_MOBILE_AUTH_VERIFIER)
 
     fun clearPendingMobileAuth() {
-        prefs.edit()
-            .remove(KEY_MOBILE_AUTH_STATE)
-            .remove(KEY_MOBILE_AUTH_VERIFIER)
-            .apply()
+        removeSecret(KEY_MOBILE_AUTH_STATE, KEY_MOBILE_AUTH_VERIFIER)
     }
 
     // --- Convenience ---
@@ -161,12 +195,11 @@ object TokenStore {
      * Clear all stored credentials (logout).
      */
     fun clearAll() {
-        prefs.edit()
-            .remove(KEY_JWT_TOKEN)
-            .remove(KEY_REFRESH_TOKEN)
-            .remove(KEY_USER_ID)
-            .remove(KEY_MOBILE_AUTH_STATE)
-            .remove(KEY_MOBILE_AUTH_VERIFIER)
-            .apply()
+        removeSecret(
+            KEY_JWT_TOKEN,
+            KEY_USER_ID,
+            KEY_MOBILE_AUTH_STATE,
+            KEY_MOBILE_AUTH_VERIFIER,
+        )
     }
 }

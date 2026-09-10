@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.settings
 
+import com.claudewebui.app.R
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
@@ -81,6 +83,8 @@ import com.claudewebui.app.ui.components.common.PlumBorder
 import com.claudewebui.app.ui.components.common.PlumNavScaffold
 import com.claudewebui.app.ui.components.common.PlumGreen
 import com.claudewebui.app.ui.components.common.PlumIconButton
+import com.claudewebui.app.ui.components.dashboard.IdlePrefs
+import com.claudewebui.app.ui.components.dashboard.IdleThreshold
 import com.claudewebui.app.ui.theme.LayoutPrefs
 import com.claudewebui.app.ui.theme.TwoPaneOption
 import com.claudewebui.app.ui.components.common.PlumMuted
@@ -108,8 +112,14 @@ fun SettingsScreen(
     onLoggedOut: () -> Unit,
     onNavigateMain: (MainDestination) -> Unit = {},
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
     val twoPaneOption by LayoutPrefs.twoPane.collectAsState()
+    val idleThreshold by IdlePrefs.threshold.collectAsState()
     val context = LocalContext.current
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showThemePicker by remember { mutableStateOf(false) }
@@ -136,41 +146,49 @@ fun SettingsScreen(
                     top = 4.dp,
                     bottom = 4.dp + padding.calculateBottomPadding(),
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             ) {
+                state.error?.let { message ->
+                    item {
+                        com.claudewebui.app.ui.components.common.ErrorBanner(
+                            message = message,
+                            onRetry = viewModel::loadSettings,
+                        )
+                    }
+                }
                 item {
                     PlumScreenHeader(
-                        title = "Settings",
-                        subtitle = "Connection, providers and app preferences",
+                        title = screenResources.getString(R.string.settings_settings_c7f73),
+                        subtitle = screenResources.getString(R.string.settings_connection_providers_and_app_preferences_a8c65),
                         actions = {
-                            PlumIconButton(Icons.Outlined.Refresh, "Refresh", viewModel::loadSettings)
+                            PlumIconButton(Icons.Outlined.Refresh, screenResources.getString(R.string.settings_refresh_56e3b), viewModel::loadSettings)
                         },
                     )
                 }
                 item {
                     GlassPanel(Modifier.fillMaxWidth(), radius = 19.dp) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text("Server Status", color = PlumText, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        Column(Modifier.padding(screenTokens.spacing.lg)) {
+                            Text(screenResources.getString(R.string.settings_server_status_fd709), color = PlumText, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                             Row(Modifier.padding(top = 13.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(10.dp).background(PlumGreen, CircleShape))
                                 Column(Modifier.weight(1f).padding(horizontal = 11.dp)) {
-                                    Text("Connected to plum-code-webui", color = PlumText, fontWeight = FontWeight.Bold)
-                                    Text(state.serverUrl.ifBlank { "Server configured" }, color = PlumMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(screenResources.getString(R.string.settings_connected_to_plum_code_webui_82f9f), color = PlumText, fontWeight = FontWeight.Bold)
+                                    Text(state.serverUrl.ifBlank { screenResources.getString(R.string.settings_server_configured_c7807) }, color = PlumMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
-                                StatusPill("Healthy", PlumGreen)
+                                StatusPill(screenResources.getString(R.string.settings_healthy_80ea1), PlumGreen)
                             }
                             Box(Modifier.fillMaxWidth().padding(vertical = 13.dp).height(1.dp).background(PlumBorder))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Outlined.Sync, null, tint = PlumMuted, modifier = Modifier.size(18.dp))
-                                Text("  Last sync: just now", color = PlumMuted, fontSize = 12.sp)
+                                Icon(Icons.Outlined.Sync, null, tint = PlumMuted, modifier = Modifier.size(screenTokens.sizing.iconInline))
+                                Text(screenResources.getString(R.string.settings_last_sync_just_now_ca523), color = PlumMuted, fontSize = 12.sp)
                             }
                         }
                     }
                 }
                 item {
                     GlassPanel(Modifier.fillMaxWidth(), radius = 19.dp) {
-                        Column(Modifier.padding(horizontal = 14.dp, vertical = 13.dp)) {
-                            Text("Providers", color = PlumText, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 5.dp))
+                        Column(Modifier.padding(horizontal = screenTokens.spacing.cozy, vertical = 13.dp)) {
+                            Text(screenResources.getString(R.string.settings_providers_87b7c), color = PlumText, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 5.dp))
                             CLIProvider.active.forEachIndexed { index, provider ->
                                 ProviderRow(
                                     provider = provider,
@@ -189,26 +207,26 @@ fun SettingsScreen(
                 }
                 item {
                     ResponsiveSettingsPair(
-                        first = { groupModifier -> SettingsGroup("Security", groupModifier) {
-                            CompactSettingRow(Icons.Outlined.Fingerprint, "Biometric lock", "Use fingerprint", PlumAccent) {
+                        first = { groupModifier -> SettingsGroup(screenResources.getString(R.string.settings_security_f25ce), groupModifier) {
+                            CompactSettingRow(Icons.Outlined.Fingerprint, screenResources.getString(R.string.settings_biometric_lock_20972), screenResources.getString(R.string.settings_use_fingerprint_8b19c), PlumAccent) {
                                 PlumSwitch(state.biometricEnabled) { viewModel.setBiometricEnabled(it) }
                             }
-                            CompactSettingRow(Icons.Outlined.Security, "Encrypted tokens", "Stored securely", PlumAccent) {
-                                Icon(Icons.Outlined.CloudDone, "Enabled", tint = PlumGreen)
+                            CompactSettingRow(Icons.Outlined.Security, screenResources.getString(R.string.settings_encrypted_tokens_9a220), screenResources.getString(R.string.settings_stored_securely_4f6fe), PlumAccent) {
+                                Icon(Icons.Outlined.CloudDone, screenResources.getString(R.string.settings_enabled_df174), tint = PlumGreen)
                             }
                             CompactSettingRow(
                                 Icons.Outlined.Lock,
-                                "Permissions",
-                                "Per session",
+                                screenResources.getString(R.string.settings_permissions_d06d5),
+                                screenResources.getString(R.string.settings_per_session_66a54),
                                 PlumAccent,
                                 onClick = onNavigateToPermissions,
                             )
                         } },
-                        second = { groupModifier -> SettingsGroup("Appearance", groupModifier) {
+                        second = { groupModifier -> SettingsGroup(screenResources.getString(R.string.settings_appearance_41def), groupModifier) {
                             CompactSettingRow(
                                 Icons.Outlined.Brightness4,
-                                "Theme",
-                                state.theme.label,
+                                screenResources.getString(R.string.settings_theme_a797e),
+                                state.theme.localizedLabel(screenResources),
                                 PlumMuted,
                                 onClick = { showThemePicker = true },
                             )
@@ -217,8 +235,8 @@ fun SettingsScreen(
                             // screen that plainly has room for it.
                             CompactSettingRow(
                                 Icons.Outlined.ViewColumn,
-                                "Two-pane layout",
-                                twoPaneOption.label + " · " + twoPaneOption.description,
+                                screenResources.getString(R.string.settings_two_pane_layout_e5d18),
+                                twoPaneOption.localizedLabel(screenResources) + " · " + twoPaneOption.localizedDescription(screenResources),
                                 PlumMuted,
                                 onClick = {
                                     val order = TwoPaneOption.entries
@@ -226,20 +244,35 @@ fun SettingsScreen(
                                     LayoutPrefs.set(context, next)
                                 },
                             )
+                            // How long a session may claim to be working with
+                            // nothing to show for it before the dashboard says
+                            // so. Sessions running a test suite are quiet for
+                            // minutes by design; ones editing files are not.
+                            CompactSettingRow(
+                                Icons.Outlined.Timer,
+                                screenResources.getString(R.string.settings_call_a_session_quiet_after_6f50e),
+                                idleThreshold.label + screenResources.getString(R.string.settings_then_the_card_stops_claiming_it_is_working_e4e6d),
+                                PlumMuted,
+                                onClick = {
+                                    val order = IdleThreshold.entries
+                                    val next = order[(order.indexOf(idleThreshold) + 1) % order.size]
+                                    IdlePrefs.set(context, next)
+                                },
+                            )
                         } },
                     )
                 }
                 item {
                     ResponsiveSettingsPair(
-                        first = { groupModifier -> SettingsGroup("Notifications", groupModifier) {
+                        first = { groupModifier -> SettingsGroup(screenResources.getString(R.string.settings_notifications_753a2), groupModifier) {
                             val notificationsActive = state.notificationsEnabled &&
                                 state.notificationsAllowedBySystem
                             val notificationStatus = when {
-                                !state.notificationsAllowedBySystem -> "Blocked by Android settings"
-                                notificationsActive -> "Reply, goal and approval alerts"
-                                else -> "Off"
+                                !state.notificationsAllowedBySystem -> screenResources.getString(R.string.settings_blocked_by_android_settings_2f8f9)
+                                notificationsActive -> screenResources.getString(R.string.settings_reply_goal_and_approval_alerts_52963)
+                                else -> screenResources.getString(R.string.settings_off_e3de5)
                             }
-                            CompactSettingRow(Icons.Outlined.Notifications, "Push notifications", notificationStatus, PlumAccent) {
+                            CompactSettingRow(Icons.Outlined.Notifications, screenResources.getString(R.string.settings_push_notifications_03be2), notificationStatus, PlumAccent) {
                                 PlumSwitch(notificationsActive) { enable ->
                                     when {
                                         !enable -> viewModel.setNotificationsEnabled(false)
@@ -259,9 +292,9 @@ fun SettingsScreen(
                             }
                             CompactSettingRow(
                                 Icons.Outlined.Notifications,
-                                "Usage alerts",
-                                "Quota ≥${com.claudewebui.app.widget.UsageAlerts.LIMIT_THRESHOLD_PERCENT}% " +
-                                    "or cost ≥$${"%.0f".format(com.claudewebui.app.widget.UsageAlerts.dailyCostThreshold(context))}/day",
+                                screenResources.getString(R.string.settings_usage_alerts_ca98c),
+                                screenResources.getString(R.string.settings_quota_1_s_2c324, com.claudewebui.app.widget.UsageAlerts.LIMIT_THRESHOLD_PERCENT) +
+                                    screenResources.getString(R.string.settings_or_cost_1_s_day_edc99, "%.0f".format(com.claudewebui.app.widget.UsageAlerts.dailyCostThreshold(context))),
                                 PlumAccent,
                             ) {
                                 PlumSwitch(usageAlerts) { enable ->
@@ -273,7 +306,7 @@ fun SettingsScreen(
                                 }
                             }
                         } },
-                        second = { groupModifier -> SettingsGroup("Advanced", groupModifier) {
+                        second = { groupModifier -> SettingsGroup(screenResources.getString(R.string.settings_advanced_4d064), groupModifier) {
                             // The update checker existed but nothing ever called
                             // it — without this row the in-app update path was
                             // unreachable and every install had to be sideloaded.
@@ -282,15 +315,15 @@ fun SettingsScreen(
                             val updateState by updateChecker.updateState.collectAsState()
                             CompactSettingRow(
                                 Icons.Outlined.Sync,
-                                "App update",
+                                screenResources.getString(R.string.settings_app_update_45b5d),
                                 when (val u = updateState) {
                                     is com.claudewebui.app.core.updates.UpdateState.UpdateAvailable ->
-                                        "Version ${u.newVersion} available — tap to install"
-                                    com.claudewebui.app.core.updates.UpdateState.Checking -> "Checking…"
-                                    com.claudewebui.app.core.updates.UpdateState.UpToDate -> "Up to date"
+                                        screenResources.getString(R.string.settings_version_1_s_available_tap_to_install_4cc36, u.newVersion)
+                                    com.claudewebui.app.core.updates.UpdateState.Checking -> screenResources.getString(R.string.settings_checking_820d6)
+                                    com.claudewebui.app.core.updates.UpdateState.UpToDate -> screenResources.getString(R.string.settings_up_to_date_82fb1)
                                     is com.claudewebui.app.core.updates.UpdateState.Downloading ->
-                                        "Downloading… ${u.progress}%"
-                                    else -> "Version ${com.claudewebui.app.BuildConfig.VERSION_NAME} · tap to check"
+                                        screenResources.getString(R.string.settings_downloading_1_s_926c0, u.progress)
+                                    else -> screenResources.getString(R.string.settings_version_1_s_tap_to_check_57029, com.claudewebui.app.BuildConfig.VERSION_NAME)
                                 },
                                 PlumAccent,
                                 onClick = {
@@ -302,26 +335,26 @@ fun SettingsScreen(
                                     }
                                 },
                             )
-                            CompactSettingRow(Icons.Outlined.SettingsEthernet, "MCP Servers", "${state.mcpServers.size} configured", PlumMuted, onNavigateToMcp)
+                            CompactSettingRow(Icons.Outlined.SettingsEthernet, screenResources.getString(R.string.settings_mcp_servers_3c23b), screenResources.getString(R.string.settings_1_s_configured_9e3b8, state.mcpServers.size), PlumMuted, onNavigateToMcp)
                             CompactSettingRow(
                                 Icons.Outlined.SmartToy,
-                                "Agents & Skills",
-                                "${state.configAgents.size + state.agents.size} agents · ${state.configSkills.size} skills",
+                                screenResources.getString(R.string.settings_agents_skills_e140f),
+                                screenResources.getString(R.string.settings_1_s_agents_2_s_skills_d9944, state.configAgents.size + state.agents.size, state.configSkills.size),
                                 PlumMuted,
                                 onNavigateToAgents,
                             )
-                            CompactSettingRow(Icons.Outlined.Terminal, "CLI Tools", "${state.cliTools.size} tools", PlumMuted, onNavigateToCliTools)
+                            CompactSettingRow(Icons.Outlined.Terminal, screenResources.getString(R.string.settings_cli_tools_4b238), screenResources.getString(R.string.settings_1_s_tools_9d483, state.cliTools.size), PlumMuted, onNavigateToCliTools)
                             CompactSettingRow(
                                 Icons.Outlined.Hub,
-                                "Integrations",
-                                "ComfyUI · Discord · Home Assistant",
+                                screenResources.getString(R.string.settings_integrations_a7881),
+                                screenResources.getString(R.string.settings_comfyui_discord_home_assistant_b5f60),
                                 PlumMuted,
                                 onNavigateToIntegrations,
                             )
                             CompactSettingRow(
                                 Icons.Outlined.AdminPanelSettings,
-                                "Operations",
-                                "Containers, watchdogs, audit",
+                                screenResources.getString(R.string.settings_operations_a1fda),
+                                screenResources.getString(R.string.settings_containers_watchdogs_audit_a3e6e),
                                 PlumMuted,
                                 onNavigateToOperations,
                             )
@@ -338,11 +371,11 @@ fun SettingsScreen(
                         radius = 18.dp,
                         borderColor = PlumRed.copy(alpha = .45f),
                     ) {
-                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.padding(screenTokens.spacing.lg), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.AutoMirrored.Outlined.ExitToApp, null, tint = PlumRed, modifier = Modifier.size(27.dp))
                             Column(Modifier.weight(1f).padding(start = 13.dp)) {
-                                Text("Log out", color = PlumRed, fontWeight = FontWeight.Bold)
-                                Text("Sign out of your Plum Code account", color = PlumMuted, fontSize = 12.sp)
+                                Text(screenResources.getString(R.string.settings_log_out_6e78c), color = PlumRed, fontWeight = FontWeight.Bold)
+                                Text(screenResources.getString(R.string.settings_sign_out_of_your_plum_code_account_bfaa9), color = PlumMuted, fontSize = 12.sp)
                             }
                             Icon(Icons.Outlined.ChevronRight, null, tint = PlumMuted)
                         }
@@ -358,7 +391,7 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { showThemePicker = false },
             containerColor = PlumSurfaceStrong,
-            title = { Text("Theme", color = PlumText) },
+            title = { Text(screenResources.getString(R.string.settings_theme_a797e), color = PlumText) },
             text = {
                 Column {
                     AppThemeOption.entries.forEach { option ->
@@ -366,12 +399,12 @@ fun SettingsScreen(
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(screenTokens.radius.md))
                                 .clickable {
                                     viewModel.updateTheme(option)
                                     showThemePicker = false
                                 }
-                                .padding(vertical = 11.dp, horizontal = 8.dp),
+                                .padding(vertical = 11.dp, horizontal = screenTokens.spacing.sm),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Box(
@@ -381,16 +414,16 @@ fun SettingsScreen(
                                     .background(if (selected) PlumAccent else Color.Transparent)
                                     .border(1.dp, if (selected) PlumAccent else PlumBorder, CircleShape)
                             )
-                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                                Text(option.label, color = PlumText, fontWeight = FontWeight.Medium)
-                                Text(option.description, color = PlumMuted, fontSize = 11.sp)
+                            Column(Modifier.weight(1f).padding(start = screenTokens.spacing.md)) {
+                                Text(option.localizedLabel(screenResources), color = PlumText, fontWeight = FontWeight.Medium)
+                                Text(option.localizedDescription(screenResources), color = PlumMuted, fontSize = 11.sp)
                             }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showThemePicker = false }) { Text("Close", color = PlumAccent) }
+                TextButton(onClick = { showThemePicker = false }) { Text(screenResources.getString(R.string.settings_close_bbfa7), color = PlumAccent) }
             },
         )
     }
@@ -398,27 +431,32 @@ fun SettingsScreen(
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
-            title = { Text("Log out?") },
-            text = { Text("You can sign in to Plum Code again at any time.") },
+            title = { Text(screenResources.getString(R.string.settings_log_out_dd4dd)) },
+            text = { Text(screenResources.getString(R.string.settings_you_can_sign_in_to_plum_code_again_at_any_time_cfcf1)) },
             confirmButton = {
                 TextButton(onClick = {
                     showLogoutDialog = false
                     viewModel.logout(onLoggedOut)
-                }) { Text("Log out", color = PlumRed) }
+                }) { Text(screenResources.getString(R.string.settings_log_out_6e78c), color = PlumRed) }
             },
-            dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { showLogoutDialog = false }) { Text(screenResources.getString(R.string.settings_cancel_77dfd)) } },
         )
     }
 }
 
 @Composable
 private fun ProviderRow(provider: CLIProvider, config: CLIProviderConfig?, onClick: () -> Unit) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val connected = config?.available ?: (provider == CLIProvider.CODEX || provider == CLIProvider.OPENCODE)
     val enabled = config?.enabled ?: true
     val status = when {
-        !enabled -> "Disabled"
-        connected -> "Connected"
-        else -> "Needs login"
+        !enabled -> screenResources.getString(R.string.settings_disabled_f4f44)
+        connected -> screenResources.getString(R.string.settings_connected_c2f9b)
+        else -> screenResources.getString(R.string.settings_needs_login_1867b)
     }
     val statusColor = when {
         !enabled -> PlumMuted
@@ -430,7 +468,7 @@ private fun ProviderRow(provider: CLIProvider, config: CLIProviderConfig?, onCli
             .fillMaxWidth()
             .heightIn(min = 56.dp)
             .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
+            .padding(vertical = screenTokens.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(9.dp).background(providerColor(provider), CircleShape))
@@ -452,13 +490,15 @@ private fun ResponsiveSettingsPair(
     first: @Composable (Modifier) -> Unit,
     second: @Composable (Modifier) -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     if (rememberWindowWidth() == WindowWidth.COMPACT) {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact)) {
             first(Modifier.fillMaxWidth())
             second(Modifier.fillMaxWidth())
         }
     } else {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact)) {
             first(Modifier.weight(1f))
             second(Modifier.weight(1f))
         }
@@ -467,8 +507,10 @@ private fun ResponsiveSettingsPair(
 
 @Composable
 private fun SettingsGroup(title: String, modifier: Modifier, content: @Composable () -> Unit) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     GlassPanel(modifier, radius = 18.dp) {
-        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+        Column(Modifier.fillMaxWidth().padding(screenTokens.spacing.md)) {
             Text(title, color = PlumText, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 5.dp))
             content()
         }
@@ -484,16 +526,18 @@ private fun CompactSettingRow(
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(vertical = 8.dp),
+            .padding(vertical = screenTokens.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(22.dp))
-        Column(Modifier.weight(1f).padding(start = 10.dp)) {
+        Column(Modifier.weight(1f).padding(start = screenTokens.spacing.compact)) {
             Text(title, color = PlumText, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (subtitle.isNotBlank()) Text(subtitle, color = PlumMuted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }

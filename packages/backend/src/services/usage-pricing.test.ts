@@ -96,3 +96,30 @@ test('two harnesses sharing one model id get different timeline keys', () => {
   const opencode = getUsageModelKey('opencode', 'z-ai/glm-5.1');
   assert.notEqual(pi, opencode, 'series would collapse into one line otherwise');
 });
+
+test('GLM 5.3 and Flash resolve independently, including provider aliases', () => {
+  for (const prefix of ['', 'z-ai/', 'zai/', 'zhipuai/']) {
+    for (const [model, expected] of [
+      ['glm-5.3', [1.4, 4.4, 0.26, 0]],
+      ['glm-5.3-flash', [0.15, 0.5, 0.03, 0]],
+    ] as const) {
+      const pricing = resolveModelPricing(`${prefix}${model}`);
+      assert.ok(pricing);
+      assert.deepEqual(
+        [pricing.input, pricing.output, pricing.cacheRead, pricing.cacheWrite],
+        expected
+      );
+      const estimate = estimateModelCost(`${prefix}${model}`, {
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+        cacheReadTokens: 1_000_000,
+        cacheCreationTokens: 1_000_000,
+      });
+      assert.equal(estimate.known, true);
+      assert.ok(
+        Math.abs(estimate.cost - expected.reduce<number>((sum, value) => sum + value, 0)) < 1e-8
+      );
+    }
+  }
+  assert.equal(resolveModelPricing('glm-5.3-unknown'), null);
+});

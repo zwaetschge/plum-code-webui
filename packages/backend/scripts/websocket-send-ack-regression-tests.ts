@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import jwt from 'jsonwebtoken';
+import express from 'express';
 import { io as createClient, type Socket } from 'socket.io-client';
 
 type SendAck =
@@ -27,12 +28,11 @@ process.env.WEBUI_DATA_DIR = temporaryDirectory;
 process.env.WEBUI_SUPPRESS_BOOTSTRAP_CREDENTIAL_LOG = '1';
 process.env.WEBUI_EXTERNAL_SKILL_SYNC = 'false';
 
-const { useTestSchema, createTestSchema, dropTestSchema } = await import(
-  '../src/db/testing.js'
-);
+const { useTestSchema, createTestSchema, dropTestSchema } = await import('../src/db/testing.js');
 useTestSchema();
 const { getProcessManager, setupWebSocket } = await import('../src/websocket/index.js');
-const { all: pgAll, get: pgGet, run: pgRun } = await import('../src/db/pg.js');
+const { default: sessionRoutes } = await import('../src/routes/sessions.js');
+const { get: pgGet, run: pgRun } = await import('../src/db/pg.js');
 
 await createTestSchema();
 await pgRun(
@@ -56,7 +56,10 @@ await pgRun(
      VALUES ('presence-marker', 'send-session', 'assistant', 'read me')`
 );
 
-const httpServer = createServer();
+const app = express();
+app.use(express.json());
+app.use('/api/sessions', sessionRoutes);
+const httpServer = createServer(app);
 const ioServer = setupWebSocket(httpServer);
 await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
 const address = httpServer.address();
@@ -209,11 +212,115 @@ await pgRun(`UPDATE sessions SET event_sequence = 10 WHERE id = 'send-session'`)
 const resync = new Promise<{
   needsFullResync?: boolean;
   highWatermark?: number;
+  activeChatId?: string | null;
+  streamingSnapshot?: unknown;
 }>((resolve) => reconnected.once('session:reconnected', resolve));
 reconnected.emit('session:reconnect', { sessionId: 'send-session', lastSequence: 1 });
 const resyncPayload = await resync;
 assert.equal(resyncPayload.needsFullResync, true);
 assert.equal(resyncPayload.highWatermark, undefined);
+assert.equal(resyncPayload.activeChatId, null);
+assert.equal(resyncPayload.streamingSnapshot, null);
+const upgradeResync = new Promise<{ needsFullResync?: boolean }>((resolve) =>
+  reconnected.once('session:reconnected', resolve)
+);
+reconnected.emit('session:reconnect', { sessionId: 'send-session' });
+assert.equal((await upgradeResync).needsFullResync, true);
+
+// Thread mutations must reach another device, including one only in the
+// owner's room. These requests run against the isolated test schema/server;
+// sendMessage above is mocked, so no provider or live conversation is used.
+type Chats = {
+  sessionId: string;
+  activeChatId: string | null;
+  chats: Array<{ id: string; title: string }>;
+};
+const threadObserver = await connect();
+async function mutateChat(method: string, suffix: string, body?: unknown): Promise<Chats> {
+  const event = new Promise<Chats>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('thread change was not broadcast')), 2_000);
+    threadObserver.once('session:chats', (data) => {
+      clearTimeout(timer);
+      resolve(data);
+    });
+  });
+  const response = await fetch(`${url}/api/sessions/send-session/chats${suffix}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${jwt.sign({ userId: 'send-user' }, jwtSecret, { expiresIn: '5m' })}`,
+      'Content-Type': 'application/json',
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  assert.equal(response.status, 200);
+  const result = (await response.json()) as { data: Omit<Chats, 'sessionId'> };
+  const broadcast = await event;
+  assert.deepEqual(broadcast, { sessionId: 'send-session', ...result.data });
+  return broadcast;
+}
+const createdChat = await mutateChat('POST', '', { title: 'Other device' });
+const createdChatId = createdChat.activeChatId!;
+const mainChatId = createdChat.chats.find((chat) => chat.id !== createdChatId)!.id;
+const renamedChat = await mutateChat('PATCH', `/${createdChatId}`, { title: 'Renamed remotely' });
+assert.equal(
+  renamedChat.chats.find((chat) => chat.id === createdChatId)?.title,
+  'Renamed remotely'
+);
+assert.equal((await mutateChat('POST', `/${mainChatId}/activate`)).activeChatId, mainChatId);
+assert.equal((await mutateChat('DELETE', `/${createdChatId}`)).chats.length, 1);
+threadObserver.close();
+
+// Restore precisely the text still on screen, not the already persisted reply.
+const liveProcess = {
+  cliProvider: 'codex',
+  currentChatId: 'thread-a',
+  isStreaming: true,
+  streamingText: 'prefix received before the connection dropped',
+  lastSavedAssistantContent: undefined,
+};
+const snapshotManager = {
+  processes: new Map([['snapshot-session', liveProcess]]),
+} as unknown as ReturnType<typeof getProcessManager>;
+const snapshot = getProcessManager().getStreamingSnapshot.call(snapshotManager, 'snapshot-session');
+assert.equal(snapshot?.chatId, 'thread-a');
+assert.equal(snapshot?.content, liveProcess.streamingText);
+Object.assign(liveProcess, { currentChatId: null, providerChatId: null });
+getProcessManager().materializeMainChat.call(
+  snapshotManager,
+  'snapshot-session',
+  'main-materialized'
+);
+assert.equal(liveProcess.currentChatId, 'main-materialized');
+assert.equal(
+  getProcessManager().getStreamingSnapshot.call(snapshotManager, 'snapshot-session')?.chatId,
+  'main-materialized'
+);
+Object.assign(liveProcess, { lastSavedAssistantContent: liveProcess.streamingText });
+assert.equal(
+  getProcessManager().getStreamingSnapshot.call(snapshotManager, 'snapshot-session'),
+  null
+);
+Object.assign(liveProcess, {
+  cliProvider: 'opencode',
+  opencodeActiveMessageId: 'reply-2',
+  partStreams: new Map([
+    ['old', { type: 'text', messageId: 'reply-1', text: 'old answer', savedCleanedLength: 10 }],
+    [
+      'new',
+      {
+        type: 'text',
+        messageId: 'reply-2',
+        text: 'savedfresh',
+        cleaned: 'savedfresh',
+        savedCleanedLength: 5,
+      },
+    ],
+  ]),
+});
+assert.equal(
+  getProcessManager().getStreamingSnapshot.call(snapshotManager, 'snapshot-session')?.content,
+  'fresh'
+);
 
 // Sequenced live state is emitted before its cursor; blocking permissions are
 // buffered under an explicit replay type just like questions.
@@ -224,7 +331,7 @@ const managerSource = fs.readFileSync(
 const websocketSource = fs.readFileSync(path.resolve('src/websocket/index.ts'), 'utf8');
 assert.match(
   websocketSource,
-  /bufferedMessages: needsFullResync \? \[\] : bufferedMessages[^]*?needsFullResync \? \{\} : \{ highWatermark:/,
+  /bufferedMessages: needsFullResync \? \[\] : bufferedMessages[^]*?needsFullResync \? \{\} : \{ highWatermark(?:[:,} ]|$)/,
   'known replay gaps must expose neither truncated items nor an unapplied high watermark'
 );
 const sequencedHelper = managerSource.match(
@@ -247,8 +354,8 @@ assert.match(
 );
 assert.match(
   managerSource,
-  /const chatId = proc\?\.currentChatId \?\? \(await getSessionSyncState/,
-  'provider output should use the pinned turn chat instead of a later active-chat switch'
+  /let chatId = proc \? proc\.currentChatId : \(await getSessionSyncState/,
+  'provider output must preserve even a null pinned main chat instead of inheriting a later active chat'
 );
 assert.match(
   fs.readFileSync(path.resolve('../shared/src/types/websocket.ts'), 'utf8'),

@@ -1,5 +1,6 @@
 package com.claudewebui.app.core.network
 
+import com.claudewebui.app.core.diagnostics.Breadcrumbs
 import com.claudewebui.app.core.security.TokenStore
 import com.claudewebui.app.data.model.*
 import io.socket.client.IO
@@ -7,6 +8,7 @@ import io.socket.client.Ack
 import io.socket.client.Socket
 import io.socket.emitter.Emitter
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -56,8 +58,18 @@ enum class ConnectionState {
  */
 class SocketManager {
 
-    private companion object {
-        val TERMINAL_CONNECT_ERRORS = listOf(
+    companion object {
+        /**
+         * How many sessions the dashboard watches at once.
+         *
+         * Each subscription costs a server-side room join plus one turn-recovery
+         * query, so this is a ceiling on the burst when the dashboard opens, not
+         * a limit on how many sessions may exist. The list is sorted by recent
+         * activity, so what falls off the end is what nobody has touched.
+         */
+        const val MONITORED_SESSION_LIMIT = 30
+
+        private val TERMINAL_CONNECT_ERRORS = listOf(
             "Authentication required",
             "Invalid token",
             "Account unavailable",
@@ -70,18 +82,78 @@ class SocketManager {
         coerceInputValues = true
     }
 
+    // @Volatile because it is written from connect()/disconnect() on the caller's
+    // thread and read from socket.io's own event threads; without it a reader can
+    // keep seeing a socket that was already torn down.
+    @Volatile
     private var socket: Socket? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Recreated by [connect] after [destroy] cancelled it, so a manager that
+    // outlives its first scope (it is a Koin single) can come back.
+    @Volatile
+    private var scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val subscribedSessions = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * One inbound event, parked until the forwarder hands it to its flow.
+     * Holding the flow next to the value keeps a single queue for every event
+     * type. Consumers that need application ordering use chatSyncEvents: separate
+     * SharedFlow collectors can suspend independently after delivery.
+     */
+    private class Pending<T>(private val flow: MutableSharedFlow<T>, private val value: T) {
+        suspend fun deliver() = flow.emit(value)
+    }
+
+    /**
+     * The hand-off between socket.io's event thread and the SharedFlows.
+     *
+     * History: `tryEmit` dropped events when a buffer was full (a busy main
+     * thread), so a `session:message` never reached Room and the transcript
+     * had a hole until the next reconnect. Blocking the socket thread with a
+     * synchronous emit fixed the loss but froze the UI and deadlocked whenever
+     * draining the buffer needed the main thread. An unbounded channel never
+     * blocks the socket thread and never drops; the single forwarder below
+     * suspends on `emit` instead, off the main thread, in arrival order.
+     */
+    private val outbound = Channel<Pending<*>>(Channel.UNLIMITED)
+
+    @Volatile
+    private var forwarderJob: Job? = null
+    private val forwarderLock = Any()
+
+    init {
+        ensureForwarder()
+    }
+
+    /**
+     * Sessions the dashboard watches in the background, as opposed to the one
+     * the user currently has open.
+     *
+     * Kept apart because the two have different lifetimes: leaving a chat must
+     * not silence the session it was showing, or approvals, questions and
+     * errors from everything except the open chat go unnoticed — which was the
+     * behaviour before, with exactly one subscription at a time.
+     */
+    private val monitoredSessions = ConcurrentHashMap.newKeySet<String>()
 
     // --- Connection State ---
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     // --- Reconnection ---
+    // Same reason as [socket]: the backoff state is written from the reconnect
+    // coroutine on Dispatchers.IO and read from the socket.io callback threads.
+    @Volatile
     private var reconnectJob: Job? = null
+
+    @Volatile
     private var reconnectAttempt = 0
     private val maxReconnectDelay = 30_000L // 30 seconds
+
+    // Chat applies transcript, replay and cursor-bearing events in one collector.
+    // Separate public flows remain available to notifications and other observers.
+    private val _chatSyncEvents = MutableSharedFlow<ChatSyncEvent>(extraBufferCapacity = 256)
+    internal val chatSyncEvents: SharedFlow<ChatSyncEvent> = _chatSyncEvents.asSharedFlow()
 
     // --- Per-session event flows ---
     // Using replay = 0 and extraBufferCapacity for backpressure
@@ -152,8 +224,11 @@ class SocketManager {
         val url = serverUrl ?: TokenStore.getServerUrl() ?: return
         val endpoint = runCatching { socketEndpoint(url) }.getOrNull() ?: return
         disconnect(clearSubscriptions = false)
+        if (!scope.isActive) scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        ensureForwarder()
 
         _connectionState.value = ConnectionState.CONNECTING
+        Breadcrumbs.add("socket", "connecting to ${endpoint.origin}${endpoint.path}")
 
         val options = IO.Options().apply {
             forceNew = true
@@ -187,6 +262,7 @@ class SocketManager {
                 on("session:question_request", onQuestion)
                 on("session:queue", onQueue)
                 on("session:reconnected", onReconnected)
+                on("session:chats", onChats)
                 on("session:cursor", onCursor)
                 on("session:presence", onPresence)
                 on("session:compact", onCompact)
@@ -196,6 +272,7 @@ class SocketManager {
             }
         } catch (e: Exception) {
             _connectionState.value = ConnectionState.ERROR
+            Breadcrumbs.add("socket", "connect failed: ${e.message ?: e.javaClass.simpleName}")
             scheduleReconnect()
         }
     }
@@ -207,11 +284,15 @@ class SocketManager {
         reconnectJob?.cancel()
         reconnectJob = null
         socket?.let { s ->
+            Breadcrumbs.add("socket", "disconnect requested (clearSubscriptions=$clearSubscriptions)")
             s.off()
             s.disconnect()
         }
         socket = null
-        if (clearSubscriptions) subscribedSessions.clear()
+        if (clearSubscriptions) {
+            subscribedSessions.clear()
+            monitoredSessions.clear()
+        }
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
@@ -220,7 +301,10 @@ class SocketManager {
      */
     fun destroy() {
         disconnect()
+        Breadcrumbs.add("socket", "destroyed")
+        // Cancelling the scope stops the forwarder too; connect() restarts both.
         scope.cancel()
+        forwarderJob = null
     }
 
     /** Reconnect if the transport is gone; no-op while genuinely connected. */
@@ -247,14 +331,51 @@ class SocketManager {
     // Session Subscription
     // ========================================================================
 
+    /**
+     * Join a session room.
+     *
+     * Only emitted when the room is not already joined: the server answers a
+     * subscribe by running `recoverInterruptedKimiTurn` for that session, so a
+     * redundant call is a database query, not a no-op.
+     */
     fun subscribeToSession(sessionId: String) {
-        subscribedSessions.add(sessionId)
-        socket?.emit("session:subscribe", sessionId)
+        if (subscribedSessions.add(sessionId)) socket?.emit("session:subscribe", sessionId)
     }
 
+    /**
+     * Leave a session room — unless the dashboard is monitoring it.
+     *
+     * Closing a chat used to unsubscribe unconditionally, which also tore down
+     * the background subscription and stopped notifications for that session.
+     */
     fun unsubscribeFromSession(sessionId: String) {
-        subscribedSessions.remove(sessionId)
-        socket?.emit("session:unsubscribe", sessionId)
+        if (sessionId in monitoredSessions) return
+        if (subscribedSessions.remove(sessionId)) socket?.emit("session:unsubscribe", sessionId)
+    }
+
+    /**
+     * Replace the set of background-monitored sessions.
+     *
+     * Called by the dashboard with the sessions worth watching (see
+     * [MONITORED_SESSION_LIMIT]). Diffed rather than re-subscribed wholesale so
+     * a routine list refresh does not re-run the server-side turn recovery for
+     * every session.
+     *
+     * The open chat's own subscription is left alone: an id that drops out of
+     * the monitored set stays joined if the chat still holds it.
+     */
+    fun syncMonitoredSessions(sessionIds: Collection<String>, openSessionId: String? = null) {
+        val wanted = sessionIds.toSet()
+        val gone = monitoredSessions - wanted
+        monitoredSessions.removeAll(gone)
+        for (id in gone) {
+            if (id == openSessionId) continue
+            if (subscribedSessions.remove(id)) socket?.emit("session:unsubscribe", id)
+        }
+        for (id in wanted) {
+            monitoredSessions.add(id)
+            if (subscribedSessions.add(id)) socket?.emit("session:subscribe", id)
+        }
     }
 
     // ========================================================================
@@ -322,7 +443,7 @@ class SocketManager {
                 retryable = true,
             )
         if (result.status == SessionSendAck.SendStatus.ACCEPTED) {
-            _turnStarted.emitBlocking(sessionId)
+            _turnStarted.dispatch(sessionId)
         }
         return result
     }
@@ -433,6 +554,7 @@ class SocketManager {
 
     private val onConnect = Emitter.Listener {
         _connectionState.value = ConnectionState.CONNECTED
+        Breadcrumbs.add("socket", "connected (resubscribing ${subscribedSessions.size} sessions)")
         reconnectAttempt = 0
         reconnectJob?.cancel()
         // Re-subscribe to previously subscribed sessions
@@ -441,8 +563,9 @@ class SocketManager {
         }
     }
 
-    private val onDisconnect = Emitter.Listener {
+    private val onDisconnect = Emitter.Listener { args ->
         _connectionState.value = ConnectionState.DISCONNECTED
+        Breadcrumbs.add("socket", "disconnected: ${args.firstOrNull()?.toString() ?: "no reason"}")
         scheduleReconnect()
     }
 
@@ -453,6 +576,7 @@ class SocketManager {
             else -> cause?.toString().orEmpty()
         }
         val terminal = TERMINAL_CONNECT_ERRORS.any { message.contains(it, ignoreCase = true) }
+        Breadcrumbs.add("socket", "connect error${if (terminal) " (terminal)" else ""}: $message")
         // An invalid/expired token can only be fixed by re-login; retrying
         // every second just floods the server and drains the battery.
         if (!terminal) scheduleReconnect()
@@ -463,11 +587,17 @@ class SocketManager {
     // ========================================================================
 
     private val onSessionOutput = Emitter.Listener { args ->
-        parseAndEmit<StreamingMessage>(args) { _output.emitBlocking(it) }
+        parseAndEmit<StreamingMessage>(args) {
+            _chatSyncEvents.dispatch(ChatSyncEvent.Output(it))
+            _output.dispatch(it)
+        }
     }
 
     private val onSessionMessage = Emitter.Listener { args ->
-        parseAndEmit<Message>(args) { _messages.emitBlocking(it) }
+        parseAndEmit<Message>(args) {
+            _chatSyncEvents.dispatch(ChatSyncEvent.PersistedMessage(it))
+            _messages.dispatch(it)
+        }
     }
 
     private val onSessionStatus = Emitter.Listener { args ->
@@ -477,33 +607,43 @@ class SocketManager {
         val sessionStatus = try {
             json.decodeFromString<SessionStatus>("\"$statusStr\"")
         } catch (_: Exception) { return@Listener }
-        _status.emitBlocking(sessionId to sessionStatus)
+        Breadcrumbs.add("socket", "status $sessionId -> $statusStr")
+        _chatSyncEvents.dispatch(ChatSyncEvent.Status(sessionId, sessionStatus))
+        _status.dispatch(sessionId to sessionStatus)
     }
 
     private val onSessionError = Emitter.Listener { args ->
         val obj = args.firstOrNull() as? JSONObject ?: return@Listener
         val sessionId = obj.optString("sessionId")
         val error = obj.optString("error")
-        _errors.emitBlocking(sessionId to error)
+        Breadcrumbs.add("socket", "session error $sessionId: ${error.take(120)}")
+        _chatSyncEvents.dispatch(ChatSyncEvent.Failure(sessionId, error))
+        _errors.dispatch(sessionId to error)
     }
 
     private val onToolUse = Emitter.Listener { args ->
-        parseAndEmit<ToolExecutionEvent>(args) { _toolUse.emitBlocking(it) }
+        parseAndEmit<ToolExecutionEvent>(args) {
+            _chatSyncEvents.dispatch(ChatSyncEvent.Tool(it))
+            _toolUse.dispatch(it)
+        }
     }
 
     private val onAgentEvent = Emitter.Listener { args ->
-        parseAndEmit<AgentEvent>(args) { _agent.emitBlocking(it) }
+        parseAndEmit<AgentEvent>(args) {
+            _chatSyncEvents.dispatch(ChatSyncEvent.Agent(it))
+            _agent.dispatch(it)
+        }
     }
 
     private val onThinking = Emitter.Listener { args ->
         val obj = args.firstOrNull() as? JSONObject ?: return@Listener
-        _thinking.emitBlocking(
-            ThinkingEvent(
-                sessionId = obj.optString("sessionId"),
-                isThinking = obj.optBoolean("isThinking"),
-                message = obj.optString("message").takeIf { it.isNotBlank() },
-            )
+        val event = ThinkingEvent(
+            sessionId = obj.optString("sessionId"),
+            isThinking = obj.optBoolean("isThinking"),
+            message = obj.optString("message").takeIf { it.isNotBlank() },
         )
+        _chatSyncEvents.dispatch(ChatSyncEvent.Thinking(event))
+        _thinking.dispatch(event)
     }
 
     private val onTodos = Emitter.Listener { args ->
@@ -513,53 +653,56 @@ class SocketManager {
         val todoItems = try {
             json.decodeFromString<List<TodoItem>>(todosArray)
         } catch (_: Exception) { return@Listener }
-        _todos.emitBlocking(sessionId to todoItems)
+        _todos.dispatch(sessionId to todoItems)
     }
 
     private val onUsage = Emitter.Listener { args ->
-        parseAndEmit<UsageData>(args) { _usage.emitBlocking(it) }
+        parseAndEmit<UsageData>(args) { _usage.dispatch(it) }
     }
 
     private val onQueue = Emitter.Listener { args ->
-        parseAndEmit<QueueEvent>(args) { _queue.emitBlocking(it) }
+        parseAndEmit<QueueEvent>(args) { _queue.dispatch(it) }
     }
 
     private val onQuestion = Emitter.Listener { args ->
-        parseAndEmit<QuestionRequestEvent>(args) { _question.emitBlocking(it) }
+        parseAndEmit<QuestionRequestEvent>(args) {
+            _chatSyncEvents.dispatch(ChatSyncEvent.Question(it))
+            _question.dispatch(it)
+        }
     }
 
     private val onReconnected = Emitter.Listener { args ->
         val obj = args.firstOrNull() as? JSONObject ?: return@Listener
-        val buffered = buildList {
-            val values = obj.optJSONArray("bufferedMessages") ?: JSONArray()
-            for (index in 0 until values.length()) {
-                val item = values.optJSONObject(index) ?: continue
-                runCatching { json.decodeFromString<BufferedMessage>(item.toString()) }
-                    .getOrNull()
-                    ?.let(::add)
-            }
+        // A malformed buffered item requires REST recovery, not silently skipping
+        // it and committing a cursor beyond a message we never decoded.
+        val event = runCatching { json.decodeFromString<ReconnectedEvent>(obj.toString()) }
+            .getOrElse {
+                ReconnectedEvent(
+                    sessionId = obj.optString("sessionId"),
+                    isRunning = obj.optBoolean("isRunning"),
+                    needsFullResync = true,
+                )
+            }.copy(hasActiveChatId = obj.has("activeChatId"), activeChatId = obj.optString("activeChatId").takeUnless { it.isBlank() || it == "null" })
+        _chatSyncEvents.dispatch(ChatSyncEvent.Reconnected(event))
+        _reconnected.dispatch(event)
+    }
+
+    private val onChats = Emitter.Listener { args ->
+        parseAndEmit<SessionChatsEvent>(args) {
+            _chatSyncEvents.dispatch(ChatSyncEvent.Chats(it))
         }
-        _reconnected.emitBlocking(
-            ReconnectedEvent(
-                sessionId = obj.optString("sessionId"),
-                isRunning = obj.optBoolean("isRunning"),
-                needsFullResync = obj.optBoolean("needsFullResync"),
-                bufferedMessages = buffered,
-                highWatermark = obj.optLongOrNull("highWatermark"),
-                snapshotRevision = obj.optLongOrNull("snapshotRevision"),
-            )
-        )
     }
 
     private val onCursor = Emitter.Listener { args ->
         val obj = args.firstOrNull() as? JSONObject ?: return@Listener
         val sessionId = obj.optString("sessionId")
         val sequence = obj.optLongOrNull("sequence") ?: return@Listener
-        _cursor.emitBlocking(sessionId to sequence)
+        _chatSyncEvents.dispatch(ChatSyncEvent.Cursor(sessionId, sequence))
+        _cursor.dispatch(sessionId to sequence)
     }
 
     private val onPresence = Emitter.Listener { args ->
-        parseAndEmit<PresenceSnapshot>(args) { _presence.emitBlocking(it) }
+        parseAndEmit<PresenceSnapshot>(args) { _presence.dispatch(it) }
     }
 
     private val onPermission = Emitter.Listener { args ->
@@ -567,11 +710,15 @@ class SocketManager {
         val element = try {
             json.parseToJsonElement(obj.toString())
         } catch (_: Exception) { return@Listener }
-        _permission.emitBlocking(element)
+        _chatSyncEvents.dispatch(ChatSyncEvent.Permission(element))
+        _permission.dispatch(element)
     }
 
     private val onCompact = Emitter.Listener { args ->
-        parseAndEmit<CompactEvent>(args) { _compact.emitBlocking(it) }
+        parseAndEmit<CompactEvent>(args) {
+            _chatSyncEvents.dispatch(ChatSyncEvent.Compact(it))
+            _compact.dispatch(it)
+        }
     }
 
     private val onMode = Emitter.Listener { args ->
@@ -581,7 +728,7 @@ class SocketManager {
         val sessionMode = try {
             json.decodeFromString<SessionMode>("\"$modeStr\"")
         } catch (_: Exception) { return@Listener }
-        _mode.emitBlocking(sessionId to sessionMode)
+        _mode.dispatch(sessionId to sessionMode)
     }
 
     // ========================================================================
@@ -597,6 +744,7 @@ class SocketManager {
             // picks it, and delay(negative) fires an immediate reconnect burst.
             val delay = minOf(1000L * (1L shl reconnectAttempt.coerceAtMost(5)), maxReconnectDelay)
             reconnectAttempt++
+            Breadcrumbs.add("socket", "reconnect attempt $reconnectAttempt in ${delay}ms")
             delay(delay)
             if (isActive) {
                 connect()
@@ -609,13 +757,42 @@ class SocketManager {
     // ========================================================================
 
     /**
-     * tryEmit drops silently when the buffer is full (a busy main thread) — a
-     * lost session:message then never reaches Room and the transcript has a
-     * hole until the next reconnect. Briefly blocking the socket.io event
-     * thread instead preserves ordering and loses nothing.
+     * Queue [value] for its flow without blocking the calling thread.
+     *
+     * The channel is unbounded, so `trySend` only fails once the channel is
+     * closed — which never happens; the forwarder is cancelled with the scope
+     * and restarted by [connect], and whatever was queued in between is
+     * delivered then. See [outbound] for why this replaced `tryEmit` and the
+     * blocking emit.
      */
-    private fun <T> MutableSharedFlow<T>.emitBlocking(value: T) {
-        if (!tryEmit(value)) runBlocking { emit(value) }
+    private fun <T> MutableSharedFlow<T>.dispatch(value: T) {
+        outbound.trySend(Pending(this, value))
+        if (forwarderJob?.isActive != true) ensureForwarder()
+    }
+
+    /**
+     * Start the single forwarder coroutine if it is not running. One consumer
+     * on [Dispatchers.Default] drains [outbound] in order and suspends on the
+     * SharedFlow's `emit` when a buffer is full, instead of dropping or
+     * blocking. Idempotent and safe to call from any thread.
+     */
+    private fun ensureForwarder() {
+        synchronized(forwarderLock) {
+            if (forwarderJob?.isActive == true) return
+            val currentScope = scope
+            if (!currentScope.isActive) return
+            forwarderJob = currentScope.launch(Dispatchers.Default) {
+                for (pending in outbound) {
+                    try {
+                        pending.deliver()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // A collector's failure must not stop delivery to the rest.
+                    }
+                }
+            }
+        }
     }
 
     private inline fun <reified T> parseAndEmit(
@@ -653,6 +830,7 @@ data class ThinkingEvent(
 )
 
 /** `session:reconnected` — answer to a `session:reconnect` request. */
+@kotlinx.serialization.Serializable
 data class ReconnectedEvent(
     val sessionId: String,
     val isRunning: Boolean,
@@ -660,6 +838,10 @@ data class ReconnectedEvent(
     val bufferedMessages: List<BufferedMessage> = emptyList(),
     val highWatermark: Long? = null,
     val snapshotRevision: Long? = null,
+    val streamingSnapshot: StreamingMessage? = null,
+    val isBusy: Boolean? = null,
+    val activeChatId: String? = null,
+    @kotlinx.serialization.Transient val hasActiveChatId: Boolean = false,
 )
 
 @kotlinx.serialization.Serializable
@@ -731,3 +913,28 @@ internal fun parseSessionSendAck(
 
 private fun JSONObject.optLongOrNull(key: String): Long? =
     takeIf { has(key) && !isNull(key) }?.optLong(key)
+
+
+@kotlinx.serialization.Serializable
+internal data class SessionChatsEvent(
+    val sessionId: String,
+    val chats: List<SessionChat> = emptyList(),
+    val activeChatId: String? = null,
+)
+
+/** One application-ordered stream prevents a newer cursor overtaking a Room write. */
+internal sealed interface ChatSyncEvent {
+    data class Output(val value: StreamingMessage) : ChatSyncEvent
+    data class PersistedMessage(val value: Message) : ChatSyncEvent
+    data class Reconnected(val value: ReconnectedEvent) : ChatSyncEvent
+    data class Chats(val value: SessionChatsEvent) : ChatSyncEvent
+    data class Status(val sessionId: String, val value: SessionStatus) : ChatSyncEvent
+    data class Failure(val sessionId: String, val message: String) : ChatSyncEvent
+    data class Cursor(val sessionId: String, val sequence: Long) : ChatSyncEvent
+    data class Thinking(val value: ThinkingEvent) : ChatSyncEvent
+    data class Tool(val value: ToolExecutionEvent) : ChatSyncEvent
+    data class Agent(val value: AgentEvent) : ChatSyncEvent
+    data class Compact(val value: CompactEvent) : ChatSyncEvent
+    data class Question(val value: QuestionRequestEvent) : ChatSyncEvent
+    data class Permission(val value: JsonElement) : ChatSyncEvent
+}

@@ -3,16 +3,13 @@ package com.claudewebui.app.data.local.entity
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
-import androidx.room.PrimaryKey
 
 /**
- * Room entity that persists unsent message drafts per session.
- * One draft per session — upsert replaces the previous draft.
- *
- * Uses [sessionId] as primary key so that each session has at most one draft.
+ * Unsent text is owned by a session and chat. Empty chatId preserves legacy drafts.
  */
 @Entity(
     tableName = "drafts",
+    primaryKeys = ["sessionId", "chatId"],
     foreignKeys = [
         ForeignKey(
             entity = SessionEntity::class,
@@ -24,8 +21,8 @@ import androidx.room.PrimaryKey
     indices = [Index(value = ["sessionId"])]
 )
 data class DraftEntity(
-    @PrimaryKey
     val sessionId: String,
     val content: String,
+    val chatId: String = "",
     val timestamp: Long = System.currentTimeMillis()
 )

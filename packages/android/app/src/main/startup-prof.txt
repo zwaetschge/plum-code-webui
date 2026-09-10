@@ -1,0 +1,47 @@
+# Startup profile for Plum Code (Android).
+#
+# AGP 8.x reads src/main/startup-prof.txt (in addition to baseline-prof.txt)
+# and hands it to R8 for DEX layout: classes on the cold-start path land in
+# the primary DEX in the order they load, so fewer pages are faulted in before
+# the first frame. This is the startup subset of baseline-prof.txt.
+
+HSPLcom/claudewebui/app/ClaudeWebUIApp;->**(**)**
+HSPLcom/claudewebui/app/MainActivity;->**(**)**
+HSPLcom/claudewebui/app/ComposableSingletons$MainActivityKt;->**(**)**
+HSPLcom/claudewebui/app/BuildConfig;->**(**)**
+HSPLcom/claudewebui/app/di/**;->**(**)**
+HSPLcom/claudewebui/app/core/diagnostics/**;->**(**)**
+HSPLcom/claudewebui/app/core/security/**;->**(**)**
+HSPLcom/claudewebui/app/core/network/**;->**(**)**
+HSPLcom/claudewebui/app/core/notifications/LocalNotificationManager;->**(**)**
+HSPLcom/claudewebui/app/core/notifications/NotificationService;->**(**)**
+HSPLcom/claudewebui/app/data/local/**;->**(**)**
+HSPLcom/claudewebui/app/data/repository/**;->**(**)**
+HSPLcom/claudewebui/app/navigation/**;->**(**)**
+HSPLcom/claudewebui/app/ui/theme/**;->**(**)**
+HSPLcom/claudewebui/app/ui/screens/auth/**;->**(**)**
+HSPLcom/claudewebui/app/ui/screens/dashboard/**;->**(**)**
+HSPLcom/claudewebui/app/ui/components/common/**;->**(**)**
+HSPLcom/claudewebui/app/ui/components/dashboard/**;->**(**)**
+
+Lcom/claudewebui/app/ClaudeWebUIApp;
+Lcom/claudewebui/app/MainActivity;
+Lcom/claudewebui/app/di/**;
+Lcom/claudewebui/app/core/diagnostics/**;
+Lcom/claudewebui/app/core/security/**;
+Lcom/claudewebui/app/core/network/**;
+Lcom/claudewebui/app/data/local/**;
+Lcom/claudewebui/app/data/repository/**;
+Lcom/claudewebui/app/navigation/**;
+Lcom/claudewebui/app/ui/theme/**;
+Lcom/claudewebui/app/ui/screens/auth/**;
+Lcom/claudewebui/app/ui/screens/dashboard/**;
+
+Lorg/koin/**;
+Landroidx/room/**;
+Landroidx/sqlite/**;
+Lkotlinx/serialization/**;
+Lio/ktor/client/**;
+Landroidx/security/crypto/**;
+Landroidx/navigation/**;
+Landroidx/profileinstaller/**;

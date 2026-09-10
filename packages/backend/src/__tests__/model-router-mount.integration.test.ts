@@ -22,11 +22,14 @@ test.after(async () => {
 });
 
 test('an unknown router token is rejected in the Anthropic error shape', async () => {
-  const response = await fetch(`${server.url}/model-router/definitely-not-a-token-000/v1/messages`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
-  });
+  const response = await fetch(
+    `${server.url}/model-router/definitely-not-a-token-000/v1/messages`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'glm-5.3', messages: [] }),
+    }
+  );
   assert.equal(response.status, 401);
   const body = (await response.json()) as { type?: string; error?: { type?: string } };
   // Claude Code parses errors in this shape; anything else surfaces as a

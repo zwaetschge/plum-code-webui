@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Backup rules for Android 11 and below (fullBackupContent).
+
+    The encrypted preferences must never leave the device. Their master key
+    lives in the Android Keystore and is not part of any backup, so a restored
+    copy is undecryptable on the new device - the app would find an unreadable
+    keyset and reset it anyway. Excluding it keeps the auth token out of Google
+    Drive instead of shipping it there to no purpose. The two keyset files are
+    what androidx.security.crypto wraps the per-file keys in; they are useless
+    without the Keystore key but excluded for the same reason.
+
+    The Room database is a cache of the server (sessions, messages, read
+    state) plus an outbox that is drained within seconds of reconnecting; it
+    re-syncs on first launch, so restoring a stale copy only risks showing
+    old data next to a fresh login. WorkManager's own database is rebuilt by
+    ensurePeriodic() on every start. The pending crash file belongs to the
+    install that produced it, not to a new phone.
+
+    Kept: claude_webui_prefs (server URL, not a secret) and the UI preference
+    files, so a restored install lands on the right server with the user's
+    theme and layout intact.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="claude_webui_secure_prefs.xml" />
+    <exclude domain="sharedpref" path="__androidx_security_crypto_encrypted_prefs_key_keyset__.xml" />
+    <exclude domain="sharedpref" path="__androidx_security_crypto_encrypted_prefs_value_keyset__.xml" />
+    <exclude domain="database" path="claude_webui.db" />
+    <exclude domain="database" path="claude_webui.db-wal" />
+    <exclude domain="database" path="claude_webui.db-shm" />
+    <exclude domain="database" path="claude_webui.db-journal" />
+    <exclude domain="database" path="androidx.work.workdb" />
+    <exclude domain="database" path="androidx.work.workdb-wal" />
+    <exclude domain="database" path="androidx.work.workdb-shm" />
+    <exclude domain="file" path="last-crash.txt" />
+</full-backup-content>

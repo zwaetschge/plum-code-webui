@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.components.common
 
+import com.claudewebui.app.ui.theme.PlumTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
@@ -53,6 +54,7 @@ fun PullToRefreshContainer(
 @Preview(showBackground = true, backgroundColor = 0xFFF0EFEA)
 @Composable
 private fun PullToRefreshPreview() {
+    val componentTokens = PlumTheme.tokens
     ClaudeWebUITheme {
         PullToRefreshContainer(
             isRefreshing = false,
@@ -63,7 +65,7 @@ private fun PullToRefreshPreview() {
                 items(20) { index ->
                     Text(
                         text = "Session #$index",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        modifier = Modifier.padding(horizontal = componentTokens.spacing.lg, vertical = componentTokens.spacing.md),
                         style = MaterialTheme.typography.bodyLarge,
                     )
                 }

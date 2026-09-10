@@ -14,15 +14,19 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.claudewebui.app.MainActivity
 import com.claudewebui.app.R
+import com.claudewebui.app.widget.WidgetRefreshWorker
 
 /**
  * Foreground service that keeps the process — and with it the socket — alive
  * while agent turns run. Without it, Doze drops the connection minutes after
  * the screen turns off and completion notifications silently never arrive.
  *
- * Started when a turn begins (the app is in the foreground then, so the
- * background-start restriction never bites) and stopped when the last watched
- * session finishes or the watchdog timeout hits.
+ * Started when a turn begins — our own send, or one observed on any monitored
+ * session — and stopped when the last watched session finishes or the watchdog
+ * timeout hits. A turn seen while the app sits in the background may be refused
+ * a foreground start by the OS; that is expected and best-effort, so every
+ * start path swallows the refusal instead of crashing the process that is
+ * carrying the socket.
  */
 class AgentWatchService : Service() {
 
@@ -40,17 +44,28 @@ class AgentWatchService : Service() {
         }
         val count = intent?.getIntExtra(EXTRA_ACTIVE_COUNT, 1) ?: 1
         val detail = intent?.getStringExtra(EXTRA_DETAIL)
-        running = true
-        ServiceCompat.startForeground(
-            this,
-            NOTIFICATION_ID,
-            buildNotification(this, count, detail),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            } else {
-                0
-            },
-        )
+        // Android 12+ rejects a foreground start requested from the background.
+        // Since turns observed on other sessions can arrive at any time, that
+        // refusal is a normal outcome and must not take the app down with it.
+        val promoted = runCatching {
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                buildNotification(this, count, detail),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                } else {
+                    0
+                },
+            )
+        }.isSuccess
+        running = promoted
+        if (!promoted) {
+            // No keep-alive means the socket can be dropped in Doze, so hand
+            // the turn to the periodic worker exactly as the timeout path does.
+            runCatching { WidgetRefreshWorker.ensurePeriodic(applicationContext) }
+            stopSelf()
+        }
         return START_NOT_STICKY
     }
 
@@ -62,6 +77,14 @@ class AgentWatchService : Service() {
     override fun onTimeout(startId: Int, fgsType: Int) {
         // Android 15 caps dataSync foreground time per day. Let go gracefully —
         // the next turn start brings the service right back.
+        //
+        // Hand over rather than just disappearing: once the socket loses its
+        // keep-alive the running turn can finish unheard, so the periodic
+        // worker takes over and picks the result up through AttentionSync.
+        runCatching {
+            WidgetRefreshWorker.ensurePeriodic(applicationContext)
+            WidgetRefreshWorker.refreshNow(applicationContext)
+        }
         stopSelf()
     }
 
@@ -116,10 +139,10 @@ class AgentWatchService : Service() {
             nm.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ID,
-                    "Active agent turns",
+                    context.getString(R.string.native_channel_active),
                     NotificationManager.IMPORTANCE_MIN,
                 ).apply {
-                    description = "Keeps the connection alive while an agent is working"
+                    description = context.getString(R.string.native_channel_active_description)
                     setShowBadge(false)
                 },
             )
@@ -137,12 +160,12 @@ class AgentWatchService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             val text = when {
-                detail != null && activeCount == 1 -> "Working: ${detail.take(80)}"
-                detail != null -> "$activeCount agents · latest: ${detail.take(70)}"
+                detail != null && activeCount == 1 -> context.getString(R.string.native_working_detail, detail.take(80))
+                detail != null -> context.getString(R.string.native_agents_latest, activeCount, detail.take(70))
                 activeCount == 1 ->
-                    "Agent is working — you'll be notified when the reply is ready"
+                    context.getString(R.string.native_agent_working)
                 else ->
-                    "$activeCount agents are working — you'll be notified when replies are ready"
+                    context.getString(R.string.native_agents_working, activeCount)
             }
             return NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)

@@ -1,4 +1,4 @@
-import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
+import { get as pgGet, all as pgAll, run as pgRun, type TransactionScope } from '../db/pg.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { mkdir, open, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
@@ -430,14 +430,17 @@ export async function persistMessageMedia(input: PersistMessageMediaInput): Prom
 }
 
 /** Load persisted public media grouped by message id for REST hydration. */
-export async function loadMessageMedia(messageIds: string[]): Promise<Map<string, ChatMedia[]>> {
+export async function loadMessageMedia(
+  messageIds: string[],
+  query: Pick<TransactionScope, 'all'> = { all: pgAll }
+): Promise<Map<string, ChatMedia[]>> {
   const grouped = new Map<string, ChatMedia[]>();
   if (messageIds.length === 0) return grouped;
 
   for (let offset = 0; offset < messageIds.length; offset += 500) {
     const batch = messageIds.slice(offset, offset + 500);
     const placeholders = batch.map(() => '?').join(', ');
-    const rows = (await pgAll(
+    const rows = (await query.all(
       `${MEDIA_SELECT}
          WHERE message_id IN (${placeholders})
          ORDER BY created_at ASC, message_media.seq ASC`,

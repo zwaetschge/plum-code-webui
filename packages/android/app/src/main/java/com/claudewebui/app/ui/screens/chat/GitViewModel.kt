@@ -1,5 +1,9 @@
 package com.claudewebui.app.ui.screens.chat
 
+import android.content.Context
+import com.claudewebui.app.R
+import com.claudewebui.app.core.network.apiCall
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.claudewebui.app.core.network.ApiClient
@@ -29,7 +33,8 @@ data class GitUiState(
 class GitViewModel(
     private val sessionId: String,
     private val apiClient: ApiClient,
-    private val sessionRepository: SessionRepository
+    private val sessionRepository: SessionRepository,
+    private val appContext: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GitUiState())
@@ -62,11 +67,11 @@ class GitViewModel(
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             // Each call fails independently — a broken diff must not blank the
             // whole panel.
-            val status = runCatching { apiClient.gitStatus(path) }.getOrNull()
-            val log = runCatching { apiClient.gitLog(path) }.getOrNull()
-            val unstagedDiff = runCatching { apiClient.gitDiff(path) }.getOrNull()
-            val stagedDiff = runCatching { apiClient.gitDiffStaged(path) }.getOrNull()
-            val branches = runCatching { apiClient.gitBranches(path) }.getOrNull()
+            val status = apiCall { apiClient.gitStatus(path) }.getOrNull()
+            val log = apiCall { apiClient.gitLog(path) }.getOrNull()
+            val unstagedDiff = apiCall { apiClient.gitDiff(path) }.getOrNull()
+            val stagedDiff = apiCall { apiClient.gitDiffStaged(path) }.getOrNull()
+            val branches = apiCall { apiClient.gitBranches(path) }.getOrNull()
 
             val diffs =
                 parseUnifiedDiff(stagedDiff?.data?.diff.orEmpty(), staged = true) +
@@ -78,7 +83,7 @@ class GitViewModel(
                 commits = if (log?.success == true) log.data ?: emptyList() else emptyList(),
                 diffs = diffs,
                 branches = if (branches?.success == true) branches.data ?: emptyList() else emptyList(),
-                error = if (status == null) "Failed to load git status" else null,
+                error = if (status == null) appContext.getString(R.string.chat_git_load_failed) else null,
             )
         }
     }
@@ -87,8 +92,8 @@ class GitViewModel(
         val workingDir = _uiState.value.workingDirectory
         if (workingDir.isEmpty()) return
         viewModelScope.launch {
-            runCatching { apiClient.gitStage(workingDir) }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+            apiCall { apiClient.gitStage(workingDir) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.userMessage(appContext)) }
             refreshGitStatus(workingDir)
         }
     }
@@ -98,17 +103,17 @@ class GitViewModel(
         if (workingDir.isEmpty()) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isCommitting = true, error = null)
-            runCatching {
+            apiCall {
                 // The commit route only commits what is staged; stage first or
                 // it always answers NO_STAGED_CHANGES.
                 apiClient.gitStage(workingDir)
                 val response = apiClient.gitCommit(workingDir, GitCommitInput(message = message))
                 if (!response.success) {
-                    error(response.error?.message ?: "Commit failed")
+                    error(response.error?.message ?: appContext.getString(R.string.chat_commit_failed))
                 }
                 refreshGitStatus(workingDir)
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(error = e.message)
+                _uiState.value = _uiState.value.copy(error = e.userMessage(appContext))
             }
             _uiState.value = _uiState.value.copy(isCommitting = false)
         }
@@ -119,13 +124,13 @@ class GitViewModel(
         if (workingDir.isEmpty()) return
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isPushing = true, error = null)
-            runCatching {
+            apiCall {
                 val response = apiClient.pushToGitHub(workingDir)
                 if (!response.success) {
-                    error(response.error?.message ?: "Push failed")
+                    error(response.error?.message ?: appContext.getString(R.string.chat_push_failed))
                 }
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(error = e.message)
+                _uiState.value = _uiState.value.copy(error = e.userMessage(appContext))
             }
             _uiState.value = _uiState.value.copy(isPushing = false)
         }
@@ -139,9 +144,9 @@ class GitViewModel(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(error = null)
             val workingDir = _uiState.value.workingDirectory
-            val result = runCatching { apiClient.gitCheckout(workingDir, branch) }
+            val result = apiCall { apiClient.gitCheckout(workingDir, branch) }
             result.exceptionOrNull()?.let { failure ->
-                _uiState.value = _uiState.value.copy(error = failure.message ?: "Checkout failed")
+                _uiState.value = _uiState.value.copy(error = failure.userMessage(appContext))
             }
             refreshGitStatus()
         }
@@ -152,9 +157,9 @@ class GitViewModel(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(error = null)
             val workingDir = _uiState.value.workingDirectory
-            val result = runCatching { apiClient.gitPull(workingDir) }
+            val result = apiCall { apiClient.gitPull(workingDir) }
             result.exceptionOrNull()?.let { failure ->
-                _uiState.value = _uiState.value.copy(error = failure.message ?: "Pull failed")
+                _uiState.value = _uiState.value.copy(error = failure.userMessage(appContext))
             }
             refreshGitStatus()
         }

@@ -5,10 +5,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class TwoPaneOption(val label: String, val description: String) {
-    AUTO("Automatic", "Two panes from 840dp of width"),
-    ALWAYS("Always", "Two panes even on a narrower window"),
-    NEVER("Never", "Always the single-column list"),
+enum class TwoPaneOption(private val labelRes: Int, private val descriptionRes: Int) {
+    AUTO(com.claudewebui.app.R.string.settings_two_pane_auto, com.claudewebui.app.R.string.settings_two_pane_auto_description),
+    ALWAYS(com.claudewebui.app.R.string.settings_two_pane_always, com.claudewebui.app.R.string.settings_two_pane_always_description),
+    NEVER(com.claudewebui.app.R.string.settings_two_pane_never, com.claudewebui.app.R.string.settings_two_pane_never_description);
+
+    fun localizedLabel(resources: android.content.res.Resources): String = resources.getString(labelRes)
+    fun localizedDescription(resources: android.content.res.Resources): String = resources.getString(descriptionRes)
 }
 
 /**

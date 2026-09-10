@@ -1,5 +1,7 @@
 package com.claudewebui.app.ui.screens.auth
 
+import com.claudewebui.app.ui.screens.screenErrorMessage
+import com.claudewebui.app.core.network.apiCall
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
@@ -71,7 +73,7 @@ class LoginViewModel(
                 val candidates = listOfNotNull(url, mobileGatewayCandidate(url)).distinct()
                 for (candidate in candidates) {
                     TokenStore.setServerUrl(candidate)
-                    val healthResponse = runCatching { apiClient.health() }.getOrNull() ?: continue
+                    val healthResponse = apiCall { apiClient.health() }.getOrNull() ?: continue
                     lastStatus = healthResponse.status.value
                     if (healthResponse.status.value in 200..299) {
                         selectedUrl = candidate
@@ -91,7 +93,7 @@ class LoginViewModel(
                 TokenStore.setServerUrl(connectedUrl)
 
                 // Fetch which auth methods are available
-                val providersResult = runCatching { apiClient.authProviders() }
+                val providersResult = apiCall { apiClient.authProviders() }
                 val providers = providersResult.getOrNull()?.data
 
                 val authConfig = AuthConfig(
@@ -115,6 +117,8 @@ class LoginViewModel(
                     serverInfo = serverInfo,
                     authConfig = authConfig,
                 )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 _authState.value = AuthState.Error(
                     message = "Cannot reach server at $url. Check the URL and your network connection.",
@@ -148,9 +152,11 @@ class LoginViewModel(
                             ?: "Invalid username or password"
                     )
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 _authState.value = AuthState.Error(
-                    message = "Login failed: ${e.message ?: "Unknown error"}"
+                    message = e.screenErrorMessage("auth", "loginBasicAuth", context)
                 )
             }
         }
@@ -172,9 +178,11 @@ class LoginViewModel(
                         message = response.error?.message ?: "Dev login failed"
                     )
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 _authState.value = AuthState.Error(
-                    message = "Dev login failed: ${e.message ?: "Unknown error"}"
+                    message = e.screenErrorMessage("auth", "loginDev", context)
                 )
             }
         }
@@ -236,9 +244,11 @@ class LoginViewModel(
                         response.error?.message ?: "Authelia login response expired"
                     )
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 _authState.value = AuthState.Error(
-                    "Authelia login failed: ${e.message ?: "Unknown error"}"
+                    e.screenErrorMessage("auth", "handleMobileAuthCallback", context)
                 )
             } finally {
                 TokenStore.clearPendingMobileAuth()
@@ -269,9 +279,11 @@ class LoginViewModel(
                         message = response.error?.message ?: "Could not fetch user profile"
                     )
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 TokenStore.clearToken()
-                _authState.value = AuthState.Error("OAuth verification failed: ${e.message}")
+                _authState.value = AuthState.Error(e.screenErrorMessage("auth", "handleOAuthCallback", context))
             }
         }
     }
@@ -293,6 +305,8 @@ class LoginViewModel(
                 } else {
                     TokenStore.clearAll()
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
                 // Network unavailable or token expired — stay on login screen
                 TokenStore.clearAll()

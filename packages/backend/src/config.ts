@@ -30,6 +30,11 @@ const envSchema = z.object({
   FRONTEND_URL: z.string().url().default('http://localhost:5173'),
   // Additional allowed CORS origins (comma-separated, for Docker/reverse proxy setups)
   CORS_ALLOWED_ORIGINS: z.string().optional(),
+  // WEBUI_-prefixed aliases. The shipped .env uses these names so the main
+  // container and the repair-bot can be configured independently; without the
+  // aliases they were parsed, accepted and then never read.
+  WEBUI_FRONTEND_URL: z.string().url().optional(),
+  WEBUI_CORS_ORIGINS: z.string().optional(),
   ENCRYPTION_KEY: z.string().optional(),
   ALLOWED_BASE_PATHS: z.string().default('/home,/Users'),
   // Claude OAuth (uses official Claude Code client ID) - enabled by default
@@ -58,6 +63,11 @@ const envSchema = z.object({
   // such as Authelia. Disabled by default because request headers are trivial to
   // spoof unless the app is only reachable through a trusted proxy.
   PROXY_AUTH_ENABLED: z.string().optional(),
+  // Comma-separated IPs/CIDRs of the reverse proxies allowed to assert an
+  // identity through PROXY_AUTH_* headers. Anything else reaching /auth/proxy
+  // is rejected regardless of the headers it sends, because those headers are
+  // free for anyone who can open a socket to the container.
+  PROXY_AUTH_TRUSTED_IPS: z.string().optional(),
   PROXY_AUTH_EMAIL_HEADERS: z.string().optional(),
   PROXY_AUTH_USER_HEADERS: z.string().optional(),
   PROXY_AUTH_NAME_HEADERS: z.string().optional(),
@@ -85,7 +95,13 @@ function loadConfig() {
     process.exit(1);
   }
 
-  const env = parsed.data;
+  const env = {
+    ...parsed.data,
+    // z.default() erases the difference between "unset" and "set to the
+    // default", which the alias fallback below needs to know.
+    FRONTEND_URL_EXPLICIT:
+      typeof process.env.FRONTEND_URL === 'string' && process.env.FRONTEND_URL.length > 0,
+  };
 
   // Normalize `trust proxy` value. Express accepts booleans, numbers, or
   // strings — we distinguish at parse time so the app's `app.set` call can
@@ -102,10 +118,16 @@ function loadConfig() {
     trustProxy = trustProxyRaw;
   }
 
-  // Build allowed origins list
-  const allowedOrigins = [env.FRONTEND_URL.toLowerCase()];
-  if (env.CORS_ALLOWED_ORIGINS) {
-    const additionalOrigins = env.CORS_ALLOWED_ORIGINS.split(',')
+  // Build allowed origins list. The explicit key wins; the WEBUI_ alias is the
+  // fallback so a .env that only defines WEBUI_FRONTEND_URL still works.
+  const frontendUrl = env.FRONTEND_URL_EXPLICIT
+    ? env.FRONTEND_URL
+    : env.WEBUI_FRONTEND_URL || env.FRONTEND_URL;
+  const corsOrigins = env.CORS_ALLOWED_ORIGINS || env.WEBUI_CORS_ORIGINS;
+  const allowedOrigins = [frontendUrl.toLowerCase()];
+  if (corsOrigins) {
+    const additionalOrigins = corsOrigins
+      .split(',')
       .map((o) => o.trim().toLowerCase())
       .filter((o) => o.length > 0);
     allowedOrigins.push(...additionalOrigins);
@@ -133,7 +155,7 @@ function loadConfig() {
       clientSecret: env.GOOGLE_CLIENT_SECRET,
       callbackUrl: env.GOOGLE_CALLBACK_URL,
     },
-    frontendUrl: env.FRONTEND_URL,
+    frontendUrl,
     allowedOrigins, // List of allowed CORS origins
     trustProxy,
     encryptionKey: env.ENCRYPTION_KEY,
@@ -150,6 +172,10 @@ function loadConfig() {
     },
     proxyAuth: {
       enabled: parseBoolean(env.PROXY_AUTH_ENABLED),
+      trustedIps: (env.PROXY_AUTH_TRUSTED_IPS || '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
       emailHeaders: parseHeaderList(env.PROXY_AUTH_EMAIL_HEADERS, [
         'remote-email',
         'x-forwarded-email',

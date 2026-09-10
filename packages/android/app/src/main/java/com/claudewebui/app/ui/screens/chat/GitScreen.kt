@@ -1,5 +1,10 @@
 package com.claudewebui.app.ui.screens.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+
+import com.claudewebui.app.R
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -43,8 +48,9 @@ fun GitScreen(
     onSwitchBranch: (branch: String) -> Unit,
     onRefresh: () -> Unit
 ) {
+    val t = PlumTheme.tokens
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Status", "Log", "Branches")
+    val tabs = listOf(stringResource(R.string.chat_status), stringResource(R.string.chat_log), stringResource(R.string.chat_branches))
     var showCommitDialog by remember { mutableStateOf(false) }
     var selectedCommit by remember { mutableStateOf<GitCommit?>(null) }
     var expandedDiff by remember { mutableStateOf<GitFileDiff?>(null) }
@@ -54,16 +60,16 @@ fun GitScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("Git")
+                        Text(stringResource(R.string.chat_panel_git))
                         gitStatus?.let { status ->
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(t.spacing.inline),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.MergeType,
                                     contentDescription = null,
-                                    modifier = Modifier.size(12.dp),
+                                    modifier = Modifier.size(t.spacing.md),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
@@ -76,11 +82,11 @@ fun GitScreen(
                                         Color(0xFF4CAF50).copy(alpha = 0.2f)
                                     else
                                         MaterialTheme.colorScheme.errorContainer,
-                                    shape = RoundedCornerShape(4.dp)
+                                    shape = RoundedCornerShape(t.spacing.xs)
                                 ) {
                                     Text(
-                                        if (status.isClean) "clean" else "dirty",
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                        if (status.isClean) stringResource(R.string.chat_git_clean) else stringResource(R.string.chat_git_dirty),
+                                        modifier = Modifier.padding(horizontal = t.spacing.xs, vertical = 1.dp),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (status.isClean)
                                             Color(0xFF4CAF50)
@@ -94,12 +100,12 @@ fun GitScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.chat_back))
                     }
                 },
                 actions = {
                     IconButton(onClick = onRefresh) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.chat_refresh))
                     }
                 },
                 windowInsets = TopAppBarDefaults.windowInsets
@@ -185,24 +191,25 @@ private fun GitStatusTab(
     isCommitting: Boolean,
     isPushing: Boolean
 ) {
+    val t = PlumTheme.tokens
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(t.spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(t.spacing.lg)
     ) {
         // Quick actions
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)
             ) {
                 OutlinedButton(
                     onClick = onStageAll,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Stage All")
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(t.spacing.lg))
+                    Spacer(Modifier.width(t.spacing.xs))
+                    Text(stringResource(R.string.chat_stage_all))
                 }
                 FilledTonalButton(
                     onClick = onCommit,
@@ -210,12 +217,12 @@ private fun GitStatusTab(
                     enabled = !isCommitting && (status?.staged?.isNotEmpty() == true)
                 ) {
                     if (isCommitting) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(t.spacing.cozy), strokeWidth = t.spacing.xxs)
                     } else {
-                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(t.spacing.lg))
                     }
-                    Spacer(Modifier.width(4.dp))
-                    Text("Commit")
+                    Spacer(Modifier.width(t.spacing.xs))
+                    Text(stringResource(R.string.chat_commit))
                 }
                 FilledTonalButton(
                     onClick = onPush,
@@ -223,12 +230,12 @@ private fun GitStatusTab(
                     enabled = !isPushing
                 ) {
                     if (isPushing) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(t.spacing.cozy), strokeWidth = t.spacing.xxs)
                     } else {
-                        Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(t.spacing.lg))
                     }
-                    Spacer(Modifier.width(4.dp))
-                    Text("Push")
+                    Spacer(Modifier.width(t.spacing.xs))
+                    Text(stringResource(R.string.chat_push))
                 }
             }
         }
@@ -236,7 +243,7 @@ private fun GitStatusTab(
         if (status == null) {
             item {
                 Text(
-                    "Not a git repository",
+                    stringResource(R.string.chat_not_repo),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -248,7 +255,7 @@ private fun GitStatusTab(
         if (status.staged.isNotEmpty()) {
             item {
                 FileSectionHeader(
-                    title = "Staged (${status.staged.size})",
+                    title = stringResource(R.string.chat_staged_count, status.staged.size),
                     color = Color(0xFF4CAF50)
                 )
             }
@@ -260,7 +267,7 @@ private fun GitStatusTab(
                 )
             }
             items(status.staged.filter { staged -> diffs.none { it.file == staged && it.staged } }) { file ->
-                SimpleFileItem(file = file, status = "staged", color = Color(0xFF4CAF50))
+                SimpleFileItem(file = file, status = stringResource(R.string.chat_staged), color = Color(0xFF4CAF50))
             }
         }
 
@@ -268,7 +275,7 @@ private fun GitStatusTab(
         if (status.unstaged.isNotEmpty()) {
             item {
                 FileSectionHeader(
-                    title = "Modified (${status.unstaged.size})",
+                    title = stringResource(R.string.chat_modified_count, status.unstaged.size),
                     color = MaterialTheme.colorScheme.secondary
                 )
             }
@@ -280,7 +287,7 @@ private fun GitStatusTab(
                 )
             }
             items(status.unstaged.filter { u -> diffs.none { it.file == u && !it.staged } }) { file ->
-                SimpleFileItem(file = file, status = "modified", color = MaterialTheme.colorScheme.secondary)
+                SimpleFileItem(file = file, status = stringResource(R.string.chat_modified), color = MaterialTheme.colorScheme.secondary)
             }
         }
 
@@ -288,12 +295,12 @@ private fun GitStatusTab(
         if (status.untracked.isNotEmpty()) {
             item {
                 FileSectionHeader(
-                    title = "Untracked (${status.untracked.size})",
+                    title = stringResource(R.string.chat_untracked_count, status.untracked.size),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             items(status.untracked) { file ->
-                SimpleFileItem(file = file, status = "untracked", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SimpleFileItem(file = file, status = stringResource(R.string.chat_untracked), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -302,13 +309,13 @@ private fun GitStatusTab(
             item {
                 Surface(
                     color = Color(0xFF4CAF50).copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(t.radius.md)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            .padding(t.spacing.lg),
+                        horizontalArrangement = Arrangement.spacedBy(t.spacing.compact),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -317,7 +324,7 @@ private fun GitStatusTab(
                             tint = Color(0xFF4CAF50)
                         )
                         Text(
-                            "Working tree clean",
+                            stringResource(R.string.chat_tree_clean),
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color(0xFF4CAF50)
                         )
@@ -330,14 +337,15 @@ private fun GitStatusTab(
 
 @Composable
 private fun FileSectionHeader(title: String, color: Color) {
+    val t = PlumTheme.tokens
     Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(t.spacing.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(8.dp)
-                .clip(RoundedCornerShape(2.dp))
+                .size(t.spacing.sm)
+                .clip(RoundedCornerShape(t.spacing.xxs))
                 .background(color)
         )
         Text(
@@ -355,23 +363,24 @@ private fun DiffFileItem(
     isExpanded: Boolean,
     onClick: () -> Unit
 ) {
+    val t = PlumTheme.tokens
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(t.radius.sm),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     ) {
         Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
+                horizontalArrangement = Arrangement.spacedBy(t.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     Icons.Default.Code,
                     contentDescription = null,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(t.spacing.cozy),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
@@ -397,7 +406,7 @@ private fun DiffFileItem(
                 Icon(
                     if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                     contentDescription = null,
-                    modifier = Modifier.size(14.dp)
+                    modifier = Modifier.size(t.spacing.cozy)
                 )
             }
             if (isExpanded && diff.diff.isNotBlank()) {
@@ -407,7 +416,7 @@ private fun DiffFileItem(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Color(0xFF0D1117))
-                        .padding(8.dp)
+                        .padding(t.spacing.sm)
                 )
             }
         }
@@ -438,11 +447,12 @@ private fun DiffContent(diff: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun SimpleFileItem(file: String, status: String, color: Color) {
+    val t = PlumTheme.tokens
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = t.spacing.md, vertical = t.spacing.inline),
+        horizontalArrangement = Arrangement.spacedBy(t.spacing.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Surface(
@@ -451,7 +461,7 @@ private fun SimpleFileItem(file: String, status: String, color: Color) {
         ) {
             Text(
                 text = status.first().uppercaseChar().toString(),
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                modifier = Modifier.padding(horizontal = t.spacing.xs, vertical = 1.dp),
                 style = MaterialTheme.typography.labelSmall,
                 color = color,
                 fontWeight = FontWeight.Bold
@@ -479,16 +489,17 @@ private fun GitLogTab(
     commits: List<GitCommit>,
     onCommitClick: (GitCommit) -> Unit
 ) {
+    val t = PlumTheme.tokens
     if (commits.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No commits found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.chat_no_commits), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = PaddingValues(t.spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(t.spacing.sm)
     ) {
         items(commits) { commit ->
             CommitItem(commit = commit, onClick = { onCommitClick(commit) })
@@ -498,26 +509,27 @@ private fun GitLogTab(
 
 @Composable
 private fun CommitItem(commit: GitCommit, onClick: () -> Unit) {
+    val t = PlumTheme.tokens
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(t.radius.chip),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(t.spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(t.spacing.compact),
             verticalAlignment = Alignment.Top
         ) {
             // Hash badge
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
-                shape = RoundedCornerShape(6.dp)
+                shape = RoundedCornerShape(t.spacing.inline)
             ) {
                 Text(
                     text = commit.shortHash,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                    modifier = Modifier.padding(horizontal = t.spacing.inline, vertical = 3.dp),
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
@@ -530,8 +542,8 @@ private fun CommitItem(commit: GitCommit, onClick: () -> Unit) {
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(2.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(Modifier.height(t.spacing.xxs))
+                Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
                     Text(
                         text = commit.author,
                         style = MaterialTheme.typography.labelSmall,
@@ -552,7 +564,7 @@ private fun CommitItem(commit: GitCommit, onClick: () -> Unit) {
             Icon(
                 Icons.Default.ChevronRight,
                 contentDescription = null,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(t.spacing.cozy),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
             )
         }
@@ -564,9 +576,10 @@ private fun GitBranchesTab(
     branches: List<GitBranch>,
     onSwitchBranch: (String) -> Unit
 ) {
+    val t = PlumTheme.tokens
     if (branches.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No branches found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.chat_no_branches), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
@@ -575,13 +588,13 @@ private fun GitBranchesTab(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = PaddingValues(t.spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(t.spacing.sm)
     ) {
         if (local.isNotEmpty()) {
             item {
                 Text(
-                    "Local Branches",
+                    stringResource(R.string.chat_local_branches),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
@@ -593,9 +606,9 @@ private fun GitBranchesTab(
         }
         if (remote.isNotEmpty()) {
             item {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(t.spacing.sm))
                 Text(
-                    "Remote Branches",
+                    stringResource(R.string.chat_remote_branches),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.secondary
@@ -610,8 +623,9 @@ private fun GitBranchesTab(
 
 @Composable
 private fun BranchItem(branch: GitBranch, onSwitch: () -> Unit) {
+    val t = PlumTheme.tokens
     Surface(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(t.radius.chip),
         color = if (branch.isCurrent)
             MaterialTheme.colorScheme.primaryContainer
         else
@@ -620,14 +634,14 @@ private fun BranchItem(branch: GitBranch, onSwitch: () -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(t.spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(t.spacing.compact),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 if (branch.isCurrent) Icons.AutoMirrored.Filled.MergeType else Icons.Default.AccountTree,
                 contentDescription = null,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(t.spacing.lg),
                 tint = if (branch.isCurrent)
                     MaterialTheme.colorScheme.onPrimaryContainer
                 else
@@ -646,11 +660,11 @@ private fun BranchItem(branch: GitBranch, onSwitch: () -> Unit) {
             if (branch.isCurrent) {
                 Surface(
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                    shape = RoundedCornerShape(4.dp)
+                    shape = RoundedCornerShape(t.spacing.xs)
                 ) {
                     Text(
-                        "current",
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        stringResource(R.string.chat_current),
+                        modifier = Modifier.padding(horizontal = t.spacing.inline, vertical = t.spacing.xxs),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -658,9 +672,9 @@ private fun BranchItem(branch: GitBranch, onSwitch: () -> Unit) {
             } else if (!branch.isRemote) {
                 TextButton(
                     onClick = onSwitch,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    contentPadding = PaddingValues(horizontal = t.spacing.sm, vertical = t.spacing.xxs)
                 ) {
-                    Text("Switch", style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.chat_switch_branch), style = MaterialTheme.typography.labelSmall)
                 }
             }
         }
@@ -673,24 +687,25 @@ private fun CommitDialog(
     onDismiss: () -> Unit,
     onCommit: (message: String) -> Unit
 ) {
+    val t = PlumTheme.tokens
     var message by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.Check, contentDescription = null) },
-        title = { Text("Commit Changes") },
+        title = { Text(stringResource(R.string.chat_commit_changes)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
                 Text(
-                    "$stagedCount staged file(s)",
+                    stringResource(R.string.chat_commit_file_count, stagedCount),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 OutlinedTextField(
                     value = message,
                     onValueChange = { message = it },
-                    label = { Text("Commit message") },
-                    placeholder = { Text("Describe your changes...") },
+                    label = { Text(stringResource(R.string.chat_commit_message)) },
+                    placeholder = { Text(stringResource(R.string.chat_commit_placeholder)) },
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 4
                 )
@@ -701,11 +716,11 @@ private fun CommitDialog(
                 onClick = { onCommit(message.trim()) },
                 enabled = message.isNotBlank()
             ) {
-                Text("Commit")
+                Text(stringResource(R.string.chat_commit))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.chat_cancel)) }
         }
     )
 }
@@ -715,12 +730,13 @@ private fun CommitDetailDialog(
     commit: GitCommit,
     onDismiss: () -> Unit
 ) {
+    val t = PlumTheme.tokens
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Column {
                 Text(commit.message, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(t.spacing.xs))
                 Text(
                     commit.hash,
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
@@ -729,19 +745,19 @@ private fun CommitDetailDialog(
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(14.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(t.spacing.inline)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+                    Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(t.spacing.cozy))
                     Text(commit.author, style = MaterialTheme.typography.bodySmall)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
+                    Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(t.spacing.cozy))
                     Text(commit.date, style = MaterialTheme.typography.bodySmall)
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.chat_close)) }
         }
     )
 }

@@ -1,3 +1,4 @@
+import { Inbox } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
@@ -116,6 +117,8 @@ export function Sidebar({
     agentRuns,
     toolExecutions,
     queueState,
+    lifecycle,
+    pendingApprovalCounts,
   } = useSessionStore(
     useShallow((state) => ({
       sessions: state.sessions,
@@ -127,6 +130,8 @@ export function Sidebar({
       agentRuns: state.agentRuns,
       toolExecutions: state.toolExecutions,
       queueState: state.queueState,
+      lifecycle: state.lifecycle,
+      pendingApprovalCounts: state.pendingApprovalCounts,
     }))
   );
   const streamingSessionIds = useSessionStore(
@@ -197,6 +202,8 @@ export function Sidebar({
               : undefined,
             tools: toolExecutions[activeSession.id],
             queue: queueState[activeSession.id],
+            lifecycle: lifecycle[activeSession.id],
+            pendingApprovals: pendingApprovalCounts[activeSession.id],
           })
         : null,
     [
@@ -204,6 +211,8 @@ export function Sidebar({
       activeSession,
       activity,
       agentRuns,
+      lifecycle,
+      pendingApprovalCounts,
       queueState,
       streamingSessionIds,
       toolExecutions,
@@ -245,6 +254,8 @@ export function Sidebar({
         streamingContent: streamingSessionIds.includes(a.id) ? 'streaming' : undefined,
         tools: toolExecutions[a.id],
         queue: queueState[a.id],
+        lifecycle: lifecycle[a.id],
+        pendingApprovals: pendingApprovalCounts[a.id],
       }).isWorking;
       const bWorking = getSessionRunState(b, {
         activity: activity[b.id],
@@ -253,6 +264,8 @@ export function Sidebar({
         streamingContent: streamingSessionIds.includes(b.id) ? 'streaming' : undefined,
         tools: toolExecutions[b.id],
         queue: queueState[b.id],
+        lifecycle: lifecycle[b.id],
+        pendingApprovals: pendingApprovalCounts[b.id],
       }).isWorking;
 
       if (aWorking !== bWorking) return aWorking ? -1 : 1;
@@ -264,6 +277,8 @@ export function Sidebar({
     activeAgent,
     activity,
     agentRuns,
+    lifecycle,
+    pendingApprovalCounts,
     queueState,
     searchQuery,
     sessions,
@@ -286,6 +301,8 @@ export function Sidebar({
             streamingContent: streamingSessionIds.includes(session.id) ? 'streaming' : undefined,
             tools: toolExecutions[session.id],
             queue: queueState[session.id],
+            lifecycle: lifecycle[session.id],
+            pendingApprovals: pendingApprovalCounts[session.id],
           }).isWorking
       );
 
@@ -369,6 +386,8 @@ export function Sidebar({
     agentRuns,
     categories,
     filteredSessions,
+    lifecycle,
+    pendingApprovalCounts,
     queueState,
     streamingSessionIds,
     toolExecutions,
@@ -385,9 +404,21 @@ export function Sidebar({
             streamingContent: streamingSessionIds.includes(session.id) ? 'streaming' : undefined,
             tools: toolExecutions[session.id],
             queue: queueState[session.id],
+            lifecycle: lifecycle[session.id],
+            pendingApprovals: pendingApprovalCounts[session.id],
           }).isWorking
       ).length,
-    [activity, activeAgent, agentRuns, queueState, sessions, streamingSessionIds, toolExecutions]
+    [
+      activity,
+      activeAgent,
+      agentRuns,
+      lifecycle,
+      pendingApprovalCounts,
+      queueState,
+      sessions,
+      streamingSessionIds,
+      toolExecutions,
+    ]
   );
 
   const handleLinkClick = () => {
@@ -665,6 +696,8 @@ export function Sidebar({
       streamingContent: streamingSessionIds.includes(session.id) ? 'streaming' : undefined,
       tools: toolExecutions[session.id],
       queue: queueState[session.id],
+      lifecycle: lifecycle[session.id],
+      pendingApprovals: pendingApprovalCounts[session.id],
     });
     const unreadCount = Math.max(
       0,
@@ -715,6 +748,8 @@ export function Sidebar({
       >
         <Link
           to={`/session/${session.id}`}
+          title={session.name}
+          aria-current={isActive ? 'page' : undefined}
           onClick={handleLinkClick}
           aria-label={
             isCollapsed
@@ -746,7 +781,9 @@ export function Sidebar({
           </span>
           {!isCollapsed && (
             <span className="flex min-w-0 flex-1 items-center text-xs">
-              <span className="min-w-0 truncate font-medium">{session.name}</span>
+              <span className="sidebar-session-name min-w-0 flex-1 font-medium">
+                {session.name}
+              </span>
               {unreadCount > 0 && (
                 <span
                   className="sidebar-session-unread"
@@ -907,13 +944,13 @@ export function Sidebar({
         'app-sidebar-shell flex flex-col h-full transition-all duration-300',
         mobile ? 'app-sidebar-mobile w-full' : '',
         navigationOnly && !mobile && 'app-sidebar-navigation-only',
-        !mobile && (isCollapsed ? 'w-16' : 'w-64')
+        !mobile && (isCollapsed ? 'w-16' : 'w-[272px]')
       )}
     >
       {/* Active session identity */}
       <div
         className={cn(
-          'flex items-center transition-all duration-300',
+          'sidebar-header flex items-center transition-all duration-300',
           isCollapsed
             ? 'h-14 justify-center px-2'
             : activeSession && !mobile
@@ -1003,17 +1040,33 @@ export function Sidebar({
             )}
           </button>
         )}
+        {!isCollapsed && (
+          <div className="ml-auto shrink-0 pl-2">
+            <NotificationCenter />
+          </div>
+        )}
       </div>
 
       <nav className="flex-1 flex flex-col min-h-0 px-2 pt-2 pb-0 overflow-visible">
         {/* Notification centre lives with the main navigation: it spans every
             session rather than belonging to the one currently open. */}
-        {!isCollapsed && (
-          <div className="flex items-center justify-end px-3 pb-1 shrink-0">
-            <NotificationCenter />
-          </div>
-        )}
 
+        <button
+          type="button"
+          aria-label="Outbox"
+          title="Outbox"
+          className={cn(
+            'sidebar-nav-item flex shrink-0 items-center gap-3 px-3 py-2 text-sm font-medium',
+            isCollapsed && 'is-collapsed'
+          )}
+          onClick={() => {
+            handleLinkClick();
+            window.dispatchEvent(new Event('plum:open-outbox'));
+          }}
+        >
+          <Inbox className="h-4 w-4 shrink-0" />
+          {!isCollapsed && <span>Outbox</span>}
+        </button>
         {/* Top nav */}
         <div className="space-y-1 shrink-0">
           {baseNavItems.map((item) => {
@@ -1123,6 +1176,7 @@ export function Sidebar({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search sessions..."
+                  aria-label="Search sessions"
                   className="h-9 rounded-full border-0 bg-transparent pl-8 pr-8 text-xs shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                 />
                 {searchQuery && (

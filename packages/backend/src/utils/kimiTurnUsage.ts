@@ -1,4 +1,5 @@
 import fs from 'fs';
+import fsp from 'fs/promises';
 import path from 'path';
 
 export interface KimiTurnUsage {
@@ -189,6 +190,75 @@ function summarizeKimiUsage(records: KimiUsageRecord[]): KimiTurnUsage {
   result.totalTokens =
     result.inputTokens + result.outputTokens + result.cacheReadTokens + result.cacheCreationTokens;
   return result;
+}
+
+async function safeDirectoryEntriesAsync(directory: string): Promise<Array<fs.Dirent>> {
+  try {
+    return await fsp.readdir(directory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+async function resolveKimiNativeSessionDirectoryAsync(
+  kimiHome: string,
+  nativeSessionId: string
+): Promise<string | null> {
+  if (!nativeSessionId || nativeSessionId.includes('/') || nativeSessionId.includes('\\')) {
+    return null;
+  }
+  const sessionsRoot = path.join(kimiHome, 'sessions');
+  for (const workspace of await safeDirectoryEntriesAsync(sessionsRoot)) {
+    if (!workspace.isDirectory()) continue;
+    const candidate = path.join(sessionsRoot, workspace.name, nativeSessionId);
+    try {
+      if ((await fsp.stat(candidate)).isDirectory()) return candidate;
+    } catch {
+      // Continue through the bounded one-directory workspace index.
+    }
+  }
+  return null;
+}
+
+/**
+ * Cheap change detector for one session's native ledgers.
+ *
+ * The expensive half of the usage backfill is reading and parsing every
+ * `wire.jsonl` a session owns — files that grow to megabytes on a long session.
+ * They are append-only, so "same set of files, same sizes" means "nothing has
+ * been written since the last look": one `stat` per file instead of a full
+ * parse. Returns an empty string when the session has no ledger on disk at all.
+ *
+ * Async on purpose. This runs once per Kimi session near boot, where the
+ * synchronous helpers below — which each serve a single live turn — would add
+ * up to a real stall on the event loop.
+ */
+export async function readKimiLedgerSignature(
+  kimiHome: string,
+  nativeSessionId: string
+): Promise<string> {
+  const sessionDirectory = await resolveKimiNativeSessionDirectoryAsync(kimiHome, nativeSessionId);
+  if (!sessionDirectory) return '';
+
+  const candidates = [path.join(sessionDirectory, 'wire.jsonl')];
+  const agentsDirectory = path.join(sessionDirectory, 'agents');
+  for (const agent of await safeDirectoryEntriesAsync(agentsDirectory)) {
+    if (!agent.isDirectory()) continue;
+    candidates.push(path.join(agentsDirectory, agent.name, 'wire.jsonl'));
+  }
+
+  const parts: string[] = [];
+  for (const filePath of candidates.sort()) {
+    try {
+      // A failed stat is how a missing file reports itself here, which is why
+      // there is no separate existence check.
+      const { size } = await fsp.stat(filePath);
+      parts.push(`${path.relative(sessionDirectory, filePath)}:${size}`);
+    } catch {
+      // Absent, or gone between listing and stat.
+    }
+  }
+  return parts.join('|');
 }
 
 export function captureKimiUsageCursor(kimiHome: string, nativeSessionId: string): KimiUsageCursor {

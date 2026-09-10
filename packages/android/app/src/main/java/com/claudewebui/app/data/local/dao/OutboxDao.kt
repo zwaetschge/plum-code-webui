@@ -8,6 +8,12 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface OutboxDao {
+    @Query("SELECT * FROM message_outbox WHERE status != 'ACCEPTED' ORDER BY createdAt ASC")
+    fun observePending(): Flow<List<OutboxEntity>>
+
+    @Query("DELETE FROM message_outbox WHERE clientMessageId = :clientMessageId AND status = 'FAILED'")
+    suspend fun discardFailed(clientMessageId: String)
+
     @Query("SELECT * FROM message_outbox WHERE sessionId = :sessionId ORDER BY createdAt ASC")
     fun observeForSession(sessionId: String): Flow<List<OutboxEntity>>
 

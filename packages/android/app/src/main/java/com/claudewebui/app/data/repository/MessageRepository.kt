@@ -2,7 +2,12 @@ package com.claudewebui.app.data.repository
 
 import android.database.sqlite.SQLiteConstraintException
 
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.map
 import androidx.room.withTransaction
+import com.claudewebui.app.core.network.apiCall
 import com.claudewebui.app.core.network.ApiClient
 import com.claudewebui.app.data.local.AppDatabase
 import com.claudewebui.app.data.local.dao.DraftDao
@@ -15,6 +20,7 @@ import com.claudewebui.app.data.local.entity.SessionReadStateEntity
 import com.claudewebui.app.data.local.entity.toEntity
 import com.claudewebui.app.data.local.entity.toModel
 import com.claudewebui.app.data.model.Message
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -31,6 +37,8 @@ data class MessageHistoryPage(
     val chatId: String? = null,
     val snapshot: com.claudewebui.app.data.model.MessageHistorySnapshot? = null,
     val readState: com.claudewebui.app.data.model.SessionReadState? = null,
+    /** True only after an accepted full latest snapshot atomically reset a legacy cursor. */
+    val replayCursorReset: Boolean = false,
 )
 
 /**
@@ -58,6 +66,19 @@ class MessageRepository(
     fun getMessages(sessionId: String, chatId: String?, limit: Int): Flow<List<Message>> =
         dao.getByChat(sessionId, chatId, limit).map { list -> list.map { it.toModel() } }
 
+    /** Paging keeps a bounded set of cached rows resident even in long sessions. */
+    fun pagedMessages(sessionId: String, chatId: String?): Flow<PagingData<Message>> =
+        Pager(
+            config = PagingConfig(
+                pageSize = 50,
+                initialLoadSize = 150,
+                prefetchDistance = 20,
+                maxSize = 600,
+                enablePlaceholders = false,
+            ),
+            pagingSourceFactory = { dao.pageByChat(sessionId, chatId) },
+        ).flow.map { page -> page.map { it.toModel() } }
+
     fun getOutbox(sessionId: String): Flow<List<OutboxEntity>> =
         outboxDao.observeForSession(sessionId)
 
@@ -79,8 +100,11 @@ class MessageRepository(
         after: String? = null,
         around: String? = null,
         chatId: String? = null,
+        useServerActiveChat: Boolean = false,
+        resetReplayCursor: Boolean = false,
+        acceptResponse: () -> Boolean = { true },
     ): Result<MessageHistoryPage> {
-        return runCatching {
+        return apiCall {
             require(listOf(before, after, around).count { it != null } <= 1) {
                 "before, after and around are mutually exclusive"
             }
@@ -90,13 +114,14 @@ class MessageRepository(
                 before = before,
                 after = after,
                 around = around,
-                chatId = chatId,
+                // Omitted means server-active; empty explicitly targets the NULL main thread.
+                chatId = if (useServerActiveChat) null else chatId.orEmpty(),
             )
             if (!response.success || response.data == null) {
                 error(response.error?.message ?: "Failed to fetch messages")
             }
             val resolvedChatId = if (response.snapshot != null) response.snapshot.chatId else chatId
-            if (chatId != null && response.snapshot != null && resolvedChatId != chatId) {
+            if (!useServerActiveChat && response.snapshot != null && resolvedChatId != chatId) {
                 error("Message snapshot belongs to another chat")
             }
             val messages = response.data.map { message ->
@@ -107,7 +132,9 @@ class MessageRepository(
                 message.copy(chatId = message.chatId ?: resolvedChatId)
             }
 
+            var replayCursorReset = false
             database.withTransaction {
+                if (!acceptResponse()) throw SupersededHistoryResponse()
                 val current = readStateDao.get(sessionId) ?: SessionReadStateEntity(sessionId)
                 val snapshot = response.snapshot
                 val staleSnapshot = snapshot != null &&
@@ -147,6 +174,22 @@ class MessageRepository(
                         )
                     )
                 }
+                // Protocol v1 could persist an issued cursor ahead of a missing
+                // durable event. Only a full, accepted latest snapshot can repair
+                // it; around/older pages do not prove a complete live tail.
+                if (resetReplayCursor && clearExisting && before == null && after == null &&
+                    around == null && snapshot != null && !response.pagination.hasMoreAfter) {
+                    val latest = readStateDao.get(sessionId) ?: current
+                    readStateDao.upsert(latest.copy(
+                        lastSeenSequence = snapshot.highWatermark,
+                        highWatermark = snapshot.highWatermark,
+                        snapshotRevision = snapshot.revision,
+                    ))
+                    replayCursorReset = true
+                }
+                // DAO calls suspend. If a newer navigation wins while they run,
+                // rolling back here preserves both messages and the read cursor.
+                if (!acceptResponse()) throw SupersededHistoryResponse()
             }
             MessageHistoryPage(
                 messages = messages,
@@ -161,6 +204,7 @@ class MessageRepository(
                 chatId = resolvedChatId,
                 snapshot = response.snapshot,
                 readState = response.readState,
+                replayCursorReset = replayCursorReset,
             )
         }
     }
@@ -169,6 +213,7 @@ class MessageRepository(
         sessionId: String,
         messageId: String,
         chatId: String?,
+        acceptResponse: () -> Boolean = { true },
     ): Result<MessageHistoryPage> =
         fetchMessages(
             sessionId,
@@ -176,6 +221,7 @@ class MessageRepository(
             limit = 80,
             around = messageId,
             chatId = chatId,
+            acceptResponse = acceptResponse,
         )
 
     suspend fun fetchAfterMessage(
@@ -185,8 +231,14 @@ class MessageRepository(
     ): Result<MessageHistoryPage> =
         fetchMessages(sessionId, limit = 200, after = messageId, chatId = chatId)
 
-    suspend fun fetchLatestMessages(sessionId: String, chatId: String?): Result<MessageHistoryPage> =
-        fetchMessages(sessionId, clearExisting = true, limit = 200, chatId = chatId)
+    suspend fun fetchLatestMessages(
+        sessionId: String,
+        chatId: String?,
+        acceptResponse: () -> Boolean = { true },
+    ): Result<MessageHistoryPage> = fetchMessages(
+        sessionId, clearExisting = true, limit = 200, chatId = chatId,
+        acceptResponse = acceptResponse,
+    )
 
     /**
      * Return the N most recent cached messages without subscribing to updates.
@@ -241,30 +293,51 @@ class MessageRepository(
             clientMessageId = message.clientMessageId,
             eventSequence = message.eventSequence,
         ).map { it.toModel() }
-        val winner = mergeMessagesByIdentity(matches + message).singleOrNull() ?: message
-        if (matches.isNotEmpty()) dao.deleteByIds(matches.map { it.id })
-        dao.insert(winner.toEntity())
+        // Usually one winner. When the merge keeps more than one — two cached
+        // rows that each match the incoming message on a different identity key
+        // (a restore, or clientMessageId and eventSequence pointing at different
+        // rows) — write all of them. Collapsing to `message` and deleting every
+        // match dropped one of the two rows outright.
+        val winners = mergeMessagesByIdentity(matches + message).ifEmpty { listOf(message) }
+        val survivingIds = winners.mapTo(mutableSetOf()) { it.id }
+        val superseded = matches.map { it.id }.filterNot { it in survivingIds }
+        if (superseded.isNotEmpty()) dao.deleteByIds(superseded)
+        winners.forEach { dao.insert(it.toEntity()) }
     }
 
     // ---- Drafts ------------------------------------------------------------
 
     /** Load the current draft for a session, or null if none. */
-    suspend fun getDraft(sessionId: String): String? =
-        draftDao.getBySessionId(sessionId)?.content
+    suspend fun getDraft(sessionId: String, chatId: String?): String? =
+        draftDao.getBySessionId(sessionId, chatId.orEmpty())?.content
 
     /** Save or update the draft for a session. */
-    suspend fun saveDraft(sessionId: String, content: String) {
-        draftDao.upsert(DraftEntity(sessionId = sessionId, content = content))
+    suspend fun saveDraft(sessionId: String, content: String, chatId: String?) {
+        draftDao.upsert(DraftEntity(sessionId = sessionId, content = content, chatId = chatId.orEmpty()))
     }
 
     /** Delete the draft for a session (called after a message is sent). */
-    suspend fun clearDraft(sessionId: String) {
-        draftDao.delete(sessionId)
+    suspend fun clearDraft(sessionId: String, chatId: String?) {
+        draftDao.delete(sessionId, chatId.orEmpty())
     }
 
     // ---- Durable outbox ----------------------------------------------------
 
+    fun observePendingOutbox(): Flow<List<OutboxEntity>> = outboxDao.observePending()
+
+    suspend fun discardFailedOutbox(clientMessageId: String) = outboxDao.discardFailed(clientMessageId)
+
     suspend fun putOutbox(item: OutboxEntity) = outboxDao.upsert(item)
+
+    suspend fun retargetFailedOutbox(clientMessageId: String, chatId: String?): OutboxEntity? =
+        database.withTransaction {
+            val old = outboxDao.get(clientMessageId) ?: return@withTransaction null
+            if (old.deliveryStatus != com.claudewebui.app.data.local.entity.OutboxStatus.FAILED) return@withTransaction null
+            val replacement = old.retarget(chatId, java.util.UUID.randomUUID().toString())
+            outboxDao.upsert(replacement)
+            outboxDao.delete(clientMessageId)
+            replacement
+        }
 
     suspend fun getOutboxItem(clientMessageId: String): OutboxEntity? = outboxDao.get(clientMessageId)
 
@@ -286,7 +359,16 @@ class MessageRepository(
      */
     private suspend fun writeReadState(state: SessionReadStateEntity) {
         try {
-            readStateDao.upsert(state)
+            database.withTransaction {
+                val current = readStateDao.get(state.sessionId)
+                readStateDao.upsert(state.copy(
+                    // Scroll/read receipts can finish after a protocol reset.
+                    // Only advanceAppliedSequence owns an existing replay cursor.
+                    lastSeenSequence = current?.lastSeenSequence ?: state.lastSeenSequence,
+                    highWatermark = maxOf(state.highWatermark, current?.highWatermark ?: 0L),
+                    snapshotRevision = maxOf(state.snapshotRevision, current?.snapshotRevision ?: 0L),
+                ))
+            }
         } catch (error: SQLiteConstraintException) {
             android.util.Log.w(
                 "MessageRepository",
@@ -300,7 +382,20 @@ class MessageRepository(
 
     suspend fun saveReadState(state: SessionReadStateEntity) = writeReadState(state)
 
-    suspend fun syncReadState(sessionId: String): Result<SessionReadStateEntity> = runCatching {
+    /** Commit only a contiguous, applied server prefix, atomically and monotonically. */
+    suspend fun advanceAppliedSequence(sessionId: String, sequence: Long?, revision: Long? = null) {
+        if (sequence == null && revision == null) return
+        database.withTransaction {
+            val current = readStateDao.get(sessionId) ?: SessionReadStateEntity(sessionId)
+            readStateDao.upsert(current.copy(
+                lastSeenSequence = maxOf(current.lastSeenSequence, sequence ?: 0L),
+                highWatermark = maxOf(current.highWatermark, sequence ?: 0L),
+                snapshotRevision = maxOf(current.snapshotRevision, revision ?: 0L),
+            ))
+        }
+    }
+
+    suspend fun syncReadState(sessionId: String): Result<SessionReadStateEntity> = apiCall {
         val response = api.getSessionReadState(sessionId)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to load read position")
@@ -314,7 +409,7 @@ class MessageRepository(
         sessionId: String,
         chatId: String?,
         messageId: String?,
-    ): Result<SessionReadStateEntity> = runCatching {
+    ): Result<SessionReadStateEntity> = apiCall {
         val response = api.updateSessionReadState(sessionId, chatId, messageId)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to save read position")
@@ -373,4 +468,15 @@ private fun preferredMessage(left: Message, right: Message): Message {
             (if (!message.media.isNullOrEmpty()) 2 else 0) +
             (if (!message.attachments.isNullOrEmpty() || !message.images.isNullOrEmpty()) 1 else 0)
     return if (richness(right) >= richness(left)) right else left
+}
+
+/** A rejected replacement is rolled back without cancelling its socket subscription. */
+internal class SupersededHistoryResponse : CancellationException("Superseded history response")
+
+internal suspend fun ignoreSupersededHistory(block: suspend () -> Unit) {
+    try {
+        block()
+    } catch (_: SupersededHistoryResponse) {
+        // Navigation already started a newer authoritative load.
+    }
 }

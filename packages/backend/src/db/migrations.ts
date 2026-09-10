@@ -1,4 +1,6 @@
 import { all as pgAll, get as pgGet, transaction as pgTransaction } from './pg.js';
+import type { TransactionScope } from './pg.js';
+import { REPRICE_MIGRATION_ID, repriceUsageHistory } from './reprice.js';
 
 /**
  * Schema changes made after the baseline, each run exactly once.
@@ -29,6 +31,13 @@ interface Migration {
   id: string;
   /** Statements run in order, inside one transaction with the bookkeeping. */
   statements: string[];
+  /**
+   * Optional code step, run after `statements` in the same transaction. For
+   * work that cannot be written as fixed SQL because it depends on values only
+   * TypeScript knows — the price table, for instance, is a function with
+   * pattern matching, not an enumerable table.
+   */
+  run?: (tx: TransactionScope) => Promise<void>;
 }
 
 /**
@@ -73,6 +82,49 @@ const MIGRATIONS: Migration[] = [
     id: '003-session-subagent-model',
     statements: [`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS subagent_model TEXT DEFAULT NULL`],
   },
+  {
+    /**
+     * Recompute stored costs from stored tokens with the current price table.
+     *
+     * The id carries `LLM_PRICING_RATE_CARD_VERSION`, so this is not one step
+     * but one step *per rate card*: change the constant and the next boot sees
+     * an id it has never recorded, reprices once, and writes it down. Until now
+     * the constant was read by nothing at all, while both AGENTS.md and
+     * CLAUDE.md described exactly this behaviour.
+     */
+    id: REPRICE_MIGRATION_ID,
+    statements: [],
+    run: async (tx) => {
+      await repriceUsageHistory(tx);
+    },
+  },
+  {
+    /**
+     * Make the usage dedup index actually cover every row.
+     *
+     * `turn_id` was nullable, and Postgres treats NULLs as distinct inside a
+     * unique index — so every legacy row with no turn id sat outside the one
+     * constraint that stops a turn being booked twice, and any future writer
+     * that left the column out would have inherited that hole. The backfill
+     * value is derived from the primary key, which is unique by construction.
+     */
+    id: '005-usage-history-turn-id-not-null',
+    statements: [
+      `UPDATE usage_history SET turn_id = 'legacy-' || id WHERE turn_id IS NULL`,
+      `ALTER TABLE usage_history ALTER COLUMN turn_id SET NOT NULL`,
+    ],
+  },
+  {
+    /**
+     * The snapshot retention pass deletes by `recorded_at` every 15 minutes and
+     * had no index to do it with — a sequential scan of the whole table on a
+     * schedule, growing with the table it is meant to keep small.
+     */
+    id: '006-usage-limit-snapshots-recorded-index',
+    statements: [
+      `CREATE INDEX IF NOT EXISTS idx_usage_limit_snapshots_recorded ON usage_limit_snapshots (recorded_at)`,
+    ],
+  },
 ];
 
 async function ensureTable(): Promise<void> {
@@ -112,6 +164,7 @@ export async function runMigration(migration: Migration): Promise<boolean> {
       for (const statement of migration.statements) {
         await tx.run(statement);
       }
+      if (migration.run) await migration.run(tx);
       await tx.run('INSERT INTO schema_migrations (id) VALUES (?)', migration.id);
     });
     console.log(`[migrations] Applied ${migration.id}`);

@@ -37,7 +37,7 @@ export function useTestSchema(): string {
  * as it was when the baseline was captured, not as it is. Skipping them made
  * the gateway tests fail on a column the running system has had for days.
  */
-export async function createTestSchema(): Promise<void> {
+export async function createTestSchema(options: { runMigrations?: boolean } = {}): Promise<void> {
   const schema = process.env.PGSCHEMA;
   if (!schema) throw new Error('useTestSchema() must run before createTestSchema()');
 
@@ -45,6 +45,10 @@ export async function createTestSchema(): Promise<void> {
   await pool.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await pool.query(sql);
+
+  // Opt out only to compare the baseline against the migrated shape — see
+  // schema-drift.test.ts. Everything else wants the database as it is.
+  if (options.runMigrations === false) return;
 
   const { runPendingMigrations } = await import('./migrations.js');
   await runPendingMigrations();

@@ -14,6 +14,7 @@ import path from 'path';
 import fs from 'fs';
 import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
+import { DEFAULT_CODEX_MODEL } from '@plum-code-webui/shared';
 import type {
   CodexServiceTier,
   CodexWebSearchMode,
@@ -53,9 +54,11 @@ const CLI_PROVIDER_MODELS: Record<CLIProvider, string[]> = {
   // Fallback only — runtime list comes from ~/.codex/models_cache.json (filtered to
   // visibility=list, sorted by priority). Cache refreshes via the codex CLI itself;
   // if the user's auth token is expired, the cache freezes and the dropdown stays on
-  // whatever was last fetched. gpt-5.5 remains the default; codex CLI 0.144.0
-  // lists the 5.6 family after it.
+  // whatever was last fetched. gpt-5.5 remains the default; codex CLI 0.153.3
+  // lists GPT-6 Astra first, then the 5.6 family. An older CLI never sees
+  // the newer entries at all — the models endpoint filters by client version.
   codex: [
+    'gpt-6-astra',
     'gpt-5.5',
     'gpt-5.6-sol',
     'gpt-5.6-terra',
@@ -104,6 +107,7 @@ const MODEL_DISPLAY_LABELS: Record<string, string> = {
   sonnet: 'Sonnet 5',
   haiku: 'Haiku 4.5',
   // Codex (labels for the currently-listed models in upstream models_cache.json)
+  'gpt-6-astra': 'GPT 6 Astra',
   'gpt-5.5': 'GPT 5.5',
   'gpt-5.6-sol': 'GPT 5.6 Sol',
   'gpt-5.6-terra': 'GPT 5.6 Terra',
@@ -757,9 +761,20 @@ export async function refreshCodexModelsCache(): Promise<boolean> {
       const beforeMtime = fs.existsSync(cachePath) ? fs.statSync(cachePath).mtimeMs : 0;
 
       // Async spawn so we don't block the event loop for up to 30s.
+      // --ephemeral is mandatory for every helper invocation: without it this
+      // probe writes a rollout file into ~/.codex/sessions on each refresh and
+      // shows up as a phantom conversation.
       await execFileAsync(
         bin,
-        ['exec', '--json', '--skip-git-repo-check', '--model', 'gpt-5.5', 'say OK'],
+        [
+          'exec',
+          '--json',
+          '--ephemeral',
+          '--skip-git-repo-check',
+          '--model',
+          DEFAULT_CODEX_MODEL,
+          'say OK',
+        ],
         { cwd: '/app', timeout: 30000 }
       );
 
@@ -891,7 +906,7 @@ export const CLI_PROVIDERS: Record<CLIProvider, CLIProviderConfig> = {
       webSearch: true,
       allowedDirectories: true,
     },
-    defaultModel: getProviderEnv('codex', 'DEFAULT_MODEL') || 'gpt-5.5',
+    defaultModel: getProviderEnv('codex', 'DEFAULT_MODEL') || DEFAULT_CODEX_MODEL,
     models: parseEnvModels('codex') ?? CLI_PROVIDER_MODELS.codex,
   },
   opencode: {

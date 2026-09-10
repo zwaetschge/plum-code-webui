@@ -51,6 +51,8 @@ data class ChatUiState(
     /** Server-provided activity label ("Writing response", tool name, …). */
     val thinkingLabel: String? = null,
     val activeTools: Map<String, ToolExecution> = emptyMap(),
+    /** Retained across turn resets, bounded to the latest 300 tool calls. */
+    val toolHistory: Map<String, ToolExecution> = emptyMap(),
 
     /** Agent task list (`session:todos`) shown in the workbench strip. */
     val todos: List<TodoItem> = emptyList(),

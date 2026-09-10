@@ -20,9 +20,7 @@ process.env.SESSION_SECRET = 'chat-media-session-secret-000000000000000000';
 process.env.JWT_SECRET = 'chat-media-jwt-secret-000000000000000000000';
 process.env.ENCRYPTION_KEY = 'chat-media-encryption-key-0000000000000000';
 
-const { useTestSchema, createTestSchema, dropTestSchema } = await import(
-  '../src/db/testing.js'
-);
+const { useTestSchema, createTestSchema, dropTestSchema } = await import('../src/db/testing.js');
 useTestSchema();
 const {
   MAX_CHAT_MEDIA_BYTES,

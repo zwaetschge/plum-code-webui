@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.filemanager
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -26,8 +27,15 @@ import androidx.compose.ui.unit.sp
 import com.claudewebui.app.data.model.FileInfo
 import com.claudewebui.app.data.model.FileType
 import com.claudewebui.app.ui.components.filemanager.FileUploadSheet
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
+import java.io.File
 import java.text.DecimalFormat
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,6 +47,11 @@ fun FileManagerScreen(
     onOpenFile: (FileInfo) -> Unit,
     onSendToChat: (String) -> Unit = {}
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val viewModel: FileManagerViewModel = koinViewModel(
         parameters = { parametersOf(sessionId, workingDirectory) }
     )
@@ -48,25 +61,75 @@ fun FileManagerScreen(
     var longPressedFile by remember { mutableStateOf<FileInfo?>(null) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
+    // Save-to-device: fetch the bytes (file, or the folder as ZIP) into the
+    // cache, then let the system picker choose the destination — same flow as
+    // chat attachments, no storage permission needed.
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var pendingSaveFile by remember { mutableStateOf<File?>(null) }
+    var downloadBusy by remember { mutableStateOf(false) }
+    val saveDownloadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("*/*"),
+    ) { destination ->
+        val source = pendingSaveFile
+        pendingSaveFile = null
+        if (destination != null && source != null) {
+            coroutineScope.launch(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(destination)?.use { output ->
+                        source.inputStream().use { input -> input.copyTo(output) }
+                    } ?: error(context.getString(R.string.filemanager_unwritable))
+                }.onFailure {
+                    viewModel.reportError(it.message ?: context.getString(R.string.filemanager_download_failed))
+                }
+                source.delete()
+            }
+        } else {
+            source?.delete()
+        }
+    }
+    val downloadToDevice: (FileInfo) -> Unit = { file ->
+        if (!downloadBusy) {
+            coroutineScope.launch {
+                downloadBusy = true
+                val saveName = if (file.type == FileType.DIRECTORY) "${file.name}.zip" else file.name
+                viewModel.fetchDownload(file)
+                    .mapCatching { bytes ->
+                        withContext(Dispatchers.IO) { cacheDownload(context, saveName, bytes) }
+                    }
+                    .onSuccess { cached ->
+                        pendingSaveFile = cached
+                        saveDownloadLauncher.launch(saveName)
+                    }
+                    .onFailure { failure ->
+                        viewModel.reportError(
+                            failure.message ?: context.getString(R.string.filemanager_download_failed)
+                        )
+                    }
+                downloadBusy = false
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             Column {
                 TopAppBar(
                     title = {
                         Text(
-                            text = state.pathSegments.lastOrNull() ?: "Files",
+                            text = state.pathSegments.lastOrNull() ?: screenResources.getString(R.string.filemanager_files_6ce6c),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     },
                     navigationIcon = {
                         IconButton(onClick = onNavigateBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = screenResources.getString(R.string.filemanager_back_b52b3))
                         }
                     },
                     actions = {
                         IconButton(onClick = { viewModel.refresh() }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                            Icon(Icons.Default.Refresh, contentDescription = screenResources.getString(R.string.filemanager_refresh_56e3b))
                         }
                     }
                 )
@@ -85,7 +148,7 @@ fun FileManagerScreen(
                     onQueryChange = { viewModel.search(it) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.xs)
                 )
             }
         },
@@ -94,7 +157,7 @@ fun FileManagerScreen(
                 onClick = { showUploadSheet = true },
                 containerColor = MaterialTheme.colorScheme.primaryContainer
             ) {
-                Icon(Icons.Default.Upload, contentDescription = "Upload file")
+                Icon(Icons.Default.Upload, contentDescription = screenResources.getString(R.string.filemanager_upload_file_503a3))
             }
         }
     ) { paddingValues ->
@@ -175,7 +238,12 @@ fun FileManagerScreen(
             onSendToChat = {
                 onSendToChat(file.path)
                 longPressedFile = null
-            }
+            },
+            onDownload = {
+                downloadToDevice(file)
+                longPressedFile = null
+            },
+            downloadBusy = downloadBusy
         )
     }
 
@@ -186,8 +254,8 @@ fun FileManagerScreen(
                 showDeleteDialog = false
                 longPressedFile = null
             },
-            title = { Text("Delete ${longPressedFile?.name}?") },
-            text = { Text("This action cannot be undone.") },
+            title = { Text(screenResources.getString(R.string.filemanager_delete_1_s_137cd, longPressedFile?.name)) },
+            text = { Text(screenResources.getString(R.string.filemanager_this_action_cannot_be_undone_951f4)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -199,7 +267,7 @@ fun FileManagerScreen(
                         contentColor = MaterialTheme.colorScheme.error
                     )
                 ) {
-                    Text("Delete")
+                    Text(screenResources.getString(R.string.filemanager_delete_f6fdb))
                 }
             },
             dismissButton = {
@@ -207,7 +275,7 @@ fun FileManagerScreen(
                     showDeleteDialog = false
                     longPressedFile = null
                 }) {
-                    Text("Cancel")
+                    Text(screenResources.getString(R.string.filemanager_cancel_77dfd))
                 }
             }
         )
@@ -236,23 +304,28 @@ private fun BreadcrumbBar(
     showGoUp: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     Row(
         modifier = modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = screenTokens.spacing.sm, vertical = screenTokens.spacing.inline),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (showGoUp) {
             IconButton(
                 onClick = onGoUp,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(com.claudewebui.app.ui.theme.PlumTheme.tokens.sizing.touchTarget)
             ) {
                 Icon(
                     Icons.Default.ArrowUpward,
-                    contentDescription = "Go up",
-                    modifier = Modifier.size(18.dp),
+                    contentDescription = screenResources.getString(R.string.filemanager_go_up_25874),
+                    modifier = Modifier.size(screenTokens.sizing.iconInline),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -260,14 +333,14 @@ private fun BreadcrumbBar(
         Icon(
             Icons.Default.Home,
             contentDescription = null,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(screenTokens.sizing.iconSm),
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
         segments.forEachIndexed { index, segment ->
             Icon(
                 Icons.Default.ChevronRight,
                 contentDescription = null,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(screenTokens.sizing.iconSm),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
             )
             TextButton(
@@ -295,23 +368,28 @@ private fun SearchBar(
     onQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
-        placeholder = { Text("Search files...", style = MaterialTheme.typography.bodyMedium) },
+        placeholder = { Text(screenResources.getString(R.string.filemanager_search_files_fe116), style = MaterialTheme.typography.bodyMedium) },
         leadingIcon = {
-            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(screenTokens.sizing.iconInline))
         },
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Close, contentDescription = screenResources.getString(R.string.filemanager_clear_719ea), modifier = Modifier.size(screenTokens.sizing.iconInline))
                 }
             }
         },
         singleLine = true,
         modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(screenTokens.radius.xl),
         textStyle = MaterialTheme.typography.bodyMedium
     )
 }
@@ -324,6 +402,8 @@ private fun FileListItem(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -331,15 +411,15 @@ private fun FileListItem(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.compact),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.md)
     ) {
         // File icon
         Box(
             modifier = Modifier
                 .size(40.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(screenTokens.radius.sm))
                 .background(fileIconBackground(file)),
             contentAlignment = Alignment.Center
         ) {
@@ -361,7 +441,7 @@ private fun FileListItem(
                 overflow = TextOverflow.Ellipsis
             )
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)
             ) {
                 if (file.type == FileType.FILE) {
                     Text(
@@ -387,7 +467,7 @@ private fun FileListItem(
             Icon(
                 Icons.Default.ChevronRight,
                 contentDescription = null,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(screenTokens.sizing.iconInline),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
             )
         }
@@ -464,8 +544,15 @@ private fun FileContextMenu(
     file: FileInfo,
     onDismiss: () -> Unit,
     onDelete: () -> Unit,
-    onSendToChat: () -> Unit
+    onSendToChat: () -> Unit,
+    onDownload: () -> Unit = {},
+    downloadBusy: Boolean = false
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -485,9 +572,35 @@ private fun FileContextMenu(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Chat, contentDescription = null, modifier = Modifier.size(screenTokens.sizing.iconInline))
                     Spacer(Modifier.width(8.dp))
-                    Text("Send path to chat")
+                    Text(screenResources.getString(R.string.filemanager_send_path_to_chat_6d770))
+                }
+                TextButton(
+                    onClick = {
+                        onDownload()
+                        onDismiss()
+                    },
+                    enabled = !downloadBusy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(screenTokens.sizing.iconInline))
+                    Spacer(Modifier.width(8.dp))
+                    Column(horizontalAlignment = Alignment.Start) {
+                        Text(
+                            screenResources.getString(
+                                if (file.type == FileType.DIRECTORY) R.string.filemanager_download_zip
+                                else R.string.filemanager_download_file
+                            )
+                        )
+                        if (file.type == FileType.DIRECTORY) {
+                            Text(
+                                screenResources.getString(R.string.filemanager_download_zip_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
                 TextButton(
                     onClick = {
@@ -499,16 +612,29 @@ private fun FileContextMenu(
                         contentColor = MaterialTheme.colorScheme.error
                     )
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(screenTokens.sizing.iconInline))
                     Spacer(Modifier.width(8.dp))
-                    Text("Delete")
+                    Text(screenResources.getString(R.string.filemanager_delete_f6fdb))
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(screenResources.getString(R.string.filemanager_cancel_77dfd)) }
         }
     )
+}
+
+private fun cacheDownload(context: android.content.Context, filename: String, bytes: ByteArray): File {
+    val directory = File(context.cacheDir, "file-downloads").apply { mkdirs() }
+    val safeName = filename
+        .substringAfterLast('/')
+        .substringAfterLast('\\')
+        .replace(Regex("[\\p{Cc}\\p{Cf}]"), "")
+        .take(120)
+        .ifBlank { "download" }
+    return File(directory, "${System.currentTimeMillis()}-$safeName").apply {
+        outputStream().use { it.write(bytes) }
+    }
 }
 
 @Composable
@@ -516,18 +642,23 @@ private fun UploadProgressOverlay(
     progress: Float,
     modifier: Modifier = Modifier
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .padding(16.dp),
+            .padding(screenTokens.spacing.lg),
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(screenTokens.spacing.lg)) {
             Row(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Uploading...", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(screenResources.getString(R.string.filemanager_uploading_070e3), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 Text("${(progress * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
             }
             Spacer(Modifier.height(8.dp))
@@ -541,15 +672,20 @@ private fun UploadProgressOverlay(
 
 @Composable
 private fun ErrorView(message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     Column(
-        modifier = modifier.padding(32.dp),
+        modifier = modifier.padding(screenTokens.spacing.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md)
     ) {
         Icon(
             Icons.Default.ErrorOutline,
             contentDescription = null,
-            modifier = Modifier.size(48.dp),
+            modifier = Modifier.size(screenTokens.sizing.touchTarget),
             tint = MaterialTheme.colorScheme.error
         )
         Text(
@@ -558,19 +694,24 @@ private fun ErrorView(message: String, onRetry: () -> Unit, modifier: Modifier =
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         OutlinedButton(onClick = onRetry) {
-            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(screenTokens.sizing.iconSm))
             Spacer(Modifier.width(4.dp))
-            Text("Retry")
+            Text(screenResources.getString(R.string.filemanager_retry_9f5cd))
         }
     }
 }
 
 @Composable
 private fun EmptyDirectoryView(modifier: Modifier = Modifier) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     Column(
-        modifier = modifier.padding(32.dp),
+        modifier = modifier.padding(screenTokens.spacing.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)
     ) {
         Icon(
             Icons.Default.FolderOpen,
@@ -579,12 +720,12 @@ private fun EmptyDirectoryView(modifier: Modifier = Modifier) {
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
         )
         Text(
-            "Empty directory",
+            screenResources.getString(R.string.filemanager_empty_directory_950d3),
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            "Upload files using the button below",
+            screenResources.getString(R.string.filemanager_upload_files_using_the_button_below_c7fda),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         )
@@ -593,19 +734,24 @@ private fun EmptyDirectoryView(modifier: Modifier = Modifier) {
 
 @Composable
 private fun NoSearchResultsView(query: String, modifier: Modifier = Modifier) {
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Column(
-        modifier = modifier.padding(32.dp),
+        modifier = modifier.padding(screenTokens.spacing.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)
     ) {
         Icon(
             Icons.Default.SearchOff,
             contentDescription = null,
-            modifier = Modifier.size(48.dp),
+            modifier = Modifier.size(screenTokens.sizing.touchTarget),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
         )
         Text(
-            "No results for \"$query\"",
+            screenResources.getString(R.string.filemanager_no_results_for_1_s_70985, query),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

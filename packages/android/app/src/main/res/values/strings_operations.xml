@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="operations_1_s_2_s_sessions_f7a3d">%1$s · %2$s sessions</string>
+    <string name="operations_admin_access_required_737b1">Admin access required</string>
+    <string name="operations_audit_fa170">Audit</string>
+    <string name="operations_back_b52b3">Back</string>
+    <string name="operations_connected_c5e23">connected</string>
+    <string name="operations_containers_e040a">Containers</string>
+    <string name="operations_containers_watchdogs_and_access_2ae75">Containers, watchdogs and access</string>
+    <string name="operations_docker_1_s_8184b">Docker %1$s</string>
+    <string name="operations_docker_unavailable_61df4">Docker unavailable</string>
+    <string name="operations_enabled_3ea3f">enabled</string>
+    <string name="operations_last_incident_1_s_199b2">Last incident %1$s</string>
+    <string name="operations_no_audit_entries_01c84">No audit entries</string>
+    <string name="operations_no_containers_visible_5f733">No containers visible</string>
+    <string name="operations_no_users_c4b06">No users</string>
+    <string name="operations_no_watchdogs_configured_d7503">No watchdogs configured</string>
+    <string name="operations_operations_a1fda">Operations</string>
+    <string name="operations_paused_11b1b">paused</string>
+    <string name="operations_reload_cce71">Reload</string>
+    <string name="operations_running_73989">Running</string>
+    <string name="operations_sessions_e11e3">Sessions</string>
+    <string name="operations_users_57f2b">Users</string>
+    <string name="operations_watchdogs_fbf2c">Watchdogs</string>
+</resources>

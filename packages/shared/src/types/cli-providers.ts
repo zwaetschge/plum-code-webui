@@ -16,6 +16,13 @@ export interface ProviderCapabilities {
   allowedDirectories: boolean;
 }
 
+/**
+ * The Codex model everything falls back to. It was spelled out as a literal in
+ * eight places (config templates, helper spawns, the SQL default, /model), so a
+ * version bump only ever updated some of them and the rest quietly disagreed.
+ */
+export const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+
 export type ProviderFamilyLabel =
   | 'Codex'
   | 'Claude'

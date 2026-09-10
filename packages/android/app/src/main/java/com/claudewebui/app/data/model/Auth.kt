@@ -39,6 +39,14 @@ data class LoginResponse(
     val user: AuthUser
 )
 
+/** `POST /auth/refresh` — a fresh JWT for the same identity. */
+@Serializable
+data class TokenRefreshResponse(
+    val token: String,
+    /** Epoch millis, or null when the server did not decode its own token. */
+    val expiresAt: Long? = null,
+)
+
 @Serializable
 data class AuthProviders(
     val github: Boolean = false,

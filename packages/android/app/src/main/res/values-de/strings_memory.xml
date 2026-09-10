@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="memory_back_b52b3">Zurück</string>
+    <string name="memory_cancel_77dfd">Abbrechen</string>
+    <string name="memory_close_bbfa7">Schliessen</string>
+    <string name="memory_create_6e157">Erstellen</string>
+    <string name="memory_delete_f6fdb">Löschen</string>
+    <string name="memory_dismiss_70afe">Schliessen</string>
+    <string name="memory_file_name_09979">Dateiname</string>
+    <string name="memory_memories_written_by_the_agent_show_up_here_08dc5">Vom Agenten gespeicherte Erinnerungen erscheinen hier.</string>
+    <string name="memory_memory_89c8a">Erinnerungen</string>
+    <string name="memory_new_memory_c8ff7">Neue Erinnerung</string>
+    <string name="memory_no_memory_files_d97c4">Keine Erinnerungsdateien</string>
+    <string name="memory_persistent_notes_for_this_workspace_abbc9">Dauerhafte Notizen für diesen Arbeitsbereich</string>
+    <string name="memory_reload_cce71">Neu laden</string>
+    <string name="memory_save_efc00">Speichern</string>
+    <string name="memory_saved_c0ae8">Gespeichert</string>
+    <string name="memory_saving_56a22">Wird gespeichert…</string>
+    <string name="memory_unsaved_2ab06">Ungespeichert</string>
+</resources>

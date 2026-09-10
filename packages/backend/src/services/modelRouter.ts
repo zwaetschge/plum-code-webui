@@ -132,7 +132,16 @@ export function matchUpstreamModel(patterns: string[], model: string): boolean {
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 /** Hop-by-hop headers must not be forwarded in either direction. */
-const HOP_BY_HOP = ['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'proxy-authorization', 'proxy-authenticate', 'te', 'trailer'];
+const HOP_BY_HOP = [
+  'connection',
+  'keep-alive',
+  'transfer-encoding',
+  'upgrade',
+  'proxy-authorization',
+  'proxy-authenticate',
+  'te',
+  'trailer',
+];
 
 function anthropicError(res: ServerResponse, status: number, type: string, message: string): void {
   if (res.headersSent) {
@@ -144,7 +153,13 @@ function anthropicError(res: ServerResponse, status: number, type: string, messa
 }
 
 function emptyTotals(): RoutedUsageTotals {
-  return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, requests: 0 };
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    requests: 0,
+  };
 }
 
 interface UsageFields {
@@ -181,7 +196,12 @@ export function extractZaiUsage(body: string, contentType: string | undefined): 
       const usage = event.usage ?? event.message?.usage;
       if (!usage) continue;
       const next: UsageFields = { ...(merged ?? {}) };
-      for (const key of ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'] as const) {
+      for (const key of [
+        'input_tokens',
+        'output_tokens',
+        'cache_read_input_tokens',
+        'cache_creation_input_tokens',
+      ] as const) {
         if (typeof usage[key] === 'number') next[key] = usage[key];
       }
       merged = next;
@@ -268,7 +288,10 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
             }
           });
           upstreamRes.on('end', () => {
-            tee.onBody(Buffer.concat(collected).toString('utf8'), String(upstreamRes.headers['content-type'] ?? ''));
+            tee.onBody(
+              Buffer.concat(collected).toString('utf8'),
+              String(upstreamRes.headers['content-type'] ?? '')
+            );
           });
         }
 
@@ -335,7 +358,9 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
       try {
         parsedBody = JSON.parse(body.toString('utf8')) as Record<string, unknown>;
         if (typeof parsedBody.model === 'string' && !isAnthropicModel(parsedBody.model)) {
-          resolved = await options.resolveUpstream(session.userId, parsedBody.model).catch(() => null);
+          resolved = await options
+            .resolveUpstream(session.userId, parsedBody.model)
+            .catch(() => null);
         }
       } catch {
         // Unparseable body: let Anthropic produce the error the CLI expects.
@@ -347,7 +372,14 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
       for (const header of HOP_BY_HOP) delete headers[header];
       delete headers['content-length'];
       if (body) headers['content-length'] = String(body.length);
-      forward(req, res, anthropicBase, anthropicBase.pathname.replace(/\/$/, '') + upstreamPath, headers, body);
+      forward(
+        req,
+        res,
+        anthropicBase,
+        anthropicBase.pathname.replace(/\/$/, '') + upstreamPath,
+        headers,
+        body
+      );
       return;
     }
 
@@ -371,36 +403,44 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
     if (outBody) headers['content-length'] = String(outBody.length);
 
     const requestId = randomBytes(8).toString('hex');
-    forward(req, res, upstreamBase, upstreamBase.pathname.replace(/\/$/, '') + upstreamPath, headers, outBody, {
-      onBody: (text, contentType) => {
-        const reported = extractZaiUsage(text, contentType);
-        if (!reported) return;
-        const inputTokens = reported.input_tokens ?? 0;
-        const outputTokens = reported.output_tokens ?? 0;
-        const cacheReadTokens = reported.cache_read_input_tokens ?? 0;
-        const cacheCreationTokens = reported.cache_creation_input_tokens ?? 0;
+    forward(
+      req,
+      res,
+      upstreamBase,
+      upstreamBase.pathname.replace(/\/$/, '') + upstreamPath,
+      headers,
+      outBody,
+      {
+        onBody: (text, contentType) => {
+          const reported = extractZaiUsage(text, contentType);
+          if (!reported) return;
+          const inputTokens = reported.input_tokens ?? 0;
+          const outputTokens = reported.output_tokens ?? 0;
+          const cacheReadTokens = reported.cache_read_input_tokens ?? 0;
+          const cacheCreationTokens = reported.cache_creation_input_tokens ?? 0;
 
-        const totals = usage.get(session.sessionId) ?? emptyTotals();
-        totals.inputTokens += inputTokens;
-        totals.outputTokens += outputTokens;
-        totals.cacheReadTokens += cacheReadTokens;
-        totals.cacheCreationTokens += cacheCreationTokens;
-        totals.requests += 1;
-        usage.set(session.sessionId, totals);
+          const totals = usage.get(session.sessionId) ?? emptyTotals();
+          totals.inputTokens += inputTokens;
+          totals.outputTokens += outputTokens;
+          totals.cacheReadTokens += cacheReadTokens;
+          totals.cacheCreationTokens += cacheCreationTokens;
+          totals.requests += 1;
+          usage.set(session.sessionId, totals);
 
-        options.onRoutedUsage?.({
-          userId: session.userId,
-          sessionId: session.sessionId,
-          model: resolved.model,
-          provider: resolved.provider,
-          requestId,
-          inputTokens,
-          outputTokens,
-          cacheReadTokens,
-          cacheCreationTokens,
-        });
-      },
-    });
+          options.onRoutedUsage?.({
+            userId: session.userId,
+            sessionId: session.sessionId,
+            model: resolved.model,
+            provider: resolved.provider,
+            requestId,
+            inputTokens,
+            outputTokens,
+            cacheReadTokens,
+            cacheCreationTokens,
+          });
+        },
+      }
+    );
   }
 
   return { handler, registerSession, unregisterSession, drainRoutedUsage };

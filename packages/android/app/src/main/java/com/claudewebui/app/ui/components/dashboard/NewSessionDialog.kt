@@ -1,5 +1,10 @@
 package com.claudewebui.app.ui.components.dashboard
 
+import com.claudewebui.app.ui.components.common.localizedLabel
+import com.claudewebui.app.ui.components.common.localizedDescription
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -99,6 +104,7 @@ fun NewSessionDialog(
         categoryId: String?,
     ) -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var sessionName by remember { mutableStateOf("") }
@@ -138,8 +144,8 @@ fun NewSessionDialog(
         dragHandle = {
             Box(
                 modifier = Modifier
-                    .padding(top = 12.dp, bottom = 4.dp)
-                    .size(width = 36.dp, height = 4.dp)
+                    .padding(top = componentTokens.spacing.md, bottom = componentTokens.spacing.xs)
+                    .size(width = 36.dp, height = componentTokens.spacing.xs)
                     .clip(RoundedCornerShape(50))
                     .background(MaterialTheme.colorScheme.outlineVariant),
             )
@@ -149,36 +155,36 @@ fun NewSessionDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp),
+                .padding(horizontal = componentTokens.spacing.xl)
+                .padding(bottom = componentTokens.spacing.xxl),
         ) {
             // ── Header ───────────────────────────────────────────────────────
             Text(
-                text = "New Session",
+                text = stringResource(R.string.component_new_session),
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "Choose a provider to get started",
+                text = stringResource(R.string.component_choose_a_provider_to_get_started),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.section))
 
             // ── Provider Grid ────────────────────────────────────────────────
-            SectionLabel("Provider")
-            Spacer(modifier = Modifier.height(10.dp))
+            SectionLabel(stringResource(R.string.component_provider))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.compact))
 
             if (providers.isEmpty()) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.surfaceContainer,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(componentTokens.radius.md),
                 ) {
                     Text(
-                        text = "No providers are enabled. Enable one in Settings to start a session.",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        text = stringResource(R.string.component_no_providers_are_enabled_enable_one_in_settings_to_start_a_sessio),
+                        modifier = Modifier.padding(horizontal = componentTokens.spacing.lg, vertical = componentTokens.spacing.cozy),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -186,8 +192,8 @@ fun NewSessionDialog(
             } else {
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.compact),
+                    verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.compact),
                 ) {
                     providers.forEach { provider ->
                         ProviderOption(
@@ -203,14 +209,14 @@ fun NewSessionDialog(
             // A saved template fills provider, mode and directory in one tap;
             // everything stays editable afterwards.
             if (templates.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(20.dp))
-                SectionLabel("Start from a template")
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(componentTokens.spacing.section))
+                SectionLabel(stringResource(R.string.component_start_from_a_template))
+                Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
                 ) {
                     templates.forEach { template ->
                         AssistChip(
@@ -235,18 +241,18 @@ fun NewSessionDialog(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.section))
 
             // ── Session Name ─────────────────────────────────────────────────
-            SectionLabel("Session name (optional)")
-            Spacer(modifier = Modifier.height(8.dp))
+            SectionLabel(stringResource(R.string.component_session_name_optional))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
             OutlinedTextField(
                 value = sessionName,
                 onValueChange = { sessionName = it },
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = {
                     Text(
-                        text = "Auto-generated if empty",
+                        text = stringResource(R.string.component_auto_generated_if_empty),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 },
@@ -258,10 +264,10 @@ fun NewSessionDialog(
                 keyboardActions = KeyboardActions(
                     onDone = { createSession() },
                 ),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(componentTokens.radius.md),
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.lg))
 
             // ── Advanced toggle ──────────────────────────────────────────────
             TextButton(
@@ -271,10 +277,10 @@ fun NewSessionDialog(
                 Icon(
                     imageVector = Icons.Default.ExpandMore,
                     contentDescription = null,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(componentTokens.sizing.iconInline),
                 )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(if (showAdvanced) "Hide options" else "More options")
+                Spacer(modifier = Modifier.width(componentTokens.spacing.xs))
+                Text(if (showAdvanced) stringResource(R.string.component_hide_options) else stringResource(R.string.component_more_options))
             }
 
             AnimatedVisibility(
@@ -284,8 +290,8 @@ fun NewSessionDialog(
             ) {
                 Column {
                     // ── Workspace directory ──────────────────────────────────
-                    SectionLabel("Workspace directory (optional)")
-                    Spacer(modifier = Modifier.height(8.dp))
+                    SectionLabel(stringResource(R.string.component_workspace_directory_optional))
+                    Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
                     OutlinedTextField(
                         value = workingDirectory,
                         onValueChange = { workingDirectory = it },
@@ -302,21 +308,21 @@ fun NewSessionDialog(
                                 contentDescription = null,
                             )
                         },
-                        supportingText = { Text("Leave empty to use the default workspace") },
+                        supportingText = { Text(stringResource(R.string.component_leave_empty_to_use_the_default_workspace)) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = { createSession() }),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(componentTokens.radius.md),
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(componentTokens.spacing.lg))
 
                     // ── Mode selector ────────────────────────────────────────
-                    SectionLabel("Mode")
-                    Spacer(modifier = Modifier.height(8.dp))
+                    SectionLabel(stringResource(R.string.component_mode))
+                    Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
                     ) {
                         SessionMode.entries.forEach { mode ->
                             ModeChip(
@@ -328,37 +334,37 @@ fun NewSessionDialog(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(componentTokens.spacing.lg))
 
                     // ── Category selector ────────────────────────────────────
                     if (categories.isNotEmpty()) {
-                        SectionLabel("Category")
-                        Spacer(modifier = Modifier.height(8.dp))
+                        SectionLabel(stringResource(R.string.component_category))
+                        Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
                         Box {
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(componentTokens.radius.md))
                                     .clickable { categoryMenuExpanded = true },
                                 color = MaterialTheme.colorScheme.surfaceContainer,
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(componentTokens.radius.md),
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                        .padding(horizontal = componentTokens.spacing.lg, vertical = componentTokens.spacing.cozy),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.FolderOpen,
                                         contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
+                                        modifier = Modifier.size(componentTokens.sizing.iconInline),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Spacer(modifier = Modifier.width(componentTokens.spacing.sm))
                                     Text(
                                         text = categories.find { it.id == selectedCategoryId }?.name
-                                            ?: "No category",
+                                            ?: stringResource(R.string.component_no_category),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = if (selectedCategoryId != null)
                                             MaterialTheme.colorScheme.onSurface
@@ -369,7 +375,7 @@ fun NewSessionDialog(
                                     Icon(
                                         imageVector = Icons.Default.ExpandMore,
                                         contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
+                                        modifier = Modifier.size(componentTokens.sizing.iconInline),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
@@ -380,7 +386,7 @@ fun NewSessionDialog(
                                 onDismissRequest = { categoryMenuExpanded = false },
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("No category") },
+                                    text = { Text(stringResource(R.string.component_no_category)) },
                                     onClick = {
                                         selectedCategoryId = null
                                         categoryMenuExpanded = false
@@ -400,19 +406,19 @@ fun NewSessionDialog(
                                 }
                             }
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(componentTokens.spacing.lg))
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
 
             creationError?.let { error ->
                 Text(
                     text = error,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(bottom = 8.dp),
+                    modifier = Modifier.padding(bottom = componentTokens.spacing.sm),
                 )
             }
 
@@ -423,30 +429,30 @@ fun NewSessionDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 52.dp),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(componentTokens.spacing.cozy),
             ) {
                 if (isCreating) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(componentTokens.sizing.iconMd),
+                        strokeWidth = componentTokens.spacing.xxs,
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Creating session…")
+                    Spacer(modifier = Modifier.width(componentTokens.spacing.sm))
+                    Text(stringResource(R.string.component_creating_session))
                 } else if (availableProvider != null) {
                     ProviderBadge(
                         provider = availableProvider.toCliProvider(),
                         size = BadgeSize.SMALL,
                         showLabel = false,
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(componentTokens.spacing.sm))
                     Text(
-                        text = "Start with ${availableProvider.toCliProvider().displayName}",
+                        text = stringResource(R.string.component_start_with, availableProvider.toCliProvider().displayName),
                         style = MaterialTheme.typography.labelLarge,
                     )
                 } else {
                     Text(
-                        text = "No provider available",
+                        text = stringResource(R.string.component_no_provider_available),
                         style = MaterialTheme.typography.labelLarge,
                     )
                 }
@@ -463,6 +469,7 @@ private fun ProviderOption(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     val isDark = isSystemInDarkTheme()
     val cliProvider = provider.toCliProvider()
     val theme = ProviderThemes.get(cliProvider)
@@ -479,13 +486,13 @@ private fun ProviderOption(
 
     Surface(
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.md))
             .then(
                 if (isSelected) {
                     Modifier.border(
                         width = 1.5.dp,
                         color = ProviderThemes.color(cliProvider, isDark).copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(componentTokens.radius.md),
                     )
                 } else Modifier
             )
@@ -494,13 +501,13 @@ private fun ProviderOption(
                 role = Role.Button
             },
         color = containerColor,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(componentTokens.radius.md),
         onClick = onClick,
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = componentTokens.spacing.cozy, vertical = componentTokens.spacing.md),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
         ) {
             Icon(
                 imageVector = theme.icon,
@@ -527,33 +534,34 @@ private fun ModeChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     Surface(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.chip))
             .semantics {
                 selected = isSelected
                 role = Role.Button
             },
         color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(componentTokens.radius.chip),
         onClick = onClick,
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = componentTokens.spacing.sm, vertical = componentTokens.spacing.compact),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (isSelected) {
                 Icon(
                     imageVector = Icons.Default.Check,
                     contentDescription = null,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(componentTokens.sizing.iconXs),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(componentTokens.spacing.xxs))
             }
             Text(
-                text = mode.label,
+                text = mode.localizedLabel(),
                 style = MaterialTheme.typography.labelSmall,
                 color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
                 else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -567,9 +575,10 @@ private fun ModeChip(
 
 @Composable
 private fun CategoryColorDot(color: String) {
+    val componentTokens = PlumTheme.tokens
     Box(
         modifier = Modifier
-            .size(12.dp)
+            .size(componentTokens.spacing.md)
             .clip(RoundedCornerShape(50))
             .background(parseHexColor(color)),
     )

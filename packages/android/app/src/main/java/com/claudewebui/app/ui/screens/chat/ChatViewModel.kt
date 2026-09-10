@@ -1,34 +1,40 @@
 package com.claudewebui.app.ui.screens.chat
 
+import com.claudewebui.app.R
+import com.claudewebui.app.ui.components.common.localizedLabel
+
 import android.content.Context
-import android.net.Uri
-import android.os.Build
-import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.claudewebui.app.core.network.ApiHttpException
-import com.claudewebui.app.core.network.BufferedMessage
-import com.claudewebui.app.core.network.ConnectionState
+import androidx.paging.cachedIn
+import com.claudewebui.app.core.network.AppError
+import com.claudewebui.app.core.network.toAppError
+import com.claudewebui.app.core.diagnostics.Breadcrumbs
 import com.claudewebui.app.core.network.SocketManager
+import com.claudewebui.app.core.notifications.LocalNotificationManager
 import com.claudewebui.app.data.local.entity.OutboxEntity
-import com.claudewebui.app.data.local.entity.OutboxStatus
 import com.claudewebui.app.data.local.entity.SessionReadStateEntity
 import com.claudewebui.app.data.model.*
-import com.claudewebui.app.data.repository.MessageHistoryPage
 import com.claudewebui.app.data.repository.MessageRepository
 import com.claudewebui.app.data.repository.SessionRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import java.io.ByteArrayOutputStream
-import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
-private val socketJson = Json { ignoreUnknownKeys = true; coerceInputValues = true }
-
+/**
+ * One live ViewModel per open chat. [ChatScreen] owns it in a per-session
+ * store, so switching sessions clears it — socket subscriptions, heartbeat,
+ * deliveries and all. The heavy lifting is split across collaborators that
+ * share `viewModelScope` and the single [uiState] flow:
+ *
+ * - [ChatStreamingController] — live-turn text/thinking/tool/agent state
+ * - [ChatHistoryLoader] — transcript paging and the Room reveal window
+ * - [ChatDraftController] — composer drafts and pending attachments
+ * - [ChatSendController] — outbox, uploads, acknowledgements, retries
+ * - [ChatPermissionController] — permission and question prompts
+ * - [ChatSearchController] — search, jump-to-message, read position
+ * - [ChatSocketBinder] — room membership, event routing, presence
+ */
 class ChatViewModel(
     private val sessionId: String,
     private val messageRepository: MessageRepository,
@@ -44,21 +50,15 @@ class ChatViewModel(
 
     private val selectedChatId = MutableStateFlow<String?>(null)
 
-    /**
-     * How many of the newest rows the transcript observes. Scrolling to the top
-     * widens it; a bounded window is what keeps year-long sessions from holding
-     * their entire history in memory (and re-reading it on every write).
-     */
-    private val messageWindow = MutableStateFlow(MESSAGE_WINDOW_INITIAL)
-    val revealWindow: StateFlow<Int> = messageWindow.asStateFlow()
+    /** Small live tail for delivery reconciliation; the UI uses [pagedMessages]. */
+    val messages: StateFlow<List<Message>> = selectedChatId
+        .flatMapLatest { chatId -> messageRepository.getMessages(sessionId, chatId, limit = 150) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** Room-backed message list — auto-updates as messages arrive */
-    val messages: StateFlow<List<Message>> =
-        combine(selectedChatId, messageWindow, ::Pair)
-            .flatMapLatest { (chatId, limit) ->
-                messageRepository.getMessages(sessionId, chatId, limit)
-            }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /** The transcript uses Paging; [messages] is a small tail for delivery/read bookkeeping. */
+    val pagedMessages = selectedChatId
+        .flatMapLatest { chatId -> messageRepository.pagedMessages(sessionId, chatId) }
+        .cachedIn(viewModelScope)
 
     /** Pending/accepted/failed sends survive process death and reconnects. */
     val outbox: StateFlow<List<OutboxEntity>> = messageRepository.getOutbox(sessionId)
@@ -70,6 +70,114 @@ class ChatViewModel(
     /** Room-backed session info */
     val session: StateFlow<Session?> = sessionRepository.observeSession(sessionId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val deviceId: String by lazy {
+        val preferences = appContext.getSharedPreferences("chat_device", Context.MODE_PRIVATE)
+        preferences.getString("device_id", null) ?: UUID.randomUUID().toString().also {
+            preferences.edit().putString("device_id", it).apply()
+        }
+    }
+
+    private var initializationJob: Job? = null
+    private var limitsJob: Job? = null
+    private var isSessionReady = false
+    private var hasLoadedChatList = false
+    private var chatListVersion = 0L
+
+    // ── Collaborators (construction order follows their dependencies) ───────
+
+    private val streaming = ChatStreamingController(viewModelScope, _uiState)
+    private val drafts = ChatDraftController(
+        appContext = appContext,
+        scope = viewModelScope,
+        sessionId = sessionId,
+        state = _uiState,
+        messageRepository = messageRepository,
+        api = api,
+        isSessionReady = { isSessionReady },
+    )
+    private val history = ChatHistoryLoader(
+        appContext = appContext,
+        scope = viewModelScope,
+        sessionId = sessionId,
+        state = _uiState,
+        selectedChatId = selectedChatId,
+        messageRepository = messageRepository,
+        onChatSelected = drafts::selectChat,
+    )
+    private val search = ChatSearchController(
+        appContext = appContext,
+        scope = viewModelScope,
+        sessionId = sessionId,
+        state = _uiState,
+        api = api,
+        messageRepository = messageRepository,
+        sessionRepository = sessionRepository,
+        socketManager = socketManager,
+        messages = messages,
+        history = history,
+        drafts = drafts,
+        deviceId = { deviceId },
+    )
+    private val permissions = ChatPermissionController(
+        appContext = appContext,
+        scope = viewModelScope,
+        sessionId = sessionId,
+        state = _uiState,
+        sessionRepository = sessionRepository,
+        socketManager = socketManager,
+    )
+    private val send = ChatSendController(
+        scope = viewModelScope,
+        sessionId = sessionId,
+        state = _uiState,
+        messageRepository = messageRepository,
+        socketManager = socketManager,
+        api = api,
+        appContext = appContext,
+        messages = messages,
+        drafts = drafts,
+        isSessionReady = { isSessionReady },
+    )
+    private val socket = ChatSocketBinder(
+        appContext = appContext,
+        scope = viewModelScope,
+        sessionId = sessionId,
+        state = _uiState,
+        socketManager = socketManager,
+        messageRepository = messageRepository,
+        sessionRepository = sessionRepository,
+        readState = readState,
+        streaming = streaming,
+        history = history,
+        search = search,
+        permissions = permissions,
+        send = send,
+        belongsToActiveChat = ::belongsToActiveChat,
+        adoptIncomingChat = ::adoptIncomingChat,
+        deviceId = { deviceId },
+        isSessionReady = { isSessionReady },
+        onChatsChanged = { list -> applyChatList(list, null) },
+        refreshChats = { refreshChatList(refreshHistory = false) },
+    )
+
+    init {
+        Breadcrumbs.add("chat", "created")
+        socket.observeConnectionState()
+        observeSessionMode()
+        observeReadState()
+        reconcileOutboxWithMessages()
+        observeProviderLimits()
+        socket.observeTodos()
+        loadSlashCommands()
+        loadStyleLibrary()
+        loadTurnDiffs()
+        loadMeshPeers()
+        probeVoiceInput()
+        initializeChat()
+    }
+
+    // ── Room-backed observers ───────────────────────────────────────────────
 
     private fun observeSessionMode() {
         session
@@ -110,65 +218,6 @@ class ChatViewModel(
             .launchIn(viewModelScope)
     }
 
-    private val deviceId: String by lazy {
-        val preferences = appContext.getSharedPreferences("chat_device", Context.MODE_PRIVATE)
-        preferences.getString("device_id", null) ?: UUID.randomUUID().toString().also {
-            preferences.edit().putString("device_id", it).apply()
-        }
-    }
-
-    private fun requestReconnect() {
-        val sequence = readState.value?.lastSeenSequence?.takeIf { it > 0 }
-        socketManager.reconnectSession(sessionId, lastSequence = sequence)
-    }
-
-    private fun startPresenceHeartbeat() {
-        presenceJob?.cancel()
-        // IO on purpose: the first tick materialises deviceId from
-        // SharedPreferences, and socket emits are thread-safe.
-        presenceJob = viewModelScope.launch(Dispatchers.IO) {
-            while (isActive) {
-                socketManager.updatePresence(
-                    sessionId = sessionId,
-                    deviceId = deviceId,
-                    label = Build.MODEL.takeIf { it.isNotBlank() },
-                    state = "active",
-                    lastReadMessageId = null,
-                )
-                delay(PRESENCE_HEARTBEAT_MS)
-            }
-        }
-    }
-
-    private var draftSaveJob: Job? = null
-    private var initializationJob: Job? = null
-    private var limitsJob: Job? = null
-    private var searchJob: Job? = null
-    private var readSaveJob: Job? = null
-    private var presenceJob: Job? = null
-    private val deliveryJobs = ConcurrentHashMap<String, Job>()
-    private var viewportAtBottom = true
-    private var announcedHighWatermark = 0L
-    private var isSessionReady = false
-    private val streamingDeltas = StreamingDeltaAccumulator()
-    private var streamingFlushJob: Job? = null
-
-    init {
-        observeConnectionState()
-        observeSessionMode()
-        observeReadState()
-        reconcileOutboxWithMessages()
-        observeProviderLimits()
-        observeTodos()
-        loadSlashCommands()
-        loadStyleLibrary()
-        syncRemoteDraft()
-        loadTurnDiffs()
-        loadMeshPeers()
-        probeVoiceInput()
-        initializeChat()
-    }
-
     /** Backs the composer's `/` picker; a failure just leaves it empty. */
     private fun loadSlashCommands() {
         viewModelScope.launch {
@@ -194,7 +243,7 @@ class ChatViewModel(
 
     /** Apply or clear a presentation preset for this session. */
     fun setStyleSkill(kind: StyleKind, skill: String?) {
-        applySessionChange("Style preset updated") {
+        applySessionChange(appContext.getString(R.string.chat_style_updated)) {
             sessionRepository.setStyleSkill(sessionId, kind, skill)
         }
     }
@@ -207,35 +256,40 @@ class ChatViewModel(
         if (initializationJob?.isActive == true) return
         initializationJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingHistory = true) }
-            loadSessionThenMessages(
-                loadSession = { sessionRepository.getSession(sessionId).map { } },
-                onSessionLoaded = {
-                    isSessionReady = true
-                    observeSocketEvents()
-                    loadDraft()
-                    loadAllowedDirectories()
-                    loadChats()
-                    startPresenceHeartbeat()
-                    if (socketManager.connectionState.value == ConnectionState.CONNECTED) {
-                        socketManager.subscribeToSession(sessionId)
-                        requestReconnect()
-                        retryPendingOutbox()
-                    }
-                },
-                loadMessages = {
-                    messageRepository.fetchMessages(sessionId, clearExisting = true)
-                        .onSuccess(::applyInitialHistoryPage)
-                        .map { }
-                },
-            )
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-            _uiState.update { it.copy(isLoadingHistory = false) }
+            try {
+                loadSessionThenMessages(
+                    loadSession = { sessionRepository.getSessionOrCached(sessionId).map { } },
+                    onSessionLoaded = {
+                        isSessionReady = true
+                        val cachedChatId = messageRepository.cachedReadState(sessionId)?.chatId
+                        if (_uiState.value.activeChatId == null && cachedChatId != null) {
+                            selectedChatId.value = cachedChatId
+                            _uiState.update { it.copy(activeChatId = cachedChatId) }
+                        }
+                        drafts.selectChat(_uiState.value.activeChatId)
+                        socket.bindSessionEvents()
+                        loadAllowedDirectories()
+                        loadChats()
+                        socket.startPresenceHeartbeat()
+                        socket.joinIfConnected()
+                    },
+                    loadMessages = {
+                        val version = history.beginReplacement()
+                        messageRepository.fetchMessages(
+                            sessionId, clearExisting = true, useServerActiveChat = true,
+                            acceptResponse = { history.isCurrentReplacement(version) },
+                        )
+                            .onSuccess { page ->
+                                if (history.isCurrentReplacement(version)) history.applyInitialHistoryPage(page)
+                            }
+                            .map { }
+                    },
+                )
+                    .onFailure { e -> _uiState.update { it.copy(error = e.userMessage(appContext)) } }
+            } finally {
+                _uiState.update { it.copy(isLoadingHistory = false) }
+            }
         }
-    }
-
-    private suspend fun loadDraft() {
-        val draft = messageRepository.getDraft(sessionId) ?: ""
-        _uiState.update { it.copy(draftText = draft) }
     }
 
     private fun loadMessages() {
@@ -243,17 +297,7 @@ class ChatViewModel(
             initializeChat()
             return
         }
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoadingHistory = true) }
-            messageRepository.fetchMessages(
-                sessionId,
-                clearExisting = true,
-                chatId = _uiState.value.activeChatId,
-            )
-                .onSuccess(::applyInitialHistoryPage)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-            _uiState.update { it.copy(isLoadingHistory = false) }
-        }
+        history.reloadActiveChat()
     }
 
     // ========================================================================
@@ -261,16 +305,6 @@ class ChatViewModel(
     // ========================================================================
 
     /** Reload the quota whenever the session's provider appears or changes. */
-    /** Agent task list for this session; other sessions' todos are ignored. */
-    private fun observeTodos() {
-        socketManager.todos
-            .onEach { (eventSessionId, todos) ->
-                if (eventSessionId != sessionId) return@onEach
-                _uiState.update { it.copy(todos = todos) }
-            }
-            .launchIn(viewModelScope)
-    }
-
     private fun observeProviderLimits() {
         session
             .mapNotNull { it?.cliProvider }
@@ -306,1083 +340,213 @@ class ChatViewModel(
      * re-joins the session room.
      */
     fun onResumed() {
+        Breadcrumbs.add("chat", "resumed")
         if (!isSessionReady) return
         socketManager.ensureConnected()
-        viewModelScope.launch {
-            messageRepository.fetchMessages(
-                sessionId,
-                clearExisting = true,
-                chatId = _uiState.value.activeChatId,
-            )
-                .onSuccess(::applyInitialHistoryPage)
-        }
-        if (socketManager.connectionState.value == ConnectionState.CONNECTED) {
-            socketManager.subscribeToSession(sessionId)
-            requestReconnect()
-            retryPendingOutbox()
-        }
+        // Marks this session as the one on screen, so the dashboard-wide
+        // monitoring window cannot unsubscribe it while the user is reading.
+        LocalNotificationManager.setOpenSession(sessionId)
+        history.refreshInBackground()
+        socket.joinIfConnected()
         loadChats()
         loadProviderLimits()
     }
 
     // ========================================================================
-    // Socket Connection & Events
+    // Chat threads
     // ========================================================================
-
-    private fun observeConnectionState() {
-        var wasConnected = socketManager.connectionState.value == ConnectionState.CONNECTED
-        socketManager.connectionState
-            .onEach { state ->
-                val isConnected = state == ConnectionState.CONNECTED
-                if (!isConnected) {
-                    // Without this the composer stays locked on "Agent is
-                    // working…" forever after a network drop.
-                    _uiState.update {
-                        it.copy(
-                            isConnected = false,
-                            isSending = false,
-                            isThinking = false,
-                            streamingState = StreamingState.Idle,
-                        )
-                    }
-                } else {
-                    _uiState.update { it.copy(isConnected = true) }
-                    if (isSessionReady) {
-                        socketManager.subscribeToSession(sessionId)
-                        // session:reconnect re-joins the room and reports the
-                        // running state; the REST refetch recovers messages
-                        // produced while the app was offline.
-                        requestReconnect()
-                        retryPendingOutbox()
-                        if (wasConnected.not()) {
-                            viewModelScope.launch {
-                                messageRepository.fetchMessages(
-                                    sessionId,
-                                    clearExisting = true,
-                                    chatId = _uiState.value.activeChatId,
-                                )
-                                    .onSuccess(::applyInitialHistoryPage)
-                            }
-                        }
-                    }
-                }
-                wasConnected = isConnected
-            }
-            .launchIn(viewModelScope)
-    }
-
-    private fun observeSocketEvents() {
-        // Streaming text deltas are flushed at most every 50 ms. Some CLIs
-        // emit hundreds of tiny chunks per second; recomposing markdown for
-        // every one causes visible jank on phones.
-        socketManager.output
-            .filter { it.sessionId == sessionId && belongsToActiveChat(it.chatId) }
-            .onEach { streaming ->
-                adoptIncomingChat(streaming.chatId)
-                enqueueStreamingDelta(streaming.content)
-            }
-            .launchIn(viewModelScope)
-
-        // Complete persisted messages — cache in Room and clear streaming state
-        socketManager.messages
-            .filter { it.sessionId == sessionId && belongsToActiveChat(it.chatId) }
-            .onEach { message ->
-                clearStreamingDeltas()
-                val incomingChatId = adoptIncomingChat(message.chatId)
-                messageRepository.cacheMessage(message, incomingChatId)
-                handleIncomingMessageReadState(message)
-                commitAppliedSequence(message.eventSequence)
-                _uiState.update { state ->
-                    state.copy(
-                        streamingState = StreamingState.Idle,
-                        isSending = false,
-                    )
-                }
-            }
-            .launchIn(viewModelScope)
-
-        // Replay only the missing monotone events after a reconnect. If the
-        // server's bounded buffer rolled over, REST becomes authoritative.
-        socketManager.reconnected
-            .filter { it.sessionId == sessionId }
-            .onEach { event ->
-                if (event.needsFullResync) {
-                    messageRepository.fetchMessages(
-                        sessionId,
-                        clearExisting = true,
-                        chatId = _uiState.value.activeChatId,
-                    ).onSuccess { page ->
-                        applyInitialHistoryPage(page)
-                        commitAppliedSequence(
-                            page.snapshot?.highWatermark,
-                            page.snapshot?.revision,
-                        )
-                    }.onFailure { error ->
-                        _uiState.update { it.copy(error = error.message) }
-                    }
-                } else {
-                    val currentSequence = messageRepository.cachedReadState(sessionId)
-                        ?.lastSeenSequence ?: 0L
-                    var lastApplied = currentSequence
-                    var replayComplete = true
-                    event.bufferedMessages
-                        .sortedWith(compareBy<BufferedMessage> { it.sequence ?: Long.MAX_VALUE }
-                            .thenBy { it.timestamp })
-                        .filter { (it.sequence ?: Long.MAX_VALUE) > currentSequence }
-                        .forEach { item ->
-                            if (replayComplete && handleBufferedMessage(item)) {
-                                item.sequence?.let { lastApplied = maxOf(lastApplied, it) }
-                            } else {
-                                replayComplete = false
-                            }
-                        }
-                    if (replayComplete) {
-                        commitAppliedSequence(lastApplied, event.snapshotRevision)
-                    } else {
-                        messageRepository.fetchMessages(
-                            sessionId,
-                            clearExisting = true,
-                            chatId = _uiState.value.activeChatId,
-                        ).onSuccess { page ->
-                            applyInitialHistoryPage(page)
-                            commitAppliedSequence(
-                                page.snapshot?.highWatermark,
-                                page.snapshot?.revision,
-                            )
-                        }.onFailure { error ->
-                            _uiState.update { it.copy(error = error.message) }
-                        }
-                    }
-                }
-            }
-            .launchIn(viewModelScope)
-
-        socketManager.cursor
-            .filter { (id, _) -> id == sessionId }
-            .onEach { (_, sequence) ->
-                // This is only an announcement. The durable cursor advances
-                // after the corresponding event/snapshot has been applied.
-                announcedHighWatermark = maxOf(announcedHighWatermark, sequence)
-            }
-            .launchIn(viewModelScope)
-
-        socketManager.presence
-            .filter { it.sessionId == sessionId }
-            .onEach { snapshot ->
-                _uiState.update { it.copy(presenceViewers = snapshot.viewers) }
-            }
-            .launchIn(viewModelScope)
-
-        // Thinking indicator. A mid-turn thinking=true (agent start, Pi
-        // compaction) must not discard streaming text already on screen.
-        socketManager.thinking
-            .filter { it.sessionId == sessionId }
-            .onEach { event ->
-                _uiState.update { state ->
-                    state.copy(
-                        isThinking = event.isThinking,
-                        thinkingLabel = if (event.isThinking) event.message else null,
-                        thinkingStartTime = if (event.isThinking) System.currentTimeMillis() else 0L,
-                        streamingState = if (event.isThinking && state.streamingState !is StreamingState.Streaming) {
-                            StreamingState.Idle
-                        } else {
-                            state.streamingState
-                        },
-                    )
-                }
-            }
-            .launchIn(viewModelScope)
-
-        // Tool use events
-        socketManager.toolUse
-            .filter { it.sessionId == sessionId }
-            .onEach { event ->
-                handleToolEvent(event)
-            }
-            .launchIn(viewModelScope)
-
-        // Agent events
-        socketManager.agent
-            .filter { it.sessionId == sessionId }
-            .onEach { event ->
-                when (event.status) {
-                    ToolStatus.STARTED -> _uiState.update { state ->
-                        state.copy(
-                            streamingState = StreamingState.AgentRunning(
-                                event.agentType,
-                                event.description,
-                            ),
-                            isThinking = false,
-                        )
-                    }
-                    ToolStatus.COMPLETED, ToolStatus.ERROR -> _uiState.update { state ->
-                        if (state.streamingState is StreamingState.AgentRunning)
-                            state.copy(streamingState = StreamingState.Idle)
-                        else state
-                    }
-                }
-            }
-            .launchIn(viewModelScope)
-
-        // Usage data
-        socketManager.usage
-            .filter { it.sessionId == sessionId }
-            .onEach { usage ->
-                _uiState.update { it.copy(usageData = usage) }
-            }
-            .launchIn(viewModelScope)
-
-        // Session status changes
-        socketManager.status
-            .filter { (id, _) -> id == sessionId }
-            .onEach { (_, status) ->
-                if (status == SessionStatus.STOPPED || status == SessionStatus.ERROR) {
-                    _uiState.update { state ->
-                        state.copy(
-                            streamingState = StreamingState.Idle,
-                            isThinking = false,
-                            isSending = false,
-                        )
-                    }
-                }
-                // Refresh session in Room
-                sessionRepository.getSession(sessionId)
-            }
-            .launchIn(viewModelScope)
-
-        // Error events
-        socketManager.errors
-            .filter { (id, _) -> id == sessionId }
-            .onEach { (_, error) ->
-                _uiState.update { state ->
-                    state.copy(
-                        error = error,
-                        streamingState = StreamingState.Idle,
-                        isThinking = false,
-                        isSending = false,
-                    )
-                }
-            }
-            .launchIn(viewModelScope)
-
-        // Server-side mode is authoritative; reconciles optimistic taps and
-        // server-initiated changes.
-        socketManager.mode
-            .filter { (id, _) -> id == sessionId }
-            .onEach { (_, mode) -> _uiState.update { it.copy(sessionMode = mode) } }
-            .launchIn(viewModelScope)
-
-        // Queue state — messages accepted while the CLI is busy would
-        // otherwise silently vanish from the UI until they run.
-        socketManager.queue
-            .filter { it.sessionId == sessionId }
-            .onEach { event ->
-                _uiState.update { it.copy(queuedCount = event.depth, isSending = false) }
-            }
-            .launchIn(viewModelScope)
-
-        // Compaction/clear — the server discarded the transcript context, so
-        // the local cache must follow or the visible history lies.
-        socketManager.compact
-            .filter { it.sessionId == sessionId }
-            .onEach { event ->
-                if (event.clear == true) {
-                    messageRepository.fetchMessages(
-                        sessionId,
-                        clearExisting = true,
-                        chatId = _uiState.value.activeChatId,
-                    )
-                        .onSuccess(::applyInitialHistoryPage)
-                }
-                _uiState.update { it.copy(settingsNotice = event.message) }
-            }
-            .launchIn(viewModelScope)
-
-        // OpenCode question prompts — without this the session stalls silently.
-        socketManager.question
-            .filter { it.sessionId == sessionId }
-            .onEach { event ->
-                _uiState.update { it.copy(pendingQuestion = event, isThinking = false) }
-                commitAppliedSequence(event.eventSequence)
-            }
-            .launchIn(viewModelScope)
-
-        // Permission prompts, both wire formats.
-        socketManager.permission
-            .onEach { element ->
-                val applied = applyPermissionElement(element)
-                if (applied.first) commitAppliedSequence(applied.second)
-            }
-            .launchIn(viewModelScope)
-    }
-
-    private suspend fun handleBufferedMessage(item: BufferedMessage): Boolean = when (item.type) {
-            "message" -> runCatching {
-                socketJson.decodeFromJsonElement(Message.serializer(), item.data)
-            }.getOrNull()?.let { message ->
-                if (!belongsToActiveChat(message.chatId)) return@let false
-                val incomingChatId = adoptIncomingChat(message.chatId)
-                messageRepository.cacheMessage(message, incomingChatId)
-                handleIncomingMessageReadState(message)
-                true
-            } ?: false
-            "output" -> runCatching {
-                socketJson.decodeFromJsonElement(StreamingMessage.serializer(), item.data)
-            }.getOrNull()?.let {
-                if (!belongsToActiveChat(it.chatId)) return@let false
-                adoptIncomingChat(it.chatId)
-                enqueueStreamingDelta(it.content)
-                true
-            } ?: false
-            "thinking" -> runCatching {
-                val obj = item.data.jsonObject
-                val active = obj["isThinking"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
-                val label = obj["message"]?.jsonPrimitive?.content
-                _uiState.update {
-                    it.copy(
-                        isThinking = active,
-                        thinkingLabel = label,
-                        thinkingStartTime = if (active) System.currentTimeMillis() else 0L,
-                    )
-                }
-                true
-            }.getOrDefault(false)
-            "question", "question_request", "session:question_request" -> runCatching {
-                socketJson.decodeFromJsonElement(QuestionRequestEvent.serializer(), item.data)
-            }.getOrNull()?.takeIf { it.sessionId == sessionId }?.let { request ->
-                _uiState.update { it.copy(pendingQuestion = request, isThinking = false) }
-                true
-            } ?: false
-            "permission_request", "permission", "session:permission_request" ->
-                applyPermissionElement(item.data).first
-            // These event types are already represented by newer REST/session
-            // state or are non-durable UI hints; consuming them is idempotent.
-            "status", "tool_use", "agent", "mode", "compact", "todos", "usage" -> true
-            else -> false
-        }
-
-    private fun applyPermissionElement(
-        element: kotlinx.serialization.json.JsonElement,
-    ): Pair<Boolean, Long?> {
-        val obj = element as? kotlinx.serialization.json.JsonObject ?: return false to null
-        val sid = (obj["sessionId"] as? kotlinx.serialization.json.JsonPrimitive)?.content
-        if (sid != sessionId) return false to null
-        if (obj.containsKey("requestId")) {
-            val request = runCatching {
-                socketJson.decodeFromJsonElement(PermissionRequest.serializer(), obj)
-            }.getOrNull() ?: return false to null
-            _uiState.update { it.copy(pendingPermission = request, isThinking = false) }
-            return true to request.eventSequence
-        }
-        if (obj.containsKey("denials")) {
-            val request = runCatching {
-                socketJson.decodeFromJsonElement(PermissionRequestData.serializer(), obj)
-            }.getOrNull() ?: return false to null
-            _uiState.update { it.copy(pendingLegacyPermission = request, isThinking = false) }
-            return true to request.eventSequence
-        }
-        return false to null
-    }
 
     private fun belongsToActiveChat(chatId: String?): Boolean {
         val active = _uiState.value.activeChatId
-        return chatId == null || active == null || chatId == active
+        return !hasLoadedChatList || chatId == active
     }
 
     private fun adoptIncomingChat(chatId: String?): String? {
         val active = _uiState.value.activeChatId
-        if (active == null && chatId != null) {
+        if (!hasLoadedChatList && active == null && chatId != null) {
             selectedChatId.value = chatId
             _uiState.update { it.copy(activeChatId = chatId) }
+            drafts.selectChat(chatId)
             return chatId
         }
         return active
     }
 
-    private suspend fun commitAppliedSequence(sequence: Long?, snapshotRevision: Long? = null) {
-        if (sequence == null && snapshotRevision == null) return
-        val current = messageRepository.cachedReadState(sessionId)
-            ?: SessionReadStateEntity(sessionId)
-        messageRepository.saveReadState(
-            current.copy(
-                lastSeenSequence = maxOf(current.lastSeenSequence, sequence ?: 0L),
-                highWatermark = maxOf(current.highWatermark, sequence ?: 0L),
-                snapshotRevision = maxOf(current.snapshotRevision, snapshotRevision ?: 0L),
-            )
-        )
+    fun loadChats() {
+        viewModelScope.launch { refreshChatList() }
     }
 
-    private suspend fun handleIncomingMessageReadState(message: Message) {
-        val current = messageRepository.cachedReadState(sessionId)
-            ?: SessionReadStateEntity(sessionId)
-        if (viewportAtBottom) {
-            messageRepository.markRead(sessionId, current.chatId, message.id)
-                .onFailure {
-                    messageRepository.saveReadState(
-                        current.copy(lastReadMessageId = message.id, unreadCount = 0)
-                    )
-                }
-        } else if (message.role == MessageRole.ASSISTANT) {
-            messageRepository.saveReadState(current.copy(unreadCount = current.unreadCount + 1))
+    private suspend fun refreshChatList(refreshHistory: Boolean = true): Boolean {
+        val version = ++chatListVersion
+        val list = sessionRepository.getChats(sessionId).getOrNull() ?: return false
+        if (version != chatListVersion) return false
+        return applyChatList(list, null, refreshHistory)
+    }
+
+    /** REST and other devices use the same thread transition, including history and draft. */
+    private fun applyChatList(
+        list: SessionChatList,
+        notice: String?,
+        refreshHistory: Boolean = true,
+    ): Boolean {
+        ++chatListVersion // Invalidates an older REST list still in flight.
+        val changed = _uiState.value.activeChatId != list.activeChatId
+        hasLoadedChatList = true
+        if (changed) {
+            history.beginReplacement()
+            streaming.resetActivity()
+            drafts.selectChat(list.activeChatId)
+            selectedChatId.value = list.activeChatId
         }
-    }
-
-    private fun handleToolEvent(event: ToolExecutionEvent) {
-        when (event.status) {
-            ToolStatus.STARTED -> {
-                val toolId = event.toolId ?: "${event.toolName}_${System.currentTimeMillis()}"
-                val tool = ToolExecution(
-                    toolId = toolId,
-                    toolName = event.toolName,
-                    status = ToolStatus.STARTED,
-                    input = event.input,
-                    timestamp = event.timestamp ?: System.currentTimeMillis(),
-                )
-                _uiState.update { state ->
-                    val updated = state.activeTools.toMutableMap().also { it[toolId] = tool }
-                    state.copy(
-                        activeTools = updated,
-                        streamingState = StreamingState.ToolExecuting(event.toolName, toolId),
-                        isThinking = false,
-                    )
-                }
-            }
-            ToolStatus.COMPLETED -> {
-                val toolId = event.toolId ?: ""
-                _uiState.update { state ->
-                    val updated = state.activeTools.toMutableMap()
-                    updated[toolId]?.let { existing ->
-                        updated[toolId] = existing.copy(
-                            status = ToolStatus.COMPLETED,
-                            result = event.result,
-                            completedAt = System.currentTimeMillis(),
-                        )
-                    }
-                    state.copy(
-                        activeTools = updated,
-                        streamingState = StreamingState.Idle,
-                    )
-                }
-            }
-            ToolStatus.ERROR -> {
-                val toolId = event.toolId ?: ""
-                _uiState.update { state ->
-                    val updated = state.activeTools.toMutableMap()
-                    updated[toolId]?.let { existing ->
-                        updated[toolId] = existing.copy(
-                            status = ToolStatus.ERROR,
-                            error = event.error,
-                            completedAt = System.currentTimeMillis(),
-                        )
-                    }
-                    state.copy(
-                        activeTools = updated,
-                        streamingState = StreamingState.Idle,
-                    )
-                }
-            }
-        }
-    }
-
-    private fun applyInitialHistoryPage(page: MessageHistoryPage) {
-        selectedChatId.value = page.chatId
         _uiState.update {
             it.copy(
-                activeChatId = if (page.snapshot != null) page.chatId else it.activeChatId,
-                hasMoreHistory = page.hasMoreBefore,
-                hasMoreAfterHistory = page.hasMoreAfter,
-                oldestMessageId = page.oldestId,
-                newestMessageId = page.newestId,
-                totalMessageCount = page.total,
-                lastHistoryPageSize = 0,
+                chats = list.chats,
+                activeChatId = list.activeChatId,
+                isSwitchingChat = false,
+                activeTools = if (changed) emptyMap() else it.activeTools,
+                queuedCount = if (changed) 0 else it.queuedCount,
+                settingsNotice = notice ?: it.settingsNotice,
+                hasMoreHistory = if (changed) false else it.hasMoreHistory,
+                hasMoreAfterHistory = if (changed) false else it.hasMoreAfterHistory,
+                isLoadingOlderHistory = if (changed) false else it.isLoadingOlderHistory,
+                oldestMessageId = if (changed) null else it.oldestMessageId,
+                newestMessageId = if (changed) null else it.newestMessageId,
             )
         }
+        if (changed && refreshHistory) history.refreshInBackground(list.activeChatId)
+        return changed
     }
 
-    private fun enqueueStreamingDelta(delta: String) {
-        if (delta.isEmpty()) return
-        // The accumulator now holds the whole partial reply; publishing its
-        // snapshot per flush copies the text once instead of concatenating
-        // current + batch — quadratic over a long answer.
-        streamingDeltas.append(delta)
-        if (streamingFlushJob?.isActive == true) return
-        streamingFlushJob = viewModelScope.launch {
-            delay(STREAM_FLUSH_MS)
-            if (!streamingDeltas.isEmpty()) {
-                val text = streamingDeltas.snapshot()
-                _uiState.update { state ->
-                    state.copy(
-                        streamingState = StreamingState.Streaming(text),
-                        isThinking = false,
-                        isSending = false,
-                    )
+    fun switchChat(chatId: String) {
+        Breadcrumbs.add("chat", "switch thread")
+        if (chatId.takeUnless { it == "main" } == _uiState.value.activeChatId) return
+        history.beginReplacement()
+        _uiState.update { it.copy(isSwitchingChat = true) }
+        val requestVersion = ++chatListVersion
+        viewModelScope.launch {
+            sessionRepository.activateChat(sessionId, chatId)
+                .onSuccess { list -> if (requestVersion == chatListVersion) applyChatList(list, null) }
+                .onFailure { e ->
+                    if (requestVersion != chatListVersion) return@onFailure
+                    _uiState.update { it.copy(isSwitchingChat = false, error = e.userMessage(appContext)) }
                 }
-            }
         }
     }
 
-    private fun clearStreamingDeltas() {
-        streamingFlushJob?.cancel()
-        streamingFlushJob = null
-        streamingDeltas.reset()
+    fun newChat() {
+        history.beginReplacement()
+        _uiState.update { it.copy(isSwitchingChat = true) }
+        val requestVersion = ++chatListVersion
+        viewModelScope.launch {
+            sessionRepository.createChat(sessionId)
+                .onSuccess { list -> if (requestVersion == chatListVersion) applyChatList(list, appContext.getString(R.string.chat_new_started)) }
+                .onFailure { e ->
+                    if (requestVersion != chatListVersion) return@onFailure
+                    _uiState.update { it.copy(isSwitchingChat = false, error = e.userMessage(appContext)) }
+                }
+        }
+    }
+
+    fun deleteChat(chatId: String) {
+        val requestVersion = ++chatListVersion
+        viewModelScope.launch {
+            sessionRepository.deleteChat(sessionId, chatId)
+                .onSuccess { list -> if (requestVersion == chatListVersion) applyChatList(list, appContext.getString(R.string.chat_deleted_notice)) }
+                .onFailure { e ->
+                    if (requestVersion != chatListVersion) return@onFailure
+                    _uiState.update { it.copy(error = e.userMessage(appContext)) }
+                }
+        }
     }
 
     // ========================================================================
-    // User Actions
+    // History
     // ========================================================================
 
     fun loadHistory() {
         loadMessages()
     }
 
-    /** Load one older page; Room prepends it without clearing the recent page. */
-    fun loadOlderHistory() {
-        // Widen the window first: rows already cached in Room become visible
-        // even when the server has nothing further to hand out.
-        messageWindow.value += MESSAGE_WINDOW_PAGE
+    fun loadOlderHistory() = history.loadOlderHistory()
 
-        val state = _uiState.value
-        val before = state.oldestMessageId
-        if (!state.hasMoreHistory || before == null || state.isLoadingOlderHistory) return
+    fun restoreLatestHistory() = history.restoreLatestHistory()
 
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoadingOlderHistory = true) }
-            messageRepository.fetchMessages(
-                sessionId,
-                before = before,
-                chatId = state.activeChatId,
-            )
-                .onSuccess { page ->
-                    _uiState.update {
-                        it.copy(
-                            isLoadingOlderHistory = false,
-                            hasMoreHistory = page.hasMore,
-                            oldestMessageId = page.oldestId,
-                            totalMessageCount = page.total,
-                            historyPageVersion = it.historyPageVersion + 1,
-                            lastHistoryPageSize = page.messages.size,
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(isLoadingOlderHistory = false, error = error.message)
-                    }
-                }
-        }
-    }
+    // ========================================================================
+    // Search and read position
+    // ========================================================================
 
-    /** Leave an around/search window and atomically restore the live tail. */
-    fun restoreLatestHistory() {
-        if (_uiState.value.isLoadingHistory) return
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoadingHistory = true) }
-            messageRepository.fetchLatestMessages(sessionId, _uiState.value.activeChatId)
-                .onSuccess { page ->
-                    applyInitialHistoryPage(page)
-                    _uiState.update {
-                        it.copy(
-                            isLoadingHistory = false,
-                            jumpTargetMessageId = null,
-                            jumpVersion = it.jumpVersion + 1,
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    _uiState.update { it.copy(isLoadingHistory = false, error = error.message) }
-                }
-        }
-    }
+    fun setSearchOpen(open: Boolean) = search.setSearchOpen(open)
 
-    fun setSearchOpen(open: Boolean) {
-        _uiState.update {
-            it.copy(
-                isSearchOpen = open,
-                searchQuery = if (open) it.searchQuery else "",
-                searchResults = if (open) it.searchResults else emptyList(),
-                searchError = null,
-            )
-        }
-        if (!open) searchJob?.cancel()
-    }
+    fun onSearchQueryChange(query: String) = search.onSearchQueryChange(query)
 
-    fun onSearchQueryChange(query: String) {
-        _uiState.update { it.copy(searchQuery = query, searchError = null) }
-        searchJob?.cancel()
-        if (query.trim().length < 2) {
-            _uiState.update { it.copy(searchResults = emptyList(), isSearching = false) }
-            return
-        }
-        searchJob = viewModelScope.launch {
-            delay(SEARCH_DEBOUNCE_MS)
-            _uiState.update { it.copy(isSearching = true) }
-            runCatching { api.searchSessionMessages(sessionId, query.trim()) }
-                .onSuccess { response ->
-                    _uiState.update {
-                        it.copy(
-                            isSearching = false,
-                            searchResults = response.data.orEmpty(),
-                            searchError = response.error?.message,
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(isSearching = false, searchError = error.message)
-                    }
-                }
-        }
-    }
+    fun jumpToMessage(result: MessageSearchResult) = search.jumpToMessage(result)
 
-    fun jumpToMessage(result: MessageSearchResult) {
-        jumpToMessage(result.jump?.messageId ?: result.id, result.jump?.chatId)
-    }
-
-    fun jumpToMessage(messageId: String, chatId: String? = null) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoadingHistory = true) }
-            // Always re-activate an explicit target: another device may have
-            // switched the session-wide active chat since our local snapshot.
-            if (chatId != null) {
-                val switched = sessionRepository.activateChat(sessionId, chatId)
-                if (switched.isFailure) {
-                    _uiState.update {
-                        it.copy(
-                            isLoadingHistory = false,
-                            searchError = switched.exceptionOrNull()?.message ?: "Couldn't open that chat",
-                        )
-                    }
-                    return@launch
-                }
-                val list = switched.getOrThrow()
-                _uiState.update { state ->
-                    state.copy(chats = list.chats, activeChatId = list.activeChatId)
-                }
-            }
-            val targetChatId = chatId ?: _uiState.value.activeChatId
-            messageRepository.fetchAroundMessage(sessionId, messageId, targetChatId)
-                .onSuccess { page ->
-                    applyInitialHistoryPage(page)
-                    _uiState.update {
-                        it.copy(
-                            isLoadingHistory = false,
-                            isSearchOpen = false,
-                            jumpTargetMessageId = messageId,
-                            jumpVersion = it.jumpVersion + 1,
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    _uiState.update {
-                        it.copy(isLoadingHistory = false, searchError = error.message)
-                    }
-                }
-        }
-    }
+    fun jumpToMessage(messageId: String, chatId: String? = null) =
+        search.jumpToMessage(messageId, chatId)
 
     fun onViewportState(
         atBottom: Boolean,
         anchorMessageId: String?,
         anchorOffset: Int,
-    ) {
-        viewportAtBottom = atBottom
-        readSaveJob?.cancel()
-        readSaveJob = viewModelScope.launch {
-            delay(READ_POSITION_DEBOUNCE_MS)
-            val current = messageRepository.cachedReadState(sessionId)
-                ?: SessionReadStateEntity(sessionId)
-            val newest = messages.value.lastOrNull()?.id
-            val local = current.copy(
-                scrollAnchorMessageId = anchorMessageId,
-                scrollOffset = anchorOffset,
-                lastReadMessageId = if (atBottom) newest ?: current.lastReadMessageId
-                    else current.lastReadMessageId,
-                unreadCount = if (atBottom) 0 else current.unreadCount,
-            )
-            messageRepository.saveReadState(local)
-            if (atBottom && newest != null) {
-                messageRepository.markRead(sessionId, local.chatId, newest)
-            }
-            socketManager.updatePresence(
-                sessionId = sessionId,
-                deviceId = deviceId,
-                label = Build.MODEL.takeIf { it.isNotBlank() },
-                state = "active",
-                lastReadMessageId = null,
-            )
-        }
-    }
+    ) = search.onViewportState(atBottom, anchorMessageId, anchorOffset)
 
-    fun sendMessage(content: String) {
-        val attachments = _uiState.value.pendingAttachments.takeIf { it.isNotEmpty() }
-        if (content.isBlank() && attachments.isNullOrEmpty()) return
-        if (!isSessionReady) {
-            _uiState.update { it.copy(error = "Session is still loading") }
-            return
-        }
-        val trimmed = content.trim()
-        val clientMessageId = UUID.randomUUID().toString()
-        val persistedAttachments = attachments.orEmpty().map {
-            PersistedOutboxAttachment(
-                uri = it.uri,
-                mimeType = it.mimeType,
-                filename = it.filename,
-                sizeBytes = it.sizeBytes,
-            )
-        }
-        val item = OutboxEntity(
-            clientMessageId = clientMessageId,
-            sessionId = sessionId,
-            chatId = _uiState.value.activeChatId,
-            content = trimmed,
-            attachmentsJson = OutboxEntity.attachmentsJson(persistedAttachments),
-            activeFollowupMode = _uiState.value.activeFollowupMode.name,
-            status = OutboxStatus.SENDING.name,
-        )
-        viewModelScope.launch {
-            // The composer clears only after the message is durable in Room.
-            // A process death or transport loss can therefore never erase it.
-            messageRepository.putOutbox(item)
-            clearDraft()
-            _uiState.update {
-                it.copy(
-                    isSending = true,
-                    draftText = "",
-                    pendingAttachments = emptyList(),
-                    isPreparingAttachments = persistedAttachments.isNotEmpty(),
-                    attachmentPreparationProgress = 0f,
-                    activeDeliveryId = clientMessageId,
-                )
-            }
-            deliverOutbox(item)
-        }
-    }
+    // ========================================================================
+    // Sending
+    // ========================================================================
+
+    fun sendMessage(content: String) = send.sendMessage(content)
 
     fun setActiveFollowupMode(mode: ActiveFollowupMode) {
         _uiState.update { it.copy(activeFollowupMode = mode) }
     }
 
-    fun retryOutbox(clientMessageId: String) {
-        viewModelScope.launch {
-            val item = messageRepository.getOutboxItem(clientMessageId) ?: return@launch
-            val retry = prepareOutboxRetry(item)
-            messageRepository.putOutbox(retry)
-            deliverOutbox(retry)
-        }
+    fun retryOutbox(clientMessageId: String) = send.retryOutbox(clientMessageId)
+
+    /** Drops a failed send for good — the only exit for a message the server will never take. */
+    fun discardOutbox(clientMessageId: String) = send.discardOutbox(clientMessageId)
+
+    /** Re-targets a send whose original chat is gone at the chat that is open now. */
+    fun resendOutboxInActiveChat(clientMessageId: String) =
+        send.resendOutboxInActiveChat(clientMessageId)
+
+    fun cancelDelivery(clientMessageId: String) = send.cancelDelivery(clientMessageId)
+
+    fun interrupt() {
+        socketManager.interruptSession(sessionId)
+        streaming.resetActivity()
     }
 
-    private fun retryPendingOutbox() {
-        if (socketManager.connectionState.value != ConnectionState.CONNECTED) return
-        viewModelScope.launch {
-            messageRepository.pendingOutbox(sessionId)
-                .filter { it.retryable || it.deliveryStatus == OutboxStatus.SENDING }
-                .forEach(::deliverOutbox)
-            messageRepository.pruneAcceptedOutbox(System.currentTimeMillis() - OUTBOX_ACCEPTED_RETENTION_MS)
-        }
-    }
+    // ========================================================================
+    // Input, drafts & attachments
+    // ========================================================================
 
-    private fun deliverOutbox(item: OutboxEntity) {
-        if (deliveryJobs[item.clientMessageId]?.isActive == true) return
-        deliveryJobs[item.clientMessageId] = viewModelScope.launch {
-            try {
-                if (socketManager.connectionState.value != ConnectionState.CONNECTED) {
-                    failOutbox(item, "Saved to outbox — it will retry when reconnected", true)
-                    return@launch
-                }
-                _uiState.update {
-                    it.copy(
-                        isSending = true,
-                        isPreparingAttachments = item.attachments.isNotEmpty(),
-                        activeDeliveryId = item.clientMessageId,
-                    )
-                }
-                val prepared = prepareDelivery(item)
-                val latest = messageRepository.getOutboxItem(item.clientMessageId) ?: item
-                val acknowledgement = socketManager.sendMessage(
-                    sessionId = sessionId,
-                    chatId = item.chatId,
-                    message = item.content,
-                    images = prepared.legacyAttachments.takeIf { it.isNotEmpty() },
-                    clientMessageId = item.clientMessageId,
-                    uploadIds = prepared.uploadIds,
-                    activeFollowupMode = item.followupMode,
-                )
-                if (acknowledgement.status == SessionSendAck.SendStatus.ACCEPTED) {
-                    val alreadyPersisted = messages.value.any { message ->
-                        message.clientMessageId == item.clientMessageId ||
-                            (acknowledgement.messageId != null && message.id == acknowledgement.messageId)
-                    }
-                    if (alreadyPersisted) {
-                        messageRepository.removeOutbox(item.clientMessageId)
-                    } else {
-                        messageRepository.putOutbox(
-                            latest.copy(
-                                status = OutboxStatus.ACCEPTED.name,
-                                progress = 1f,
-                                error = null,
-                                retryable = false,
-                                acceptedAt = acknowledgement.acceptedAt,
-                                messageId = acknowledgement.messageId,
-                                disposition = acknowledgement.disposition,
-                                highWatermark = acknowledgement.highWatermark,
-                                uploadIdsJson = OutboxEntity.uploadIdsJson(prepared.uploadIds),
-                            )
-                        )
-                    }
-                    acknowledgement.highWatermark?.let { sequence ->
-                        val read = messageRepository.cachedReadState(sessionId)
-                            ?: SessionReadStateEntity(sessionId)
-                        messageRepository.saveReadState(
-                            read.copy(highWatermark = maxOf(read.highWatermark, sequence))
-                        )
-                    }
-                } else {
-                    failOutbox(
-                        latest,
-                        acknowledgement.error ?: "Message was rejected",
-                        acknowledgement.retryable,
-                    )
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Throwable) {
-                failOutbox(item, failure.message ?: "Delivery failed", true)
-            } finally {
-                deliveryJobs.remove(item.clientMessageId)
-                _uiState.update { state ->
-                    if (state.activeDeliveryId == item.clientMessageId) {
-                        state.copy(
-                            isSending = false,
-                            isPreparingAttachments = false,
-                            attachmentPreparationProgress = 0f,
-                            activeDeliveryId = null,
-                        )
-                    } else state
-                }
-            }
-        }
-    }
+    fun addAttachments(attachments: List<PendingFileAttachment>) = drafts.addAttachments(attachments)
 
-    private suspend fun failOutbox(item: OutboxEntity, error: String, retryable: Boolean) {
-        val latest = messageRepository.getOutboxItem(item.clientMessageId) ?: item
-        messageRepository.putOutbox(
-            latest.copy(
-                status = OutboxStatus.FAILED.name,
-                error = error,
-                retryable = retryable,
-            )
-        )
-    }
+    fun removeAttachment(index: Int) = drafts.removeAttachment(index)
 
-    fun cancelDelivery(clientMessageId: String) {
-        deliveryJobs.remove(clientMessageId)?.cancel()
-        viewModelScope.launch {
-            val item = messageRepository.getOutboxItem(clientMessageId) ?: return@launch
-            item.uploadIds.forEach { uploadId ->
-                runCatching { api.cancelChatUpload(sessionId, uploadId) }
-            }
-            failOutbox(item, "Upload cancelled", true)
-            _uiState.update {
-                it.copy(
-                    isSending = false,
-                    isPreparingAttachments = false,
-                    attachmentPreparationProgress = 0f,
-                    activeDeliveryId = null,
-                )
-            }
-        }
-    }
-
-    private suspend fun prepareDelivery(item: OutboxEntity): PreparedDelivery = withContext(Dispatchers.IO) {
-        if (item.attachments.isEmpty()) return@withContext PreparedDelivery(emptyList(), emptyList())
-        var totalBytes = 0L
-        val allBytes = item.attachments.map { attachment ->
-            val remaining = (MAX_TOTAL_ATTACHMENT_BYTES - totalBytes).coerceAtLeast(0)
-            val bytes = readUriWithLimit(
-                appContext,
-                Uri.parse(attachment.uri),
-                minOf(MAX_ATTACHMENT_BYTES, remaining),
-            )
-            totalBytes += bytes.size
-            bytes
-        }
-
-        var updatedAttachments = item.attachments
-        val uploadIds = mutableListOf<String>()
-        try {
-            item.attachments.forEachIndexed { attachmentIndex, original ->
-                val bytes = allBytes[attachmentIndex]
-                var upload = original.uploadId?.let { id ->
-                    runCatching { api.getChatUpload(sessionId, id) }.getOrNull()?.data
-                }
-                if (upload == null || upload.status == "cancelled" || upload.status == "failed") {
-                    val response = api.createChatUpload(
-                        sessionId,
-                        CreateChatUploadInput(
-                            filename = original.filename,
-                            mimeType = original.mimeType,
-                            byteSize = bytes.size.toLong(),
-                            sha256 = sha256Hex(bytes),
-                        ),
-                    )
-                    if (!response.success || response.data == null) {
-                        error(response.error?.message ?: "Couldn't start upload")
-                    }
-                    upload = response.data
-                }
-
-                val initial = requireNotNull(upload)
-                val missing = when {
-                    initial.status == "complete" -> emptyList()
-                    initial.missingChunks.isNotEmpty() -> initial.missingChunks
-                    else -> (0 until initial.totalChunks).toList()
-                }
-                var latest = initial
-                for (chunkIndex in missing) {
-                    ensureActive()
-                    val range = chunkByteRange(chunkIndex, initial.chunkSize, bytes.size) ?: continue
-                    val start = range.first
-                    val end = range.last + 1
-                    val response = api.putChatUploadChunk(
-                        sessionId = sessionId,
-                        uploadId = initial.id,
-                        index = chunkIndex,
-                        bytes = bytes.copyOfRange(start, end),
-                        byteOffset = start.toLong(),
-                        totalBytes = bytes.size.toLong(),
-                    )
-                    if (!response.success || response.data == null) {
-                        error(response.error?.message ?: "Couldn't upload ${original.filename}")
-                    }
-                    latest = response.data
-                    val overallProgress = (
-                        attachmentIndex + latest.progress.coerceIn(0f, 1f)
-                    ) / item.attachments.size.toFloat()
-                    updatedAttachments = updatedAttachments.toMutableList().also { list ->
-                        list[attachmentIndex] = original.copy(
-                            uploadId = latest.id,
-                            progress = latest.progress,
-                            uploadedChunks = latest.receivedChunks,
-                            totalChunks = latest.totalChunks,
-                            error = latest.error,
-                        )
-                    }
-                    val persisted = (messageRepository.getOutboxItem(item.clientMessageId) ?: item).copy(
-                        attachmentsJson = OutboxEntity.attachmentsJson(updatedAttachments),
-                        uploadIdsJson = OutboxEntity.uploadIdsJson(uploadIds + latest.id),
-                        progress = overallProgress,
-                    )
-                    messageRepository.putOutbox(persisted)
-                    _uiState.update {
-                        it.copy(attachmentPreparationProgress = overallProgress)
-                    }
-                }
-                if (latest.status != "complete") {
-                    val refreshed = api.getChatUpload(sessionId, latest.id)
-                    latest = refreshed.data ?: latest
-                }
-                if (latest.status != "complete") {
-                    error(latest.error ?: "Upload did not complete")
-                }
-                uploadIds += latest.id
-                updatedAttachments = updatedAttachments.toMutableList().also { list ->
-                    list[attachmentIndex] = original.copy(
-                        uploadId = latest.id,
-                        progress = 1f,
-                        uploadedChunks = latest.receivedChunks,
-                        totalChunks = latest.totalChunks,
-                    )
-                }
-            }
-            messageRepository.putOutbox(
-                (messageRepository.getOutboxItem(item.clientMessageId) ?: item).copy(
-                    attachmentsJson = OutboxEntity.attachmentsJson(updatedAttachments),
-                    uploadIdsJson = OutboxEntity.uploadIdsJson(uploadIds),
-                    progress = 1f,
-                )
-            )
-            PreparedDelivery(uploadIds, emptyList())
-        } catch (failure: ApiHttpException) {
-            if (failure.status != 404 && failure.status != 405) throw failure
-            // Compatibility with servers predating staged uploads.
-            PreparedDelivery(
-                uploadIds = emptyList(),
-                legacyAttachments = item.attachments.mapIndexed { index, attachment ->
-                    FileAttachmentData(
-                        data = Base64.encodeToString(allBytes[index], Base64.NO_WRAP),
-                        mimeType = attachment.mimeType,
-                        filename = attachment.filename,
-                    )
-                },
-            )
-        }
-    }
-
-    fun addAttachments(attachments: List<PendingFileAttachment>) {
-        if (attachments.isEmpty()) return
-        _uiState.update { state ->
-            val availableSlots = (MAX_ATTACHMENT_COUNT - state.pendingAttachments.size).coerceAtLeast(0)
-            val accepted = attachments.take(availableSlots)
-            val combined = state.pendingAttachments + accepted
-            val withinTotal = mutableListOf<PendingFileAttachment>()
-            var total = 0L
-            combined.forEach { item ->
-                val size = item.sizeBytes ?: 0L
-                if (total + size <= MAX_TOTAL_ATTACHMENT_BYTES) {
-                    withinTotal += item
-                    total += size
-                }
-            }
-            state.copy(
-                pendingAttachments = withinTotal,
-                error = if (withinTotal.size < combined.size || accepted.size < attachments.size) {
-                    "Up to $MAX_ATTACHMENT_COUNT files and ${formatBytes(MAX_TOTAL_ATTACHMENT_BYTES)} total can be attached"
-                } else state.error,
-            )
-        }
-    }
-
-    fun removeAttachment(index: Int) {
-        _uiState.update { state ->
-            if (index !in state.pendingAttachments.indices) return@update state
-            state.copy(
-                pendingAttachments = state.pendingAttachments
-                    .toMutableList()
-                    .apply { removeAt(index) },
-            )
-        }
-    }
-
-    fun reportAttachmentFailure(failed: Int, total: Int) {
-        if (failed <= 0) return
-        val message = when {
-            total == 1 -> "Couldn't attach file (too large or unsupported)"
-            failed == total -> "Couldn't attach $failed files (too large or unsupported)"
-            else -> "$failed of $total files couldn't be attached"
-        }
-        _uiState.update { it.copy(error = message) }
-    }
+    fun reportAttachmentFailure(failed: Int, total: Int) = drafts.reportAttachmentFailure(failed, total)
 
     suspend fun fetchAttachment(mediaId: String): Result<ByteArray> = runCatching {
         api.getSessionMedia(sessionId, mediaId)
     }
 
-    fun interrupt() {
-        socketManager.interruptSession(sessionId)
-        _uiState.update { state ->
-            state.copy(
-                streamingState = StreamingState.Idle,
-                isThinking = false,
-                isSending = false,
-            )
-        }
-    }
+    /** Append a message as a Markdown quote to whatever is already typed. */
+    fun quoteIntoDraft(content: String) = drafts.quoteIntoDraft(content)
+
+    fun onInputChange(text: String) = drafts.onInputChange(text)
+
+    /** Send the recorded clip for transcription and append the text. */
+    fun transcribeAndAppend(audio: ByteArray) = drafts.transcribeAndAppend(audio)
+
+    // ========================================================================
+    // Title, notices, sharing
+    // ========================================================================
 
     fun updateTitle(newTitle: String) {
         if (newTitle.isBlank()) return
         viewModelScope.launch {
             sessionRepository.updateSession(id = sessionId, name = newTitle)
-                .onFailure { _uiState.update { it.copy(error = "Failed to update title") } }
+                .onFailure { _uiState.update { it.copy(error = appContext.getString(R.string.chat_title_failed)) } }
             _uiState.update { it.copy(isEditingTitle = false) }
         }
     }
@@ -1427,9 +591,9 @@ class ChatViewModel(
                     )
                 )
             }.onSuccess {
-                _uiState.update { it.copy(notice = "Template “$name” saved") }
+                _uiState.update { it.copy(notice = appContext.getString(R.string.chat_template_saved, name)) }
             }.onFailure {
-                _uiState.update { s -> s.copy(error = it.message ?: "Could not save template") }
+                _uiState.update { s -> s.copy(error = it.userMessage(appContext)) }
             }
         }
     }
@@ -1452,7 +616,7 @@ class ChatViewModel(
                     _uiState.update {
                         it.copy(
                             isExportingTranscript = false,
-                            error = error.message ?: "Export failed",
+                            error = error.userMessage(appContext),
                         )
                     }
                 }
@@ -1464,62 +628,8 @@ class ChatViewModel(
     }
 
     // ========================================================================
-    // Input & Draft
+    // Turn diffs, mesh peers, voice
     // ========================================================================
-
-    /**
-     * Append a message as a Markdown quote to whatever is already typed — the
-     * usual way to say "about this part" without retyping it.
-     */
-    fun quoteIntoDraft(content: String) {
-        val quoted = content.trim().lines().joinToString("\n") { "> $it" }
-        if (quoted.isBlank()) return
-        val current = _uiState.value.draftText
-        onInputChange(if (current.isBlank()) "$quoted\n\n" else "${current.trimEnd()}\n\n$quoted\n\n")
-    }
-
-    fun onInputChange(text: String) {
-        _uiState.update { it.copy(draftText = text) }
-        draftSaveJob?.cancel()
-        draftSaveJob = viewModelScope.launch {
-            delay(500)
-            if (!isSessionReady) return@launch
-            if (text.isNotEmpty()) {
-                messageRepository.saveDraft(sessionId, text)
-            } else {
-                messageRepository.clearDraft(sessionId)
-            }
-            // Mirror to the server so the draft follows the account to other
-            // devices. Local Room stays authoritative while offline.
-            runCatching {
-                api.putSessionDraft(sessionId, text, _uiState.value.activeChatId)
-            }
-        }
-    }
-
-    private fun clearDraft() {
-        draftSaveJob?.cancel()
-        viewModelScope.launch {
-            messageRepository.clearDraft(sessionId)
-            runCatching { api.putSessionDraft(sessionId, "", _uiState.value.activeChatId) }
-        }
-    }
-
-    /**
-     * Adopt a newer draft written on another device. Only applies when the
-     * local composer is empty, so it can never clobber what is being typed.
-     */
-    private fun syncRemoteDraft() {
-        viewModelScope.launch {
-            val remote = runCatching {
-                api.getSessionDraft(sessionId, _uiState.value.activeChatId).data
-            }.getOrNull() ?: return@launch
-            val text = remote.content
-            if (text.isNotBlank() && _uiState.value.draftText.isBlank()) {
-                _uiState.update { it.copy(draftText = text) }
-            }
-        }
-    }
 
     /** Working-tree changes recorded for the finished turns of this session. */
     private fun loadTurnDiffs() {
@@ -1535,6 +645,10 @@ class ChatViewModel(
             val detail = runCatching { api.getTurnDiff(diffId).data }.getOrNull()
             _uiState.update { it.copy(openTurnDiff = detail) }
         }
+    }
+
+    fun dismissTurnDiff() {
+        _uiState.update { it.copy(openTurnDiff = null) }
     }
 
     /** Peer sessions this one can delegate to; empty when the mesh is unused. */
@@ -1557,30 +671,6 @@ class ChatViewModel(
             }.getOrDefault(false)
             _uiState.update { it.copy(voiceAvailable = available) }
         }
-    }
-
-    /** Send the recorded clip for transcription and append the text. */
-    fun transcribeAndAppend(audio: ByteArray) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isTranscribing = true) }
-            val text = runCatching { api.transcribe(audio).data?.text }.getOrNull()
-            _uiState.update { state ->
-                val merged = when {
-                    text.isNullOrBlank() -> state.draftText
-                    state.draftText.isBlank() -> text
-                    else -> state.draftText.trimEnd() + " " + text
-                }
-                state.copy(
-                    isTranscribing = false,
-                    draftText = merged,
-                    error = if (text.isNullOrBlank()) "Nothing was recognised" else state.error,
-                )
-            }
-        }
-    }
-
-    fun dismissTurnDiff() {
-        _uiState.update { it.copy(openTurnDiff = null) }
     }
 
     // ========================================================================
@@ -1614,18 +704,18 @@ class ChatViewModel(
                 }
                 .onFailure { failure ->
                     _uiState.update {
-                        it.copy(settingsNotice = "Model list unavailable: ${failure.message}")
+                        it.copy(settingsNotice = appContext.getString(R.string.chat_models_unavailable, failure.userMessage(appContext)))
                     }
                 }
         }
     }
 
     fun setModel(model: String?) {
-        applySessionChange("Model updated") { sessionRepository.setModel(sessionId, model) }
+        applySessionChange(appContext.getString(R.string.chat_model_updated)) { sessionRepository.setModel(sessionId, model) }
     }
 
     fun setReasoning(level: String?) {
-        applySessionChange("Reasoning updated") { sessionRepository.setReasoning(sessionId, level) }
+        applySessionChange(appContext.getString(R.string.chat_reasoning_updated)) { sessionRepository.setReasoning(sessionId, level) }
     }
 
     fun switchProvider(provider: CLIProvider) {
@@ -1633,7 +723,7 @@ class ChatViewModel(
         // refills once the PATCH has come back.
         _uiState.update { it.copy(availableModels = emptyList()) }
         applySessionChange(
-            "Provider switched to ${provider.displayName}",
+            appContext.getString(R.string.chat_provider_switched, provider.displayName),
             onApplied = { updated -> loadAvailableModels(updated.cliProvider) },
         ) {
             sessionRepository.switchProvider(sessionId, provider)
@@ -1646,7 +736,7 @@ class ChatViewModel(
      */
     fun setMode(mode: SessionMode) {
         socketManager.setMode(sessionId, mode)
-        _uiState.update { it.copy(sessionMode = mode, settingsNotice = "Mode set to ${mode.label}") }
+        _uiState.update { it.copy(sessionMode = mode, settingsNotice = appContext.getString(R.string.chat_mode_set, mode.localizedLabel(appContext))) }
     }
 
     fun loadAllowedDirectories() {
@@ -1657,7 +747,7 @@ class ChatViewModel(
                     _uiState.update { it.copy(allowedDirectories = directories, directoriesLoading = false) }
                 }
                 .onFailure { error ->
-                    _uiState.update { it.copy(directoriesLoading = false, error = error.message) }
+                    _uiState.update { it.copy(directoriesLoading = false, error = error.userMessage(appContext)) }
                 }
         }
     }
@@ -1672,12 +762,12 @@ class ChatViewModel(
                         it.copy(
                             allowedDirectories = directories,
                             directoriesLoading = false,
-                            settingsNotice = "Directory allowed for this session",
+                            settingsNotice = appContext.getString(R.string.chat_directory_allowed),
                         )
                     }
                 }
                 .onFailure { error ->
-                    _uiState.update { it.copy(directoriesLoading = false, error = error.message) }
+                    _uiState.update { it.copy(directoriesLoading = false, error = error.userMessage(appContext)) }
                 }
         }
     }
@@ -1691,12 +781,12 @@ class ChatViewModel(
                         it.copy(
                             allowedDirectories = directories,
                             directoriesLoading = false,
-                            settingsNotice = "Directory access removed",
+                            settingsNotice = appContext.getString(R.string.chat_directory_removed),
                         )
                     }
                 }
                 .onFailure { error ->
-                    _uiState.update { it.copy(directoriesLoading = false, error = error.message) }
+                    _uiState.update { it.copy(directoriesLoading = false, error = error.userMessage(appContext)) }
                 }
         }
     }
@@ -1717,7 +807,7 @@ class ChatViewModel(
                             // The backend reloads an active provider process as
                             // part of the setting write, preserving its context.
                             settingsNotice = if (updated.status == SessionStatus.RUNNING) {
-                                "$notice — active session reloaded"
+                                appContext.getString(R.string.chat_session_reloaded, notice)
                             } else {
                                 notice
                             },
@@ -1726,7 +816,7 @@ class ChatViewModel(
                 }
                 .onFailure { error ->
                     _uiState.update {
-                        it.copy(isApplyingSettings = false, error = error.message)
+                        it.copy(isApplyingSettings = false, error = error.userMessage(appContext))
                     }
                 }
         }
@@ -1736,238 +826,41 @@ class ChatViewModel(
         _uiState.update { it.copy(settingsNotice = null) }
     }
 
-    // ── Chat threads ────────────────────────────────────────────────────────
-
-    fun loadChats() {
-        viewModelScope.launch {
-            sessionRepository.getChats(sessionId).onSuccess { list ->
-                selectedChatId.value = list.activeChatId
-                _uiState.update { it.copy(chats = list.chats, activeChatId = list.activeChatId) }
-            }
-        }
-    }
-
-    /** Apply a thread switch: server already swapped context and stopped the CLI. */
-    private fun applyChatList(list: SessionChatList, notice: String?) {
-        selectedChatId.value = list.activeChatId
-        _uiState.update {
-            it.copy(
-                chats = list.chats,
-                activeChatId = list.activeChatId,
-                isSwitchingChat = false,
-                streamingState = StreamingState.Idle,
-                isThinking = false,
-                isSending = false,
-                activeTools = emptyMap(),
-                queuedCount = 0,
-                settingsNotice = notice,
-            )
-        }
-        viewModelScope.launch {
-            messageRepository.fetchMessages(
-                sessionId,
-                clearExisting = true,
-                chatId = list.activeChatId,
-            )
-                .onSuccess(::applyInitialHistoryPage)
-        }
-    }
-
-    fun switchChat(chatId: String) {
-        if (chatId == _uiState.value.activeChatId) return
-        messageWindow.value = MESSAGE_WINDOW_INITIAL
-        _uiState.update { it.copy(isSwitchingChat = true) }
-        viewModelScope.launch {
-            sessionRepository.activateChat(sessionId, chatId)
-                .onSuccess { list -> applyChatList(list, null) }
-                .onFailure { e ->
-                    _uiState.update { it.copy(isSwitchingChat = false, error = e.message) }
-                }
-        }
-    }
-
-    fun newChat() {
-        messageWindow.value = MESSAGE_WINDOW_INITIAL
-        _uiState.update { it.copy(isSwitchingChat = true) }
-        viewModelScope.launch {
-            sessionRepository.createChat(sessionId)
-                .onSuccess { list -> applyChatList(list, "New chat started") }
-                .onFailure { e ->
-                    _uiState.update { it.copy(isSwitchingChat = false, error = e.message) }
-                }
-        }
-    }
-
-    fun deleteChat(chatId: String) {
-        viewModelScope.launch {
-            sessionRepository.deleteChat(sessionId, chatId)
-                .onSuccess { list -> applyChatList(list, "Chat deleted") }
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-        }
-    }
-
-    // ── Interactive prompts ─────────────────────────────────────────────────
+    // ========================================================================
+    // Interactive prompts
+    // ========================================================================
 
     /** Answer a hooks-based permission request over REST (the working path). */
-    fun respondToPermission(action: PermissionAction) {
-        val request = _uiState.value.pendingPermission ?: return
-        _uiState.update { it.copy(pendingPermission = null) }
-        viewModelScope.launch {
-            sessionRepository.respondToPermission(
-                sessionId = sessionId,
-                requestId = request.requestId,
-                action = action,
-                pattern = request.suggestedPattern.takeIf { it.isNotBlank() },
-            ).onFailure { e ->
-                _uiState.update { it.copy(error = e.message ?: "Permission response failed") }
-            }
-        }
-    }
+    fun respondToPermission(action: PermissionAction) = permissions.respondToPermission(action)
 
     /** Answer a legacy (denials-based) permission request over the socket. */
-    fun respondToLegacyPermission(approve: Boolean) {
-        val request = _uiState.value.pendingLegacyPermission ?: return
-        _uiState.update { it.copy(pendingLegacyPermission = null) }
-        if (approve) {
-            socketManager.approvePermission(
-                sessionId = sessionId,
-                toolNames = request.denials.map { it.toolName },
-                originalMessage = request.originalMessage,
-            )
-        } else {
-            socketManager.denyPermission(sessionId)
-        }
-    }
+    fun respondToLegacyPermission(approve: Boolean) = permissions.respondToLegacyPermission(approve)
 
     /** Answer an OpenCode question prompt; answers[i] holds question i's picks. */
-    fun respondToQuestion(answers: List<List<String>>) {
-        val question = _uiState.value.pendingQuestion ?: return
-        _uiState.update { it.copy(pendingQuestion = null) }
-        viewModelScope.launch {
-            sessionRepository.respondToQuestion(
-                requestId = question.requestId,
-                answers = answers,
-                providerSessionId = question.providerSessionId,
-            ).onFailure { e ->
-                _uiState.update { it.copy(error = e.message ?: "Failed to answer question") }
-            }
-        }
-    }
+    fun respondToQuestion(answers: List<List<String>>) = permissions.respondToQuestion(answers)
 
-    fun dismissQuestion() {
-        val question = _uiState.value.pendingQuestion ?: return
-        _uiState.update { it.copy(pendingQuestion = null) }
-        viewModelScope.launch {
-            sessionRepository.rejectQuestion(question.requestId, question.providerSessionId)
-        }
-    }
+    fun dismissQuestion() = permissions.dismissQuestion()
 
     // ========================================================================
     // Lifecycle
     // ========================================================================
 
     override fun onCleared() {
-        socketManager.updatePresence(
-            sessionId = sessionId,
-            deviceId = deviceId,
-            label = Build.MODEL.takeIf { it.isNotBlank() },
-            state = "leave",
-            lastReadMessageId = null,
-        )
-        presenceJob?.cancel()
-        deliveryJobs.values.forEach { it.cancel() }
-        socketManager.unsubscribeFromSession(sessionId)
+        socket.stopPresence()
+        send.cancelAll()
+        LocalNotificationManager.setOpenSession(null)
+        socket.unsubscribe()
         super.onCleared()
     }
 }
 
-internal const val STREAM_FLUSH_MS = 50L
-internal const val MESSAGE_WINDOW_INITIAL = 150
-internal const val MESSAGE_WINDOW_PAGE = 150
-internal const val PRESENCE_HEARTBEAT_MS = 25_000L
-internal const val SEARCH_DEBOUNCE_MS = 250L
-internal const val READ_POSITION_DEBOUNCE_MS = 400L
-internal const val OUTBOX_ACCEPTED_RETENTION_MS = 24L * 60L * 60L * 1_000L
-internal const val MAX_ATTACHMENT_COUNT = 8
-// The backend persists at most 25 MB per file and Socket.IO caps the complete
-// JSON frame at 50 MB. Base64 expands bytes by roughly one third, so a 32 MB
-// raw total leaves room for filenames and protocol overhead.
-internal const val MAX_ATTACHMENT_BYTES = 25L * 1024L * 1024L
-internal const val MAX_TOTAL_ATTACHMENT_BYTES = 32L * 1024L * 1024L
-
-private data class PreparedDelivery(
-    val uploadIds: List<String>,
-    val legacyAttachments: List<FileAttachmentData>,
-)
-
-internal fun sha256Hex(bytes: ByteArray): String =
-    MessageDigest.getInstance("SHA-256")
-        .digest(bytes)
-        .joinToString("") { "%02x".format(it) }
-
-internal fun prepareOutboxRetry(item: OutboxEntity): OutboxEntity = item.copy(
-    status = OutboxStatus.SENDING.name,
-    error = null,
-    retryable = true,
-)
-
-internal fun chunkByteRange(index: Int, chunkSize: Int, totalBytes: Int): IntRange? {
-    if (index < 0 || chunkSize <= 0 || totalBytes <= 0) return null
-    val start = index.toLong() * chunkSize.toLong()
-    if (start >= totalBytes) return null
-    val endExclusive = minOf(start + chunkSize, totalBytes.toLong()).toInt()
-    return start.toInt() until endExclusive
-}
-
-/** Small testable buffer used by the 50 ms streaming UI batcher. */
-internal class StreamingDeltaAccumulator {
-    private val value = StringBuilder()
-
-    fun append(delta: String) {
-        value.append(delta)
+/**
+ * What the banner says when a request fails. Transport errors used to surface
+ * as the raw exception text ("Failed to connect to /127.0.0.1:1"), which tells
+ * the user nothing they can act on.
+ */
+internal fun Throwable.userMessage(context: Context? = null): String? =
+    when (val error = toAppError()) {
+        is AppError.Cancelled -> throw (error.cause as? CancellationException ?: CancellationException())
+        else -> if (context != null) error.userMessage(context) else error.userMessage()
     }
-
-    fun drain(): String = value.toString().also { value.clear() }
-
-    /** Full text so far without clearing — one copy per flush instead of the
-     *  quadratic current+batch concatenation over the whole reply. */
-    fun snapshot(): String = value.toString()
-
-    fun reset() {
-        value.clear()
-    }
-
-    fun isEmpty(): Boolean = value.isEmpty()
-}
-
-internal fun readUriWithLimit(
-    context: Context,
-    uri: Uri,
-    maxBytes: Long,
-    onProgress: (Long) -> Unit = {},
-): ByteArray {
-    val input = context.contentResolver.openInputStream(uri)
-        ?: error("The selected file can no longer be opened")
-    return input.use { stream ->
-        val output = ByteArrayOutputStream()
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        var total = 0L
-        while (true) {
-            val count = stream.read(buffer)
-            if (count < 0) break
-            total += count
-            if (total > maxBytes) {
-                error("Attachment exceeds ${formatBytes(maxBytes)}")
-            }
-            output.write(buffer, 0, count)
-            onProgress(total)
-        }
-        output.toByteArray()
-    }
-}
-
-internal fun formatBytes(bytes: Long): String = when {
-    bytes < 1_024 -> "$bytes B"
-    bytes < 1_048_576 -> "%.1f KB".format(bytes / 1_024.0)
-    else -> "%.1f MB".format(bytes / 1_048_576.0)
-}

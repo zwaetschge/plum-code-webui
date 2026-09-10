@@ -2,9 +2,11 @@ import { get as pgGet, all as pgAll } from '../db/pg.js';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
+import { rateLimiters } from '../middleware/rateLimiter.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { getProcessManager } from '../websocket/index.js';
 import { listPendingPermissionsForUser } from './permissions.js';
+import { listPendingQuestionsForUser } from '../services/pendingQuestions.js';
 import {
   createGatewayToken,
   listGatewayTokens,
@@ -47,7 +49,7 @@ router.get('/tokens', requireAuth, async (req: Request, res: Response) => {
   res.json({ success: true, data: await listGatewayTokens(userId) });
 });
 
-router.post('/tokens', requireAuth, async (req: Request, res: Response) => {
+router.post('/tokens', requireAuth, rateLimiters.strict, async (req: Request, res: Response) => {
   rejectGatewayCaller(req);
   const parsed = createTokenSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -82,6 +84,8 @@ interface SessionOverview {
   activitySummary: string | null;
   lastActivityAt: string | null;
   pendingApprovals: number;
+  /** Questions the agent is blocked on. A separate block from an approval. */
+  pendingQuestions: number;
 }
 
 /**
@@ -112,6 +116,7 @@ router.get('/overview', requireAuth, async (req: Request, res: Response) => {
       | 'activitySummary'
       | 'lastActivityAt'
       | 'pendingApprovals'
+      | 'pendingQuestions'
       | 'archived'
     > & { archived: number }
   >;
@@ -120,6 +125,18 @@ router.get('/overview', requireAuth, async (req: Request, res: Response) => {
   const pendingBySession = new Map<string, number>();
   for (const request of pending) {
     pendingBySession.set(request.sessionId, (pendingBySession.get(request.sessionId) ?? 0) + 1);
+  }
+
+  // Questions block a session exactly as hard as an approval does, and until
+  // now they were invisible here — a supervisor, the widget and the watch all
+  // saw an idle session that was in fact waiting for someone to pick an option.
+  const questions = listPendingQuestionsForUser(userId);
+  const questionsBySession = new Map<string, number>();
+  for (const question of questions) {
+    questionsBySession.set(
+      question.sessionId,
+      (questionsBySession.get(question.sessionId) ?? 0) + 1
+    );
   }
 
   const manager = getProcessManager();
@@ -134,15 +151,22 @@ router.get('/overview', requireAuth, async (req: Request, res: Response) => {
       activitySummary: runtime.activitySummary,
       lastActivityAt: runtime.lastActivityAt,
       pendingApprovals: pendingBySession.get(row.id) ?? 0,
+      pendingQuestions: questionsBySession.get(row.id) ?? 0,
     };
   });
 
   const response: ApiResponse<{
     generatedAt: string;
-    totals: { sessions: number; busy: number; pendingApprovals: number };
+    totals: {
+      sessions: number;
+      busy: number;
+      pendingApprovals: number;
+      pendingQuestions: number;
+    };
     needsAttention: string[];
     sessions: SessionOverview[];
     pendingApprovals: typeof pending;
+    pendingQuestions: typeof questions;
   }> = {
     success: true,
     data: {
@@ -151,13 +175,15 @@ router.get('/overview', requireAuth, async (req: Request, res: Response) => {
         sessions: sessions.length,
         busy: sessions.filter((s) => s.busy).length,
         pendingApprovals: pending.length,
+        pendingQuestions: questions.length,
       },
       // Blocked on a human, or errored — the list a supervisor acts on first.
       needsAttention: sessions
-        .filter((s) => s.pendingApprovals > 0 || s.status === 'error')
+        .filter((s) => s.pendingApprovals > 0 || s.pendingQuestions > 0 || s.status === 'error')
         .map((s) => s.id),
       sessions,
       pendingApprovals: pending,
+      pendingQuestions: questions,
     },
   };
   res.json(response);
@@ -169,9 +195,29 @@ router.get('/overview', requireAuth, async (req: Request, res: Response) => {
  * Server-sent events for the same session traffic the UI sees. An external CLI
  * gets a plain HTTP stream instead of having to speak Socket.IO.
  */
+/**
+ * Every open stream registers three listeners on the process manager's event
+ * emitter (which is deliberately unbounded) plus a heartbeat interval, and each
+ * one gets a copy of every message from every session the user owns. A
+ * reconnect loop in a supervisor script therefore multiplies the fan-out
+ * silently. Cap it; four supervisors is already generous.
+ */
+const GATEWAY_SSE_MAX_PER_USER = Number(process.env.GATEWAY_SSE_MAX_PER_USER) || 4;
+const openEventStreams = new Map<string, number>();
+
 router.get('/events', requireAuth, (req: Request, res: Response) => {
   const userId = (req as AuthenticatedRequest).userId;
   const manager = getProcessManager();
+
+  const open = openEventStreams.get(userId) ?? 0;
+  if (open >= GATEWAY_SSE_MAX_PER_USER) {
+    throw new AppError(
+      `Too many open gateway event streams (max ${GATEWAY_SSE_MAX_PER_USER})`,
+      429,
+      'GATEWAY_STREAM_LIMIT'
+    );
+  }
+  openEventStreams.set(userId, open + 1);
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -219,13 +265,24 @@ router.get('/events', requireAuth, (req: Request, res: Response) => {
 
   // Proxies drop an idle stream; a comment line keeps it open without noise.
   const heartbeat = setInterval(() => res.write(': keepalive\n\n'), 25_000);
+  // An open stream must not by itself keep the process from shutting down.
+  heartbeat.unref();
 
-  req.on('close', () => {
+  let closed = false;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
     clearInterval(heartbeat);
     manager.events.off('assistantMessage', onAssistant);
     manager.events.off('userMessage', onUser);
     manager.events.off('turnComplete', onTurn);
-  });
+    const remaining = (openEventStreams.get(userId) ?? 1) - 1;
+    if (remaining > 0) openEventStreams.set(userId, remaining);
+    else openEventStreams.delete(userId);
+  };
+
+  req.on('close', cleanup);
+  res.on('close', cleanup);
 });
 
 export default router;

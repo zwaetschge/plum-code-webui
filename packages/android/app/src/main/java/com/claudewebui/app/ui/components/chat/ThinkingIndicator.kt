@@ -1,5 +1,9 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
@@ -25,6 +29,7 @@ fun ThinkingIndicator(
     thinkingStartTime: Long = 0L,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     AnimatedVisibility(
         visible = isThinking || toolName != null,
         enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
@@ -33,10 +38,10 @@ fun ThinkingIndicator(
     ) {
         Row(
             modifier = Modifier
-                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                .padding(start = componentTokens.spacing.lg, end = componentTokens.spacing.lg, bottom = componentTokens.spacing.sm)
                 .wrapContentWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.compact),
         ) {
             // Avatar placeholder matching assistant bubble style
             Surface(
@@ -57,15 +62,15 @@ fun ThinkingIndicator(
             // Bubble content
             Surface(
                 shape = RoundedCornerShape(
-                    topStart = 4.dp, topEnd = 16.dp, bottomEnd = 16.dp, bottomStart = 16.dp
+                    topStart = componentTokens.spacing.xs, topEnd = componentTokens.spacing.lg, bottomEnd = componentTokens.spacing.lg, bottomStart = componentTokens.spacing.lg
                 ),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 tonalElevation = 1.dp,
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    modifier = Modifier.padding(horizontal = componentTokens.spacing.cozy, vertical = componentTokens.spacing.md),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
                 ) {
                     if (toolName != null) {
                         // Tool executing state. A long-running tool call is
@@ -81,7 +86,7 @@ fun ThinkingIndicator(
                         PulsingDots(color = MaterialTheme.colorScheme.primary)
                         ElapsedTime(
                             startTime = thinkingStartTime,
-                            prefix = "Thinking",
+                            prefix = stringResource(R.string.component_thinking),
                         )
                     }
                 }
@@ -95,15 +100,16 @@ private fun PulsingDots(
     color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "dots")
+    val componentTokens = PlumTheme.tokens
+    val infiniteTransition = if (PlumTheme.tokens.motion.reduceMotion) null else rememberInfiniteTransition(label = "dots")
 
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         repeat(3) { index ->
-            val scale by infiniteTransition.animateFloat(
+            val scale by infiniteTransition?.animateFloat(
                 initialValue = 0.6f,
                 targetValue = 1.0f,
                 animationSpec = infiniteRepeatable(
@@ -115,12 +121,12 @@ private fun PulsingDots(
                     repeatMode = RepeatMode.Reverse,
                 ),
                 label = "dot_scale_$index",
-            )
+            ) ?: androidx.compose.runtime.rememberUpdatedState(0.6f)
             Surface(
                 shape = CircleShape,
                 color = color,
                 modifier = Modifier
-                    .size(6.dp)
+                    .size(componentTokens.spacing.inline)
                     .scale(scale),
             ) {}
         }
@@ -145,7 +151,7 @@ private fun ElapsedTime(
     }
 
     Text(
-        text = if (elapsed > 0) "$prefix… ${elapsed}s" else "$prefix…",
+        text = if (elapsed > 0) stringResource(R.string.component_elapsed_thinking, prefix, elapsed) else "$prefix…",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 13.sp,
@@ -153,16 +159,18 @@ private fun ElapsedTime(
     )
 }
 
+@Composable
+
 private fun formatToolLabel(toolName: String): String = when (toolName.lowercase()) {
-    "read" -> "Reading file…"
-    "write" -> "Writing file…"
-    "edit" -> "Editing file…"
-    "bash" -> "Running command…"
-    "glob" -> "Searching files…"
-    "grep" -> "Searching content…"
-    "agent" -> "Running agent…"
-    "todowrite" -> "Updating todos…"
-    "websearch" -> "Searching web…"
-    "webfetch" -> "Fetching URL…"
-    else -> "Using $toolName…"
+    "read" -> stringResource(R.string.component_reading_file)
+    "write" -> stringResource(R.string.component_writing_file)
+    "edit" -> stringResource(R.string.component_editing_file)
+    "bash" -> stringResource(R.string.component_running_command)
+    "glob" -> stringResource(R.string.component_searching_files)
+    "grep" -> stringResource(R.string.component_searching_content)
+    "agent" -> stringResource(R.string.component_running_agent)
+    "todowrite" -> stringResource(R.string.component_updating_todos)
+    "websearch" -> stringResource(R.string.component_searching_web)
+    "webfetch" -> stringResource(R.string.component_fetching_url)
+    else -> stringResource(R.string.component_using_tool, toolName)
 }

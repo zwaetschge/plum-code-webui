@@ -116,6 +116,7 @@ import {
   type MessageSearchResult,
 } from '@/components/session/MessageSearch';
 import { socketService } from '@/services/socket';
+import { updateSessionChatQuery } from '@/lib/sessionChatSync';
 import {
   isMessageSnapshotStale,
   loadThenCommit,
@@ -161,6 +162,7 @@ import {
 } from '@/lib/providers';
 import { TASK_WORKFLOWS } from '@/lib/taskWorkflows';
 import { toast } from '@/hooks/use-toast';
+import { useIsDesktopLayout } from '@/hooks/useMediaQuery';
 
 function generateId() {
   return Math.random().toString(36).substring(2, 9);
@@ -741,6 +743,7 @@ export function SessionPage() {
 
   const [mainView, setMainView] = useState<'chat' | 'editor' | 'files'>('chat');
   const [configTab, setConfigTab] = useState<'memories' | 'agents'>('memories');
+  const isDesktopLayout = useIsDesktopLayout();
   const [rightDockCollapsed, setRightDockCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem('chat.rightDockCollapsed') === '1';
@@ -1600,11 +1603,57 @@ export function SessionPage() {
   const activeHistoryChatId = normalizeMessageChatId(sessionChatList?.activeChatId) ?? null;
   const activeHistoryChatKey = activeHistoryChatId ?? 'main';
 
+  const syncActiveChat = useCallback(
+    (chatId: string | null) => {
+      if (!id) return;
+      const normalizedChat = normalizeMessageChatId(chatId) ?? null;
+      if (activeChatIdRef.current === normalizedChat) return;
+      // Invalidate in-flight old-thread reads before publishing the new query key.
+      // Initial hydration already fetches this same thread, so keep that request.
+      if (activeChatIdRef.current !== undefined) {
+        messageHistoryEpochRef.current += 1;
+        void queryClient.cancelQueries({ queryKey: ['messages', id] });
+      }
+      messageSnapshotRef.current = undefined;
+      activeChatIdRef.current = normalizedChat;
+      socketService.setSessionChat(id, normalizedChat);
+      setMessages(
+        id,
+        (useSessionStore.getState().messages[id] ?? []).filter((message) =>
+          messageBelongsToChat(message, normalizedChat)
+        )
+      );
+      setIsSearchHistoryWindow(false);
+      setHistoryFirstItemIndex(MESSAGE_HISTORY_FIRST_INDEX);
+      setHistoryPagination({
+        total: 0,
+        limit: MESSAGE_HISTORY_PAGE_SIZE,
+        hasMore: false,
+        oldestId: null,
+      });
+      setIsLoadingOlderMessages(false);
+      setIsLoadingLatestMessages(false);
+      setOlderMessagesError(null);
+      setPendingMessageJump(null);
+      setHighlightedMessageId(null);
+      setMessageJumpStatus('');
+      void queryClient.invalidateQueries({ queryKey: ['session', id] });
+    },
+    [id, queryClient, setMessages]
+  );
+
   useEffect(() => {
-    if (!id || !sessionChatsReady) return;
-    activeChatIdRef.current = activeHistoryChatId;
-    socketService.setSessionChat(id, activeHistoryChatId);
-  }, [activeHistoryChatId, id, sessionChatsReady]);
+    if (!id) return;
+    return socketService.onChatSync((data) => {
+      if (data.sessionId !== id) return;
+      syncActiveChat(data.activeChatId);
+      updateSessionChatQuery(queryClient, data);
+    });
+  }, [id, queryClient, syncActiveChat]);
+
+  useEffect(() => {
+    if (sessionChatsReady) syncActiveChat(activeHistoryChatId);
+  }, [activeHistoryChatId, sessionChatsReady, syncActiveChat]);
 
   const resolveActiveHistoryChatId = useCallback(async (): Promise<string | null> => {
     if (!id) throw new Error('Session unavailable.');
@@ -1612,9 +1661,16 @@ export function SessionPage() {
     const cached = queryClient.getQueryData<SessionChatListPayload>(['session-chats', id]);
     let payload = cached;
     if (!payload) {
+      const requestEpoch = messageHistoryEpochRef.current;
       const response = await api.get<ApiResponse<SessionChatListPayload>>(
         `/api/sessions/${id}/chats`
       );
+      if (
+        requestEpoch !== messageHistoryEpochRef.current &&
+        activeChatIdRef.current !== undefined
+      ) {
+        return activeChatIdRef.current;
+      }
       if (!response.data.success || !response.data.data) {
         throw new Error('Chat threads could not be loaded.');
       }
@@ -1688,7 +1744,11 @@ export function SessionPage() {
         `/api/sessions/${id}/messages?${params.toString()}`
       );
       if (response.data.success && response.data.data) {
-        if (requestEpoch !== messageHistoryEpochRef.current) return response.data.data;
+        if (
+          requestEpoch !== messageHistoryEpochRef.current ||
+          activeChatIdRef.current !== activeHistoryChatId
+        )
+          return response.data.data;
         if (normalizeMessageChatId(response.data.snapshot?.chatId) !== activeHistoryChatId) {
           throw new Error('The chat changed while its history was loading.');
         }
@@ -1800,7 +1860,7 @@ export function SessionPage() {
     async (targetChatId: string | null): Promise<SessionChatListPayload> => {
       if (!id) throw new Error('Session unavailable.');
       const targetId = targetChatId ?? 'main';
-      messageHistoryEpochRef.current += 1;
+      const requestEpoch = ++messageHistoryEpochRef.current;
       await queryClient.cancelQueries({ queryKey: ['messages', id] });
       // Activation is intentionally idempotent and unconditional. A cached chat
       // list can be stale when another device changed the active thread.
@@ -1810,6 +1870,12 @@ export function SessionPage() {
       if (!response.data.success) throw new Error('The matching chat could not be activated.');
       if (!response.data.data) throw new Error('The matching chat could not be activated.');
       const activatedChatId = normalizeMessageChatId(response.data.data.activeChatId) ?? null;
+      if (
+        requestEpoch !== messageHistoryEpochRef.current &&
+        activeChatIdRef.current !== activatedChatId
+      ) {
+        throw new Error('The chat changed on another device while activating the result.');
+      }
       activeChatIdRef.current = activatedChatId;
       socketService.setSessionChat(id, activatedChatId);
       await queryClient.invalidateQueries({ queryKey: ['session', id] });
@@ -1839,6 +1905,7 @@ export function SessionPage() {
       const targetChatId = normalizeMessageChatId(target.chatId) ?? null;
       const cursorBeforeRequest = socketService.getSessionCursor(id);
       let activatedPayload: SessionChatListPayload | null = null;
+      let activatedEpoch: number | undefined;
       try {
         if (previousChatId === undefined) {
           previousChatId = await resolveActiveHistoryChatId();
@@ -1848,6 +1915,7 @@ export function SessionPage() {
           ]);
         }
         activatedPayload = await activateSearchTargetChat(targetChatId);
+        activatedEpoch = messageHistoryEpochRef.current;
         if (previousChatId === targetChatId && jumpToMessage(target.messageId)) {
           queryClient.setQueryData(['session-chats', id], activatedPayload);
           setPendingMessageJump(null);
@@ -1901,7 +1969,13 @@ export function SessionPage() {
           }
         );
       } catch (error) {
-        if (activatedPayload && previousChatId !== undefined && previousChatId !== targetChatId) {
+        if (
+          activatedPayload &&
+          previousChatId !== undefined &&
+          previousChatId !== targetChatId &&
+          activeChatIdRef.current === targetChatId &&
+          activatedEpoch === messageHistoryEpochRef.current
+        ) {
           messageHistoryEpochRef.current += 1;
           try {
             const restoredChatId = previousChatId;
@@ -2452,6 +2526,10 @@ export function SessionPage() {
 
     return () => {
       socketService.unsubscribeFromSession(id);
+      // Release the page-local slices of the sessions the user left longest ago.
+      // Without this, every session ever opened keeps its tool log, its base64
+      // images and its editor buffers in the store until a hard reload.
+      useSessionStore.getState().pruneSession(id);
     };
   }, [id, sessionModeStorageKey]);
 
@@ -2482,7 +2560,23 @@ export function SessionPage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only trigger on Escape when Claude is active and not typing in an input
       if (e.key === 'Escape' && canInterruptActiveRun) {
+        // Something nearer the event already acted on this Escape.
+        if (e.defaultPrevented) return;
+
         const target = e.target as HTMLElement;
+        // Escape inside an open dialog means "close the dialog". Radix does not
+        // stop the event, so it reached this handler too and the click that was
+        // meant to dismiss a tool detail or a rename box also killed the running
+        // turn — including, worst of all, on the permission dialog for the work
+        // the user was about to approve.
+        if (
+          target?.closest?.(
+            '[role="dialog"], [role="alertdialog"], [data-radix-popper-content-wrapper]'
+          )
+        ) {
+          return;
+        }
+
         const isTyping =
           target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
 
@@ -2521,6 +2615,14 @@ export function SessionPage() {
     setIsLoadingLatestMessages(false);
     setIsSearchHistoryWindow(false);
     setOlderMessagesError(null);
+    // Everything below belongs to the session we just left. Carried over, the
+    // goal box showed another session's text, the tool detail dialog described a
+    // call that never happened here, and the editor stayed open on a file from a
+    // different working directory.
+    setGoalDraft('');
+    setSelectedCliTool(null);
+    setSelectedToolDetail(null);
+    setMainView('chat');
   }, [id]);
 
   useEffect(() => {
@@ -4357,22 +4459,7 @@ export function SessionPage() {
                 <ChatThreadSwitcher
                   sessionId={id}
                   onSwitched={(chatId) => {
-                    messageHistoryEpochRef.current += 1;
-                    messageSnapshotRef.current = undefined;
-                    activeChatIdRef.current = chatId;
-                    socketService.setSessionChat(id, chatId);
-                    clearStreamingContent(id);
-                    setMessages(id, []);
-                    setIsSearchHistoryWindow(false);
-                    setHistoryFirstItemIndex(MESSAGE_HISTORY_FIRST_INDEX);
-                    setHistoryPagination({
-                      total: 0,
-                      limit: MESSAGE_HISTORY_PAGE_SIZE,
-                      hasMore: false,
-                      oldestId: null,
-                    });
-                    setOlderMessagesError(null);
-                    queryClient.invalidateQueries({ queryKey: ['session', id] });
+                    syncActiveChat(chatId);
                     setMobileSheetPanel(null);
                   }}
                 />
@@ -4817,17 +4904,26 @@ export function SessionPage() {
                               </span>
                             </div>
                             {img.imageBase64 && (
-                              <img
-                                src={`data:${img.mimeType};base64,${img.imageBase64}`}
-                                alt={img.prompt}
-                                className="max-w-full rounded-lg border border-border/60 cursor-pointer hover:opacity-90 transition-opacity mb-3"
+                              // A button, not an `img onClick`: downloading the
+                              // result was mouse-only and announced as a plain
+                              // image, so a keyboard never reached it at all.
+                              <button
+                                type="button"
+                                aria-label={`Download generated image: ${img.prompt}`}
+                                className="mb-3 block w-full rounded-lg transition-opacity hover:opacity-90"
                                 onClick={() => {
                                   const link = document.createElement('a');
                                   link.href = `data:${img.mimeType};base64,${img.imageBase64}`;
                                   link.download = `generated-image-${img.timestamp}.png`;
                                   link.click();
                                 }}
-                              />
+                              >
+                                <img
+                                  src={`data:${img.mimeType};base64,${img.imageBase64}`}
+                                  alt={img.prompt}
+                                  className="max-w-full rounded-lg border border-border/60"
+                                />
+                              </button>
                             )}
                             <p className="text-xs text-muted-foreground italic">"{img.prompt}"</p>
                           </Card>
@@ -4953,6 +5049,8 @@ export function SessionPage() {
                 onOpenTasks={() => openRightPanel('tasks')}
               />
               <ChatInput
+                key={`${id}:${activeHistoryChatId ?? ''}`}
+                chatId={activeHistoryChatId}
                 sessionId={id || ''}
                 onSendMessage={handleSendMessage}
                 onSendMessageWithFiles={handleSendMessageWithFiles}
@@ -4987,210 +5085,202 @@ export function SessionPage() {
       {/* /main column */}
 
       {/* Right session menu: former More actions, Run, and workspace panels live here. */}
-      <div
-        className={cn('session-right-dock hidden md:flex', rightDockCollapsed && 'is-collapsed')}
-      >
-        {(runCockpitOpen || hasVisiblePinnedPanel) && (
-          <div
-            className={cn(
-              'session-docked-panel-column',
-              !runCockpitOpen && pinnedPanels.browser && 'is-browser-active'
-            )}
-          >
-            {runCockpitOpen
-              ? renderRunCockpitPanel()
-              : visibleDockedPanels.map((p) => (pinnedPanels[p] ? renderDockedPanel(p) : null))}
-          </div>
-        )}
-        <nav className="session-right-menu" aria-label="Session menu">
-          <div className="session-right-menu-header">
-            <button
-              type="button"
-              className="session-right-collapse-button"
-              onClick={toggleRightDockCollapsed}
-              title={rightDockCollapsed ? 'Expand right menu' : 'Collapse right menu'}
-              aria-label={rightDockCollapsed ? 'Expand right menu' : 'Collapse right menu'}
-            >
-              {rightDockCollapsed ? (
-                <ChevronLeft className="h-3.5 w-3.5" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5" />
+      {/* Gated in JS, not only by `hidden md:flex`: display:none still mounts the
+          subtree, so on a phone the docked browser preview and task list ran a
+          second time alongside the copies inside the mobile sheet. */}
+      {isDesktopLayout && (
+        <div
+          className={cn('session-right-dock hidden md:flex', rightDockCollapsed && 'is-collapsed')}
+        >
+          {(runCockpitOpen || hasVisiblePinnedPanel) && (
+            <div
+              className={cn(
+                'session-docked-panel-column',
+                !runCockpitOpen && pinnedPanels.browser && 'is-browser-active'
               )}
-            </button>
-          </div>
+            >
+              {runCockpitOpen
+                ? renderRunCockpitPanel()
+                : visibleDockedPanels.map((p) => (pinnedPanels[p] ? renderDockedPanel(p) : null))}
+            </div>
+          )}
+          <nav className="session-right-menu" aria-label="Session menu">
+            <div className="session-right-menu-header">
+              <button
+                type="button"
+                className="session-right-collapse-button"
+                onClick={toggleRightDockCollapsed}
+                title={rightDockCollapsed ? 'Expand right menu' : 'Collapse right menu'}
+                aria-label={rightDockCollapsed ? 'Expand right menu' : 'Collapse right menu'}
+              >
+                {rightDockCollapsed ? (
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </div>
 
-          <div className="session-side-menu-scroll">
-            {/* Chat threads belong to the session, so they live in the right
+            <div className="session-side-menu-scroll">
+              {/* Chat threads belong to the session, so they live in the right
                 menu with the other per-session controls rather than floating
                 over the transcript. */}
-            {id &&
-              renderSideMenuGroup({
-                id: 'chat',
-                label: 'Chat',
-                icon: <MessageSquare className="h-3.5 w-3.5" />,
-                children: rightDockCollapsed ? null : (
-                  <div className="session-side-menu-embed">
-                    <ChatThreadSwitcher
-                      sessionId={id}
-                      onSwitched={(chatId) => {
-                        // The server stopped the CLI and swapped the thread
-                        // context; drop live UI state and reload the transcript.
-                        messageHistoryEpochRef.current += 1;
-                        messageSnapshotRef.current = undefined;
-                        activeChatIdRef.current = chatId;
-                        socketService.setSessionChat(id, chatId);
-                        clearStreamingContent(id);
-                        setMessages(id, []);
-                        setIsSearchHistoryWindow(false);
-                        setHistoryFirstItemIndex(MESSAGE_HISTORY_FIRST_INDEX);
-                        setHistoryPagination({
-                          total: 0,
-                          limit: MESSAGE_HISTORY_PAGE_SIZE,
-                          hasMore: false,
-                          oldestId: null,
-                        });
-                        setOlderMessagesError(null);
-                        queryClient.invalidateQueries({ queryKey: ['session', id] });
-                      }}
-                    />
-                  </div>
+              {id &&
+                renderSideMenuGroup({
+                  id: 'chat',
+                  label: 'Chat',
+                  icon: <MessageSquare className="h-3.5 w-3.5" />,
+                  children: rightDockCollapsed ? null : (
+                    <div className="session-side-menu-embed">
+                      <ChatThreadSwitcher
+                        sessionId={id}
+                        onSwitched={(chatId) => {
+                          syncActiveChat(chatId);
+                        }}
+                      />
+                    </div>
+                  ),
+                })}
+
+              {renderSideMenuGroup({
+                id: 'session',
+                label: 'Session',
+                icon: <Settings className="h-3.5 w-3.5" />,
+                children: (
+                  <>
+                    {renderSideMenuItem({
+                      id: 'session-rename',
+                      label: 'Rename',
+                      icon: <Pencil className="h-3.5 w-3.5" />,
+                      onClick: () => setShowRenameDialog(true),
+                      nested: true,
+                    })}
+                    {renderSideMenuItem({
+                      id: 'session-template',
+                      label: 'Save as template',
+                      icon: <BookmarkPlus className="h-3.5 w-3.5" />,
+                      onClick: () => setTemplateNameDraft(session.name),
+                      nested: true,
+                    })}
+                    {renderSideMenuItem({
+                      id: 'session-export',
+                      label: 'Export transcript',
+                      icon: <Download className="h-3.5 w-3.5" />,
+                      onClick: () => void handleExportSession(),
+                      nested: true,
+                    })}
+                    {renderSideMenuItem({
+                      id: 'session-directories',
+                      label: 'Directories',
+                      icon: <FolderKey className="h-3.5 w-3.5" />,
+                      onClick: () => setShowAllowedDirsDialog(true),
+                      nested: true,
+                    })}
+                  </>
                 ),
               })}
 
-            {renderSideMenuGroup({
-              id: 'session',
-              label: 'Session',
-              icon: <Settings className="h-3.5 w-3.5" />,
-              children: (
-                <>
-                  {renderSideMenuItem({
-                    id: 'session-rename',
-                    label: 'Rename',
-                    icon: <Pencil className="h-3.5 w-3.5" />,
-                    onClick: () => setShowRenameDialog(true),
-                    nested: true,
-                  })}
-                  {renderSideMenuItem({
-                    id: 'session-template',
-                    label: 'Save as template',
-                    icon: <BookmarkPlus className="h-3.5 w-3.5" />,
-                    onClick: () => setTemplateNameDraft(session.name),
-                    nested: true,
-                  })}
-                  {renderSideMenuItem({
-                    id: 'session-export',
-                    label: 'Export transcript',
-                    icon: <Download className="h-3.5 w-3.5" />,
-                    onClick: () => void handleExportSession(),
-                    nested: true,
-                  })}
-                  {renderSideMenuItem({
-                    id: 'session-directories',
-                    label: 'Directories',
-                    icon: <FolderKey className="h-3.5 w-3.5" />,
-                    onClick: () => setShowAllowedDirsDialog(true),
-                    nested: true,
-                  })}
-                </>
-              ),
-            })}
-
-            {renderSideMenuGroup({
-              id: 'view',
-              label: 'View',
-              icon: <MessageSquare className="h-3.5 w-3.5" />,
-              children: (
-                <>
-                  {renderSideMenuItem({
-                    id: 'view-chat',
-                    label: 'Chat view',
-                    icon: <MessageSquare className="h-3.5 w-3.5" />,
-                    onClick: () => setMainView('chat'),
-                    active: mainView === 'chat',
-                    nested: true,
-                  })}
-                  {!isTaskSurface &&
-                    hasOpenFiles &&
-                    renderSideMenuItem({
-                      id: 'view-editor',
-                      label: 'Editor view',
-                      icon: <Code2 className="h-3.5 w-3.5" />,
-                      onClick: () => setMainView('editor'),
-                      active: mainView === 'editor',
+              {renderSideMenuGroup({
+                id: 'view',
+                label: 'View',
+                icon: <MessageSquare className="h-3.5 w-3.5" />,
+                children: (
+                  <>
+                    {renderSideMenuItem({
+                      id: 'view-chat',
+                      label: 'Chat view',
+                      icon: <MessageSquare className="h-3.5 w-3.5" />,
+                      onClick: () => setMainView('chat'),
+                      active: mainView === 'chat',
                       nested: true,
                     })}
-                  {!isTaskSurface &&
-                    renderSideMenuItem({
-                      id: 'view-files',
-                      label: 'Files view',
-                      icon: <FolderOpen className="h-3.5 w-3.5" />,
-                      onClick: () => setMainView('files'),
-                      active: mainView === 'files',
-                      nested: true,
-                    })}
-                </>
-              ),
-            })}
+                    {!isTaskSurface &&
+                      hasOpenFiles &&
+                      renderSideMenuItem({
+                        id: 'view-editor',
+                        label: 'Editor view',
+                        icon: <Code2 className="h-3.5 w-3.5" />,
+                        onClick: () => setMainView('editor'),
+                        active: mainView === 'editor',
+                        nested: true,
+                      })}
+                    {!isTaskSurface &&
+                      renderSideMenuItem({
+                        id: 'view-files',
+                        label: 'Files view',
+                        icon: <FolderOpen className="h-3.5 w-3.5" />,
+                        onClick: () => setMainView('files'),
+                        active: mainView === 'files',
+                        nested: true,
+                      })}
+                  </>
+                ),
+              })}
 
-            {renderSideMenuGroup({
-              id: 'runtime',
-              label: 'Runtime',
-              icon: <Sparkles className="h-3.5 w-3.5" />,
-              children: <>{!rightDockCollapsed && renderSessionRuntimeControls('sidebar')}</>,
-            })}
+              {renderSideMenuGroup({
+                id: 'runtime',
+                label: 'Runtime',
+                icon: <Sparkles className="h-3.5 w-3.5" />,
+                children: <>{!rightDockCollapsed && renderSessionRuntimeControls('sidebar')}</>,
+              })}
 
-            {renderSideMenuGroup({
-              id: 'subagents',
-              label: 'CLI subagents',
-              icon: <Brain className="h-3.5 w-3.5" />,
-              badge: cliSubagents.filter((entry) => entry.enabled).length,
-              children: (
-                <>
-                  {cliSubagents.length === 0 ? (
-                    <p className="px-3 py-1.5 text-[11px] leading-snug text-muted-foreground">
-                      Keine CLI-Subagenten konfiguriert. Einstellungen &rarr; Subagenten.
-                    </p>
-                  ) : (
-                    !rightDockCollapsed && (
-                      <>
-                        <p className="px-3 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
-                          Delegierbar per run_subagent
-                        </p>
-                        <div className="session-runtime-controls">
-                          {cliSubagents.map((entry) => (
-                            <Fragment key={entry.id || entry.provider}>
-                              {renderCliSubagentField(entry)}
-                            </Fragment>
-                          ))}
-                        </div>
-                      </>
-                    )
-                  )}
-                </>
-              ),
-            })}
+              {renderSideMenuGroup({
+                id: 'subagents',
+                label: 'CLI subagents',
+                icon: <Brain className="h-3.5 w-3.5" />,
+                badge: cliSubagents.filter((entry) => entry.enabled).length,
+                children: (
+                  <>
+                    {cliSubagents.length === 0 ? (
+                      <p className="px-3 py-1.5 text-[11px] leading-snug text-muted-foreground">
+                        Keine CLI-Subagenten konfiguriert. Einstellungen &rarr; Subagenten.
+                      </p>
+                    ) : (
+                      !rightDockCollapsed && (
+                        <>
+                          <p className="px-3 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                            Delegierbar per run_subagent
+                          </p>
+                          <div className="session-runtime-controls">
+                            {cliSubagents.map((entry) => (
+                              <Fragment key={entry.id || entry.provider}>
+                                {renderCliSubagentField(entry)}
+                              </Fragment>
+                            ))}
+                          </div>
+                        </>
+                      )
+                    )}
+                  </>
+                ),
+              })}
 
-            {renderSideMenuGroup({
-              id: 'styles',
-              label: 'Styles',
-              icon: <Palette className="h-3.5 w-3.5" />,
-              badge: activeStyleCount,
-              children: <>{styleMenuPanels.map((panel) => renderPanelMenuItem(panel, true))}</>,
-            })}
+              {renderSideMenuGroup({
+                id: 'styles',
+                label: 'Styles',
+                icon: <Palette className="h-3.5 w-3.5" />,
+                badge: activeStyleCount,
+                children: <>{styleMenuPanels.map((panel) => renderPanelMenuItem(panel, true))}</>,
+              })}
 
-            {renderSideMenuGroup({
-              id: 'workspace',
-              label: 'Workspace',
-              icon: <FolderOpen className="h-3.5 w-3.5" />,
-              open: rightMenuGroupsOpen.workspace || hasPinnedWorkspacePanel,
-              badge: pendingTasksCount + meshPeers.length + (session.androidDeviceSerial ? 1 : 0),
-              children: <>{workspaceMenuPanels.map((panel) => renderPanelMenuItem(panel, true))}</>,
-            })}
-          </div>
-        </nav>
-      </div>
+              {renderSideMenuGroup({
+                id: 'workspace',
+                label: 'Workspace',
+                icon: <FolderOpen className="h-3.5 w-3.5" />,
+                open: rightMenuGroupsOpen.workspace || hasPinnedWorkspacePanel,
+                badge: pendingTasksCount + meshPeers.length + (session.androidDeviceSerial ? 1 : 0),
+                children: (
+                  <>{workspaceMenuPanels.map((panel) => renderPanelMenuItem(panel, true))}</>
+                ),
+              })}
+            </div>
+          </nav>
+        </div>
+      )}
 
-      {runCockpitOpen && <div className="md:hidden">{renderRunCockpitPanel('rail')}</div>}
+      {runCockpitOpen && !isDesktopLayout && (
+        <div className="md:hidden">{renderRunCockpitPanel('rail')}</div>
+      )}
 
       <Sheet
         open={mobileSheetPanel !== null}
@@ -5198,7 +5288,7 @@ export function SessionPage() {
           if (!open) setMobileSheetPanel(null);
         }}
       >
-        <SheetContent side="bottom" className="mobile-session-sheet p-0">
+        <SheetContent side="bottom" title="Session tools" className="mobile-session-sheet p-0">
           {renderMobileSheetContent()}
         </SheetContent>
       </Sheet>

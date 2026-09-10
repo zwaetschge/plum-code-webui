@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -265,6 +268,7 @@ fun CodeBlock(
     modifier: Modifier = Modifier,
     showLineNumbers: Boolean = false,
 ) {
+    val componentTokens = PlumTheme.tokens
     val clipboardManager = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
@@ -286,7 +290,7 @@ fun CodeBlock(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.sm))
             .background(SyntaxColors.background)
     ) {
         // Header bar
@@ -294,12 +298,12 @@ fun CodeBlock(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(SyntaxColors.headerBg)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.inline),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = language.ifEmpty { "code" },
+                text = language.ifEmpty { stringResource(R.string.component_code) },
                 style = MaterialTheme.typography.labelSmall,
                 color = SyntaxColors.lineNumber,
                 fontFamily = JetBrainsMonoFamily,
@@ -314,9 +318,9 @@ fun CodeBlock(
             ) {
                 Icon(
                     imageVector = Icons.Outlined.ContentCopy,
-                    contentDescription = if (copied) "Copied!" else "Copy code",
+                    contentDescription = if (copied) stringResource(R.string.component_copied) else stringResource(R.string.component_copy_code),
                     tint = if (copied) Color(0xFF22C55E) else SyntaxColors.lineNumber,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(componentTokens.sizing.iconXs),
                 )
             }
         }
@@ -334,12 +338,12 @@ fun CodeBlock(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(scrollState)
-                .padding(12.dp)
+                .padding(componentTokens.spacing.md)
         ) {
             // Line numbers
             if (showLineNumbers && lines.size > 1) {
                 Column(
-                    modifier = Modifier.padding(end = 16.dp),
+                    modifier = Modifier.padding(end = componentTokens.spacing.lg),
                     horizontalAlignment = Alignment.End,
                 ) {
                     lines.forEachIndexed { idx, _ ->
@@ -376,11 +380,12 @@ fun InlineCode(
     code: String,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.xs))
             .background(SyntaxColors.background)
-            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .padding(horizontal = componentTokens.spacing.inline, vertical = componentTokens.spacing.xxs)
     ) {
         Text(
             text = code,

@@ -3,7 +3,7 @@ import { X, Circle, Loader2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api } from '@/services/api';
 import { toast } from '@/hooks/use-toast';
-import { useSessionStore } from '@/stores/sessionStore';
+import { useSessionStore, type OpenFile } from '@/stores/sessionStore';
 import { CodeEditor } from './CodeEditor';
 import { FileIcon } from '@/components/file-tree/file-icons';
 import type { ApiResponse } from '@plum-code-webui/shared';
@@ -13,12 +13,22 @@ interface EditorPanelProps {
   sessionId: string;
 }
 
-export function EditorPanel({ sessionId }: EditorPanelProps) {
-  const { openFiles, activeFileTab, updateFileContent, closeFile, setActiveTab, markFileSaved } =
-    useSessionStore();
+// Stable identity for the empty case, so a session with no open file does not
+// hand the selector a fresh array on every store change.
+const EMPTY_OPEN_FILES: OpenFile[] = [];
 
-  const files = openFiles[sessionId] || [];
-  const activeTab = activeFileTab[sessionId];
+export function EditorPanel({ sessionId }: EditorPanelProps) {
+  // Per-session slices, not the whole store: subscribing to the store object
+  // re-rendered the editor — and with it Monaco — on every streaming flush,
+  // every tool event and every status change of any session.
+  const files = useSessionStore((s) => s.openFiles[sessionId] ?? EMPTY_OPEN_FILES);
+  const activeTab = useSessionStore((s) => s.activeFileTab[sessionId]);
+  // Actions are stable Zustand refs; subscribing to them never re-renders.
+  const updateFileContent = useSessionStore((s) => s.updateFileContent);
+  const closeFile = useSessionStore((s) => s.closeFile);
+  const setActiveTab = useSessionStore((s) => s.setActiveTab);
+  const markFileSaved = useSessionStore((s) => s.markFileSaved);
+
   const activeFile = files.find((f) => f.path === activeTab);
 
   // Save file mutation

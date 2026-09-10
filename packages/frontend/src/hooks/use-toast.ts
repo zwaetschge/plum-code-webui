@@ -122,7 +122,11 @@ function useToast() {
         listeners.splice(index, 1);
       }
     };
-  }, [state]);
+    // `setState` is stable, so the subscription only ever needs to be set up
+    // once. Depending on `state` re-ran this on every toast, and each re-run
+    // removed and re-appended the listener — which is also why a dismiss during
+    // a burst of toasts could drop a subscriber.
+  }, []);
 
   return {
     ...state,

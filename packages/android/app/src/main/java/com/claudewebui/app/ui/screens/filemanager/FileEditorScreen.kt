@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.filemanager
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.WindowInsets
@@ -56,6 +57,11 @@ fun FileEditorScreen(
     viewModel: FileEditorViewModel,
     onNavigateBack: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
 
     PlumBackdrop {
@@ -65,17 +71,17 @@ fun FileEditorScreen(
             contentWindowInsets = WindowInsets.safeDrawing,
         ) { padding ->
             Column(
-                Modifier.fillMaxSize().padding(padding).padding(horizontal = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier.fillMaxSize().padding(padding).padding(horizontal = screenTokens.spacing.cozy),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact),
             ) {
                 PlumScreenHeader(
-                    title = state.fileName.ifBlank { "File" },
+                    title = state.fileName.ifBlank { screenResources.getString(R.string.filemanager_file_2c3ca) },
                     subtitle = state.path,
                     actions = {
-                        PlumIconButton(Icons.Outlined.Refresh, "Reload", viewModel::load)
+                        PlumIconButton(Icons.Outlined.Refresh, screenResources.getString(R.string.filemanager_reload_cce71), viewModel::load)
                         PlumIconButton(
                             Icons.AutoMirrored.Outlined.ArrowBack,
-                            "Back",
+                            screenResources.getString(R.string.filemanager_back_b52b3),
                             onNavigateBack,
                         )
                     },
@@ -88,20 +94,20 @@ fun FileEditorScreen(
                 ) {
                     Text(
                         when {
-                            state.isSaving -> "Saving…"
-                            state.hasChanges -> "Unsaved changes"
-                            state.savedAt != null -> "Saved"
-                            else -> "No changes"
+                            state.isSaving -> screenResources.getString(R.string.filemanager_saving_56a22)
+                            state.hasChanges -> screenResources.getString(R.string.filemanager_unsaved_changes_29267)
+                            state.savedAt != null -> screenResources.getString(R.string.filemanager_saved_c0ae8)
+                            else -> screenResources.getString(R.string.filemanager_no_changes_24a61)
                         },
                         color = if (state.hasChanges) PlumAccent else PlumMuted,
                         fontSize = 12.sp,
                         modifier = Modifier.weight(1f),
                     )
                     if (state.hasChanges) {
-                        ActionChip("Revert", enabled = !state.isSaving, onClick = viewModel::revert)
+                        ActionChip(screenResources.getString(R.string.filemanager_revert_27260), enabled = !state.isSaving, onClick = viewModel::revert)
                     }
                     ActionChip(
-                        "Save",
+                        screenResources.getString(R.string.filemanager_save_efc00),
                         enabled = state.hasChanges && !state.isSaving,
                         onClick = viewModel::save,
                     )
@@ -111,14 +117,14 @@ fun FileEditorScreen(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(screenTokens.radius.md))
                             .background(PlumSubtleFill)
-                            .padding(12.dp),
+                            .padding(screenTokens.spacing.md),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(message, color = PlumRed, fontSize = 12.sp, modifier = Modifier.weight(1f))
                         Text(
-                            "Dismiss",
+                            screenResources.getString(R.string.filemanager_dismiss_70afe),
                             color = PlumAccent,
                             fontSize = 12.sp,
                             modifier = Modifier.clickable(onClick = viewModel::dismissError),

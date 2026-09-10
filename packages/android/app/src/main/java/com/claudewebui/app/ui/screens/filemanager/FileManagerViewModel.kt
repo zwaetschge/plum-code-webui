@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.filemanager
 
+import com.claudewebui.app.ui.screens.screenErrorMessage
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -67,11 +68,13 @@ class FileManagerViewModel(
                         )
                     }
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
                         isLoading = false,
-                        error = e.message ?: "Unknown error"
+                        error = e.screenErrorMessage("filemanager", "navigateTo")
                     )
                 }
             }
@@ -101,6 +104,23 @@ class FileManagerViewModel(
         }
     }
 
+    /**
+     * Bytes for a save-to-device action: the raw file, or the whole directory
+     * as a ZIP. The screen owns the document picker and the copy, so this only
+     * fetches.
+     */
+    suspend fun fetchDownload(file: FileInfo): Result<ByteArray> = runCatching {
+        if (file.type == FileType.DIRECTORY) {
+            apiClient.downloadFolderArchive(file.path)
+        } else {
+            apiClient.downloadFile(file.path)
+        }
+    }
+
+    fun reportError(message: String) {
+        _state.update { it.copy(error = message) }
+    }
+
     fun uploadFile(
         context: Context,
         uri: Uri,
@@ -113,7 +133,13 @@ class FileManagerViewModel(
                     ?: throw Exception("Could not read file")
                 val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
                 _state.update { it.copy(uploadProgress = 0.5f) }
-                val result = apiClient.uploadFile(sessionId, fileName, bytes, mimeType)
+                val result = apiClient.uploadFile(
+                    sessionId = sessionId,
+                    fileName = fileName,
+                    fileBytes = bytes,
+                    mimeType = mimeType,
+                    targetDirectory = _state.value.currentPath.ifBlank { null }
+                )
                 if (result.success) {
                     _state.update { it.copy(isUploading = false, uploadProgress = null) }
                     refresh()
@@ -126,12 +152,14 @@ class FileManagerViewModel(
                         )
                     }
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
                         isUploading = false,
                         uploadProgress = null,
-                        error = e.message ?: "Upload failed"
+                        error = e.screenErrorMessage("filemanager", "uploadFile")
                     )
                 }
             }

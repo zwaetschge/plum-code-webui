@@ -1,5 +1,6 @@
 package com.claudewebui.app.data.repository
 
+import com.claudewebui.app.core.network.apiCall
 import com.claudewebui.app.core.network.ApiClient
 import com.claudewebui.app.core.security.TokenStore
 import com.claudewebui.app.data.model.AuthUser
@@ -26,7 +27,7 @@ class AuthRepository(
         username: String,
         password: String
     ): Result<AuthUser> {
-        return runCatching {
+        return apiCall {
             // Store the server URL so ApiClient can build the correct base URL
             tokenStore.setServerUrl(serverUrl)
 
@@ -46,7 +47,7 @@ class AuthRepository(
      * Dev / anonymous login — only available on servers with dev mode enabled.
      */
     suspend fun devLogin(serverUrl: String): Result<AuthUser> {
-        return runCatching {
+        return apiCall {
             tokenStore.setServerUrl(serverUrl)
 
             val response = api.devLogin(LoginRequest())
@@ -68,7 +69,7 @@ class AuthRepository(
         serverUrl: String,
         oauthToken: String
     ): Result<AuthUser> {
-        return runCatching {
+        return apiCall {
             tokenStore.setServerUrl(serverUrl)
             // Store the OAuth token as the session token
             tokenStore.setToken(oauthToken)
@@ -90,9 +91,9 @@ class AuthRepository(
      * the server to invalidate the session.
      */
     suspend fun logout(): Result<Unit> {
-        return runCatching {
+        return apiCall {
             // Best-effort server logout — don't fail if server is unreachable
-            runCatching { api.logout() }
+            apiCall { api.logout() }
             tokenStore.clearAll()
         }
     }
@@ -105,7 +106,7 @@ class AuthRepository(
      * Returns a failure if the token is expired or the server is unreachable.
      */
     suspend fun getAuthUser(): Result<AuthUser> {
-        return runCatching {
+        return apiCall {
             val response = api.me()
             if (!response.success || response.data == null) {
                 error(response.error?.message ?: "Failed to fetch user")
@@ -117,7 +118,7 @@ class AuthRepository(
     /**
      * Query which OAuth providers the target server has enabled.
      */
-    suspend fun getAuthProviders(serverUrl: String) = runCatching {
+    suspend fun getAuthProviders(serverUrl: String) = apiCall {
         tokenStore.setServerUrl(serverUrl)
         val response = api.authProviders()
         if (!response.success || response.data == null) {

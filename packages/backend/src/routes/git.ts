@@ -24,6 +24,36 @@ function getGit(repoPath: string): SimpleGit {
   return simpleGit(resolvedPath);
 }
 
+/**
+ * Reject a user-supplied ref, branch name or pathspec that would be read as a
+ * git option.
+ *
+ * simple-git assembles `["diff", ...args]` and contributes no `--` separator of
+ * its own, so any value in an argument slot that starts with a dash is an
+ * option. `/api/git/compare?base=--output&head=/tmp/evil` therefore ran
+ * `git diff --output /tmp/evil` and wrote the diff to an arbitrary path — only
+ * `path` was ever validated against ALLOWED_BASE_PATHS, never the refs. Values
+ * that look like options are refused here, and pathspecs additionally go behind
+ * an explicit `--` at the call sites.
+ */
+function gitArg(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new AppError(`${label} is required`, 400, 'MISSING_PARAMS');
+  }
+  if (value.startsWith('-')) {
+    throw new AppError(`Invalid ${label}: must not start with "-"`, 400, 'INVALID_GIT_ARGUMENT');
+  }
+  return value;
+}
+
+/** Same rule for a list of pathspecs. */
+function gitArgs(values: unknown, label: string): string[] {
+  if (!Array.isArray(values)) {
+    throw new AppError(`${label} is required`, 400, 'MISSING_PARAMS');
+  }
+  return values.map((value) => gitArg(value, label));
+}
+
 // Get git status
 router.get('/status', requireAuth, async (req, res) => {
   const repoPath = req.query.path as string;
@@ -146,7 +176,7 @@ router.post('/checkout', requireAuth, async (req, res) => {
 
   try {
     const git = getGit(repoPath);
-    await git.checkout(branch);
+    await git.checkout(gitArg(branch, 'branch'));
 
     res.json({ success: true, data: { branch } });
   } catch (err) {
@@ -171,7 +201,7 @@ router.get('/diff', requireAuth, async (req, res) => {
 
   try {
     const git = getGit(repoPath);
-    const diff = file ? await git.diff([file]) : await git.diff();
+    const diff = file ? await git.diff(['--', gitArg(file, 'file')]) : await git.diff();
 
     res.json({ success: true, data: { diff } });
   } catch (err) {
@@ -195,7 +225,7 @@ router.get('/diff-staged', requireAuth, async (req, res) => {
     const git = getGit(repoPath);
     const diffArgs = ['--cached'];
     if (file) {
-      diffArgs.push(file);
+      diffArgs.push('--', gitArg(file, 'file'));
     }
     const diff = await git.diff(diffArgs);
 
@@ -220,7 +250,9 @@ router.get('/diff-file', requireAuth, async (req, res) => {
 
   try {
     const git = getGit(repoPath);
-    const diffArgs = staged ? ['--cached', file] : [file];
+    const diffArgs = staged
+      ? ['--cached', '--', gitArg(file, 'file')]
+      : ['--', gitArg(file, 'file')];
     const diff = await git.diff(diffArgs);
 
     // Parse diff to count additions and deletions
@@ -267,7 +299,7 @@ router.post('/stage', requireAuth, async (req, res) => {
 
     if (files && Array.isArray(files) && files.length > 0) {
       // Stage specific files
-      await git.add(files);
+      await git.add(['--', ...gitArgs(files, 'files')]);
     } else {
       // Stage all changes
       await git.add('.');
@@ -402,11 +434,12 @@ router.post('/branch/create', requireAuth, async (req, res) => {
     const git = getGit(repoPath);
 
     // Create branch
-    await git.branch([name]);
+    const branchName = gitArg(name, 'branch name');
+    await git.branch([branchName]);
 
     // Checkout if requested
     if (checkout) {
-      await git.checkout(name);
+      await git.checkout(branchName);
     }
 
     res.json({ success: true, data: { branch: name, checkedOut: !!checkout } });
@@ -433,7 +466,7 @@ router.post('/branch/delete', requireAuth, async (req, res) => {
     const git = getGit(repoPath);
 
     // Delete branch (force if requested)
-    await git.branch([force ? '-D' : '-d', name]);
+    await git.branch([force ? '-D' : '-d', gitArg(name, 'branch name')]);
 
     res.json({ success: true });
   } catch (err) {
@@ -481,10 +514,11 @@ router.post('/checkout', requireAuth, async (req, res) => {
       );
     }
 
+    const targetBranch = gitArg(branch.trim(), 'branch');
     if (create) {
-      await git.checkoutLocalBranch(branch.trim());
+      await git.checkoutLocalBranch(targetBranch);
     } else {
-      await git.checkout(branch.trim());
+      await git.checkout(targetBranch);
     }
 
     const after = await git.status();
@@ -510,8 +544,8 @@ router.post('/pull', requireAuth, async (req, res) => {
     const git = getGit(repoPath);
 
     const pullOptions: string[] = [];
-    if (remote) pullOptions.push(remote);
-    if (branch) pullOptions.push(branch);
+    if (remote) pullOptions.push(gitArg(remote, 'remote'));
+    if (branch) pullOptions.push(gitArg(branch, 'branch'));
 
     const result = await git.pull(pullOptions);
 
@@ -545,7 +579,7 @@ router.post('/fetch', requireAuth, async (req, res) => {
 
     const fetchOptions: string[] = [];
     if (prune) fetchOptions.push('--prune');
-    if (remote) fetchOptions.push(remote);
+    if (remote) fetchOptions.push(gitArg(remote, 'remote'));
 
     await git.fetch(fetchOptions);
 
@@ -634,10 +668,11 @@ router.get('/commit-diff', requireAuth, async (req, res) => {
     const git = getGit(repoPath);
 
     // Get diff for this commit compared to its parent
-    const diff = await git.diff([`${hash}^`, hash]);
+    const commitHash = gitArg(hash, 'commit hash');
+    const diff = await git.diff([`${commitHash}^`, commitHash, '--']);
 
     // Get commit details
-    const log = await git.log({ from: hash, to: hash, maxCount: 1 });
+    const log = await git.log({ from: commitHash, to: commitHash, maxCount: 1 });
     const commit = log.all[0];
 
     // Parse file changes from diff
@@ -717,8 +752,9 @@ router.get('/commit-diff', requireAuth, async (req, res) => {
     // Handle first commit (no parent)
     if ((err as Error).message.includes('unknown revision')) {
       const git = getGit(repoPath);
-      const diff = await git.diff(['--root', hash]);
-      const log = await git.log({ from: hash, to: hash, maxCount: 1 });
+      const commitHash = gitArg(hash, 'commit hash');
+      const diff = await git.diff(['--root', commitHash, '--']);
+      const log = await git.log({ from: commitHash, to: commitHash, maxCount: 1 });
       const commit = log.all[0];
 
       res.json({
@@ -752,7 +788,7 @@ router.get('/file-at-commit', requireAuth, async (req, res) => {
 
   try {
     const git = getGit(repoPath);
-    const content = await git.show([`${hash}:${file}`]);
+    const content = await git.show([`${gitArg(hash, 'commit hash')}:${gitArg(file, 'file')}`]);
 
     res.json({ success: true, data: { content } });
   } catch (err) {
@@ -779,11 +815,13 @@ router.get('/compare', requireAuth, async (req, res) => {
 
   try {
     const git = getGit(repoPath);
-    const diff = await git.diff([base, head]);
+    const baseRef = gitArg(base, 'base ref');
+    const headRef = gitArg(head, 'head ref');
+    const diff = await git.diff([baseRef, headRef, '--']);
 
     // Get commit info for both refs
-    const baseLog = await git.log({ from: base, to: base, maxCount: 1 });
-    const headLog = await git.log({ from: head, to: head, maxCount: 1 });
+    const baseLog = await git.log({ from: baseRef, to: baseRef, maxCount: 1 });
+    const headLog = await git.log({ from: headRef, to: headRef, maxCount: 1 });
 
     // Parse additions/deletions
     const diffLines = diff.split('\n');
@@ -835,10 +873,10 @@ router.post('/restore', requireAuth, async (req, res) => {
 
     if (commit) {
       // Restore from specific commit
-      await git.checkout([commit, '--', file]);
+      await git.checkout([gitArg(commit, 'commit'), '--', gitArg(file, 'file')]);
     } else {
       // Restore from HEAD (discard all changes including staged)
-      await git.checkout(['HEAD', '--', file]);
+      await git.checkout(['HEAD', '--', gitArg(file, 'file')]);
     }
 
     res.json({ success: true, data: { restored: file, from: commit || 'HEAD' } });
@@ -908,7 +946,7 @@ router.get('/file-history', requireAuth, async (req, res) => {
 
     const log = await git.log({
       maxCount: limit,
-      file,
+      file: gitArg(file, 'file'),
     });
 
     const commits = log.all.map((commit) => ({
@@ -997,7 +1035,10 @@ router.post('/stash/apply', requireAuth, async (req, res) => {
   try {
     const git = getGit(repoPath);
 
-    const stashRef = index !== undefined ? `stash@{${index}}` : undefined;
+    if (index !== undefined && !Number.isInteger(Number(index))) {
+      throw new AppError('Stash index must be a number', 400, 'INVALID_STASH_INDEX');
+    }
+    const stashRef = index !== undefined ? `stash@{${Number(index)}}` : undefined;
     const args = stashRef ? [stashRef] : [];
 
     if (pop) {

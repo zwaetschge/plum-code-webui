@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Backup and device-transfer rules for Android 12+.
+
+    Same reasoning as backup_rules.xml: the token is encrypted against a
+    Keystore key that does not travel, so backing it up leaks a secret without
+    ever restoring a usable session. The keyset files, the Room cache, the
+    WorkManager database and the pending crash report are excluded from both
+    cloud backup and device-to-device transfer for the reasons given there.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="claude_webui_secure_prefs.xml" />
+        <exclude domain="sharedpref" path="__androidx_security_crypto_encrypted_prefs_key_keyset__.xml" />
+        <exclude domain="sharedpref" path="__androidx_security_crypto_encrypted_prefs_value_keyset__.xml" />
+        <exclude domain="database" path="claude_webui.db" />
+        <exclude domain="database" path="claude_webui.db-wal" />
+        <exclude domain="database" path="claude_webui.db-shm" />
+        <exclude domain="database" path="claude_webui.db-journal" />
+        <exclude domain="database" path="androidx.work.workdb" />
+        <exclude domain="database" path="androidx.work.workdb-wal" />
+        <exclude domain="database" path="androidx.work.workdb-shm" />
+        <exclude domain="file" path="last-crash.txt" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="claude_webui_secure_prefs.xml" />
+        <exclude domain="sharedpref" path="__androidx_security_crypto_encrypted_prefs_key_keyset__.xml" />
+        <exclude domain="sharedpref" path="__androidx_security_crypto_encrypted_prefs_value_keyset__.xml" />
+        <exclude domain="database" path="claude_webui.db" />
+        <exclude domain="database" path="claude_webui.db-wal" />
+        <exclude domain="database" path="claude_webui.db-shm" />
+        <exclude domain="database" path="claude_webui.db-journal" />
+        <exclude domain="database" path="androidx.work.workdb" />
+        <exclude domain="database" path="androidx.work.workdb-wal" />
+        <exclude domain="database" path="androidx.work.workdb-shm" />
+        <exclude domain="file" path="last-crash.txt" />
+    </device-transfer>
+</data-extraction-rules>

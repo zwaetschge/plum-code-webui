@@ -1,5 +1,7 @@
 package com.claudewebui.app.widget
 
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.os.Bundle
@@ -98,19 +100,19 @@ private fun ConfigSheet(initial: WidgetConfig, onConfirm: (WidgetConfig) -> Unit
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("Widget options", color = accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.native_widget_options), color = accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
 
-            SectionLabel("Time range (stat widgets)")
-            RadioRow("Today", period == "24h") { period = "24h" }
-            RadioRow("This week", period == "7d") { period = "7d" }
+            SectionLabel(stringResource(R.string.native_range))
+            RadioRow(stringResource(R.string.native_today_title), period == "24h") { period = "24h" }
+            RadioRow(stringResource(R.string.native_week_title), period == "7d") { period = "7d" }
 
-            SectionLabel("Provider filter")
-            RadioRow("All providers", provider == null) { provider = null }
+            SectionLabel(stringResource(R.string.native_provider_filter))
+            RadioRow(stringResource(R.string.native_all_providers), provider == null) { provider = null }
             CLIProvider.active.forEach { p ->
                 RadioRow(p.displayName, provider == p.displayName) { provider = p.displayName }
             }
 
-            SectionLabel("Appearance")
+            SectionLabel(stringResource(R.string.native_appearance))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -118,7 +120,7 @@ private fun ConfigSheet(initial: WidgetConfig, onConfirm: (WidgetConfig) -> Unit
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Translucent background",
+                    stringResource(R.string.native_translucent),
                     color = Color(0xFFEDEBF0),
                     fontSize = 14.sp,
                     modifier = Modifier.weight(1f),
@@ -133,7 +135,7 @@ private fun ConfigSheet(initial: WidgetConfig, onConfirm: (WidgetConfig) -> Unit
                     .padding(top = 12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = accent),
             ) {
-                Text("Add widget", color = Color.White)
+                Text(stringResource(R.string.native_add_widget), color = Color.White)
             }
         }
     }

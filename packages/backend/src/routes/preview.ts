@@ -6,6 +6,7 @@ import http from 'http';
 import path from 'path';
 import { config } from '../config.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
+import { rateLimiters } from '../middleware/rateLimiter.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { redactSensitiveText } from '../utils/sanitize.js';
 import { buildRestrictedChildEnv } from '../utils/childProcessEnv.js';
@@ -602,7 +603,7 @@ router.get('/static-file', requireAuth, async (req, res) => {
   });
 });
 
-router.get('/ports', requireAuth, async (req, res) => {
+router.get('/ports', requireAuth, rateLimiters.portProbe, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const projectPath =
     typeof req.query.projectPath === 'string' && req.query.projectPath.trim()

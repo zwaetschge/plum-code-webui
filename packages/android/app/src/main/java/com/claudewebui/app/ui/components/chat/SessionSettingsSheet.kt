@@ -1,5 +1,10 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.components.common.localizedLabel
+import com.claudewebui.app.ui.components.common.localizedDescription
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -83,6 +88,7 @@ fun SessionSettingsSheet(
     isSharing: Boolean = false,
     onDismiss: () -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var newDirectory by remember { mutableStateOf("") }
     ModalBottomSheet(
@@ -95,24 +101,24 @@ fun SessionSettingsSheet(
                 .fillMaxWidth()
                 .heightIn(max = 620.dp)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 18.dp)
+                .padding(horizontal = componentTokens.spacing.headerHorizontal)
                 .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.headerHorizontal),
         ) {
-            Text("Session settings", color = PlumText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.component_session_settings), color = PlumText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
 
-            SettingsGroup("Mode", "Applies immediately") {
+            SettingsGroup(stringResource(R.string.component_mode), stringResource(R.string.component_applies_immediately)) {
                 SessionMode.entries.forEach { option ->
                     OptionRow(
-                        title = option.label,
-                        subtitle = option.description,
+                        title = option.localizedLabel(),
+                        subtitle = option.localizedDescription(),
                         selected = option == mode,
                         enabled = true,
                     ) { onModeChange(option) }
                 }
             }
 
-            SettingsGroup("Provider", "Applies immediately") {
+            SettingsGroup(stringResource(R.string.component_provider), stringResource(R.string.component_applies_immediately)) {
                 CLIProvider.active.forEach { provider ->
                     OptionRow(
                         title = provider.displayName,
@@ -124,9 +130,9 @@ fun SessionSettingsSheet(
                 }
             }
 
-            SettingsGroup("Model", "Applies immediately") {
+            SettingsGroup(stringResource(R.string.component_model), stringResource(R.string.component_applies_immediately)) {
                 OptionRow(
-                    title = "Provider default",
+                    title = stringResource(R.string.component_provider_default),
                     subtitle = null,
                     selected = session.cliModel.isNullOrBlank(),
                     enabled = !isApplying,
@@ -141,26 +147,26 @@ fun SessionSettingsSheet(
                 }
                 if (availableModels.isEmpty()) {
                     Text(
-                        "This provider reports no model list",
+                        stringResource(R.string.component_this_provider_reports_no_model_list),
                         color = PlumMuted,
                         fontSize = 11.sp,
-                        modifier = Modifier.padding(vertical = 6.dp),
+                        modifier = Modifier.padding(vertical = componentTokens.spacing.inline),
                     )
                 }
             }
 
-            SettingsGroup("Reasoning", "Applies immediately") {
+            SettingsGroup(stringResource(R.string.component_reasoning), stringResource(R.string.component_applies_immediately)) {
                 val levels = ReasoningLevel.forProvider(session.cliProvider)
                 val fastActive = session.cliServiceTier.equals(ServiceTier.FAST.id, ignoreCase = true)
                 OptionRow(
-                    title = "Provider default",
+                    title = stringResource(R.string.component_provider_default),
                     subtitle = null,
                     selected = session.cliReasoning.isNullOrBlank() && !fastActive,
                     enabled = !isApplying,
                 ) { onReasoningChange(null) }
                 levels.forEach { level ->
                     OptionRow(
-                        title = level.label,
+                        title = level.localizedLabel(),
                         subtitle = null,
                         selected = !fastActive &&
                             level.id.equals(session.cliReasoning, ignoreCase = true),
@@ -169,21 +175,21 @@ fun SessionSettingsSheet(
                 }
                 // A level the server set but this provider no longer lists
                 // (e.g. after a provider switch) would otherwise vanish from the
-                // sheet and read as "Provider default".
+                // sheet and read as stringResource(R.string.component_provider_default).
                 ReasoningLevel.fromId(session.cliReasoning)
                     ?.takeIf { it !in levels }
                     ?.let { orphan ->
                         OptionRow(
-                            title = orphan.label,
-                            subtitle = "Set on the server for another provider",
+                            title = orphan.localizedLabel(),
+                            subtitle = stringResource(R.string.component_set_on_the_server_for_another_provider),
                             selected = !fastActive,
                             enabled = !isApplying,
                         ) { onReasoningChange(orphan.id) }
                     }
                 if (session.cliProvider == CLIProvider.CODEX) {
                     OptionRow(
-                        title = ServiceTier.FAST.label,
-                        subtitle = "Codex service tier — lowest latency",
+                        title = ServiceTier.FAST.localizedLabel(),
+                        subtitle = stringResource(R.string.component_codex_service_tier_lowest_latency),
                         selected = fastActive,
                         enabled = !isApplying,
                     ) { onReasoningChange(ServiceTier.FAST.id) }
@@ -191,18 +197,18 @@ fun SessionSettingsSheet(
             }
 
             if (designStyles.isNotEmpty() || writingStyles.isNotEmpty()) {
-                SettingsGroup("Presentation presets", "Applied to this session's turns") {
-                    StylePicker("Design", designStyles, session.designStyleSkill, isApplying) {
+                SettingsGroup(stringResource(R.string.component_presentation_presets), stringResource(R.string.component_applied_to_this_session_s_turns)) {
+                    StylePicker(stringResource(R.string.component_design), designStyles, session.designStyleSkill, isApplying) {
                         onStyleChange(StyleKind.DESIGN, it)
                     }
-                    StylePicker("Writing", writingStyles, session.writingStyleSkill, isApplying) {
+                    StylePicker(stringResource(R.string.component_writing), writingStyles, session.writingStyleSkill, isApplying) {
                         onStyleChange(StyleKind.WRITING, it)
                     }
                 }
             }
 
             if (meshPeers.isNotEmpty()) {
-                SettingsGroup("Session mesh", "Sessions this one can delegate to") {
+                SettingsGroup(stringResource(R.string.component_session_mesh), stringResource(R.string.component_sessions_this_one_can_delegate_to)) {
                     meshPeers.forEach { peer ->
                         OptionRow(
                             title = peer.target?.name ?: peer.targetSessionId,
@@ -217,10 +223,10 @@ fun SessionSettingsSheet(
                 }
             }
 
-            SettingsGroup("This session", "Reuse or hand it off") {
+            SettingsGroup(stringResource(R.string.component_this_session), stringResource(R.string.component_reuse_or_hand_it_off)) {
                 var templateName by remember(session.id) { mutableStateOf(session.name) }
                 Text(
-                    "A template keeps provider, model, mode and workspace — not the messages.",
+                    stringResource(R.string.component_a_template_keeps_provider_model_mode_and_workspace_not_the_messag),
                     color = PlumMuted,
                     fontSize = 11.sp,
                 )
@@ -228,22 +234,22 @@ fun SessionSettingsSheet(
                     value = templateName,
                     onValueChange = { templateName = it },
                     singleLine = true,
-                    label = { Text("Template name") },
+                    label = { Text(stringResource(R.string.component_template_name)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 SheetActionRow(
-                    label = "Save as template",
+                    label = stringResource(R.string.component_save_as_template),
                     enabled = templateName.isNotBlank(),
                 ) { onSaveTemplate(templateName.trim()) }
                 SheetActionRow(
-                    label = if (isSharing) "Preparing transcript…" else "Share transcript",
+                    label = if (isSharing) stringResource(R.string.component_preparing_transcript) else stringResource(R.string.component_share_transcript),
                     enabled = !isSharing,
                 ) { onShareTranscript() }
             }
 
-            SettingsGroup("Allowed directories", "Enforced per session") {
+            SettingsGroup(stringResource(R.string.component_allowed_directories), stringResource(R.string.component_enforced_per_session)) {
                 Text(
-                    "Adds explicit read/write roots beyond the session workspace.",
+                    stringResource(R.string.component_adds_explicit_read_write_roots_beyond_the_session_workspace),
                     color = PlumMuted,
                     fontSize = 11.sp,
                 )
@@ -251,10 +257,10 @@ fun SessionSettingsSheet(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(componentTokens.radius.md))
                             .background(PlumSubtleFill)
-                            .border(1.dp, PlumBorder, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .border(1.dp, PlumBorder, RoundedCornerShape(componentTokens.radius.md))
+                            .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
@@ -268,16 +274,16 @@ fun SessionSettingsSheet(
                         TextButton(
                             onClick = { onRemoveAllowedDirectory(directory) },
                             enabled = !directoriesLoading,
-                        ) { Text("Remove") }
+                        ) { Text(stringResource(R.string.component_remove)) }
                     }
                 }
                 if (allowedDirectories.isEmpty()) {
-                    Text("No additional roots", color = PlumMuted, fontSize = 11.sp)
+                    Text(stringResource(R.string.component_no_additional_roots), color = PlumMuted, fontSize = 11.sp)
                 }
                 OutlinedTextField(
                     value = newDirectory,
                     onValueChange = { newDirectory = it },
-                    label = { Text("Server directory path") },
+                    label = { Text(stringResource(R.string.component_server_directory_path)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     trailingIcon = {
@@ -287,7 +293,7 @@ fun SessionSettingsSheet(
                                 newDirectory = ""
                             },
                             enabled = newDirectory.isNotBlank() && !directoriesLoading,
-                        ) { Text("Add") }
+                        ) { Text(stringResource(R.string.component_add)) }
                     },
                 )
             }
@@ -313,14 +319,16 @@ private fun SettingsGroup(
 /** A plain action, as opposed to the selectable OptionRow above it. */
 @Composable
 private fun SheetActionRow(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    val componentTokens = PlumTheme.tokens
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.md))
             .background(PlumSubtleFill)
-            .border(1.dp, PlumBorder, RoundedCornerShape(12.dp))
+            .border(1.dp, PlumBorder, RoundedCornerShape(componentTokens.radius.md))
+            .heightIn(min = componentTokens.sizing.touchTarget)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 11.dp),
+            .padding(horizontal = componentTokens.spacing.md, vertical = 11.dp),
     ) {
         Text(
             label,
@@ -340,14 +348,16 @@ private fun OptionRow(
     accent: Color = PlumAccent,
     onClick: () -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.md))
             .background(PlumSubtleFill)
-            .border(1.dp, if (selected) accent else PlumBorder, RoundedCornerShape(12.dp))
+            .border(1.dp, if (selected) accent else PlumBorder, RoundedCornerShape(componentTokens.radius.md))
+            .heightIn(min = componentTokens.sizing.touchTarget)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 11.dp),
+            .padding(horizontal = componentTokens.spacing.md, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -372,7 +382,7 @@ private fun OptionRow(
 }
 
 /**
- * One preset slot: "None" plus the catalogue entries. Collapsed to a scrollable
+ * One preset slot: stringResource(R.string.component_none) plus the catalogue entries. Collapsed to a scrollable
  * list because the design library alone ships several dozen presets.
  */
 @Composable
@@ -389,7 +399,7 @@ private fun StylePicker(
 
     OptionRow(
         title = label,
-        subtitle = active?.name ?: "None",
+        subtitle = active?.name ?: stringResource(R.string.component_none),
         selected = active != null,
         enabled = !isApplying,
     ) { expanded = !expanded }
@@ -402,7 +412,7 @@ private fun StylePicker(
                 .verticalScroll(rememberScrollState()),
         ) {
             OptionRow(
-                title = "None",
+                title = stringResource(R.string.component_none),
                 subtitle = null,
                 selected = active == null,
                 enabled = !isApplying,

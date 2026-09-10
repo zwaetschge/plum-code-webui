@@ -17,7 +17,12 @@ const BACKEND = process.env.WEBUI_BACKEND_URL || 'http://localhost:3001';
 const HOOK_SECRET = process.env.WEBUI_HOOK_SECRET || '';
 const SESSION_ID = process.env.WEBUI_SESSION_ID || '';
 const SESSION_CONTEXT_FILE = process.env.WEBUI_SESSION_CONTEXT_FILE || '';
-const TIMEOUT_S = Number(process.env.COMFYUI_TIMEOUT_SECONDS || 300);
+// A non-numeric COMFYUI_TIMEOUT_SECONDS used to yield NaN, and `setTimeout(NaN)`
+// fires immediately - every generation would abort on the spot.
+const TIMEOUT_S = (() => {
+  const parsed = Number(process.env.COMFYUI_TIMEOUT_SECONDS);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 300;
+})();
 
 const log = (...args) => console.error('[mcp-comfyui]', ...args);
 

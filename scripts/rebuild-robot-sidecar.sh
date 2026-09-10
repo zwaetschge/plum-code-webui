@@ -6,7 +6,10 @@
 # This script is POSIX sh compatible (no bash required).
 #
 
-set -e
+# -u as well as -e: this script runs unattended, and a typo'd variable name
+# silently expanding to the empty string is how a rebuild ends up stopping the
+# wrong service or writing a status file nobody can parse.
+set -eu
 
 WEBUI_DIR="/webui"
 COMPOSE_FILE="${WEBUI_DIR}/docker-compose.yml"
@@ -75,7 +78,12 @@ write_status() {
   _status="$1"
   _message="$2"
   _phase="$3"
-  cat > "$STATUS_FILE" << EOF
+  # plum-rebuild.sh polls this file every second. A plain redirect truncates it
+  # first, so the poller can read an empty or half-written document and treat a
+  # healthy rebuild as malformed. Write to a temp file in the same directory and
+  # rename it into place, which is atomic on the same filesystem.
+  _status_tmp="${STATUS_FILE}.tmp.$$"
+  cat > "$_status_tmp" << EOF
 {
   "status": "${_status}",
   "message": "${_message}",
@@ -85,6 +93,7 @@ write_status() {
   "container": true
 }
 EOF
+  mv -f "$_status_tmp" "$STATUS_FILE"
 }
 
 # Write markdown report
@@ -489,7 +498,17 @@ do_rebuild() {
   # shellcheck disable=SC2086
   docker compose ${_compose_flags} -p "$COMPOSE_PROJECT" rm -f "$MAIN_SERVICE" 2>&1 || true
 
-  sleep 2
+  # Wait for the container name to actually be free instead of guessing with a
+  # fixed sleep. Usually this returns immediately, which shortens the downtime
+  # window; when removal is slow it waits longer than the old two seconds did.
+  _free_attempt=1
+  while [ "$_free_attempt" -le 10 ]; do
+    if [ -z "$(service_container_id "$_compose_flags")" ]; then
+      break
+    fi
+    sleep 1
+    _free_attempt=$((_free_attempt + 1))
+  done
 
   # Phase 3: Start main container with new image
   log_info "Phase 3: Starting ${MAIN_SERVICE} with new image..."
@@ -602,16 +621,12 @@ watch() {
 # Verify docker compose is available
 check_prerequisites() {
   if ! docker compose version >/dev/null 2>&1; then
+    # No self-install attempt here: the sidecar image runs as an unprivileged
+    # user, so `apk add` can only ever fail, and pretending otherwise buried the
+    # real cause under a second misleading error.
     log_error "docker compose nicht verfügbar!"
-    # Try installing compose plugin
-    if command -v apk >/dev/null 2>&1; then
-      log_info "Versuche docker-compose-plugin zu installieren..."
-      apk add --no-cache docker-compose-plugin 2>&1 || true
-    fi
-    if ! docker compose version >/dev/null 2>&1; then
-      log_error "docker compose konnte nicht installiert werden. Abbruch."
-      exit 1
-    fi
+    log_error "Das Sidecar-Image muss das Compose-Plugin mitbringen. Abbruch."
+    exit 1
   fi
   log_info "docker compose $(docker compose version --short 2>/dev/null || echo 'verfügbar')"
 

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="activity_1_s_session_2_s_0520f">%1$s session%2$s</string>
+    <string name="activity_activity_81c0d">Activity</string>
+    <string name="activity_all_6a720">All</string>
+    <string name="activity_chat_1_s_2_s_6330a">Chat: %1$s · %2$s</string>
+    <string name="activity_connected_to_plum_code_webui_82f9f">Connected to plum-code-webui</string>
+    <string name="activity_connecting_fd3e7">Connecting…</string>
+    <string name="activity_connection_failed_202ca">Connection failed</string>
+    <string name="activity_discard_36fff">Discard</string>
+    <string name="activity_failed_09fef">Failed</string>
+    <string name="activity_history_unavailable_5bcef">History unavailable</string>
+    <string name="activity_live_activity_93df4">Live Activity</string>
+    <string name="activity_more_4bab2">More</string>
+    <string name="activity_needs_you_0d9d0">Needs you</string>
+    <string name="activity_new_live_events_will_appear_here_31fb0">New live events will appear here.</string>
+    <string name="activity_no_matching_activity_26303">No matching activity</string>
+    <string name="activity_no_messages_waiting_to_be_sent_1f175">No messages waiting to be sent</string>
+    <string name="activity_nothing_in_progress_a710d">Nothing in progress</string>
+    <string name="activity_offline_showing_cached_state_56761">Offline — showing cached state</string>
+    <string name="activity_open_session_77709">Open session</string>
+    <string name="activity_original_chat_b08b0">Original chat</string>
+    <string name="activity_outbox_1_s_this_device_9640e">Outbox (%1$s) · this device</string>
+    <string name="activity_queued_6a599">Queued</string>
+    <string name="activity_realtime_overview_of_agents_tools_and_events_a04c0">Realtime overview of agents, tools and events</string>
+    <string name="activity_reconnecting_8a8b9">Reconnecting…</string>
+    <string name="activity_refresh_56e3b">Refresh</string>
+    <string name="activity_requests_24h_f8785">Requests 24h</string>
+    <string name="activity_unavailable_session_64980">Unavailable session</string>
+    <string name="activity_waiting_for_server_confirmation_2d41d">Waiting for server confirmation</string>
+    <string name="activity_working_3b4df">Working</string>
+    <plurals name="activity_session_count">
+        <item quantity="one">%d session</item>
+        <item quantity="other">%d sessions</item>
+    </plurals>
+</resources>

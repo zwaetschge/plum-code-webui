@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="workflow_heading">Start with a workflow</string>
+    <string name="workflow_quick_brief_title">Create a clear brief</string>
+    <string name="workflow_quick_brief_description">Summarize text, files, links, or notes into the points that matter.</string>
+    <string name="workflow_quick_brief_prompt">Create a clear brief from the material I provide. Read the text, files, links, or notes first, then summarize the essential points in plain language. Separate facts from assumptions, call out decisions, risks, open questions, and next steps, and keep the result concise enough to act on.</string>
+    <string name="workflow_research_brief_title">Research a topic</string>
+    <string name="workflow_research_brief_description">Gather context, compare sources, and return a practical answer.</string>
+    <string name="workflow_research_brief_prompt">Research the topic or question I provide and turn it into a practical brief. Start by clarifying the exact question if needed, use current external sources when the answer may have changed, compare the most relevant viewpoints or options, include source links, and finish with a direct answer, caveats, and useful next steps.</string>
+    <string name="workflow_draft_message_title">Draft a message</string>
+    <string name="workflow_draft_message_description">Write emails, replies, announcements, posts, or polished notes.</string>
+    <string name="workflow_draft_message_prompt">Help me draft the message I need. Ask for missing audience, goal, tone, or constraints only if they are necessary. Otherwise produce a polished version, keep it natural and specific, and include two shorter alternatives when useful: one warmer and one more direct.</string>
+    <string name="workflow_plan_project_title">Plan a project</string>
+    <string name="workflow_plan_project_description">Turn a goal into milestones, owners, timeline, and first actions.</string>
+    <string name="workflow_plan_project_prompt">Turn the goal I describe into a realistic plan. Define the outcome, break it into milestones, identify dependencies, risks, and decisions, suggest a practical timeline, and finish with the first actions I should take. Keep the plan useful for real execution, not just a generic checklist.</string>
+    <string name="workflow_creative_direction_title">Shape a creative idea</string>
+    <string name="workflow_creative_direction_description">Develop concepts, names, outlines, campaigns, scenes, or visual directions.</string>
+    <string name="workflow_creative_direction_prompt">Help shape the creative idea I provide. Explore several strong directions, explain what makes each one work, then develop the best option into a concrete outline, structure, copy, scene, campaign, name set, or visual direction depending on what I need.</string>
+    <string name="workflow_decision_support_title">Compare options</string>
+    <string name="workflow_decision_support_description">Weigh choices with criteria, tradeoffs, risks, and a recommendation.</string>
+    <string name="workflow_decision_support_prompt">Help me choose between the options I provide. Define the decision criteria, compare each option against those criteria, identify tradeoffs, costs, risks, and reversibility, then give a clear recommendation with the assumptions that would change it.</string>
+</resources>

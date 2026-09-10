@@ -1,6 +1,7 @@
 import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import passport from 'passport';
+import jwt from 'jsonwebtoken';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -17,6 +18,7 @@ import type { User } from '@plum-code-webui/shared';
 import { isProviderAvailable } from '../services/cli-providers.js';
 import { generateUserToken } from '../utils/authTokens.js';
 import { upsertProxyUser } from '../utils/proxyUser.js';
+import { isTrustedAddress } from '../utils/ipTrust.js';
 import { stampLogin } from '../utils/auditLog.js';
 import { requestClaudeOAuthTokenRefresh } from '../utils/claudeOauth.js';
 import { mobileAuthCodes } from '../services/mobileAuthCodes.js';
@@ -123,11 +125,25 @@ function redirectMobileAuth(res: Response, values: Record<string, string>): void
   res.redirect(`claudewebui://auth/callback?${new URLSearchParams(values).toString()}`);
 }
 
+/**
+ * Proxy auth believes whatever `X-Forwarded-Email` says. That is only sound if
+ * the request provably came from the ForwardAuth proxy, so we check the direct
+ * TCP peer — the one value in the request a client cannot choose — against
+ * PROXY_AUTH_TRUSTED_IPS. Anyone else on the Docker network could otherwise
+ * curl the container with a header of their choosing and be logged in as it.
+ */
+function isTrustedProxyPeer(req: Request): boolean {
+  return isTrustedAddress(req.socket?.remoteAddress, config.proxyAuth.trustedIps);
+}
+
 function getProxyIdentity(req: Request): {
   proxyUser: string | null;
   proxyName: string | null;
   proxyEmail: string | null;
 } {
+  if (!isTrustedProxyPeer(req)) {
+    return { proxyUser: null, proxyName: null, proxyEmail: null };
+  }
   const proxyUser = getHeaderValue(req, config.proxyAuth.userHeaders);
   const proxyName = getHeaderValue(req, config.proxyAuth.nameHeaders);
   const proxyEmail =
@@ -150,11 +166,12 @@ async function establishProxyLogin(
   return user;
 }
 
-router.get('/proxy/status', (_req, res) => {
+router.get('/proxy/status', (_req: Request, res) => {
   res.json({
     success: true,
     data: {
       enabled: config.proxyAuth.enabled,
+      trustedPeer: isTrustedProxyPeer(_req),
       emailHeaders: config.proxyAuth.emailHeaders,
       userHeaders: config.proxyAuth.userHeaders,
       nameHeaders: config.proxyAuth.nameHeaders,
@@ -165,6 +182,14 @@ router.get('/proxy/status', (_req, res) => {
 router.get('/proxy', async (req, res, next) => {
   if (!config.proxyAuth.enabled) {
     return redirectProxyError(res, 'disabled');
+  }
+
+  if (!isTrustedProxyPeer(req)) {
+    console.warn(
+      `[auth] Rejected proxy login from untrusted peer ${req.socket?.remoteAddress ?? 'unknown'}. ` +
+        'Set PROXY_AUTH_TRUSTED_IPS to the reverse proxy address.'
+    );
+    return redirectProxyError(res, 'untrusted_proxy');
   }
 
   const { proxyUser, proxyName, proxyEmail } = getProxyIdentity(req);
@@ -196,6 +221,12 @@ router.get('/proxy/mobile', rateLimiters.strict, async (req, res, next) => {
   const query = mobileProxyQuerySchema.safeParse(req.query);
   if (!query.success) return redirectMobileAuth(res, { error: 'invalid_request' });
   if (!config.proxyAuth.enabled) return redirectMobileAuth(res, { error: 'proxy_disabled' });
+  if (!isTrustedProxyPeer(req)) {
+    console.warn(
+      `[auth] Rejected mobile proxy login from untrusted peer ${req.socket?.remoteAddress ?? 'unknown'}.`
+    );
+    return redirectMobileAuth(res, { error: 'untrusted_proxy' });
+  }
 
   const { proxyUser, proxyName, proxyEmail } = getProxyIdentity(req);
   if (!proxyEmail) return redirectMobileAuth(res, { error: 'missing_identity' });
@@ -560,6 +591,53 @@ router.get('/me', requireAuth, async (req, res) => {
   }
 
   res.json({ success: true, data: user });
+});
+
+/**
+ * Slide the session forward.
+ *
+ * Tokens are issued for 7 days (30 for Basic Auth) and nothing renewed them,
+ * so every long-lived install — the Android app above all — was silently
+ * signed out on a fixed schedule: REST started answering 401 and the socket
+ * handshake failed with a terminal "Invalid token" that suppresses reconnects.
+ *
+ * This is deliberately a sliding window over the *current, still valid* token
+ * rather than a separate refresh-token grant: no second credential to store,
+ * and a device that has been offline past the expiry still has to sign in.
+ */
+router.post('/refresh', requireAuth, rateLimiters.strict, async (req, res) => {
+  const authed = req as AuthenticatedRequest;
+
+  // A gateway token must not be convertible into a user JWT: that would
+  // outlive the token's own revocation and escape its scope.
+  if (authed.viaGateway) {
+    return res.status(403).json({
+      success: false,
+      error: { code: 'GATEWAY_FORBIDDEN', message: 'Gateway tokens cannot mint session tokens' },
+    });
+  }
+
+  // Carry the Basic Auth claim and its longer lifetime across, otherwise a
+  // renewal quietly demotes the session and shortens it to 7 days.
+  let basicAuth = false;
+  const header = req.headers.authorization;
+  if (header?.startsWith('Bearer ')) {
+    try {
+      const decoded = jwt.verify(header.substring(7), config.jwtSecret) as { basicAuth?: boolean };
+      basicAuth = decoded.basicAuth === true;
+    } catch {
+      // requireAuth already accepted this request, so a decode failure here
+      // means a Passport session rather than a bearer token.
+    }
+  }
+
+  const expiresIn = basicAuth ? '30d' : '7d';
+  const token = generateUserToken(authed.userId, { basicAuth, expiresIn });
+  const decoded = jwt.decode(token) as { exp?: number } | null;
+  res.json({
+    success: true,
+    data: { token, expiresAt: decoded?.exp ? decoded.exp * 1000 : undefined },
+  });
 });
 
 // Logout

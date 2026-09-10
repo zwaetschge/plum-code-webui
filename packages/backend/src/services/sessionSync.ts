@@ -1,4 +1,9 @@
-import { get as pgGet, run as pgRun, transaction as pgTransaction } from '../db/pg.js';
+import {
+  get as pgGet,
+  run as pgRun,
+  transaction as pgTransaction,
+  type TransactionScope,
+} from '../db/pg.js';
 import type { MessageHistorySnapshot, SessionReadState } from '@plum-code-webui/shared';
 
 interface SessionSyncRow {
@@ -8,17 +13,54 @@ interface SessionSyncRow {
 }
 
 const EVENT_SEQUENCE_BLOCK_SIZE = 256;
-const sequenceBlocks = new Map<string, { next: number; end: number; lastIssued: number }>();
+const sequenceBlocks = new Map<
+  string,
+  { next: number; end: number; lastIssued: number; initialBase: number }
+>();
+const sequenceReservations = new Map<string, Promise<void>>();
+const pendingSequences = new Map<string, Set<number>>();
+
+function trackPendingSequence(sessionId: string, sequence: number): number {
+  const pending = pendingSequences.get(sessionId) ?? new Set<number>();
+  pending.add(sequence);
+  pendingSequences.set(sessionId, pending);
+  return sequence;
+}
+
+/** Close a sequence after its live event was emitted, or its write failed. */
+export function settleSessionEventSequence(sessionId: string, sequence: number): void {
+  const pending = pendingSequences.get(sessionId);
+  pending?.delete(sequence);
+  if (pending?.size === 0) pendingSequences.delete(sessionId);
+}
+
+/**
+ * Capture before the first snapshot read. A reserved sequence whose message
+ * is still being saved must not let a REST response skip that future event.
+ */
+export function captureSessionSnapshotWatermark(sessionId: string): number | undefined {
+  let watermark = sequenceBlocks.get(sessionId)?.lastIssued;
+  if (watermark === undefined) return undefined;
+  for (const sequence of pendingSequences.get(sessionId) ?? []) {
+    watermark = Math.min(watermark, sequence - 1);
+  }
+  return watermark;
+}
 
 export async function nextSessionEventSequence(sessionId: string): Promise<number> {
+  const inFlight = sequenceReservations.get(sessionId);
+  if (inFlight) {
+    await inFlight;
+    return nextSessionEventSequence(sessionId);
+  }
   const existing = sequenceBlocks.get(sessionId);
   if (existing && existing.next <= existing.end) {
     const sequence = existing.next++;
     existing.lastIssued = sequence;
-    return sequence;
+    return trackPendingSequence(sessionId, sequence);
   }
 
-  const reserved = await pgTransaction(async (tx) => {
+  const reservation = pgTransaction(async (tx) => {
     const updated = (await tx.get(
       `UPDATE sessions
             SET event_sequence = event_sequence + ?
@@ -28,22 +70,32 @@ export async function nextSessionEventSequence(sessionId: string): Promise<numbe
       sessionId
     )) as unknown as { sequence: number } | undefined;
     if (!updated) throw new Error('Session not found');
-    return {
-      start: updated.sequence - EVENT_SEQUENCE_BLOCK_SIZE + 1,
+    const base = updated.sequence - EVENT_SEQUENCE_BLOCK_SIZE;
+    // Install before COMMIT makes the reservation visible to other readers.
+    // Allocation still waits on sequenceReservations until COMMIT completes.
+    sequenceBlocks.set(sessionId, {
+      next: base + 1,
       end: updated.sequence,
-    };
+      lastIssued: base,
+      initialBase: existing?.initialBase ?? base,
+    });
+  }).catch((error) => {
+    if (existing) sequenceBlocks.set(sessionId, existing);
+    else sequenceBlocks.delete(sessionId);
+    throw error;
   });
-  sequenceBlocks.set(sessionId, {
-    next: reserved.start + 1,
-    end: reserved.end,
-    lastIssued: reserved.start,
-  });
-  return reserved.start;
+  sequenceReservations.set(sessionId, reservation);
+  try {
+    await reservation;
+  } finally {
+    if (sequenceReservations.get(sessionId) === reservation) sequenceReservations.delete(sessionId);
+  }
+  return nextSessionEventSequence(sessionId);
 }
 
 /**
  * The persisted value is the end of the currently reserved block. While this
- * process is alive, report the last actually issued sequence. After restart a
+ * process is alive, report only the contiguous published sequences. After restart a
  * reserved-but-unused gap is intentionally visible and forces a safe REST
  * resync instead of risking an undetected missing event.
  */
@@ -51,18 +103,21 @@ export function getSessionEventHighWatermark(
   sessionId: string,
   persistedHighWatermark: number
 ): number {
-  return sequenceBlocks.get(sessionId)?.lastIssued ?? persistedHighWatermark;
+  return captureSessionSnapshotWatermark(sessionId) ?? persistedHighWatermark;
 }
 
 export function resetSessionSequenceAllocatorForTests(): void {
   sequenceBlocks.clear();
+  sequenceReservations.clear();
+  pendingSequences.clear();
 }
 
 export async function getSessionSyncState(
   sessionId: string,
-  userId?: string
+  userId?: string,
+  query: Pick<TransactionScope, 'get'> = { get: pgGet }
 ): Promise<{ highWatermark: number; snapshotRevision: number; activeChatId: string | null }> {
-  const row = (await pgGet(
+  const row = (await query.get(
     `SELECT active_chat_id AS activeChatId,
               event_sequence AS eventSequence,
               snapshot_revision AS snapshotRevision
@@ -114,13 +169,19 @@ export async function resolveSessionSendChatId(
 export async function getMessageHistorySnapshot(
   sessionId: string,
   userId: string,
-  chatId?: string | null
+  chatId?: string | null,
+  options: { query?: Pick<TransactionScope, 'get'>; snapshotStartWatermark?: number | null } = {}
 ): Promise<MessageHistorySnapshot> {
-  const state = await getSessionSyncState(sessionId, userId);
+  const query = options.query ?? { get: pgGet };
+  const capturedWatermark =
+    options.snapshotStartWatermark === null
+      ? null
+      : (options.snapshotStartWatermark ?? captureSessionSnapshotWatermark(sessionId) ?? null);
+  const state = await getSessionSyncState(sessionId, userId, query);
   const effectiveChatId = chatId === undefined ? state.activeChatId : chatId;
   if (
     effectiveChatId !== null &&
-    !(await pgGet(
+    !(await query.get(
       `SELECT 1 FROM session_chats WHERE id = ? AND session_id = ?`,
       effectiveChatId,
       sessionId
@@ -128,7 +189,7 @@ export async function getMessageHistorySnapshot(
   ) {
     throw new Error('Chat not found');
   }
-  const newest = (await pgGet(
+  const newest = (await query.get(
     `SELECT id
          FROM messages
         WHERE session_id = ? AND chat_id IS ?
@@ -140,7 +201,12 @@ export async function getMessageHistorySnapshot(
   return {
     chatId: effectiveChatId,
     revision: state.snapshotRevision,
-    highWatermark: state.highWatermark,
+    highWatermark: Math.min(
+      state.highWatermark,
+      // No allocator existed when this read began. Exclude any newly started
+      // block rather than acknowledging events produced during the snapshot.
+      capturedWatermark ?? sequenceBlocks.get(sessionId)?.initialBase ?? state.highWatermark
+    ),
     newestMessageId: newest?.id ?? null,
   };
 }
@@ -148,13 +214,14 @@ export async function getMessageHistorySnapshot(
 export async function getSessionReadState(
   userId: string,
   sessionId: string,
-  chatId?: string | null
+  chatId?: string | null,
+  query: Pick<TransactionScope, 'get'> = { get: pgGet }
 ): Promise<SessionReadState> {
-  const state = await getSessionSyncState(sessionId, userId);
+  const state = await getSessionSyncState(sessionId, userId, query);
   const effectiveChatId = chatId === undefined ? state.activeChatId : chatId;
   if (
     effectiveChatId !== null &&
-    !(await pgGet(
+    !(await query.get(
       `SELECT 1 FROM session_chats WHERE id = ? AND session_id = ?`,
       effectiveChatId,
       sessionId
@@ -163,7 +230,7 @@ export async function getSessionReadState(
     throw new Error('Chat not found');
   }
   const chatKey = effectiveChatId ?? '';
-  const read = (await pgGet(
+  const read = (await query.get(
     `SELECT last_read_message_id AS lastReadMessageId, updated_at AS updatedAt
          FROM session_reads
         WHERE user_id = ? AND session_id = ? AND chat_key = ?`,
@@ -172,13 +239,13 @@ export async function getSessionReadState(
     chatKey
   )) as unknown as { lastReadMessageId: string | null; updatedAt: string } | undefined;
   const marker = read?.lastReadMessageId
-    ? ((await pgGet(
+    ? ((await query.get(
         `SELECT seq FROM messages WHERE id = ? AND session_id = ?`,
         read.lastReadMessageId,
         sessionId
       )) as unknown as { seq: number } | undefined)
     : undefined;
-  const unread = (await pgGet(
+  const unread = (await query.get(
     `SELECT COUNT(*) AS count
          FROM messages
         WHERE session_id = ? AND chat_id IS ? AND role = 'assistant'

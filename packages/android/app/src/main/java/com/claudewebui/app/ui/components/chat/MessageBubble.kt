@@ -1,5 +1,9 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.*
@@ -152,14 +156,15 @@ private fun UserBubble(
     onImageClick: (String) -> Unit,
     onAttachmentClick: (HistoryAttachmentItem) -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(
                 start = 48.dp,
-                end = 16.dp,
-                top = if (groupInfo.isFirst) 8.dp else 2.dp,
-                bottom = if (groupInfo.isLast) 8.dp else 2.dp,
+                end = componentTokens.spacing.lg,
+                top = if (groupInfo.isFirst) componentTokens.spacing.sm else componentTokens.spacing.xxs,
+                bottom = if (groupInfo.isLast) componentTokens.spacing.sm else componentTokens.spacing.xxs,
             ),
         horizontalAlignment = Alignment.End,
     ) {
@@ -174,7 +179,7 @@ private fun UserBubble(
                     onClick = { onImageClick(image.path) },
                     modifier = Modifier
                         .widthIn(max = 240.dp)
-                        .padding(bottom = 4.dp),
+                        .padding(bottom = componentTokens.spacing.xs),
                 )
             }
         MessageMediaImages(message, onImageClick)
@@ -182,10 +187,10 @@ private fun UserBubble(
 
         // Text bubble — accent-tinted frosted glass over the backdrop.
         val bubbleShape = RoundedCornerShape(
-            topStart = 16.dp,
-            topEnd = if (groupInfo.isFirst) 4.dp else 16.dp,
-            bottomEnd = if (groupInfo.isLast) 16.dp else 4.dp,
-            bottomStart = 16.dp,
+            topStart = componentTokens.spacing.lg,
+            topEnd = if (groupInfo.isFirst) componentTokens.spacing.xs else componentTokens.spacing.lg,
+            bottomEnd = if (groupInfo.isLast) componentTokens.spacing.lg else componentTokens.spacing.xs,
+            bottomStart = componentTokens.spacing.lg,
         )
         val palette = LocalPlumPalette.current
         if (message.content.isNotBlank()) {
@@ -213,7 +218,7 @@ private fun UserBubble(
                     text = message.content,
                     style = MaterialTheme.typography.bodyMedium,
                     color = PlumText,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    modifier = Modifier.padding(horizontal = componentTokens.spacing.cozy, vertical = componentTokens.spacing.compact),
                 )
             }
         }
@@ -224,7 +229,7 @@ private fun UserBubble(
                 text = formatTimestamp(message.createdAt),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, end = 4.dp),
+                modifier = Modifier.padding(top = componentTokens.spacing.xs, end = componentTokens.spacing.xs),
                 fontSize = 11.sp,
             )
         }
@@ -245,17 +250,18 @@ private fun AssistantBubble(
     onImageClick: (String) -> Unit,
     onAttachmentClick: (HistoryAttachmentItem) -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(
-                start = 12.dp,
-                end = 12.dp,
-                top = if (groupInfo.isFirst) 8.dp else 2.dp,
-                bottom = if (groupInfo.isLast) 8.dp else 2.dp,
+                start = componentTokens.spacing.md,
+                end = componentTokens.spacing.md,
+                top = if (groupInfo.isFirst) componentTokens.spacing.sm else componentTokens.spacing.xxs,
+                bottom = if (groupInfo.isLast) componentTokens.spacing.sm else componentTokens.spacing.xxs,
             ),
         verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
     ) {
         // Avatar
         if (groupInfo.isFirst) {
@@ -286,10 +292,10 @@ private fun AssistantBubble(
                     .fillMaxWidth()
                     .glassSurface(
                         RoundedCornerShape(
-                            topStart = if (groupInfo.isFirst) 4.dp else 16.dp,
-                            topEnd = 16.dp,
-                            bottomEnd = 16.dp,
-                            bottomStart = if (groupInfo.isLast) 16.dp else 4.dp,
+                            topStart = if (groupInfo.isFirst) componentTokens.spacing.xs else componentTokens.spacing.lg,
+                            topEnd = componentTokens.spacing.lg,
+                            bottomEnd = componentTokens.spacing.lg,
+                            bottomStart = if (groupInfo.isLast) componentTokens.spacing.lg else componentTokens.spacing.xs,
                         ),
                     )
                     .pointerInput(Unit) {
@@ -300,8 +306,8 @@ private fun AssistantBubble(
                     },
             ) {
                 Column(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = componentTokens.spacing.cozy, vertical = componentTokens.spacing.md),
+                    verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
                 ) {
                     MessageMediaImages(message, onImageClick)
                     MessageFileAttachments(message, onAttachmentClick)
@@ -325,7 +331,7 @@ private fun AssistantBubble(
                     text = formatTimestamp(message.createdAt),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+                    modifier = Modifier.padding(top = componentTokens.spacing.xs, start = componentTokens.spacing.xs),
                     fontSize = 11.sp,
                 )
             }
@@ -340,10 +346,11 @@ private fun SystemMessage(
     message: Message,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 8.dp),
+            .padding(horizontal = componentTokens.spacing.xxl, vertical = componentTokens.spacing.sm),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -359,8 +366,9 @@ private fun SystemMessage(
 
 @Composable
 private fun StreamingCursor() {
-    val infiniteTransition = rememberInfiniteTransition(label = "cursor")
-    val alpha by infiniteTransition.animateFloat(
+    val componentTokens = PlumTheme.tokens
+    val infiniteTransition = if (PlumTheme.tokens.motion.reduceMotion) null else rememberInfiniteTransition(label = "cursor")
+    val alpha by infiniteTransition?.animateFloat(
         initialValue = 1f,
         targetValue = 0f,
         animationSpec = infiniteRepeatable(
@@ -368,10 +376,10 @@ private fun StreamingCursor() {
             repeatMode = RepeatMode.Reverse,
         ),
         label = "cursor_alpha",
-    )
+    ) ?: androidx.compose.runtime.rememberUpdatedState(1f)
     Box(
         modifier = Modifier
-            .size(width = 2.dp, height = 16.dp)
+            .size(width = componentTokens.spacing.xxs, height = componentTokens.spacing.lg)
             .background(
                 color = MaterialTheme.colorScheme.primary.copy(alpha = alpha),
                 shape = RoundedCornerShape(1.dp),
@@ -387,12 +395,13 @@ private fun AttachmentImage(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     AsyncImage(
         model = path,
-        contentDescription = "Attachment",
+        contentDescription = stringResource(R.string.component_attachment),
         contentScale = ContentScale.Crop,
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.md))
             .clickable(onClick = onClick)
             .aspectRatio(1f),
     )
@@ -404,6 +413,7 @@ private fun AttachmentImage(
  */
 @Composable
 private fun MessageMediaImages(message: Message, onImageClick: (String) -> Unit) {
+    val componentTokens = PlumTheme.tokens
     val serverUrl = com.claudewebui.app.core.security.TokenStore.getServerUrl()?.trimEnd('/')
         ?: return
     message.media?.filter { it.mimeType.startsWith("image/") }?.forEach { media ->
@@ -414,8 +424,8 @@ private fun MessageMediaImages(message: Message, onImageClick: (String) -> Unit)
             contentScale = ContentScale.Crop,
             modifier = Modifier
                 .widthIn(max = 240.dp)
-                .padding(bottom = 4.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .padding(bottom = componentTokens.spacing.xs)
+                .clip(RoundedCornerShape(componentTokens.radius.md))
                 .clickable { onImageClick(url) }
                 .aspectRatio(1f),
         )
@@ -487,6 +497,7 @@ private fun MessageFileAttachments(
     message: Message,
     onAttachmentClick: (HistoryAttachmentItem) -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     val attachments = remember(message.media, message.attachments) {
         historyFileAttachments(message)
     }
@@ -494,19 +505,19 @@ private fun MessageFileAttachments(
 
     Column(
         modifier = Modifier.widthIn(max = 280.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
     ) {
         attachments.forEach { attachment ->
             Surface(
                 onClick = { onAttachmentClick(attachment) },
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(componentTokens.radius.chip),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = componentTokens.spacing.compact, vertical = componentTokens.spacing.sm),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
                 ) {
                     Icon(
                         imageVector = when (attachment.kind) {
@@ -521,7 +532,7 @@ private fun MessageFileAttachments(
                         } else {
                             MaterialTheme.colorScheme.primary
                         },
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(componentTokens.sizing.iconMd),
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
@@ -545,12 +556,14 @@ private fun MessageFileAttachments(
     }
 }
 
+@Composable
+
 private fun attachmentSubtitle(attachment: HistoryAttachmentItem): String {
     val type = when (attachment.kind) {
-        HistoryAttachmentKind.IMAGE -> "Image"
-        HistoryAttachmentKind.PDF -> "PDF"
-        HistoryAttachmentKind.TEXT -> "Text"
-        HistoryAttachmentKind.DOCUMENT -> "File"
+        HistoryAttachmentKind.IMAGE -> stringResource(R.string.component_image)
+        HistoryAttachmentKind.PDF -> stringResource(R.string.component_pdf)
+        HistoryAttachmentKind.TEXT -> stringResource(R.string.component_text)
+        HistoryAttachmentKind.DOCUMENT -> stringResource(R.string.component_file)
     }
     val size = attachment.byteSize?.let(::formatAttachmentSize)
     return if (size == null) type else "$type · $size"
@@ -581,27 +594,28 @@ private fun MessageActionsDialog(
     onCopy: () -> Unit,
     onQuote: () -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     val context = LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Message actions") },
+        title = { Text(stringResource(R.string.component_message_actions)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs)) {
                 TextButton(
                     onClick = onCopy,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                 ) {
                     Icon(Icons.Outlined.ContentCopy, contentDescription = null)
-                    Spacer(Modifier.width(10.dp))
-                    Text("Copy text", modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(componentTokens.spacing.compact))
+                    Text(stringResource(R.string.component_copy_text), modifier = Modifier.weight(1f))
                 }
                 TextButton(
                     onClick = onQuote,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                 ) {
                     Icon(Icons.Outlined.FormatQuote, contentDescription = null)
-                    Spacer(Modifier.width(10.dp))
-                    Text("Quote in composer", modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(componentTokens.spacing.compact))
+                    Text(stringResource(R.string.component_quote_in_composer), modifier = Modifier.weight(1f))
                 }
                 TextButton(
                     onClick = {
@@ -609,25 +623,26 @@ private fun MessageActionsDialog(
                             type = "text/plain"
                             putExtra(Intent.EXTRA_TEXT, message.content)
                         }
-                        context.startActivity(Intent.createChooser(intent, "Share message"))
+                        context.startActivity(Intent.createChooser(intent, context.getString(R.string.component_share_message)))
                         onDismiss()
                     },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                 ) {
                     Icon(Icons.Outlined.Share, contentDescription = null)
-                    Spacer(Modifier.width(10.dp))
-                    Text("Share", modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(componentTokens.spacing.compact))
+                    Text(stringResource(R.string.component_share), modifier = Modifier.weight(1f))
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.component_close)) }
         },
     )
 }
 
 @Composable
 private fun FullScreenImageDialog(url: String, onDismiss: () -> Unit) {
+    val componentTokens = PlumTheme.tokens
     var scale by remember(url) { mutableFloatStateOf(1f) }
     var offset by remember(url) { mutableStateOf(Offset.Zero) }
 
@@ -649,7 +664,7 @@ private fun FullScreenImageDialog(url: String, onDismiss: () -> Unit) {
         ) {
             AsyncImage(
                 model = url,
-                contentDescription = "Attachment preview",
+                contentDescription = stringResource(R.string.component_attachment_preview),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxSize()
@@ -665,10 +680,10 @@ private fun FullScreenImageDialog(url: String, onDismiss: () -> Unit) {
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .statusBarsPadding()
-                    .padding(12.dp)
+                    .padding(componentTokens.spacing.md)
                     .background(Color.Black.copy(alpha = .55f), CircleShape),
             ) {
-                Icon(Icons.Outlined.Close, contentDescription = "Close image", tint = Color.White)
+                Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.component_close_image), tint = Color.White)
             }
         }
     }
@@ -682,11 +697,12 @@ fun MarkdownContent(
     modifier: Modifier = Modifier,
     isStreaming: Boolean = false,
 ) {
+    val componentTokens = PlumTheme.tokens
     val parsed = remember(text) { parseMarkdown(text) }
 
     Column(
         modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.inline),
     ) {
         for (block in parsed) {
             when (block) {
@@ -706,7 +722,7 @@ fun MarkdownContent(
                             else -> MaterialTheme.typography.titleSmall
                         },
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                        modifier = Modifier.padding(top = componentTokens.spacing.xs, bottom = componentTokens.spacing.xxs),
                     )
                 }
                 is MarkdownBlock.Code -> {
@@ -719,8 +735,8 @@ fun MarkdownContent(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            .padding(vertical = componentTokens.spacing.xxs),
+                        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
                     ) {
                         Box(
                             modifier = Modifier
@@ -728,7 +744,7 @@ fun MarkdownContent(
                                 .fillMaxHeight()
                                 .background(
                                     MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                                    RoundedCornerShape(2.dp),
+                                    RoundedCornerShape(componentTokens.radius.xxs),
                                 )
                         )
                         LinkedText(
@@ -742,14 +758,14 @@ fun MarkdownContent(
                 }
                 is MarkdownBlock.ListItem -> {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
                         modifier = Modifier.padding(start = block.indent.dp),
                     ) {
                         Text(
                             text = if (block.ordered) "${block.number}." else "•",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.width(20.dp),
+                            modifier = Modifier.width(componentTokens.spacing.section),
                         )
                         LinkedText(
                             text = block.annotated,
@@ -761,12 +777,96 @@ fun MarkdownContent(
                 }
                 is MarkdownBlock.HorizontalRule -> {
                     HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 4.dp),
+                        modifier = Modifier.padding(vertical = componentTokens.spacing.xs),
                         color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                }
+                is MarkdownBlock.Table -> MarkdownTable(block)
+            }
+        }
+    }
+}
+
+/**
+ * Column-major, one line per cell. Laid out as a Row of Columns so every
+ * column takes the width of its widest cell and rows stay aligned; a wide
+ * table scrolls sideways rather than wrapping cells to different heights,
+ * which is what broke row alignment in a row-major attempt.
+ */
+@Composable
+private fun MarkdownTable(table: MarkdownBlock.Table) {
+    val componentTokens = PlumTheme.tokens
+    val border = MaterialTheme.colorScheme.outlineVariant
+    val columnCount = maxOf(table.header.size, table.rows.maxOfOrNull { it.size } ?: 0)
+    if (columnCount == 0) return
+    val headerFill = MaterialTheme.colorScheme.primary.copy(alpha = .10f)
+    val zebra = MaterialTheme.colorScheme.onSurface.copy(alpha = .035f)
+    val shape = RoundedCornerShape(componentTokens.radius.chip)
+    Row(
+        modifier = Modifier
+            .padding(vertical = componentTokens.spacing.xs)
+            .clip(shape)
+            .border(1.dp, border, shape)
+            .horizontalScroll(rememberScrollState())
+            .height(IntrinsicSize.Min),
+    ) {
+        for (column in 0 until columnCount) {
+            if (column > 0) {
+                Box(Modifier.width(1.dp).fillMaxHeight().background(border))
+            }
+            // IntrinsicSize.Max: inside a horizontal scroller the column has
+            // no max width, so a plain fillMaxWidth cell only wrapped its own
+            // text and the zebra fill stopped mid-column.
+            Column(Modifier.width(IntrinsicSize.Max)) {
+                MarkdownTableCell(
+                    text = table.header.getOrNull(column) ?: AnnotatedString(""),
+                    bold = true,
+                    background = headerFill,
+                )
+                HorizontalDivider(color = border)
+                table.rows.forEachIndexed { index, row ->
+                    MarkdownTableCell(
+                        text = row.getOrNull(column) ?: AnnotatedString(""),
+                        bold = false,
+                        background = if (index % 2 == 1) zebra else Color.Transparent,
                     )
                 }
             }
         }
+    }
+}
+
+/**
+ * Every cell is the same fixed height. The columns are laid out independently,
+ * so a cell that measures taller than its neighbours — an inline-code span at
+ * a different size, say — would otherwise push its column out of step and the
+ * rows drift apart.
+ */
+@Composable
+private fun MarkdownTableCell(text: AnnotatedString, bold: Boolean, background: Color) {
+    val componentTokens = PlumTheme.tokens
+    val uriHandler = LocalUriHandler.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(componentTokens.spacing.xxl)
+            .background(background)
+            .padding(horizontal = componentTokens.spacing.compact),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        ClickableText(
+            text = text,
+            softWrap = false,
+            maxLines = 1,
+            style = MaterialTheme.typography.bodySmall.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
+            ),
+            onClick = { offset ->
+                text.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                    .firstOrNull()?.item?.let { url -> runCatching { uriHandler.openUri(url) } }
+            },
+        )
     }
 }
 
@@ -805,6 +905,10 @@ sealed class MarkdownBlock {
         val indent: Int,
     ) : MarkdownBlock()
     object HorizontalRule : MarkdownBlock()
+    data class Table(
+        val header: List<AnnotatedString>,
+        val rows: List<List<AnnotatedString>>,
+    ) : MarkdownBlock()
 }
 
 // Compiled once: parseMarkdown runs per bubble per recomposition, and Regex()
@@ -815,6 +919,24 @@ private val MD_ORDERED_ITEM = Regex("^(\\s*)(\\d+)\\.\\s+(.+)$")
 private val MD_UNORDERED_ITEM = Regex("^(\\s*)[-*+]\\s+(.+)$")
 private val MD_UNORDERED_LINE = Regex("^\\s*[-*+]\\s+.+")
 private val MD_ORDERED_LINE = Regex("^\\s*\\d+\\.\\s+.+")
+// `|---|:--:|---:|` and the variants without the outer pipes.
+private val MD_TABLE_SEPARATOR = Regex("^\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$")
+
+private fun splitTableRow(line: String): List<AnnotatedString> {
+    val inner = line.trim().removePrefix("|").removeSuffix("|")
+    val cells = mutableListOf<String>()
+    val current = StringBuilder()
+    var inCode = false
+    for (ch in inner) {
+        when {
+            ch == '`' -> { inCode = !inCode; current.append(ch) }
+            ch == '|' && !inCode -> { cells.add(current.toString()); current.setLength(0) }
+            else -> current.append(ch)
+        }
+    }
+    cells.add(current.toString())
+    return cells.map { parseInline(it.trim()) }
+}
 
 fun parseMarkdown(text: String): List<MarkdownBlock> {
     val blocks = mutableListOf<MarkdownBlock>()
@@ -892,12 +1014,28 @@ fun parseMarkdown(text: String): List<MarkdownBlock> {
             continue
         }
 
+        // Table: a header row followed by a separator row. Without this the
+        // rows collapsed into one paragraph of raw pipes.
+        if (trimmed.startsWith("|") && i + 1 < lines.size &&
+            MD_TABLE_SEPARATOR.matches(lines[i + 1].trim())
+        ) {
+            val header = splitTableRow(trimmed)
+            i += 2
+            val rows = mutableListOf<List<AnnotatedString>>()
+            while (i < lines.size && lines[i].trim().startsWith("|")) {
+                rows.add(splitTableRow(lines[i]))
+                i++
+            }
+            blocks.add(MarkdownBlock.Table(header, rows))
+            continue
+        }
+
         // Paragraph — accumulate consecutive non-special lines
         val paragraphLines = mutableListOf<String>()
         while (i < lines.size) {
             val l = lines[i].trim()
             if (l.isEmpty() || l.startsWith("#") || l.startsWith("```") ||
-                l.startsWith("> ") || l.matches(MD_HRULE) ||
+                l.startsWith("> ") || l.startsWith("|") || l.matches(MD_HRULE) ||
                 MD_UNORDERED_LINE.matches(lines[i]) ||
                 MD_ORDERED_LINE.matches(lines[i])) break
             paragraphLines.add(lines[i])

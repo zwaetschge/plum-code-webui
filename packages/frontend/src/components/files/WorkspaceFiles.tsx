@@ -407,7 +407,19 @@ async function fetchBlobUrl(filePath: string): Promise<{ url: string; contentTyp
 }
 
 async function downloadFile(filePath: string, name: string): Promise<void> {
-  const response = await fetch(`/api/files/download?path=${encodeURIComponent(filePath)}`, {
+  await downloadFromEndpoint(`/api/files/download?path=${encodeURIComponent(filePath)}`, name);
+}
+
+/** Whole directory as one ZIP (the server skips node_modules/.git by default). */
+async function downloadFolder(dirPath: string, name: string): Promise<void> {
+  await downloadFromEndpoint(
+    `/api/files/download-folder?path=${encodeURIComponent(dirPath)}`,
+    `${name || 'folder'}.zip`
+  );
+}
+
+async function downloadFromEndpoint(endpoint: string, name: string): Promise<void> {
+  const response = await fetch(endpoint, {
     headers: authHeaders(),
     credentials: 'include',
   });
@@ -739,7 +751,15 @@ export function WorkspaceFiles({
 
   const handleDownload = useCallback(async (file: FileInfo) => {
     try {
-      await downloadFile(file.path, file.name);
+      if (file.type === 'directory') {
+        toast({
+          title: 'Preparing ZIP…',
+          description: `${file.name} is being packed (node_modules and .git are skipped).`,
+        });
+        await downloadFolder(file.path, file.name);
+      } else {
+        await downloadFile(file.path, file.name);
+      }
     } catch (err) {
       toast({ title: 'Download failed', description: errorMessage(err), variant: 'destructive' });
     }
@@ -920,20 +940,18 @@ export function WorkspaceFiles({
                 </span>
               </div>
             )}
-            {!isDirectory && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="workspace-file-inline-action h-5 w-5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void handleDownload(file);
-                }}
-                title="Download file"
-              >
-                <Download className="h-3 w-3" />
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="workspace-file-inline-action h-5 w-5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleDownload(file);
+              }}
+              title={isDirectory ? 'Download folder as ZIP' : 'Download file'}
+            >
+              <Download className="h-3 w-3" />
+            </Button>
           </div>
 
           {isDirectory && isExpanded && (
@@ -1215,6 +1233,18 @@ export function WorkspaceFiles({
                   <span className="hidden sm:inline">Download</span>
                 </Button>
               </>
+            )}
+            {selectedEntry?.type === 'directory' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="workspace-files-action-button h-7 px-2"
+                onClick={() => void handleDownload(selectedEntry)}
+                title="Download folder as ZIP (node_modules and .git are skipped)"
+              >
+                <Download className="mr-1 h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Download ZIP</span>
+              </Button>
             )}
           </div>
           <div className="workspace-files-viewer min-h-0 flex-1 overflow-auto">

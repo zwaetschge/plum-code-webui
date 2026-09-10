@@ -1,5 +1,10 @@
 package com.claudewebui.app.ui.screens.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+
+import com.claudewebui.app.R
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -14,21 +19,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.claudewebui.app.data.model.UsageData
-import kotlin.math.cos
-import kotlin.math.min
-import kotlin.math.sin
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,14 +40,15 @@ fun UsageScreen(
     onNavigateBack: () -> Unit,
     onRefresh: () -> Unit
 ) {
+    val t = PlumTheme.tokens
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Token Usage")
+                        Text(stringResource(R.string.chat_usage_title))
                         Text(
-                            "Session analytics",
+                            stringResource(R.string.chat_session_analytics),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -55,12 +56,12 @@ fun UsageScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.chat_back))
                     }
                 },
                 actions = {
                     IconButton(onClick = onRefresh) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.chat_refresh))
                     }
                 }
             )
@@ -82,7 +83,7 @@ fun UsageScreen(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(t.spacing.sm)
                 ) {
                     Icon(
                         Icons.Default.Analytics,
@@ -91,7 +92,7 @@ fun UsageScreen(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                     )
                     Text(
-                        "No usage data available",
+                        stringResource(R.string.chat_no_usage),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -115,6 +116,7 @@ private fun UsageContent(
     usageHistory: List<Pair<Int, Long>>,
     modifier: Modifier = Modifier
 ) {
+    val t = PlumTheme.tokens
     val primaryColor = MaterialTheme.colorScheme.primary
     val secondaryColor = MaterialTheme.colorScheme.secondary
     val tertiaryColor = MaterialTheme.colorScheme.tertiary
@@ -122,7 +124,7 @@ private fun UsageContent(
 
     Column(
         modifier = modifier.verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(t.spacing.lg)
     ) {
         Spacer(Modifier.height(0.dp))
 
@@ -139,18 +141,18 @@ private fun UsageContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(horizontal = t.spacing.lg),
+            horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)
         ) {
             TokenStatCard(
-                label = "Input",
+                label = stringResource(R.string.chat_input_long),
                 value = usageData.inputTokens,
                 color = primaryColor,
                 icon = Icons.Default.ArrowDownward,
                 modifier = Modifier.weight(1f)
             )
             TokenStatCard(
-                label = "Output",
+                label = stringResource(R.string.chat_output_long),
                 value = usageData.outputTokens,
                 color = secondaryColor,
                 icon = Icons.Default.ArrowUpward,
@@ -160,18 +162,18 @@ private fun UsageContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(horizontal = t.spacing.lg),
+            horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)
         ) {
             TokenStatCard(
-                label = "Cache Read",
+                label = stringResource(R.string.chat_cache_read),
                 value = usageData.cacheReadTokens,
                 color = tertiaryColor,
                 icon = Icons.Default.Cached,
                 modifier = Modifier.weight(1f)
             )
             TokenStatCard(
-                label = "Cache Write",
+                label = stringResource(R.string.chat_cache_write),
                 value = usageData.cacheCreationTokens,
                 color = Color(0xFFF59E0B),
                 icon = Icons.Default.Save,
@@ -182,7 +184,7 @@ private fun UsageContent(
         // Cost estimate
         CostCard(
             totalCostUsd = usageData.totalCostUsd,
-            modifier = Modifier.padding(horizontal = 16.dp)
+            modifier = Modifier.padding(horizontal = t.spacing.lg)
         )
 
         // Token breakdown bar chart
@@ -194,7 +196,7 @@ private fun UsageContent(
             primaryColor = primaryColor,
             secondaryColor = secondaryColor,
             tertiaryColor = tertiaryColor,
-            modifier = Modifier.padding(horizontal = 16.dp)
+            modifier = Modifier.padding(horizontal = t.spacing.lg)
         )
 
         // Line chart: token usage over time
@@ -205,21 +207,21 @@ private fun UsageContent(
                 gridColor = surfaceVariant,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
+                    .padding(horizontal = t.spacing.lg)
             )
         }
 
         // Model info
         Surface(
-            modifier = Modifier.padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.padding(horizontal = t.spacing.lg),
+            shape = RoundedCornerShape(t.radius.md),
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(t.spacing.cozy),
+                horizontalArrangement = Arrangement.spacedBy(t.spacing.compact),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -230,12 +232,12 @@ private fun UsageContent(
                 )
                 Column {
                     Text(
-                        "Model",
+                        stringResource(R.string.chat_model),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        usageData.model.ifBlank { "Unknown" },
+                        usageData.model.ifBlank { stringResource(R.string.chat_unknown) },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium
                     )
@@ -243,7 +245,7 @@ private fun UsageContent(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(t.spacing.lg))
     }
 }
 
@@ -255,28 +257,29 @@ private fun ContextWindowCard(
     model: String,
     primaryColor: Color
 ) {
+    val t = PlumTheme.tokens
     val animatedProgress by animateFloatAsState(
         targetValue = usedPercent.coerceIn(0f, 1f),
-        animationSpec = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = t.motion.slow, easing = FastOutSlowInEasing),
         label = "context_progress"
     )
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            .padding(horizontal = t.spacing.lg),
+        shape = RoundedCornerShape(t.radius.lg),
+        elevation = CardDefaults.cardElevation(defaultElevation = t.spacing.xxs)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
+                .padding(t.spacing.section),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(t.spacing.md)
         ) {
             Text(
-                "Context Window",
+                stringResource(R.string.chat_context_window),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
@@ -294,7 +297,7 @@ private fun ContextWindowCard(
                 }
 
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    val strokeWidth = 16.dp.toPx()
+                    val strokeWidth = t.spacing.lg.toPx()
                     val radius = (size.minDimension - strokeWidth) / 2f
                     val center = Offset(size.width / 2f, size.height / 2f)
                     val startAngle = 135f
@@ -334,7 +337,7 @@ private fun ContextWindowCard(
                         }
                     )
                     Text(
-                        "used",
+                        stringResource(R.string.chat_used_lower),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -344,12 +347,12 @@ private fun ContextWindowCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                ContextStat(label = "Used", value = formatTokens(totalTokens))
-                VerticalDivider(modifier = Modifier.height(32.dp))
-                ContextStat(label = "Window", value = formatTokens(contextWindow))
-                VerticalDivider(modifier = Modifier.height(32.dp))
+                ContextStat(label = stringResource(R.string.chat_used), value = formatTokens(totalTokens))
+                VerticalDivider(modifier = Modifier.height(t.spacing.xxl))
+                ContextStat(label = stringResource(R.string.chat_window), value = formatTokens(contextWindow))
+                VerticalDivider(modifier = Modifier.height(t.spacing.xxl))
                 ContextStat(
-                    label = "Remaining",
+                    label = stringResource(R.string.chat_remaining),
                     value = formatTokens((contextWindow - totalTokens).coerceAtLeast(0))
                 )
             }
@@ -381,23 +384,24 @@ private fun TokenStatCard(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier
 ) {
+    val t = PlumTheme.tokens
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(t.radius.md),
         color = color.copy(alpha = 0.08f)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.padding(t.spacing.cozy),
+            verticalArrangement = Arrangement.spacedBy(t.spacing.inline)
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(t.spacing.inline),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     icon,
                     contentDescription = null,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(t.spacing.cozy),
                     tint = color
                 )
                 Text(
@@ -413,7 +417,7 @@ private fun TokenStatCard(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "$value tokens",
+                text = stringResource(R.string.chat_tokens_value, value),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -426,18 +430,19 @@ private fun CostCard(
     totalCostUsd: Double,
     modifier: Modifier = Modifier
 ) {
+    val t = PlumTheme.tokens
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(t.radius.md),
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(t.spacing.lg),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(t.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -446,7 +451,7 @@ private fun CostCard(
                     tint = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Text(
-                    "Estimated Cost",
+                    stringResource(R.string.chat_estimated_cost),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
@@ -472,25 +477,26 @@ private fun TokenBreakdownBar(
     tertiaryColor: Color,
     modifier: Modifier = Modifier
 ) {
+    val t = PlumTheme.tokens
     val total = (inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens).takeIf { it > 0 } ?: 1L
     val segments = listOf(
-        Triple(inputTokens.toFloat() / total, primaryColor, "Input"),
-        Triple(outputTokens.toFloat() / total, secondaryColor, "Output"),
-        Triple(cacheReadTokens.toFloat() / total, tertiaryColor, "Cache R"),
-        Triple(cacheCreationTokens.toFloat() / total, Color(0xFFF59E0B), "Cache W")
+        Triple(inputTokens.toFloat() / total, primaryColor, stringResource(R.string.chat_input_long)),
+        Triple(outputTokens.toFloat() / total, secondaryColor, stringResource(R.string.chat_output_long)),
+        Triple(cacheReadTokens.toFloat() / total, tertiaryColor, stringResource(R.string.chat_cache_r)),
+        Triple(cacheCreationTokens.toFloat() / total, Color(0xFFF59E0B), stringResource(R.string.chat_cache_w))
     ).filter { it.first > 0f }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(t.radius.md),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(t.spacing.cozy),
+            verticalArrangement = Arrangement.spacedBy(t.spacing.compact)
         ) {
             Text(
-                "Token Breakdown",
+                stringResource(R.string.chat_breakdown),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold
             )
@@ -499,18 +505,18 @@ private fun TokenBreakdownBar(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(12.dp)
+                        .height(t.spacing.md)
                         .background(
                             MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(6.dp)
+                            RoundedCornerShape(t.spacing.inline)
                         )
                 ) {
                     Row(modifier = Modifier.fillMaxSize()) {
                         segments.forEachIndexed { index, (fraction, color, _) ->
                             val shape = when {
-                                segments.size == 1 -> RoundedCornerShape(6.dp)
-                                index == 0 -> RoundedCornerShape(topStart = 6.dp, bottomStart = 6.dp)
-                                index == segments.lastIndex -> RoundedCornerShape(topEnd = 6.dp, bottomEnd = 6.dp)
+                                segments.size == 1 -> RoundedCornerShape(t.spacing.inline)
+                                index == 0 -> RoundedCornerShape(topStart = t.spacing.inline, bottomStart = t.spacing.inline)
+                                index == segments.lastIndex -> RoundedCornerShape(topEnd = t.spacing.inline, bottomEnd = t.spacing.inline)
                                 else -> RoundedCornerShape(0.dp)
                             }
                             Box(
@@ -525,17 +531,17 @@ private fun TokenBreakdownBar(
                 // Legend
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(t.spacing.md)
                 ) {
                     segments.forEach { (fraction, color, label) ->
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(8.dp)
-                                    .background(color, RoundedCornerShape(2.dp))
+                                    .size(t.spacing.sm)
+                                    .background(color, RoundedCornerShape(t.spacing.xxs))
                             )
                             Text(
                                 "$label ${(fraction * 100).toInt()}%",
@@ -557,23 +563,24 @@ private fun TokenLineChart(
     gridColor: Color,
     modifier: Modifier = Modifier
 ) {
+    val t = PlumTheme.tokens
     val animatedProgress by animateFloatAsState(
         targetValue = 1f,
-        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = t.motion.slow, easing = FastOutSlowInEasing),
         label = "line_chart_progress"
     )
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(t.radius.md),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(t.spacing.cozy),
+            verticalArrangement = Arrangement.spacedBy(t.spacing.sm)
         ) {
             Text(
-                "Usage Over Time",
+                stringResource(R.string.chat_usage_over_time),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold
             )
@@ -670,13 +677,13 @@ private fun TokenLineChart(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    "Message 1",
+                    stringResource(R.string.chat_message_index, 1),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 10.sp
                 )
                 Text(
-                    "Message ${dataPoints.size}",
+                    stringResource(R.string.chat_message_index, dataPoints.size),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 10.sp

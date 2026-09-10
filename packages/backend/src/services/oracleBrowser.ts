@@ -607,9 +607,10 @@ export class OracleBrowserManager {
 
     if (instance?.startPromise) {
       try {
-        instance.startPromise;
+        await instance.startPromise;
       } catch {
-        // State should still render even if the start failed.
+        // State should still render even if the start failed; the failure is
+        // already recorded on instance.error by launchInstance.
       }
     }
 
@@ -644,7 +645,13 @@ export class OracleBrowserManager {
     if (instance) {
       instance.sessionIds.add(sessionId);
       if (instance.startPromise) {
-        instance.startPromise;
+        // A second start while the first is still launching joins it instead
+        // of spawning a second Chromium on the same locked profile.
+        try {
+          await instance.startPromise;
+        } catch {
+          // Recorded on instance.error; the state below carries it.
+        }
       }
       if (instance.status === 'running') {
         await this.navigateInstance(instance, startUrl);
@@ -681,7 +688,7 @@ export class OracleBrowserManager {
 
     instance.startPromise = this.launchInstance(instance, startUrl);
     try {
-      instance.startPromise;
+      await instance.startPromise;
     } finally {
       instance.startPromise = null;
     }
@@ -1064,7 +1071,11 @@ export class OracleBrowserManager {
       );
     }
     if (instance.startPromise) {
-      instance.startPromise;
+      try {
+        await instance.startPromise;
+      } catch {
+        // Surfaced by the status check below.
+      }
     }
     if (instance.status !== 'running') {
       throw new Error(instance.error || 'Embedded Oracle browser is not ready.');

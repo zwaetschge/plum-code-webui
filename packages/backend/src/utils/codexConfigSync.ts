@@ -15,6 +15,7 @@
  * is replaced atomically.
  */
 
+import { DEFAULT_CODEX_MODEL } from '@plum-code-webui/shared';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -105,7 +106,7 @@ function buildManagedBlock(claudeSettings: ClaudeSettings | null): string {
     '# Custom config outside the markers is preserved across rewrites.',
     '',
     '# WebUI defaults',
-    'model = "gpt-5.5"',
+    `model = "${DEFAULT_CODEX_MODEL}"`,
     'model_reasoning_effort = "medium"',
     `approval_policy = "${approvalPolicy}"`,
     `sandbox_mode = "${sandboxMode}"`,
@@ -113,16 +114,16 @@ function buildManagedBlock(claudeSettings: ClaudeSettings | null): string {
     '',
     '# Profile presets exposed in the WebUI UI ("/codex profile fast" etc.)',
     '[profiles.fast]',
-    'model = "gpt-5.5"',
+    `model = "${DEFAULT_CODEX_MODEL}"`,
     'model_reasoning_effort = "low"',
     'service_tier = "fast"',
     '',
     '[profiles.balanced]',
-    'model = "gpt-5.5"',
+    `model = "${DEFAULT_CODEX_MODEL}"`,
     'model_reasoning_effort = "medium"',
     '',
     '[profiles.deep]',
-    'model = "gpt-5.5"',
+    `model = "${DEFAULT_CODEX_MODEL}"`,
     'model_reasoning_effort = "xhigh"',
   ];
 

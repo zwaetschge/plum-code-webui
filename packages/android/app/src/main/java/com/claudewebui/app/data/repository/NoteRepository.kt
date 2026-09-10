@@ -1,5 +1,6 @@
 package com.claudewebui.app.data.repository
 
+import com.claudewebui.app.core.network.apiCall
 import com.claudewebui.app.core.network.ApiClient
 import com.claudewebui.app.data.model.CreateNoteInput
 import com.claudewebui.app.data.model.Note
@@ -13,7 +14,7 @@ import com.claudewebui.app.data.model.UpdateNoteInput
  */
 class NoteRepository(private val api: ApiClient) {
 
-    suspend fun getForSession(sessionId: String): Result<List<Note>> = runCatching {
+    suspend fun getForSession(sessionId: String): Result<List<Note>> = apiCall {
         val response = api.getSessionNotes(sessionId)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to load notes")
@@ -21,7 +22,7 @@ class NoteRepository(private val api: ApiClient) {
         response.data
     }
 
-    suspend fun create(sessionId: String, title: String, content: String): Result<Note> = runCatching {
+    suspend fun create(sessionId: String, title: String, content: String): Result<Note> = apiCall {
         val response = api.createNote(
             CreateNoteInput(title = title, content = content, sessionId = sessionId)
         )
@@ -36,7 +37,7 @@ class NoteRepository(private val api: ApiClient) {
         title: String? = null,
         content: String? = null,
         pinned: Boolean? = null,
-    ): Result<Note> = runCatching {
+    ): Result<Note> = apiCall {
         val response = api.updateNote(id, UpdateNoteInput(title, content, pinned))
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to update note")
@@ -44,7 +45,7 @@ class NoteRepository(private val api: ApiClient) {
         response.data
     }
 
-    suspend fun delete(id: String): Result<Unit> = runCatching {
+    suspend fun delete(id: String): Result<Unit> = apiCall {
         val response = api.deleteNote(id)
         if (!response.success) {
             error(response.error?.message ?: "Failed to delete note")

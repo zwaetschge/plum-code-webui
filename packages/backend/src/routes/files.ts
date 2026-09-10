@@ -4,7 +4,9 @@ import { createReadStream } from 'fs';
 import path from 'path';
 import os from 'os';
 import multer from 'multer';
-import { requireAuth } from '../middleware/auth.js';
+import archiver from 'archiver';
+import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
+import { get as pgGet } from '../db/pg.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { config } from '../config.js';
 import { sanitizeFilename, ALLOWED_UPLOAD_MIME_TYPES } from '../utils/sanitize.js';
@@ -49,12 +51,54 @@ function parseCSV(content: string): { headers: string[]; rows: string[][] } {
   return { headers, rows };
 }
 
+/**
+ * Work out where an upload goes.
+ *
+ * Multer calls `destination` the moment it reaches the file part, so `req.body`
+ * only holds the text fields that were sent *before* it — whether
+ * `targetDirectory` in the body is visible at all depends on the order the
+ * client happened to append its form fields in. The query parameter is the
+ * dependable channel and is checked first; `sessionId` is accepted as well so a
+ * client can just name the session and let the server resolve its working
+ * directory (the Android file manager did exactly that and every upload failed
+ * with "Target directory is required").
+ */
+async function resolveUploadDirectory(req: Express.Request): Promise<string> {
+  const query = (req as unknown as { query: Record<string, unknown> }).query;
+  const body = ((req as unknown as { body?: Record<string, unknown> }).body || {}) as Record<
+    string,
+    unknown
+  >;
+  const pick = (value: unknown): string =>
+    typeof value === 'string' && value.trim() ? value.trim() : '';
+
+  const targetDir = pick(query.targetDirectory) || pick(body.targetDirectory);
+  if (targetDir) return targetDir;
+
+  const sessionId = pick(query.sessionId) || pick(body.sessionId);
+  if (sessionId) {
+    const userId = (req as unknown as AuthenticatedRequest).userId;
+    const row = (await pgGet(
+      'SELECT working_directory AS workingDirectory FROM sessions WHERE id = ? AND user_id = ?',
+      sessionId,
+      userId
+    )) as { workingDirectory?: string } | undefined;
+    if (row?.workingDirectory) return row.workingDirectory;
+  }
+
+  throw new Error(
+    'Target directory is required — pass ?targetDirectory=… or ?sessionId=… in the query string'
+  );
+}
+
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: async (req, _file, cb) => {
-    const targetDir = req.body.targetDirectory || (req.query.targetDirectory as string);
-    if (!targetDir) {
-      return cb(new Error('Target directory is required'), '');
+    let targetDir: string;
+    try {
+      targetDir = await resolveUploadDirectory(req);
+    } catch (err) {
+      return cb(err as Error, '');
     }
     try {
       const resolvedPath = path.resolve(targetDir);
@@ -588,6 +632,88 @@ router.get('/download', requireAuth, async (req, res) => {
     }
     throw err;
   }
+});
+
+// Directory trees that are never worth shipping in a workspace download: they
+// are regenerated from the lockfile or the remote, and they dwarf everything
+// else. `?full=1` includes them anyway.
+const FOLDER_DOWNLOAD_SKIPPED_DIRS = ['node_modules', '.git', '.pnpm-store'];
+
+// Download a directory as a streamed ZIP archive
+router.get('/download-folder', requireAuth, async (req, res) => {
+  const dirPath = req.query.path as string;
+  const includeAll = req.query.full === '1' || req.query.full === 'true';
+
+  if (!dirPath) {
+    throw new AppError('Path is required', 400, 'MISSING_PATH');
+  }
+
+  const resolvedPath = validatePath(dirPath);
+
+  let stats;
+  try {
+    stats = await fs.stat(resolvedPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new AppError('Directory not found', 404, 'NOT_FOUND');
+    }
+    throw err;
+  }
+  if (!stats.isDirectory()) {
+    throw new AppError('Path is not a directory', 400, 'NOT_DIRECTORY');
+  }
+
+  const folderName = (path.basename(resolvedPath) || 'folder').replace(/[\r\n"]/g, '');
+  const filename = `${folderName}.zip`;
+  const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_');
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+  );
+  res.setHeader('Content-Type', 'application/zip');
+  // The size is unknown up front; the archive streams straight to the socket.
+  res.setHeader('Cache-Control', 'no-store');
+
+  const archive = archiver('zip', { zlib: { level: 6 } });
+  let finished = false;
+  archive.on('warning', (err) => {
+    // ENOENT/EACCES on a single entry (file vanished mid-walk, unreadable
+    // socket) should not kill the whole download.
+    console.warn(`[FILES] Folder download warning for ${resolvedPath}: ${err.message}`);
+  });
+  archive.on('error', (err) => {
+    console.error(`[FILES] Folder download failed for ${resolvedPath}:`, err);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: { message: 'Failed to build archive', code: 'ARCHIVE_FAILED' },
+      });
+    } else {
+      res.destroy(err);
+    }
+  });
+  res.on('close', () => {
+    // Client went away: stop walking the tree instead of compressing into the void.
+    if (!finished) archive.abort();
+  });
+
+  archive.pipe(res);
+  const skipped = includeAll ? [] : FOLDER_DOWNLOAD_SKIPPED_DIRS;
+  archive.glob(
+    '**/*',
+    {
+      cwd: resolvedPath,
+      dot: true,
+      follow: false,
+      // `skip` stops the walk at the directory itself; `ignore` covers anything
+      // the matcher still reports underneath it.
+      skip: skipped.map((dir) => `**/${dir}`),
+      ignore: skipped.map((dir) => `**/${dir}/**`),
+    },
+    { prefix: folderName }
+  );
+  await archive.finalize();
+  finished = true;
 });
 
 // Get file as binary (for PDFs, images, etc.)

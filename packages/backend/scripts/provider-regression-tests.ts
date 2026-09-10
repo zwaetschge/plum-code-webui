@@ -109,7 +109,7 @@ useTestSchema();
 const { get: pgGet, run: pgRun } = await import('../src/db/pg.js');
 await createTestSchema();
 import { syncCodexConfig } from '../src/utils/codexConfigSync.js';
-import { resolveContextWindow } from '../src/utils/contextWindow.js';
+import { lookupContextWindow, resolveContextWindow } from '../src/utils/contextWindow.js';
 import { mapKimiUsage } from '../src/utils/kimiUsage.js';
 import {
   captureKimiUsageCursor,
@@ -449,11 +449,24 @@ function testContextWindowFallbacks() {
   assert.equal(resolveContextWindow('claude-haiku-4-5'), 200_000);
   assert.equal(resolveContextWindow('gpt-5.5'), 256_000);
   assert.equal(resolveContextWindow('gpt-5.5-pro'), 256_000);
+  assert.equal(resolveContextWindow('gpt-6-astra'), 1_100_000);
   assert.equal(resolveContextWindow('gpt-5.6-sol'), 1_050_000);
   assert.equal(resolveContextWindow('gpt-5.6-terra'), 1_050_000);
   assert.equal(resolveContextWindow('gpt-5.4'), 196_000);
   assert.equal(resolveContextWindow('gpt-5.4-mini'), 128_000);
   assert.equal(resolveContextWindow('gpt-5.3-codex'), 400_000);
+  // Pi and OpenCode ids carry the provider prefix; the family must still match.
+  assert.equal(resolveContextWindow('openai/gpt-5.5'), 256_000);
+  assert.equal(resolveContextWindow('antigravity/gemini-3.7-flash'), 1_000_000);
+  assert.equal(resolveContextWindow('z-ai/glm-5.1'), 200_000);
+  assert.equal(resolveContextWindow('z-ai/glm-4.7'), 200_000);
+  assert.equal(resolveContextWindow('z-ai/glm-4.5-air'), 128_000);
+  assert.equal(resolveContextWindow('kimi-for-coding/k2p5'), 256_000);
+  assert.equal(resolveContextWindow('opencode/gpt-oss-120b'), 128_000);
+  // Unknown families: display falls back to the default, config writers get null.
+  assert.equal(resolveContextWindow('alibaba-token-plan/qwen3.8-max-preview'), 200_000);
+  assert.equal(lookupContextWindow('alibaba-token-plan/qwen3.8-max-preview'), null);
+  assert.equal(lookupContextWindow('z-ai/glm-5.2'), 200_000);
 }
 
 function testUsageWindowNormalization() {
@@ -688,7 +701,7 @@ async function testCodexFreshExecUsageDoesNotDelta() {
     subagentRuns: new Map(),
   });
 
-  const translated = await managerPrivate.translateCodexMessage(sessionId, {
+  const translated = (await managerPrivate.translateCodexMessage(sessionId, {
     type: 'turn.completed',
     usage: {
       input_tokens: 2_000,
@@ -696,7 +709,7 @@ async function testCodexFreshExecUsageDoesNotDelta() {
       output_tokens: 100,
       reasoning_output_tokens: 25,
     },
-  }) as { usage?: Record<string, number> } | null;
+  })) as { usage?: Record<string, number> } | null;
 
   assert.equal(translated?.usage?.input_tokens, 1_500);
   assert.equal(translated?.usage?.cache_read_input_tokens, 500);
@@ -743,7 +756,7 @@ async function testCodexUsageClampsEachLargeTurnField() {
     subagentRuns: new Map(),
   });
 
-  const translated = await managerPrivate.translateCodexMessage(sessionId, {
+  const translated = (await managerPrivate.translateCodexMessage(sessionId, {
     type: 'turn.completed',
     usage: {
       input_tokens: 24_000_000,
@@ -751,7 +764,7 @@ async function testCodexUsageClampsEachLargeTurnField() {
       output_tokens: 420_000,
       reasoning_output_tokens: 80_000,
     },
-  }) as { usage?: Record<string, number> } | null;
+  })) as { usage?: Record<string, number> } | null;
 
   // Fresh input/output clamp at 5M; cache reads repeat the cached prefix on
   // every model call in the turn, so 22.5M is a legitimate value that must
@@ -888,7 +901,7 @@ async function testCodexUsageIncludesDescendantThreadDelta() {
     subagentRuns: new Map(),
   });
 
-  const translated = await managerPrivate.translateCodexMessage(sessionId, {
+  const translated = (await managerPrivate.translateCodexMessage(sessionId, {
     type: 'turn.completed',
     usage: {
       input_tokens: 2_000,
@@ -896,7 +909,7 @@ async function testCodexUsageIncludesDescendantThreadDelta() {
       output_tokens: 100,
       reasoning_output_tokens: 25,
     },
-  }) as { usage?: Record<string, number> } | null;
+  })) as { usage?: Record<string, number> } | null;
 
   assert.equal(translated?.usage?.input_tokens, 2_300);
   assert.equal(translated?.usage?.cache_read_input_tokens, 2_700);
@@ -1345,7 +1358,7 @@ async function testCodexTurnCompletedRollsUpDescendantsWithoutKnownThreadId() {
   try {
     CLI_PROVIDERS.codex.credentialsPath = codexHome;
     managerPrivate.processes.set(sessionId, proc);
-    const translated = await managerPrivate.translateCodexMessage(sessionId, {
+    const translated = (await managerPrivate.translateCodexMessage(sessionId, {
       type: 'turn.completed',
       usage: {
         input_tokens: 99_000,
@@ -1353,7 +1366,7 @@ async function testCodexTurnCompletedRollsUpDescendantsWithoutKnownThreadId() {
         output_tokens: 700,
         reasoning_output_tokens: 200,
       },
-    }) as { usage?: Record<string, number> } | null;
+    })) as { usage?: Record<string, number> } | null;
 
     // Root non-cached 4_000 + child non-cached 2_000; caches and output summed.
     assert.equal(translated?.usage?.input_tokens, 6_000);
@@ -1485,6 +1498,7 @@ async function testPiResumesTurnAfterThresholdCompaction() {
     reason: 'threshold',
     aborted: false,
     willRetry: false,
+    result: { summary: 'ok', tokensBefore: 120_000 },
   });
 
   assert.equal(written.length, 0, 'nudge must not fire synchronously');
@@ -1523,6 +1537,7 @@ async function testPiProgressCancelsScheduledCompactionResume() {
     reason: 'threshold',
     aborted: false,
     willRetry: false,
+    result: { summary: 'ok', tokensBefore: 120_000 },
   });
   await managerPrivate.translatePiMessage(sessionId, {
     type: 'message_start',
@@ -1531,6 +1546,113 @@ async function testPiProgressCancelsScheduledCompactionResume() {
 
   await sleep(6_400);
   assert.equal(written.length, 0);
+}
+
+/**
+ * Regression: Pi runs threshold compaction only after `agent_end`, and
+ * `turn_end` fires after every LLM round. The old handler cleared the in-flight
+ * flag at `turn_end`, so a real post-turn compaction looked like a manual
+ * `/compact` and the task waited for a typed "continue".
+ */
+async function testPiResumesAfterPostTurnThresholdCompaction() {
+  const sessionId = 'session-pi-compact-post-turn';
+  const { managerPrivate, proc, written } = makePiManagerFixture(sessionId);
+
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'turn_end',
+    message: { role: 'assistant', usage: { input: 10, output: 5 } },
+    toolResults: [{ role: 'toolResult' }],
+  });
+  assert.equal(proc.piTurnInFlight, true, 'a tool round must not end the prompt');
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'turn_end',
+    message: { role: 'assistant', usage: { input: 10, output: 5 } },
+    toolResults: [],
+  });
+  await managerPrivate.translatePiMessage(sessionId, { type: 'agent_end', messages: [] });
+  assert.equal(proc.piTurnInFlight, false);
+
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'compaction_end',
+    reason: 'threshold',
+    aborted: false,
+    willRetry: false,
+    result: { summary: 'ok', tokensBefore: 120_000 },
+  });
+  await sleep(6_400);
+
+  assert.equal(written.length, 1, 'post-turn threshold compaction must be resumed');
+  const sent = JSON.parse(written[0]) as { type: string; message: string };
+  assert.equal(sent.type, 'prompt');
+  assert.match(sent.message, /Continue the task from the compaction summary/);
+  assert.equal(proc.piTurnInFlight, true);
+}
+
+/**
+ * The continuation budget refills only after a run the model finished itself.
+ * A `length` end at the hard limit must keep counting, otherwise a session that
+ * can still squeeze out one tool call per round loops forever.
+ */
+async function testPiCompactionBudgetRefillsOnlyAfterCleanStop() {
+  const sessionId = 'session-pi-compact-budget';
+  const { managerPrivate, proc } = makePiManagerFixture(sessionId, {
+    piCompactContinuations: 2,
+  });
+
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'turn_end',
+    message: { role: 'assistant', stopReason: 'length', usage: { input: 1, output: 1 } },
+    toolResults: [],
+  });
+  await managerPrivate.translatePiMessage(sessionId, { type: 'agent_end', messages: [] });
+  assert.equal(proc.piCompactContinuations, 2, 'length end keeps the count');
+
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'turn_end',
+    message: { role: 'assistant', stopReason: 'stop', usage: { input: 1, output: 1 } },
+    toolResults: [],
+  });
+  await managerPrivate.translatePiMessage(sessionId, { type: 'agent_end', messages: [] });
+  assert.equal(proc.piCompactContinuations, 0, 'clean stop refills');
+}
+
+/**
+ * Regression: a failed compaction (no result, errorMessage set) was treated as
+ * success and nudged. The context was still full, so every nudge cost one
+ * full-window request and ended in `length` again — the "Context compacted"
+ * marker after every single tool call in the chat.
+ */
+async function testPiFailedCompactionDoesNotResume() {
+  const sessionId = 'session-pi-compact-failed';
+  const { managerPrivate, proc, written, emitted } = makePiManagerFixture(sessionId);
+  const compactEvents: Array<Record<string, unknown>> = [];
+  managerPrivate.emitCompact = (_sessionId: unknown, data: unknown) => {
+    compactEvents.push(data as Record<string, unknown>);
+  };
+
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'compaction_end',
+    reason: 'overflow',
+    aborted: false,
+    willRetry: false,
+    result: undefined,
+    errorMessage: 'Context overflow recovery failed after one compact-and-retry attempt.',
+  });
+  await sleep(6_400);
+
+  assert.equal(written.length, 0, 'no nudge after a failed compaction');
+  assert.equal(proc.piTurnInFlight, false);
+  assert.equal(compactEvents.length, 1);
+  assert.match(String(compactEvents[0]?.error), /overflow recovery failed/);
+  assert.equal(compactEvents[0]?.reason, 'context-limit');
+  assert.ok(
+    emitted.some(
+      (entry) =>
+        entry.event === 'session:thinking' &&
+        (entry.data as { isThinking?: boolean }).isThinking === false
+    ),
+    'thinking indicator is switched off'
+  );
 }
 
 /** A manual /compact between turns must not inject a continuation. */
@@ -1543,6 +1665,7 @@ async function testPiManualCompactWithoutTurnDoesNotResume() {
     reason: 'manual',
     aborted: false,
     willRetry: false,
+    result: { summary: 'ok', tokensBefore: 120_000 },
   });
 
   await sleep(6_400);
@@ -2255,7 +2378,8 @@ function testClaudeCurrentModelCatalog() {
 }
 
 function testCodexFastTierArgs() {
-  assert.deepEqual(CLI_PROVIDERS.codex.models.slice(0, 4), [
+  assert.deepEqual(CLI_PROVIDERS.codex.models.slice(0, 5), [
+    'gpt-6-astra',
     'gpt-5.5',
     'gpt-5.6-sol',
     'gpt-5.6-terra',
@@ -2692,6 +2816,74 @@ function testPiSharesOpenCodeProviderConfigWithoutPersistingSecrets() {
   assert.equal(JSON.stringify(entry).includes('encrypted-secret-that-must-not-be-copied'), false);
   assert.equal(Array.isArray(entry?.models), true);
   assert.equal((entry?.models as unknown[]).length, 2);
+}
+
+/**
+ * Regression: models.json carried no `contextWindow`, so Pi fell back to its
+ * 128k default for every WebUI-provisioned model — the tracker read 128k
+ * regardless of model and threshold compaction kicked in at ~112k.
+ */
+function testPiModelsCarryContextWindow() {
+  const provider = {
+    id: 'z-ai',
+    name: 'Z.AI',
+    apiKey: 'secret',
+    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+    enabled: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const fromTable = buildPiProviderConfig(provider, {
+    'z-ai': {
+      name: 'Z.AI',
+      models: ['glm-5.1', 'totally-unknown-model'],
+      description: 'test',
+      env: ['Z_AI_API_KEY'],
+      api: 'https://api.z.ai/api/coding/paas/v4',
+      source: 'config',
+    },
+  });
+  const tableModels = fromTable?.models as Array<Record<string, unknown>>;
+  assert.equal(tableModels.find((m) => m.id === 'glm-5.1')?.contextWindow, 200_000);
+  assert.equal(
+    'contextWindow' in (tableModels.find((m) => m.id === 'totally-unknown-model') ?? {}),
+    false,
+    'unknown families must not get a guessed window'
+  );
+
+  // A models.dev limit beats the family table, and its output cap becomes maxTokens.
+  const fromCatalog = buildPiProviderConfig(provider, {
+    'z-ai': {
+      name: 'Z.AI',
+      models: ['glm-5.1'],
+      modelLimits: { 'glm-5.1': { context: 204_800, output: 131_072 } },
+      description: 'test',
+      env: ['Z_AI_API_KEY'],
+      api: 'https://api.z.ai/api/coding/paas/v4',
+      source: 'models.dev',
+    },
+  });
+  const catalogModel = (fromCatalog?.models as Array<Record<string, unknown>>)[0];
+  assert.equal(catalogModel?.contextWindow, 204_800);
+  assert.equal(catalogModel?.maxTokens, 32_768, 'output ceiling is capped for the request budget');
+
+  const parsed = parseOpenCodeModelsCache(
+    JSON.stringify({
+      'z-ai': {
+        id: 'z-ai',
+        name: 'Z.AI',
+        env: ['Z_AI_API_KEY'],
+        api: 'https://api.z.ai/api/coding/paas/v4',
+        models: {
+          'glm-5.1': { id: 'glm-5.1', limit: { context: 204800, output: 131072 } },
+          'glm-4.5v': { id: 'glm-4.5v' },
+        },
+      },
+    })
+  );
+  assert.deepEqual(parsed['z-ai']?.modelLimits, {
+    'glm-5.1': { context: 204_800, output: 131_072 },
+  });
 }
 
 function testPiUsesOnlyEnabledUserProviderModels() {
@@ -4165,8 +4357,8 @@ async function testProxyUserAdoptsLegacySharedCliUser() {
      VALUES ('session-1', 'legacy-user', 'Chat', '/tmp')`
   );
   await pgRun(
-    `INSERT INTO usage_history (user_id, session_id, input_tokens)
-     VALUES ('legacy-user', 'session-1', 123)`
+    `INSERT INTO usage_history (user_id, session_id, turn_id, input_tokens)
+     VALUES ('legacy-user', 'session-1', 'turn-1', 123)`
   );
 
   const user = await upsertProxyUserInDatabase('Valentin@Example.COM', 'Valentin', null);
@@ -4175,7 +4367,10 @@ async function testProxyUserAdoptsLegacySharedCliUser() {
   assert.equal(user.email, 'valentin@example.com');
   assert.equal(user.provider, 'proxy');
   assert.equal(user.providerId, 'valentin@example.com');
-  assert.equal(((await pgGet('SELECT COUNT(*) as count FROM users')) as { count: number }).count, 1);
+  assert.equal(
+    ((await pgGet('SELECT COUNT(*) as count FROM users')) as { count: number }).count,
+    1
+  );
   assert.deepEqual(
     await pgGet(`SELECT email, provider, provider_id, role FROM users WHERE id = 'legacy-user'`),
     {
@@ -4625,11 +4820,13 @@ async function testDefaultMcpServerSeeding() {
       env?: Record<string, string>;
     };
 
-    assert.deepEqual(first.added, ['blender']);
+    assert.deepEqual(first.added, ['blender', 'subagents']);
     assert.equal(parsed.mcpServers.godot.command, 'custom-godot-wrapper');
     assert.deepEqual(parsed.mcpServers.godot.args, ['--keep-me']);
     assert.equal(parsed.mcpServers.blender.command, 'node');
     assert.deepEqual(parsed.mcpServers.blender.args, ['/app/scripts/mcp-servers/blender.mjs']);
+    assert.equal(parsed.mcpServers.subagents.command, 'node');
+    assert.deepEqual(parsed.mcpServers.subagents.args, ['/app/scripts/mcp-servers/subagents.mjs']);
     assert.equal(parsed.env?.KEEP, '1');
 
     const second = await ensureDefaultClaudeMcpServers({ settingsPath });
@@ -5263,21 +5460,29 @@ async function testOracleMcpStartsEmbeddedBrowserForManualMode() {
 }
 
 function testPricingTable() {
-  assert.deepEqual(resolveModelPricing('gpt-5.6-sol')?.input, 5);
+  assert.deepEqual(resolveModelPricing('gpt-6-astra'), {
+    input: 10,
+    output: 50,
+    cacheRead: 1,
+    cacheWrite: 12.5,
+    source: 'OpenAI API pricing, 2026-09-04',
+    label: 'GPT-6 Astra',
+  });
+  assert.deepEqual(resolveModelPricing('gpt-5.6-sol')?.input, 4);
   assert.deepEqual(resolveModelPricing('gpt-5.6-terra'), {
-    input: 2.5,
-    output: 15,
-    cacheRead: 0.25,
-    cacheWrite: 3.125,
-    source: 'OpenAI API pricing, 2026-07-09',
+    input: 2,
+    output: 12,
+    cacheRead: 0.2,
+    cacheWrite: 2.5,
+    source: 'OpenAI API pricing, 2026-09-04',
     label: 'GPT-5.6 Terra',
   });
   assert.deepEqual(resolveModelPricing('gpt-5.6-luna'), {
-    input: 1,
-    output: 6,
-    cacheRead: 0.1,
-    cacheWrite: 1.25,
-    source: 'OpenAI API pricing, 2026-07-09',
+    input: 0.2,
+    output: 1.2,
+    cacheRead: 0.02,
+    cacheWrite: 0.25,
+    source: 'OpenAI API pricing, 2026-09-04',
     label: 'GPT-5.6 Luna',
   });
   assert.deepEqual(resolveModelPricing('gpt-5.5')?.input, 5);
@@ -5460,6 +5665,9 @@ await testPiResumesTurnAfterThresholdCompaction();
 await testPiDoesNotResumeWhenPiWillRetry();
 await testPiProgressCancelsScheduledCompactionResume();
 await testPiManualCompactWithoutTurnDoesNotResume();
+await testPiResumesAfterPostTurnThresholdCompaction();
+await testPiCompactionBudgetRefillsOnlyAfterCleanStop();
+await testPiFailedCompactionDoesNotResume();
 await testCodexContextFallbackUsesThreadState();
 await testCodexContextFallbackCapsThreadStateAtWindow();
 await testCodexCompactEventRetainsCompactedContext();
@@ -5480,6 +5688,7 @@ testOpenCodeWebuiProviderConfig();
 testZaiVisionMcpPolicyManagedConfig();
 testOpenCodeSessionModelSelection();
 testPiSharesOpenCodeProviderConfigWithoutPersistingSecrets();
+testPiModelsCarryContextWindow();
 testPiUsesOnlyEnabledUserProviderModels();
 testPiMergesModelSourcesAndSurvivesWithoutOpenCodeConfig();
 testOpenCodeAllowedDirectories();

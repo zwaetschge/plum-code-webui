@@ -39,6 +39,13 @@ data class SessionEntity(
     val writingStyleSkill: String? = null,
     // Provider-native session id; resume/rewind logic needs it offline too.
     val claudeSessionId: String? = null,
+    // Runtime snapshot, cached so the dashboard can distinguish "a process
+    // exists" from "it is working on something" while offline or mid-refresh.
+    @ColumnInfo(defaultValue = "0") val busy: Boolean = false,
+    val activitySummary: String? = null,
+    @ColumnInfo(defaultValue = "0") val queueDepth: Int = 0,
+    @ColumnInfo(defaultValue = "0") val pendingApprovals: Int = 0,
+    val lastActivityAt: String? = null,
     val updatedAt: String,
     val createdAt: String
 )
@@ -64,6 +71,11 @@ fun Session.toEntity(): SessionEntity = SessionEntity(
     designStyleSkill = designStyleSkill,
     writingStyleSkill = writingStyleSkill,
     claudeSessionId = claudeSessionId,
+    busy = busy,
+    activitySummary = activitySummary,
+    queueDepth = queueDepth,
+    pendingApprovals = pendingApprovals,
+    lastActivityAt = lastActivityAt,
     updatedAt = updatedAt,
     createdAt = createdAt
 )
@@ -87,6 +99,11 @@ fun SessionEntity.toModel(): Session = Session(
     writingStyleSkill = writingStyleSkill,
     mode = mode?.let { m -> runCatching { SessionMode.valueOf(m) }.getOrNull() }
         ?: SessionMode.AUTO_ACCEPT,
+    busy = busy,
+    activitySummary = activitySummary,
+    queueDepth = queueDepth,
+    pendingApprovals = pendingApprovals,
+    lastActivityAt = lastActivityAt,
     updatedAt = updatedAt,
     createdAt = createdAt
 )

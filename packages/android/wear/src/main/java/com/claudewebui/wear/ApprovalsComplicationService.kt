@@ -10,8 +10,8 @@ import androidx.wear.watchface.complications.datasource.ComplicationRequest
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceService
 
 /**
- * Watch-face complication showing the number of pending approvals; tapping it
- * opens the watch app's approval list.
+ * Watch-face complication showing how many approvals and questions are waiting;
+ * tapping it opens the watch app's list.
  */
 class ApprovalsComplicationService : ComplicationDataSourceService() {
 
@@ -22,7 +22,8 @@ class ApprovalsComplicationService : ComplicationDataSourceService() {
         request: ComplicationRequest,
         listener: ComplicationRequestListener,
     ) {
-        listener.onComplicationData(build(WearSnapshotStore.cached(this).approvals.size))
+        val snapshot = WearSnapshotStore.cached(this)
+        listener.onComplicationData(build(snapshot.approvals.size + snapshot.questions.size))
     }
 
     private fun build(count: Int): ComplicationData {
@@ -34,7 +35,7 @@ class ApprovalsComplicationService : ComplicationDataSourceService() {
         )
         return ShortTextComplicationData.Builder(
             PlainComplicationText.Builder(count.toString()).build(),
-            PlainComplicationText.Builder("Plum approvals").build(),
+            PlainComplicationText.Builder("Plum waiting").build(),
         )
             .setTapAction(tap)
             .build()

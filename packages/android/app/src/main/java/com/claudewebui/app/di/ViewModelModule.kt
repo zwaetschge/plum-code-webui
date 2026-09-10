@@ -1,10 +1,12 @@
 package com.claudewebui.app.di
 
 import com.claudewebui.app.data.repository.AuthRepository
+import com.claudewebui.app.data.repository.GatewayRepository
 import com.claudewebui.app.data.repository.MessageRepository
 import com.claudewebui.app.data.repository.SessionRepository
 import com.claudewebui.app.data.repository.NoteRepository
 import com.claudewebui.app.data.repository.SettingsRepository
+import com.claudewebui.app.ui.screens.activity.ActivityViewModel
 import com.claudewebui.app.ui.screens.analytics.AnalyticsViewModel
 import com.claudewebui.app.ui.screens.auth.LoginViewModel
 import com.claudewebui.app.ui.screens.chat.ChatViewModel
@@ -32,6 +34,10 @@ val viewModelModule = module {
 
     single { SessionRepository(get(), get(), get()) }
 
+    // Cross-session supervision: one overview call instead of a per-session
+    // permission fan-out.
+    single { GatewayRepository(get(), get()) }
+
     single { MessageRepository(get(), get(), get(), get(), get(), get()) }
 
     single { SettingsRepository(get()) }
@@ -43,8 +49,8 @@ val viewModelModule = module {
     // LoginViewModel(apiClient, context)
     viewModel { LoginViewModel(get(), androidContext()) }
 
-    // DashboardViewModel(apiClient, sessionRepository)
-    viewModel { DashboardViewModel(get(), get(), androidContext()) }
+    // DashboardViewModel(apiClient, sessionRepository, gatewayRepository)
+    viewModel { DashboardViewModel(get(), get(), get(), androidContext()) }
 
     // ChatViewModel(sessionId, messageRepository, sessionRepository, settingsRepository, socketManager, apiClient, context)
     viewModel { (sessionId: String) ->
@@ -67,15 +73,16 @@ val viewModelModule = module {
 
     // AnalyticsViewModel(apiClient)
     viewModel { AnalyticsViewModel(get()) }
+    viewModel { ActivityViewModel(get(), get()) }
 
     // CheckpointViewModel(sessionId, apiClient)
-    viewModel { (sessionId: String) -> CheckpointViewModel(sessionId, get()) }
+    viewModel { (sessionId: String) -> CheckpointViewModel(sessionId, get(), get()) }
 
     // GitViewModel(sessionId, apiClient, sessionRepository)
-    viewModel { (sessionId: String) -> GitViewModel(sessionId, get(), get()) }
+    viewModel { (sessionId: String) -> GitViewModel(sessionId, get(), get(), get()) }
 
     // UsageViewModel(sessionId, apiClient)
-    viewModel { (sessionId: String) -> UsageViewModel(sessionId, get()) }
+    viewModel { (sessionId: String) -> UsageViewModel(sessionId, get(), get()) }
 
     // MemoryViewModel(workingDirectory, apiClient)
     viewModel { (workingDirectory: String) -> MemoryViewModel(workingDirectory, get()) }

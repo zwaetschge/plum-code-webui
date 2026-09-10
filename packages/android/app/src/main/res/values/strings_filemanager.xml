@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="filemanager_back_b52b3">Back</string>
+    <string name="filemanager_cancel_77dfd">Cancel</string>
+    <string name="filemanager_clear_719ea">Clear</string>
+    <string name="filemanager_delete_1_s_137cd">Delete %1$s?</string>
+    <string name="filemanager_delete_f6fdb">Delete</string>
+    <string name="filemanager_dismiss_70afe">Dismiss</string>
+    <string name="filemanager_empty_directory_950d3">Empty directory</string>
+    <string name="filemanager_file_2c3ca">File</string>
+    <string name="filemanager_files_6ce6c">Files</string>
+    <string name="filemanager_go_up_25874">Go up</string>
+    <string name="filemanager_no_changes_24a61">No changes</string>
+    <string name="filemanager_no_results_for_1_s_70985">No results for \"%1$s\"</string>
+    <string name="filemanager_refresh_56e3b">Refresh</string>
+    <string name="filemanager_reload_cce71">Reload</string>
+    <string name="filemanager_retry_9f5cd">Retry</string>
+    <string name="filemanager_revert_27260">Revert</string>
+    <string name="filemanager_save_efc00">Save</string>
+    <string name="filemanager_saved_c0ae8">Saved</string>
+    <string name="filemanager_saving_56a22">Saving…</string>
+    <string name="filemanager_search_files_fe116">Search files...</string>
+    <string name="filemanager_send_path_to_chat_6d770">Send path to chat</string>
+    <string name="filemanager_this_action_cannot_be_undone_951f4">This action cannot be undone.</string>
+    <string name="filemanager_unsaved_changes_29267">Unsaved changes</string>
+    <string name="filemanager_upload_file_503a3">Upload file</string>
+    <string name="filemanager_upload_files_using_the_button_below_c7fda">Upload files using the button below</string>
+    <string name="filemanager_uploading_070e3">Uploading...</string>
+    <string name="filemanager_download_file">Download</string>
+    <string name="filemanager_download_zip">Download as ZIP</string>
+    <string name="filemanager_download_zip_hint">node_modules and .git are skipped</string>
+    <string name="filemanager_download_preparing">Preparing %1$s…</string>
+    <string name="filemanager_download_failed">Download failed</string>
+    <string name="filemanager_unwritable">Destination is not writable</string>
+</resources>

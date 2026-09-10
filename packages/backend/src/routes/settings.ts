@@ -1,3 +1,4 @@
+import { maskSecret } from '../utils/maskSecret.js';
 import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import { z } from 'zod';
@@ -29,6 +30,7 @@ import {
   resolveOpenCodeTenantPaths,
 } from '../services/opencode/tenantPaths.js';
 import { buildOpenCodeProviderCredentialEnv } from '../utils/opencodeProviderKeys.js';
+import { mergeUserSettings, removeUserSettings } from '../utils/userSettings.js';
 import { syncProviderLinks } from '../utils/providerLinks.js';
 import { syncPiConfig } from '../utils/piConfig.js';
 
@@ -866,7 +868,7 @@ router.get('/github-token', requireAuth, async (req, res) => {
           success: true,
           data: {
             hasToken: true,
-            tokenPreview: `${parsed.githubToken.substring(0, 8)}...${parsed.githubToken.slice(-4)}`,
+            tokenPreview: maskSecret(parsed.githubToken),
           },
         });
         return;
@@ -893,35 +895,16 @@ router.put('/github-token', requireAuth, async (req, res) => {
     throw new AppError('Invalid GitHub token format', 400, 'INVALID_TOKEN');
   }
 
-  // Get existing settings_json
-  const existing = (await pgGet(
-    'SELECT settings_json FROM user_settings WHERE user_id = ?',
-    userId
-  )) as unknown as { settings_json: string | null } | undefined;
-
-  let settingsObj: Record<string, unknown> = {};
-  if (existing?.settings_json) {
-    try {
-      settingsObj = JSON.parse(existing.settings_json);
-    } catch {
-      // Invalid JSON, start fresh
-    }
-  }
-
-  // Encrypt the token before storing
-  settingsObj.githubToken = safeEncrypt(token);
-
-  await pgRun(
-    'UPDATE user_settings SET settings_json = ? WHERE user_id = ?',
-    JSON.stringify(settingsObj),
-    userId
-  );
+  // Merge inside Postgres. Read-modify-write in JS loses whichever concurrent
+  // settings update commits first — two browser tabs, or a settings save racing
+  // a provider-key write, silently dropped one side's field.
+  await mergeUserSettings(userId, { githubToken: safeEncrypt(token) });
 
   res.json({
     success: true,
     data: {
       hasToken: true,
-      tokenPreview: `${token.substring(0, 8)}...${token.slice(-4)}`,
+      tokenPreview: maskSecret(token),
     },
   });
 });
@@ -977,9 +960,7 @@ function serializeZaiApiStatus(config: ZaiApiConfig | null) {
     configured: !!config,
     baseUrl: config?.baseUrl ?? '',
     hasAuthToken: !!config?.authToken,
-    authTokenPreview: config?.authToken
-      ? `${config.authToken.substring(0, 8)}...${config.authToken.slice(-4)}`
-      : null,
+    authTokenPreview: maskSecret(config?.authToken),
     opusModel: config?.opusModel ?? '',
     sonnetModel: config?.sonnetModel ?? '',
     haikuModel: config?.haikuModel ?? '',
@@ -1047,7 +1028,7 @@ function serializeSubagentUpstream(entry: SubagentUpstream) {
     label: entry.label,
     baseUrl: entry.baseUrl,
     hasAuthToken: true,
-    authTokenPreview: `${entry.authToken.substring(0, 6)}...${entry.authToken.slice(-4)}`,
+    authTokenPreview: maskSecret(entry.authToken),
     models: entry.models,
   };
 }
@@ -1076,7 +1057,11 @@ router.put('/subagent-upstreams', requireAuth, async (req, res) => {
     // means "keep what is stored" — same contract as the Z.AI settings.
     const token = entry.authToken || (entry.id ? existingById.get(entry.id)?.authToken : undefined);
     if (!token) {
-      throw new AppError(`Upstream "${entry.label}" is missing an API token`, 400, 'MISSING_API_TOKEN');
+      throw new AppError(
+        `Upstream "${entry.label}" is missing an API token`,
+        400,
+        'MISSING_API_TOKEN'
+      );
     }
     return {
       id: entry.id || nanoid(),
@@ -1351,6 +1336,11 @@ router.get('/internal/cli-subagents', requireHookSecret, async (req, res) => {
 const cliSubagentUsageSchema = z.object({
   provider: z.enum(['codex', 'claude', 'opencode', 'pi', 'zai']),
   model: z.string().trim().min(1).max(120),
+  // Identifies the subagent run, not the request. `insertUsageHistoryTurn`
+  // deduplicates on `(session_id, provider, turn_id)`, so the sender has to
+  // repeat the same value if it retries — a fresh id per attempt would book the
+  // same tokens twice. Optional so an older MCP script keeps working.
+  runId: z.string().trim().min(1).max(120).optional(),
   inputTokens: z.number().int().min(0).default(0),
   outputTokens: z.number().int().min(0).default(0),
   cacheReadTokens: z.number().int().min(0).default(0),
@@ -1385,7 +1375,10 @@ router.post('/internal/cli-subagents/usage', requireHookSecret, async (req, res)
       userId: resolved.userId,
       sessionId: resolved.sessionId,
       provider: usage.provider,
-      turnId: `cli-subagent-${nanoid()}`,
+      // A random id per request defeats the ON CONFLICT clause that makes this
+      // insert exactly-once: every retry would look like a new turn and charge
+      // the tokens again. Fall back to one only when the caller sent no run id.
+      turnId: usage.runId ? `cli-subagent-${usage.runId}` : `cli-subagent-${nanoid()}`,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       cacheReadTokens: usage.cacheReadTokens,
@@ -1415,32 +1408,25 @@ router.put('/zai-api', requireAuth, async (req, res) => {
     throw new AppError('Invalid Z.AI configuration', 400, 'VALIDATION_ERROR');
   }
 
-  const existing = (await pgGet(
-    'SELECT settings_json FROM user_settings WHERE user_id = ?',
-    userId
-  )) as unknown as { settings_json: string | null } | undefined;
-  const settingsObj = safeJsonParse<Record<string, unknown>>(existing?.settings_json, {});
   const existingConfig = await getZaiApiConfigForUser(userId);
   const authToken = parsed.data.authToken || existingConfig?.authToken;
   if (!authToken) {
     throw new AppError('API token is required', 400, 'MISSING_API_TOKEN');
   }
 
-  settingsObj.zaiApi = {
-    baseUrl: parsed.data.baseUrl,
-    authToken: safeEncrypt(authToken),
-    opusModel: compactOptionalString(parsed.data.opusModel),
-    sonnetModel: compactOptionalString(parsed.data.sonnetModel),
-    haikuModel: compactOptionalString(parsed.data.haikuModel),
-    apiTimeoutMs: CLAUDE_API_TIMEOUT_MS,
-  };
-  delete settingsObj.claudeApi;
-
-  await pgRun(
-    'UPDATE user_settings SET settings_json = ? WHERE user_id = ?',
-    JSON.stringify(settingsObj),
-    userId
-  );
+  await mergeUserSettings(userId, {
+    zaiApi: {
+      baseUrl: parsed.data.baseUrl,
+      authToken: safeEncrypt(authToken),
+      opusModel: compactOptionalString(parsed.data.opusModel),
+      sonnetModel: compactOptionalString(parsed.data.sonnetModel),
+      haikuModel: compactOptionalString(parsed.data.haikuModel),
+      apiTimeoutMs: CLAUDE_API_TIMEOUT_MS,
+    },
+  });
+  // The pre-rename key. Dropped separately so the merge above stays a pure
+  // addition and cannot resurrect it.
+  await removeUserSettings(userId, ['claudeApi']);
 
   res.json({
     success: true,
@@ -1448,7 +1434,7 @@ router.put('/zai-api', requireAuth, async (req, res) => {
       configured: true,
       baseUrl: parsed.data.baseUrl,
       hasAuthToken: true,
-      authTokenPreview: `${authToken.substring(0, 8)}...${authToken.slice(-4)}`,
+      authTokenPreview: maskSecret(authToken),
       opusModel: compactOptionalString(parsed.data.opusModel) ?? '',
       sonnetModel: compactOptionalString(parsed.data.sonnetModel) ?? '',
       haikuModel: compactOptionalString(parsed.data.haikuModel) ?? '',
@@ -1459,21 +1445,7 @@ router.put('/zai-api', requireAuth, async (req, res) => {
 router.delete('/zai-api', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
 
-  const existing = (await pgGet(
-    'SELECT settings_json FROM user_settings WHERE user_id = ?',
-    userId
-  )) as unknown as { settings_json: string | null } | undefined;
-
-  if (existing?.settings_json) {
-    const settingsObj = safeJsonParse<Record<string, unknown>>(existing.settings_json, {});
-    delete settingsObj.zaiApi;
-    delete settingsObj.claudeApi;
-    await pgRun(
-      'UPDATE user_settings SET settings_json = ? WHERE user_id = ?',
-      JSON.stringify(settingsObj),
-      userId
-    );
-  }
+  await removeUserSettings(userId, ['zaiApi', 'claudeApi']);
 
   res.json({ success: true });
 });

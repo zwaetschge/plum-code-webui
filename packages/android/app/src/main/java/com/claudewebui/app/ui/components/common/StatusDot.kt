@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.components.common
 
+import com.claudewebui.app.ui.theme.PlumTheme
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -77,8 +78,8 @@ private fun AnimatedStatusDot(
     size: Dp,
     modifier: Modifier = Modifier,
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "statusPulse")
-    val pulseScale by infiniteTransition.animateFloat(
+    val infiniteTransition = if (PlumTheme.tokens.motion.reduceMotion) null else rememberInfiniteTransition(label = "statusPulse")
+    val pulseScale by infiniteTransition?.animateFloat(
         initialValue = 1f,
         targetValue = 2.2f,
         animationSpec = infiniteRepeatable(
@@ -86,8 +87,8 @@ private fun AnimatedStatusDot(
             repeatMode = RepeatMode.Restart,
         ),
         label = "pulseScale",
-    )
-    val pulseAlpha by infiniteTransition.animateFloat(
+    ) ?: androidx.compose.runtime.rememberUpdatedState(1f)
+    val pulseAlpha by infiniteTransition?.animateFloat(
         initialValue = 0.5f,
         targetValue = 0f,
         animationSpec = infiniteRepeatable(
@@ -95,7 +96,7 @@ private fun AnimatedStatusDot(
             repeatMode = RepeatMode.Restart,
         ),
         label = "pulseAlpha",
-    )
+    ) ?: androidx.compose.runtime.rememberUpdatedState(0.5f)
 
     Canvas(modifier = modifier.size(size * 2.5f)) {
         val center = Offset(this.size.width / 2f, this.size.height / 2f)
@@ -122,9 +123,10 @@ private fun AnimatedStatusDot(
 @Preview(showBackground = true, backgroundColor = 0xFFF0EFEA)
 @Composable
 private fun StatusDotPreview() {
+    val componentTokens = PlumTheme.tokens
     ClaudeWebUITheme {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.lg),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             StatusDot(status = SessionStatus.RUNNING)

@@ -170,7 +170,10 @@ export interface TransactionScope {
  * Using the pool helpers there instead would silently take a different
  * connection per statement and commit nothing.
  */
-export async function transaction<T>(fn: (tx: TransactionScope) => Promise<T>): Promise<T> {
+export async function transaction<T>(
+  fn: (tx: TransactionScope) => Promise<T>,
+  options: { isolation?: 'repeatable read' } = {}
+): Promise<T> {
   const client = await getPool().connect();
   const scope: TransactionScope = {
     async get(sql, ...params) {
@@ -185,7 +188,9 @@ export async function transaction<T>(fn: (tx: TransactionScope) => Promise<T>): 
   };
 
   try {
-    await client.query('BEGIN');
+    await client.query(
+      options.isolation === 'repeatable read' ? 'BEGIN ISOLATION LEVEL REPEATABLE READ' : 'BEGIN'
+    );
     const result = await fn(scope);
     await client.query('COMMIT');
     return result;

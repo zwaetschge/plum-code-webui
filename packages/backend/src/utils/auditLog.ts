@@ -40,7 +40,10 @@ export async function auditFromRequest(
   extras: Partial<Omit<AuditEntry, 'action' | 'ip' | 'userAgent'>> = {}
 ): Promise<void> {
   const actorUserId = (req as Request & { userId?: string }).userId ?? null;
-  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || null;
+  // req.ip, not the raw X-Forwarded-For: Express resolves it through the
+  // `trust proxy` setting, so a client cannot prepend an address of its choice
+  // and write a forged origin into the audit trail.
+  const ip = req.ip ?? null;
   const userAgent = (req.headers['user-agent'] as string | undefined) ?? null;
   await recordAudit({
     actorUserId,
@@ -67,9 +70,7 @@ export async function stampLogin(
   } catch (err) {
     console.error('[audit] last_login_at update failed:', err);
   }
-  const ip = req
-    ? (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || null
-    : null;
+  const ip = req?.ip ?? null;
   const userAgent = req ? ((req.headers['user-agent'] as string | undefined) ?? null) : null;
   await recordAudit({
     actorUserId: userId,

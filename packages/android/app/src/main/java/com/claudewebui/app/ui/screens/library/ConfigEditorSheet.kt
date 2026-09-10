@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.library
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,6 +73,11 @@ private fun ConfigEditorForm(
     onSave: (ConfigDocument) -> Unit,
     onDelete: (ConfigDocument) -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     var name by remember { mutableStateOf(original.name) }
     var description by remember { mutableStateOf(original.description) }
     var content by remember { mutableStateOf(original.content) }
@@ -83,9 +89,9 @@ private fun ConfigEditorForm(
     var confirmDelete by remember { mutableStateOf(false) }
 
     val label = when (original.kind) {
-        ConfigItemKind.AGENT -> "Agent"
-        ConfigItemKind.SKILL -> "Skill"
-        ConfigItemKind.PLUGIN -> "Plugin"
+        ConfigItemKind.AGENT -> screenResources.getString(R.string.library_agent_5ce2e)
+        ConfigItemKind.SKILL -> screenResources.getString(R.string.library_skill_ec9f6)
+        ConfigItemKind.PLUGIN -> screenResources.getString(R.string.library_plugin_8dc20)
     }
     val valid = name.isNotBlank() && content.isNotBlank() && !saving
     val edited = original.copy(
@@ -104,30 +110,30 @@ private fun ConfigEditorForm(
             .fillMaxWidth()
             .imePadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = screenTokens.spacing.section),
+        verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
     ) {
         Text(
-            if (original.key == null) "New $label" else "Edit $label",
+            if (original.key == null) screenResources.getString(R.string.library_new_1_s_5ccb8, label) else screenResources.getString(R.string.library_edit_1_s_5fa4d, label),
             color = PlumText,
             fontWeight = FontWeight.Bold,
         )
         Text(
-            "Saved on the server and available to new CLI sessions.",
+            screenResources.getString(R.string.library_saved_on_the_server_and_available_to_new_cli_sessions_6896d),
             color = PlumMuted,
         )
 
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
-            label = { Text("Name") },
+            label = { Text(screenResources.getString(R.string.library_name_709a2)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
             value = description,
             onValueChange = { description = it },
-            label = { Text("Description") },
+            label = { Text(screenResources.getString(R.string.library_description_55f8e)) },
             minLines = 2,
             maxLines = 4,
             modifier = Modifier.fillMaxWidth(),
@@ -137,30 +143,30 @@ private fun ConfigEditorForm(
             OutlinedTextField(
                 value = tools,
                 onValueChange = { tools = it },
-                label = { Text(if (original.kind == ConfigItemKind.SKILL) "Allowed tools" else "Tools") },
-                supportingText = { Text("Comma separated") },
+                label = { Text(if (original.kind == ConfigItemKind.SKILL) screenResources.getString(R.string.library_allowed_tools_36b46) else screenResources.getString(R.string.library_tools_4fa8c)) },
+                supportingText = { Text(screenResources.getString(R.string.library_comma_separated_8cb78)) },
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = model,
                 onValueChange = { model = it },
-                label = { Text("Model (optional)") },
+                label = { Text(screenResources.getString(R.string.library_model_optional_1cde0)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact)) {
                 OutlinedTextField(
                     value = version,
                     onValueChange = { version = it },
-                    label = { Text("Version") },
+                    label = { Text(screenResources.getString(R.string.library_version_2da60)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
                 OutlinedTextField(
                     value = category,
                     onValueChange = { category = it },
-                    label = { Text("Category") },
+                    label = { Text(screenResources.getString(R.string.library_category_a3c68)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
@@ -168,7 +174,7 @@ private fun ConfigEditorForm(
             OutlinedTextField(
                 value = author,
                 onValueChange = { author = it },
-                label = { Text("Author") },
+                label = { Text(screenResources.getString(R.string.library_author_5fda2)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -178,7 +184,7 @@ private fun ConfigEditorForm(
             value = content,
             onValueChange = { content = it },
             label = {
-                Text(if (original.kind == ConfigItemKind.AGENT) "Prompt" else "Markdown content")
+                Text(if (original.kind == ConfigItemKind.AGENT) screenResources.getString(R.string.library_prompt_a817d) else screenResources.getString(R.string.library_markdown_content_cbc16))
             },
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace),
             minLines = 10,
@@ -189,19 +195,19 @@ private fun ConfigEditorForm(
 
         Row(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm, Alignment.End),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (original.key != null) {
                 TextButton(onClick = { confirmDelete = true }, enabled = !saving) {
-                    Text("Delete", color = PlumRed)
+                    Text(screenResources.getString(R.string.library_delete_f6fdb), color = PlumRed)
                 }
             }
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = onDismiss, enabled = !saving) { Text("Cancel") }
+            TextButton(onClick = onDismiss, enabled = !saving) { Text(screenResources.getString(R.string.library_cancel_77dfd)) }
             Button(onClick = { onSave(edited) }, enabled = valid) {
                 if (saving) CircularProgressIndicator(strokeWidth = 2.dp)
-                else Text("Save")
+                else Text(screenResources.getString(R.string.library_save_efc00))
             }
         }
         Spacer(Modifier.height(24.dp))
@@ -210,13 +216,13 @@ private fun ConfigEditorForm(
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete $label?") },
-            text = { Text("${original.name} will be removed from the shared server library.") },
+            title = { Text(screenResources.getString(R.string.library_delete_1_s_137cd, label)) },
+            text = { Text(screenResources.getString(R.string.library_1_s_will_be_removed_from_the_shared_server_library_c8442, original.name)) },
             confirmButton = {
-                TextButton(onClick = { onDelete(original) }) { Text("Delete", color = PlumRed) }
+                TextButton(onClick = { onDelete(original) }) { Text(screenResources.getString(R.string.library_delete_f6fdb), color = PlumRed) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("Cancel") }
+                TextButton(onClick = { confirmDelete = false }) { Text(screenResources.getString(R.string.library_cancel_77dfd)) }
             },
         )
     }

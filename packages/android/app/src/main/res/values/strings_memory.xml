@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="memory_back_b52b3">Back</string>
+    <string name="memory_cancel_77dfd">Cancel</string>
+    <string name="memory_close_bbfa7">Close</string>
+    <string name="memory_create_6e157">Create</string>
+    <string name="memory_delete_f6fdb">Delete</string>
+    <string name="memory_dismiss_70afe">Dismiss</string>
+    <string name="memory_file_name_09979">File name</string>
+    <string name="memory_memories_written_by_the_agent_show_up_here_08dc5">Memories written by the agent show up here.</string>
+    <string name="memory_memory_89c8a">Memory</string>
+    <string name="memory_new_memory_c8ff7">New memory</string>
+    <string name="memory_no_memory_files_d97c4">No memory files</string>
+    <string name="memory_persistent_notes_for_this_workspace_abbc9">Persistent notes for this workspace</string>
+    <string name="memory_reload_cce71">Reload</string>
+    <string name="memory_save_efc00">Save</string>
+    <string name="memory_saved_c0ae8">Saved</string>
+    <string name="memory_saving_56a22">Saving…</string>
+    <string name="memory_unsaved_2ab06">Unsaved</string>
+</resources>

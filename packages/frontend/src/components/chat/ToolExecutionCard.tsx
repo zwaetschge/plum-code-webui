@@ -196,11 +196,7 @@ function describeShellCommand(command: string): { title: string; description: st
       description: 'Reads the rebuild sidecar status and recent deploy log.',
     };
   }
-  if (
-    lower.includes('typecheck') ||
-    lower.includes('tsc --noemit') ||
-    lower.includes('tsc --noemit')
-  ) {
+  if (lower.includes('typecheck') || lower.includes('tsc')) {
     return { title: 'Checking TypeScript', description: 'Runs the frontend/backend type checker.' };
   }
   if (lower.includes('prettier --write')) {
@@ -345,8 +341,12 @@ const formatInput = (toolName: string, input: unknown): { label: string; value: 
   switch (toolName) {
     case 'Bash':
       if (inputObj.command) result.push({ label: 'Command', value: String(inputObj.command) });
+      // `description` is the agent's one-line summary of the command, not a path.
+      // Labelled "Working directory" it read as a claim about where the command
+      // ran — the opposite of what the detail dialog exists for.
       if (inputObj.description)
-        result.push({ label: 'Working directory', value: String(inputObj.description) });
+        result.push({ label: 'Description', value: String(inputObj.description) });
+      if (inputObj.cwd) result.push({ label: 'Working directory', value: String(inputObj.cwd) });
       if (inputObj.timeout) result.push({ label: 'Timeout', value: `${inputObj.timeout}ms` });
       break;
     case 'Read':

@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -43,6 +46,7 @@ fun ToolDetailSheet(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     val toolInfo = ToolIconMapper.forTool(tool.toolName)
     val isBash = tool.toolName.lowercase() == "bash"
     val isFileOp = tool.toolName.lowercase() in listOf("read", "write", "edit", "multiedit")
@@ -57,11 +61,11 @@ fun ToolDetailSheet(
         dragHandle = {
             Box(
                 modifier = Modifier
-                    .padding(top = 12.dp, bottom = 8.dp)
-                    .size(width = 32.dp, height = 4.dp)
+                    .padding(top = componentTokens.spacing.md, bottom = componentTokens.spacing.sm)
+                    .size(width = componentTokens.spacing.xxl, height = componentTokens.spacing.xs)
                     .background(
                         color = MaterialTheme.colorScheme.outlineVariant,
-                        shape = RoundedCornerShape(2.dp),
+                        shape = RoundedCornerShape(componentTokens.radius.xxs),
                     )
             )
         },
@@ -70,7 +74,7 @@ fun ToolDetailSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = 32.dp),
+                .padding(bottom = componentTokens.spacing.xxl),
         ) {
             // ── Header ────────────────────────────────────────────────────────
             SheetHeader(tool = tool, toolInfo = toolInfo, duration = duration)
@@ -79,7 +83,7 @@ fun ToolDetailSheet(
             TimestampRow(tool = tool)
 
             HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = componentTokens.spacing.lg, vertical = componentTokens.spacing.md),
                 color = MaterialTheme.colorScheme.outlineVariant,
                 thickness = 0.5.dp,
             )
@@ -124,12 +128,13 @@ private fun SheetHeader(
     toolInfo: ToolDisplayInfo,
     duration: Long?,
 ) {
+    val componentTokens = PlumTheme.tokens
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(horizontal = componentTokens.spacing.section, vertical = componentTokens.spacing.md),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.md),
     ) {
         // Tool icon with colored background
         Box(
@@ -137,7 +142,7 @@ private fun SheetHeader(
                 .size(44.dp)
                 .background(
                     color = toolInfo.color.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(componentTokens.radius.chip),
                 ),
             contentAlignment = Alignment.Center,
         ) {
@@ -170,38 +175,39 @@ private fun SheetHeader(
 
 @Composable
 private fun StatusChip(status: ToolStatus) {
+    val componentTokens = PlumTheme.tokens
     val (label, color, icon) = when (status) {
         ToolStatus.STARTED -> Triple(
-            "Running",
+            stringResource(R.string.component_running),
             MaterialTheme.colorScheme.tertiary,
             Icons.Outlined.Refresh,
         )
         ToolStatus.COMPLETED -> Triple(
-            "Completed",
+            stringResource(R.string.component_completed),
             Color(0xFF22C55E),
             Icons.Filled.CheckCircle,
         )
         ToolStatus.ERROR -> Triple(
-            "Error",
+            stringResource(R.string.component_error),
             MaterialTheme.colorScheme.error,
             Icons.Outlined.ErrorOutline,
         )
     }
 
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(componentTokens.radius.panel),
         color = color.copy(alpha = 0.12f),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            modifier = Modifier.padding(horizontal = componentTokens.spacing.compact, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = color,
-                modifier = Modifier.size(12.dp),
+                modifier = Modifier.size(componentTokens.spacing.md),
             )
             Text(
                 text = label,
@@ -215,16 +221,17 @@ private fun StatusChip(status: ToolStatus) {
 
 @Composable
 private fun TimestampRow(tool: ToolExecution) {
+    val componentTokens = PlumTheme.tokens
     val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(horizontal = componentTokens.spacing.section),
+        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.lg),
     ) {
-        TimestampItem(label = "Started", value = fmt.format(Date(tool.timestamp)))
+        TimestampItem(label = stringResource(R.string.component_started), value = fmt.format(Date(tool.timestamp)))
         tool.completedAt?.let {
-            TimestampItem(label = "Completed", value = fmt.format(Date(it)))
+            TimestampItem(label = stringResource(R.string.component_completed), value = fmt.format(Date(it)))
         }
     }
 }
@@ -251,29 +258,31 @@ private fun TimestampItem(label: String, value: String) {
 
 @Composable
 private fun BashInputSection(input: JsonElement) {
+    val componentTokens = PlumTheme.tokens
     val command = extractField(input, "command") ?: formatJson(input)
-    SectionLabel("Command")
+    SectionLabel(stringResource(R.string.component_command))
     TerminalBlock(
         content = command,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 12.dp),
+            .padding(horizontal = componentTokens.spacing.lg)
+            .padding(bottom = componentTokens.spacing.md),
         isOutput = false,
     )
 }
 
 @Composable
 private fun FileInputSection(tool: ToolExecution, input: JsonElement) {
+    val componentTokens = PlumTheme.tokens
     val filePath = extractField(input, "file_path")
     filePath?.let {
-        SectionLabel("File Path")
+        SectionLabel(stringResource(R.string.component_file_path))
         FilePathChip(
             path = it,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 12.dp),
+                .padding(horizontal = componentTokens.spacing.lg)
+                .padding(bottom = componentTokens.spacing.md),
         )
     }
 
@@ -281,25 +290,25 @@ private fun FileInputSection(tool: ToolExecution, input: JsonElement) {
     val oldString = extractField(input, "old_string")
     val newString = extractField(input, "new_string")
     if (oldString != null || newString != null) {
-        SectionLabel("Changes")
+        SectionLabel(stringResource(R.string.component_changes))
         DiffView(
             removed = oldString,
             added = newString,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 12.dp),
+                .padding(horizontal = componentTokens.spacing.lg)
+                .padding(bottom = componentTokens.spacing.md),
         )
     } else {
         val content = extractField(input, "content") ?: extractField(input, "new_content")
         content?.let {
-            SectionLabel("Content")
+            SectionLabel(stringResource(R.string.component_content))
             CopyableCodeBlock(
                 content = it,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 12.dp),
+                    .padding(horizontal = componentTokens.spacing.lg)
+                    .padding(bottom = componentTokens.spacing.md),
             )
         }
     }
@@ -307,22 +316,23 @@ private fun FileInputSection(tool: ToolExecution, input: JsonElement) {
 
 @Composable
 private fun AgentInputSection(input: JsonElement) {
+    val componentTokens = PlumTheme.tokens
     val description = extractField(input, "description") ?: extractField(input, "task")
     description?.let {
-        SectionLabel("Task")
+        SectionLabel(stringResource(R.string.component_task))
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 12.dp),
-            shape = RoundedCornerShape(8.dp),
+                .padding(horizontal = componentTokens.spacing.lg)
+                .padding(bottom = componentTokens.spacing.md),
+            shape = RoundedCornerShape(componentTokens.radius.sm),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
             Text(
                 text = it,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(12.dp),
+                modifier = Modifier.padding(componentTokens.spacing.md),
                 lineHeight = 20.sp,
             )
         }
@@ -331,19 +341,19 @@ private fun AgentInputSection(input: JsonElement) {
     val agentType = extractField(input, "agent_type") ?: extractField(input, "type")
     agentType?.let {
         val agentInfo = ToolIconMapper.forAgent(it)
-        SectionLabel("Agent Type")
+        SectionLabel(stringResource(R.string.component_agent_type))
         Row(
             modifier = Modifier
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 12.dp),
+                .padding(horizontal = componentTokens.spacing.lg)
+                .padding(bottom = componentTokens.spacing.md),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
         ) {
             Icon(
                 imageVector = agentInfo.icon,
                 contentDescription = null,
                 tint = agentInfo.color,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(componentTokens.sizing.iconInline),
             )
             Text(
                 text = agentInfo.label,
@@ -357,13 +367,14 @@ private fun AgentInputSection(input: JsonElement) {
 
 @Composable
 private fun GenericInputSection(input: JsonElement) {
-    SectionLabel("Input")
+    val componentTokens = PlumTheme.tokens
+    SectionLabel(stringResource(R.string.component_input))
     CopyableCodeBlock(
         content = formatJson(input),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 12.dp),
+            .padding(horizontal = componentTokens.spacing.lg)
+            .padding(bottom = componentTokens.spacing.md),
     )
 }
 
@@ -371,41 +382,44 @@ private fun GenericInputSection(input: JsonElement) {
 
 @Composable
 private fun BashOutputSection(output: String) {
-    SectionLabel("Output")
+    val componentTokens = PlumTheme.tokens
+    SectionLabel(stringResource(R.string.component_output))
     TerminalBlock(
         content = output,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 12.dp),
+            .padding(horizontal = componentTokens.spacing.lg)
+            .padding(bottom = componentTokens.spacing.md),
         isOutput = true,
     )
 }
 
 @Composable
 private fun FileOutputSection(tool: ToolExecution, output: String) {
+    val componentTokens = PlumTheme.tokens
     if (output.isBlank()) return
-    SectionLabel("Result")
+    SectionLabel(stringResource(R.string.component_result))
     CopyableCodeBlock(
         content = output.take(4000).let {
-            if (output.length > 4000) "$it\n… (${output.length - 4000} chars truncated)" else it
+            if (output.length > 4000) stringResource(R.string.component_truncated_characters, it, output.length - 4000) else it
         },
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 12.dp),
+            .padding(horizontal = componentTokens.spacing.lg)
+            .padding(bottom = componentTokens.spacing.md),
     )
 }
 
 @Composable
 private fun AgentOutputSection(output: String) {
-    SectionLabel("Result Summary")
+    val componentTokens = PlumTheme.tokens
+    SectionLabel(stringResource(R.string.component_result_summary))
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 12.dp),
-        shape = RoundedCornerShape(8.dp),
+            .padding(horizontal = componentTokens.spacing.lg)
+            .padding(bottom = componentTokens.spacing.md),
+        shape = RoundedCornerShape(componentTokens.radius.sm),
         color = Color(0xFF22C55E).copy(alpha = 0.08f),
         border = androidx.compose.foundation.BorderStroke(
             width = 0.5.dp,
@@ -413,17 +427,17 @@ private fun AgentOutputSection(output: String) {
         ),
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(componentTokens.spacing.md),
             verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.compact),
         ) {
             Icon(
                 imageVector = Icons.Outlined.CheckCircle,
                 contentDescription = null,
                 tint = Color(0xFF22C55E),
                 modifier = Modifier
-                    .size(16.dp)
-                    .padding(top = 2.dp),
+                    .size(componentTokens.sizing.iconSm)
+                    .padding(top = componentTokens.spacing.xxs),
             )
             Text(
                 text = output.take(2000),
@@ -437,39 +451,41 @@ private fun AgentOutputSection(output: String) {
 
 @Composable
 private fun GenericOutputSection(output: String) {
-    SectionLabel("Output")
+    val componentTokens = PlumTheme.tokens
+    SectionLabel(stringResource(R.string.component_output))
     CopyableCodeBlock(
         content = output.take(4000).let {
-            if (output.length > 4000) "$it\n… (${output.length - 4000} chars truncated)" else it
+            if (output.length > 4000) stringResource(R.string.component_truncated_characters, it, output.length - 4000) else it
         },
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 12.dp),
+            .padding(horizontal = componentTokens.spacing.lg)
+            .padding(bottom = componentTokens.spacing.md),
     )
 }
 
 @Composable
 private fun ErrorSection(error: String) {
-    SectionLabel("Error")
+    val componentTokens = PlumTheme.tokens
+    SectionLabel(stringResource(R.string.component_error))
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 12.dp),
-        shape = RoundedCornerShape(8.dp),
+            .padding(horizontal = componentTokens.spacing.lg)
+            .padding(bottom = componentTokens.spacing.md),
+        shape = RoundedCornerShape(componentTokens.radius.sm),
         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(componentTokens.spacing.md),
             verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
         ) {
             Icon(
                 imageVector = Icons.Outlined.ErrorOutline,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(componentTokens.sizing.iconSm),
             )
             Text(
                 text = error,
@@ -486,6 +502,7 @@ private fun ErrorSection(error: String) {
 
 @Composable
 private fun SectionLabel(label: String) {
+    val componentTokens = PlumTheme.tokens
     Text(
         text = label.uppercase(),
         style = MaterialTheme.typography.labelSmall,
@@ -493,20 +510,21 @@ private fun SectionLabel(label: String) {
         fontSize = 10.sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier
-            .padding(horizontal = 20.dp)
-            .padding(bottom = 6.dp),
+            .padding(horizontal = componentTokens.spacing.section)
+            .padding(bottom = componentTokens.spacing.inline),
         letterSpacing = 1.sp,
     )
 }
 
 @Composable
 private fun FilePathChip(path: String, modifier: Modifier = Modifier) {
+    val componentTokens = PlumTheme.tokens
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
 
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(6.dp),
+        shape = RoundedCornerShape(componentTokens.spacing.inline),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         border = androidx.compose.foundation.BorderStroke(
             0.5.dp, MaterialTheme.colorScheme.outlineVariant
@@ -515,15 +533,15 @@ private fun FilePathChip(path: String, modifier: Modifier = Modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = componentTokens.spacing.compact, vertical = componentTokens.spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
         ) {
             Icon(
                 imageVector = Icons.Outlined.FolderOpen,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(componentTokens.sizing.iconXs),
             )
             Text(
                 text = path,
@@ -541,13 +559,13 @@ private fun FilePathChip(path: String, modifier: Modifier = Modifier) {
                     clipboard.setText(AnnotatedString(path))
                     copied = true
                 },
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(componentTokens.sizing.touchTarget),
             ) {
                 Icon(
                     imageVector = if (copied) Icons.Outlined.CheckCircle else Icons.Outlined.ContentCopy,
-                    contentDescription = "Copy path",
+                    contentDescription = stringResource(R.string.component_copy_path),
                     tint = if (copied) Color(0xFF22C55E) else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(componentTokens.sizing.iconXs),
                 )
             }
         }
@@ -567,10 +585,11 @@ private fun TerminalBlock(
     isOutput: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
     val displayContent = content.take(4000).let {
-        if (content.length > 4000) "$it\n… (truncated)" else it
+        if (content.length > 4000) stringResource(R.string.component_truncated, it) else it
     }
 
     Column(modifier = modifier) {
@@ -580,17 +599,17 @@ private fun TerminalBlock(
                 .fillMaxWidth()
                 .background(
                     color = Color(0xFF1A1A1A),
-                    shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
+                    shape = RoundedCornerShape(topStart = componentTokens.spacing.sm, topEnd = componentTokens.spacing.sm),
                 )
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.inline),
         ) {
             // Traffic lights
             repeat(3) { i ->
                 Box(
                     modifier = Modifier
-                        .size(10.dp)
+                        .size(componentTokens.spacing.compact)
                         .background(
                             color = when (i) {
                                 0 -> Color(0xFFFF5F57)
@@ -603,7 +622,7 @@ private fun TerminalBlock(
             }
             Spacer(modifier = Modifier.weight(1f))
             Text(
-                text = if (isOutput) "output" else "command",
+                text = if (isOutput) stringResource(R.string.component_output) else stringResource(R.string.component_command),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF666666),
                 fontSize = 10.sp,
@@ -614,13 +633,13 @@ private fun TerminalBlock(
                     clipboard.setText(AnnotatedString(content))
                     copied = true
                 },
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(componentTokens.sizing.touchTarget),
             ) {
                 Icon(
                     imageVector = if (copied) Icons.Outlined.CheckCircle else Icons.Outlined.ContentCopy,
-                    contentDescription = "Copy",
+                    contentDescription = stringResource(R.string.component_copy),
                     tint = if (copied) Color(0xFF28CA42) else Color(0xFF666666),
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(componentTokens.sizing.iconXs),
                 )
             }
         }
@@ -630,9 +649,9 @@ private fun TerminalBlock(
                 .fillMaxWidth()
                 .background(
                     color = Color(0xFF0D1117),
-                    shape = RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp),
+                    shape = RoundedCornerShape(bottomStart = componentTokens.spacing.sm, bottomEnd = componentTokens.spacing.sm),
                 )
-                .padding(12.dp)
+                .padding(componentTokens.spacing.md)
                 .horizontalScroll(rememberScrollState()),
         ) {
             Text(
@@ -661,9 +680,10 @@ private fun DiffView(
     added: String?,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.sm))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
@@ -671,7 +691,7 @@ private fun DiffView(
             DiffLine(
                 prefix = "−",
                 content = it.take(500).let { s ->
-                    if (it.length > 500) "$s\n… (truncated)" else s
+                    if (it.length > 500) stringResource(R.string.component_truncated, s) else s
                 },
                 bgColor = Color(0xFFEF4444).copy(alpha = 0.08f),
                 textColor = Color(0xFFEF4444),
@@ -681,7 +701,7 @@ private fun DiffView(
             DiffLine(
                 prefix = "+",
                 content = it.take(500).let { s ->
-                    if (it.length > 500) "$s\n… (truncated)" else s
+                    if (it.length > 500) stringResource(R.string.component_truncated, s) else s
                 },
                 bgColor = Color(0xFF22C55E).copy(alpha = 0.08f),
                 textColor = Color(0xFF22C55E),
@@ -697,12 +717,13 @@ private fun DiffLine(
     bgColor: Color,
     textColor: Color,
 ) {
+    val componentTokens = PlumTheme.tokens
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(bgColor)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = componentTokens.spacing.compact, vertical = componentTokens.spacing.inline),
+        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
     ) {
         Text(
             text = prefix,
@@ -730,6 +751,7 @@ private fun CopyableCodeBlock(
     content: String,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
 
@@ -740,9 +762,9 @@ private fun CopyableCodeBlock(
                 .fillMaxWidth()
                 .background(
                     color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
+                    shape = RoundedCornerShape(topStart = componentTokens.spacing.sm, topEnd = componentTokens.spacing.sm),
                 )
-                .padding(horizontal = 10.dp, vertical = 4.dp),
+                .padding(horizontal = componentTokens.spacing.compact, vertical = componentTokens.spacing.xs),
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(
@@ -750,17 +772,17 @@ private fun CopyableCodeBlock(
                     clipboard.setText(AnnotatedString(content))
                     copied = true
                 },
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                contentPadding = PaddingValues(horizontal = componentTokens.spacing.sm, vertical = componentTokens.spacing.xs),
             ) {
                 Icon(
                     imageVector = if (copied) Icons.Outlined.CheckCircle else Icons.Outlined.ContentCopy,
-                    contentDescription = "Copy",
-                    modifier = Modifier.size(14.dp),
+                    contentDescription = stringResource(R.string.component_copy),
+                    modifier = Modifier.size(componentTokens.sizing.iconXs),
                     tint = if (copied) Color(0xFF22C55E) else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(componentTokens.spacing.xs))
                 Text(
-                    text = if (copied) "Copied" else "Copy",
+                    text = if (copied) stringResource(R.string.component_copied) else stringResource(R.string.component_copy),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (copied) Color(0xFF22C55E) else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -772,9 +794,9 @@ private fun CopyableCodeBlock(
                 .fillMaxWidth()
                 .background(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp),
+                    shape = RoundedCornerShape(bottomStart = componentTokens.spacing.sm, bottomEnd = componentTokens.spacing.sm),
                 )
-                .padding(12.dp),
+                .padding(componentTokens.spacing.md),
         ) {
             Text(
                 text = content,

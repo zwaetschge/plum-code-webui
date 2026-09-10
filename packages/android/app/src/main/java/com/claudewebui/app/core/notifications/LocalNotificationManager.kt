@@ -1,5 +1,6 @@
 package com.claudewebui.app.core.notifications
 
+import com.claudewebui.app.R
 import android.app.Activity
 import android.content.Context
 import android.os.Build
@@ -9,6 +10,7 @@ import com.claudewebui.app.data.model.MessageRole
 import com.claudewebui.app.data.model.PermissionAction
 import com.claudewebui.app.data.model.SessionStatus
 import com.claudewebui.app.data.model.ToolStatus
+import com.claudewebui.app.core.tiles.QuickTileService
 import com.claudewebui.app.data.repository.SessionRepository
 import com.claudewebui.app.widget.WidgetRefreshWorker
 import java.util.concurrent.ConcurrentHashMap
@@ -18,6 +20,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -40,8 +45,16 @@ object LocalNotificationManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     // Tracks whether the hosting Activity is currently in the foreground.
-    @Volatile
-    private var appInForeground = false
+    private val _foreground = MutableStateFlow(false)
+
+    /**
+     * Whether any activity is started. Exposed because the chat's presence
+     * heartbeat has to stop while the app is backgrounded, and this class is
+     * already the one thing wired to the process lifecycle.
+     */
+    val foreground: StateFlow<Boolean> = _foreground.asStateFlow()
+
+    private val appInForeground: Boolean get() = _foreground.value
 
     // Sessions with a turn in flight — drives the foreground keep-alive
     // service so the socket survives Doze until the reply lands.
@@ -77,6 +90,57 @@ object LocalNotificationManager {
         this.sessionRepository = sessionRepository
         NotificationService.createChannels(context.applicationContext)
         observeSocketEvents(socket)
+        observeMonitoredSessions(socket, sessionRepository)
+    }
+
+    /**
+     * Keep the socket subscribed to every session worth watching.
+     *
+     * Until now exactly one session was subscribed — whichever chat was open —
+     * so an approval prompt, a question or an error in any other session
+     * reached the phone only if the user happened to be looking at it. Every
+     * notification path downstream of the socket was effectively single-session.
+     *
+     * Lives here rather than in the dashboard's ViewModel because monitoring
+     * must not stop when the user navigates into a chat or rotates the device.
+     * Reconnects are already covered: [SocketManager] replays its subscriptions
+     * on connect.
+     */
+    private fun observeMonitoredSessions(socket: SocketManager, repository: SessionRepository) {
+        repository.sessions
+            .onEach { sessions ->
+                val ids = sessions
+                    // Most recent activity first, so a full list loses the
+                    // sessions nobody has touched rather than the live ones.
+                    .sortedByDescending { it.lastActivityAt ?: it.updatedAt }
+                    .take(SocketManager.MONITORED_SESSION_LIMIT)
+                    .map { it.id }
+                socket.syncMonitoredSessions(ids, openSessionId = openSessionId)
+
+                // The Quick Settings tile had a working update path that
+                // nothing ever called, so it showed "No sessions" forever.
+                // This is the one place that already sees every session-list
+                // change, live socket updates included.
+                appContext?.let { ctx ->
+                    QuickTileService.requestUpdate(ctx, sessions.count { it.busy || it.status == SessionStatus.RUNNING })
+                }
+            }
+            .launchIn(scope)
+    }
+
+    /**
+     * The chat the user currently has open, if any.
+     *
+     * Only used to keep its subscription alive when it drops out of the
+     * monitored window — a long conversation the user is actively reading must
+     * not go quiet because thirty other sessions were busier.
+     */
+    @Volatile
+    private var openSessionId: String? = null
+
+    /** Called by the chat screen so its session is never unsubscribed underneath it. */
+    fun setOpenSession(sessionId: String?) {
+        openSessionId = sessionId
     }
 
     /**
@@ -84,14 +148,14 @@ object LocalNotificationManager {
      * While in foreground we suppress background-only notifications.
      */
     fun onAppForegrounded() {
-        appInForeground = true
+        _foreground.value = true
     }
 
     /**
      * Notify the manager that the app went to the background.
      */
     fun onAppBackgrounded() {
-        appInForeground = false
+        _foreground.value = false
     }
 
     /** Clean up coroutine scope (call from Application.onTerminate if needed). */
@@ -109,7 +173,13 @@ object LocalNotificationManager {
         // works, otherwise Doze kills the connection and no completion
         // notification ever arrives.
         socket.turnStarted
-            .onEach { sessionId -> onTurnStarted(sessionId) }
+            .onEach { sessionId ->
+                onTurnStarted(sessionId)
+                cacheBusy(sessionId, busy = true)
+                // The widgets showed a session as idle until the turn ended,
+                // which is the half of the turn a supervisor cares least about.
+                refreshWidgets()
+            }
             .launchIn(scope)
 
         // Stale-turn watchdog — an interrupted/vanished turn must not pin the
@@ -127,17 +197,38 @@ object LocalNotificationManager {
         socket.toolUse
             .onEach { event ->
                 if (event.status == ToolStatus.STARTED) {
-                    activeDetail[event.sessionId] = event.actionSummary ?: event.toolName
+                    val detail = event.actionSummary ?: event.toolName
+                    activeDetail[event.sessionId] = detail
+                    // Cheap when the turn is already watched, and the honest
+                    // signal when no status event announced it.
+                    onTurnStarted(event.sessionId)
                     pushWatchDetail()
+                    cacheActivity(event.sessionId, detail)
+                    // Debounced to 3s inside; streaming tools would otherwise
+                    // enqueue a refresh per event.
+                    refreshWidgets()
                 }
             }
             .launchIn(scope)
         socket.agent
             .onEach { event ->
                 if (event.status == ToolStatus.STARTED) {
-                    activeDetail[event.sessionId] = "agent: ${event.agentType}"
+                    val detail = appContext?.getString(R.string.native_agent_detail, event.agentType) ?: event.agentType
+                    activeDetail[event.sessionId] = detail
+                    onTurnStarted(event.sessionId)
                     pushWatchDetail()
+                    cacheActivity(event.sessionId, detail)
                 }
+            }
+            .launchIn(scope)
+
+        // Queue depth, so the "3 queued" badge is right on every screen and not
+        // just inside the chat that happens to be open.
+        socket.queue
+            .onEach { event ->
+                if (event.busy) onTurnStarted(event.sessionId)
+                sessionRepository?.cacheQueue(event.sessionId, event.depth, event.busy)
+                refreshWidgets()
             }
             .launchIn(scope)
 
@@ -147,6 +238,7 @@ object LocalNotificationManager {
             .onEach { message ->
                 if (message.role != MessageRole.ASSISTANT) return@onEach
                 onTurnFinished(message.sessionId)
+                cacheIdle(message.sessionId)
                 refreshWidgets()
                 if (appInForeground) return@onEach
                 val ctx = appContext ?: return@onEach
@@ -160,7 +252,7 @@ object LocalNotificationManager {
                     message.sessionId,
                     name,
                     summary = content.take(300),
-                    title = if (isGoal) "Goal complete ✅ — $name" else "Reply ready — $name",
+                    title = if (isGoal) ctx.getString(R.string.native_goal_complete, name) else ctx.getString(R.string.native_reply_ready, name),
                 )
             }
             .launchIn(scope)
@@ -170,7 +262,16 @@ object LocalNotificationManager {
             .onEach { (sessionId, status) ->
                 if (status == SessionStatus.STOPPED || status == SessionStatus.ERROR) {
                     onTurnFinished(sessionId)
+                    cacheIdle(sessionId)
+                } else if (status == SessionStatus.RUNNING) {
+                    // A turn started somewhere else — the web client, the
+                    // gateway, another device. The keep-alive used to hang off
+                    // our own send alone, so a run kicked off from the desktop
+                    // lost its socket to Doze and finished unannounced.
+                    onTurnStarted(sessionId)
+                    cacheBusy(sessionId, busy = true)
                 }
+                sessionRepository?.cacheStatus(sessionId, status)
                 refreshWidgets()
                 if (appInForeground) return@onEach
                 val ctx = appContext ?: return@onEach
@@ -178,7 +279,7 @@ object LocalNotificationManager {
                 if (shouldPostGenericStatusNotification(status)) {
                     NotificationService.notifyError(
                         ctx, sessionId, sessionName(sessionId),
-                        "Session encountered an error"
+                        ctx.getString(R.string.native_session_error)
                     )
                 }
             }
@@ -198,7 +299,7 @@ object LocalNotificationManager {
                         ctx,
                         sessionId = event.sessionId,
                         sessionName = sessionName(event.sessionId),
-                        questionText = question.question.ifBlank { "Agent asked a question" },
+                        questionText = question.question.ifBlank { ctx.getString(R.string.native_question_asked) },
                         options = question.options.map { it.label }.filter { it.isNotBlank() },
                         allowCustom = question.custom,
                         requestId = event.requestId,
@@ -207,7 +308,7 @@ object LocalNotificationManager {
                 } else {
                     NotificationService.notifyError(
                         ctx, event.sessionId, sessionName(event.sessionId),
-                        "Agent asked ${event.questions.size} questions — open the app to answer",
+                        ctx.getString(R.string.native_questions_asked, event.questions.size),
                         isWarning = true,
                     )
                 }
@@ -229,17 +330,21 @@ object LocalNotificationManager {
                     val requestId = jsonObj.optString("requestId", "")
                     val toolName = jsonObj
                         .optJSONArray("toolNames")
-                        ?.optString(0) ?: jsonObj.optString("toolName", "unknown tool")
+                        ?.optString(0) ?: jsonObj.optString("toolName", ctx.getString(R.string.native_unknown_tool))
+                    // The id was shown as the title back when only the open
+                    // chat was subscribed and the name was on screen anyway.
+                    // Now that approvals arrive from any session, a uuid tells
+                    // the user nothing about which one is blocked.
                     if (sessionId.isNotBlank() && requestId.isNotBlank()) {
                         NotificationService.notifyPermissionRequest(
-                            ctx, sessionId, sessionId, toolName, requestId
+                            ctx, sessionId, sessionName(sessionId), toolName, requestId
                         )
                     } else if (sessionId.isNotBlank() && jsonObj.has("denials")) {
                         // Legacy payload — no inline approve, but the user must
                         // still learn the session is blocked.
                         NotificationService.notifyError(
-                            ctx, sessionId, sessionId,
-                            "Permission needed for $toolName — open the app to approve",
+                            ctx, sessionId, sessionName(sessionId),
+                            ctx.getString(R.string.native_permission_tool, toolName),
                             isWarning = true,
                         )
                     }
@@ -251,6 +356,7 @@ object LocalNotificationManager {
         socket.errors
             .onEach { (sessionId, errorMsg) ->
                 onTurnFinished(sessionId)
+                cacheIdle(sessionId)
                 if (appInForeground) return@onEach
                 val ctx = appContext ?: return@onEach
                 if (!NotificationPreferences.canPostNotifications(ctx)) return@onEach
@@ -260,16 +366,46 @@ object LocalNotificationManager {
 
     }
 
+    // ── Room cache writes ──────────────────────────────────────────────────────
+
+    // This class is the only socket collector that lives for the whole process,
+    // so it is also the only place that can keep the cache honest for sessions
+    // the user is not looking at. Before this, every screen except the open chat
+    // showed whatever the last REST refresh happened to say.
+
+    private suspend fun cacheBusy(sessionId: String, busy: Boolean) {
+        sessionRepository?.cacheBusy(sessionId, busy)
+    }
+
+    /** What the agent is doing right now. */
+    private suspend fun cacheActivity(sessionId: String, detail: String) {
+        sessionRepository?.cacheActivity(sessionId, detail)
+    }
+
+    /** Turn over: not busy, and nothing in progress to describe. */
+    private suspend fun cacheIdle(sessionId: String) {
+        sessionRepository?.cacheIdle(sessionId)
+    }
+
     // ── Turn watch (foreground keep-alive) ─────────────────────────────────────
 
+    /**
+     * Mark a turn as in flight and make sure the keep-alive is running.
+     *
+     * Called from tool, agent and queue events as well as from our own send,
+     * so it fires many times per turn. Only the first call per session touches
+     * the service: the notification count only changes when a session joins,
+     * and [pushWatchDetail] owns the live text.
+     */
     private fun onTurnStarted(sessionId: String) {
         val ctx = appContext ?: return
-        activeTurns[sessionId] = System.currentTimeMillis()
-        if (NotificationPreferences.canPostNotifications(ctx)) {
-            AgentWatchService.start(ctx, activeTurns.size)
-        } else {
+        val alreadyWatched = activeTurns.put(sessionId, System.currentTimeMillis()) != null
+        if (!NotificationPreferences.canPostNotifications(ctx)) {
             AgentWatchService.stop(ctx)
+            return
         }
+        if (alreadyWatched) return
+        AgentWatchService.start(ctx, activeTurns.size)
     }
 
     private fun onTurnFinished(sessionId: String) {
@@ -300,7 +436,7 @@ object LocalNotificationManager {
     /** Human-readable session title from the Room cache; id-agnostic fallback. */
     private suspend fun sessionName(sessionId: String): String =
         runCatching { sessionRepository?.observeSession(sessionId)?.firstOrNull()?.name }
-            .getOrNull() ?: "Session"
+            .getOrNull() ?: appContext?.getString(R.string.native_session) ?: sessionId
 
     // ── Permission request handling ────────────────────────────────────────────
 

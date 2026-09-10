@@ -1,4 +1,4 @@
-import { get as pgGet } from '../db/pg.js';
+import { get as pgGet, all as pgAll } from '../db/pg.js';
 import { Router, Request, Response, NextFunction } from 'express';
 import { timingSafeEqual } from 'crypto';
 import { z } from 'zod';
@@ -410,6 +410,45 @@ router.post('/respond', requireAuth, async (req: Request, res: Response) => {
  * Useful for frontend to check if there are outstanding requests.
  * Requires authentication.
  */
+/**
+ * Every approval this user is blocked on, across every session.
+ *
+ * The per-session route below answers "is this one session waiting?", which
+ * forces any client that supervises several sessions to ask once per session
+ * just to discover that most of them have nothing pending. The widget did
+ * exactly that — up to eight round trips per refresh. Session names come along
+ * so a caller can render the list without a second query.
+ *
+ * Registered before `/pending/:sessionId` so the bare path cannot be read as a
+ * session id.
+ */
+router.get('/pending', requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const pending = listPendingPermissionsForUser(userId);
+
+  const sessionIds = [...new Set(pending.map((request) => request.sessionId))];
+  const names = new Map<string, string>();
+  if (sessionIds.length > 0) {
+    const placeholders = sessionIds.map(() => '?').join(', ');
+    const rows = (await pgAll(
+      `SELECT id, name FROM sessions WHERE user_id = ? AND id IN (${placeholders})`,
+      userId,
+      ...sessionIds
+    )) as Array<{ id: string; name: string }>;
+    for (const row of rows) names.set(row.id, row.name);
+  }
+
+  res.json({
+    success: true,
+    data: pending.map((request) => ({
+      ...request,
+      // Null rather than a placeholder: a request whose session has since been
+      // deleted should look wrong to the caller, not plausible.
+      sessionName: names.get(request.sessionId) ?? null,
+    })),
+  });
+});
+
 router.get('/pending/:sessionId', requireAuth, async (req: Request, res: Response) => {
   const sessionId = req.params.sessionId;
   if (!sessionId) {

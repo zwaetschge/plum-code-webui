@@ -6197,6 +6197,11 @@ html.dark .chat-composer-form.glass-chrome {
   flex: 0 0 6px;
   background: hsl(var(--muted-foreground) / 0.54);
 }
+.mobile-header-run-dot.is-needs-you {
+  background: hsl(38 92% 52%);
+  box-shadow: 0 0 0 3px hsl(38 92% 52% / 0.16);
+  animation: panel-badge-pulse 2s ease-in-out infinite;
+}
 .mobile-header-run-dot.is-working {
   background: hsl(152 70% 48%);
   box-shadow: 0 0 0 3px hsl(152 70% 48% / 0.14);
@@ -6393,6 +6398,11 @@ html.dark .chat-composer-form.glass-chrome {
   border: 2px solid hsl(var(--card));
   background: hsl(var(--muted-foreground) / 0.52);
 }
+.session-run-dot.is-needs-you {
+  background: hsl(38 92% 52%);
+  box-shadow: 0 0 0 4px hsl(38 92% 52% / 0.14);
+  animation: panel-badge-pulse 2s ease-in-out infinite;
+}
 .session-run-dot.is-working {
   background: hsl(152 70% 48%);
   box-shadow: 0 0 0 4px hsl(152 70% 48% / 0.12);
@@ -6419,6 +6429,13 @@ html.dark .chat-composer-form.glass-chrome {
   font: 750 9px/1 var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.session-run-pill.is-needs-you {
+  color: hsl(32 85% 36%);
+  background: hsl(38 92% 52% / 0.18);
+}
+.dark .session-run-pill.is-needs-you {
+  color: hsl(38 92% 70%);
 }
 .session-run-pill.is-working {
   color: hsl(152 70% 34%);
@@ -6447,7 +6464,8 @@ html.dark .chat-composer-form.glass-chrome {
   color: hsl(var(--foreground) / 0.78);
   font: 600 11px/1.25 var(--font-ui);
 }
-.session-run-detail.is-working {
+.session-run-detail.is-working,
+.session-run-detail.is-needs-you {
   color: hsl(var(--foreground) / 0.88);
 }
 .session-run-meta {
@@ -7951,6 +7969,12 @@ html.dark .chat-composer-form.glass-chrome {
   box-shadow: 0 0 0 4px hsl(var(--foreground) / 0.04);
 }
 
+.dashboard-status-dot.is-needs-you {
+  background: hsl(38 92% 52%);
+  box-shadow: 0 0 0 4px hsl(38 92% 52% / 0.14);
+  animation: panel-badge-pulse 2s ease-in-out infinite;
+}
+
 .dashboard-status-dot.is-working {
   background: hsl(152 70% 48%);
   box-shadow: 0 0 0 4px hsl(152 70% 48% / 0.12);
@@ -8323,6 +8347,11 @@ html.dark .chat-composer-form.glass-chrome {
   background: hsl(var(--muted-foreground) / 0.5);
   box-shadow: 0 0 0 4px hsl(var(--foreground) / 0.04);
 }
+.session-header-run-dot.is-needs-you {
+  background: hsl(38 92% 52%);
+  box-shadow: 0 0 0 4px hsl(38 92% 52% / 0.14);
+  animation: panel-badge-pulse 2s ease-in-out infinite;
+}
 .session-header-run-dot.is-working {
   background: hsl(152 70% 48%);
   box-shadow: 0 0 0 4px hsl(152 70% 48% / 0.12);
@@ -8454,20 +8483,26 @@ html.dark .chat-composer-form.glass-chrome {
     --sidebar-row-border-strong: hsl(var(--foreground) / 0.18);
   }
 }
-.app-sidebar-mobile {
-  background: hsl(var(--background) / 0.94);
+.app-sidebar-shell {
+  background: transparent;
+  border-right: 0;
 }
-.app-sidebar-shell:not(.app-sidebar-mobile)::before {
+.app-sidebar-shell::before {
   content: '';
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(
-    to right,
-    hsl(var(--background) / 0.48),
-    hsl(var(--background) / 0.28) 42%,
-    transparent
-  );
+  background: hsl(var(--background) / 0.12);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.sidebar-header {
+  border-bottom: 0;
+}
+.sidebar-header > button,
+.sidebar-header > a {
+  min-width: 0;
+  flex: 1;
 }
 .app-sidebar-shell > * {
   position: relative;
@@ -8480,25 +8515,16 @@ html.dark .chat-composer-form.glass-chrome {
 .sidebar-nav-item {
   min-height: 40px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   color: hsl(var(--muted-foreground));
-  background:
-    radial-gradient(circle at 18% 0%, hsl(var(--foreground) / 0.055), transparent 42%),
-    linear-gradient(180deg, hsl(var(--card) / 0.22), hsl(var(--foreground) / 0.018));
+  background: transparent;
   transition:
     background 0.16s ease,
-    transform 0.16s ease,
-    box-shadow 0.16s ease,
     color 0.16s ease;
 }
 .sidebar-nav-item:not(.is-active):hover {
-  color: hsl(var(--foreground) / 0.92);
-  background:
-    radial-gradient(circle at 18% 0%, hsl(var(--foreground) / 0.095), transparent 42%),
-    linear-gradient(180deg, hsl(var(--card) / 0.36), hsl(var(--foreground) / 0.035));
-  box-shadow:
-    inset 0 1px 0 hsl(var(--foreground) / 0.1),
-    inset 0 0 18px hsl(var(--foreground) / 0.03);
+  color: hsl(var(--foreground));
+  background: hsl(var(--foreground) / 0.055);
 }
 
 .sidebar-context-slot {
@@ -8512,14 +8538,8 @@ html.dark .chat-composer-form.glass-chrome {
 }
 .sidebar-nav-item.is-active {
   color: hsl(var(--foreground));
-  background:
-    radial-gradient(circle at 28% 18%, hsl(var(--primary) / 0.3), transparent 40%),
-    radial-gradient(circle at 76% 80%, hsl(var(--accent) / 0.14), transparent 42%),
-    linear-gradient(180deg, hsl(var(--card) / 0.52), hsl(var(--primary) / 0.09));
-  box-shadow:
-    inset 0 1px 0 hsl(var(--foreground) / 0.15),
-    inset 0 -12px 22px hsl(var(--background) / 0.2),
-    inset 0 0 22px hsl(var(--primary) / 0.14);
+  background: hsl(var(--primary) / 0.13);
+  box-shadow: inset 3px 0 0 hsl(var(--primary));
 }
 .sidebar-nav-item.is-collapsed {
   width: 40px;
@@ -8562,24 +8582,14 @@ html.dark .chat-composer-form.glass-chrome {
 .sidebar-session-search {
   min-height: 36px;
   overflow: hidden;
-  border: 0;
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 18% 0%, hsl(var(--foreground) / 0.075), transparent 36%),
-    var(--sidebar-row-surface);
-  box-shadow:
-    inset 0 1px 0 hsl(var(--foreground) / 0.09),
-    inset 0 -10px 20px hsl(var(--background) / 0.08),
-    inset 0 0 18px hsl(var(--foreground) / 0.035);
-  transition:
-    box-shadow 0.16s ease,
-    background 0.16s ease;
+  border: 1px solid hsl(var(--foreground) / 0.09);
+  border-radius: 10px;
+  background: hsl(var(--foreground) / 0.035);
+  transition: border-color 0.16s ease;
 }
 .sidebar-session-search:focus-within {
-  box-shadow:
-    inset 0 1px 0 hsl(var(--foreground) / 0.12),
-    inset 0 -10px 20px hsl(var(--background) / 0.06),
-    inset 0 0 20px hsl(var(--foreground) / 0.04);
+  border-color: hsl(var(--primary) / 0.6);
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.12);
 }
 .sidebar-session-scroll {
   --sidebar-scroll-fade: 22px;
@@ -8629,10 +8639,10 @@ html.dark .chat-composer-form.glass-chrome {
   align-items: center;
   gap: 6px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 0 8px;
   color: hsl(var(--muted-foreground) / 0.82);
-  background: hsl(var(--foreground) / 0.035);
+  background: transparent;
   text-align: left;
   transition:
     background 0.16s ease,
@@ -8722,16 +8732,13 @@ html.dark .chat-composer-form.glass-chrome {
 .sidebar-session-row {
   position: relative;
   min-height: 46px;
-  border: 1px solid var(--sidebar-row-border);
-  border-radius: 999px;
+  border: 1px solid transparent;
+  border-radius: 10px;
   overflow: hidden;
-  color: hsl(var(--muted-foreground));
-  background: var(--sidebar-row-surface);
+  color: hsl(var(--foreground) / 0.78);
+  background: transparent;
   transition:
-    border-color 0.16s ease,
     background 0.16s ease,
-    transform 0.16s ease,
-    box-shadow 0.16s ease,
     color 0.16s ease;
 }
 .sidebar-session-row > * {
@@ -8743,28 +8750,18 @@ html.dark .chat-composer-form.glass-chrome {
   padding-block: 2px;
 }
 .sidebar-session-row:not(.is-active):hover {
-  color: hsl(var(--foreground) / 0.92);
-  border-color: var(--sidebar-row-border-strong);
-  background: var(--sidebar-row-surface-hover);
-  box-shadow:
-    inset 0 1px 0 hsl(var(--foreground) / 0.075),
-    0 10px 26px -24px hsl(var(--shadow-color) / 0.76);
+  color: hsl(var(--foreground));
+  background: hsl(var(--foreground) / 0.055);
 }
 .sidebar-session-row.is-working:not(.is-active) {
-  color: hsl(var(--foreground) / 0.9);
-  border-color: var(--sidebar-row-border-strong);
-  background: var(--sidebar-row-surface);
-  box-shadow:
-    inset 0 1px 0 hsl(var(--foreground) / 0.08),
-    0 10px 28px -25px hsl(var(--shadow-color) / 0.74);
+  color: hsl(var(--foreground));
+  background: hsl(var(--foreground) / 0.025);
 }
 .sidebar-session-row.is-active {
   color: hsl(var(--foreground));
-  border-color: var(--sidebar-row-border-strong);
-  background: var(--sidebar-row-surface-hover);
-  box-shadow:
-    inset 0 1px 0 hsl(var(--foreground) / 0.1),
-    0 12px 30px -26px hsl(var(--shadow-color) / 0.82);
+  border-color: hsl(var(--primary) / 0.18);
+  background: hsl(var(--primary) / 0.12);
+  box-shadow: inset 3px 0 0 hsl(var(--primary));
 }
 .sidebar-session-row.is-editing {
   display: flex;
@@ -8808,6 +8805,11 @@ html.dark .chat-composer-form.glass-chrome {
   background: hsl(var(--muted-foreground) / 0.38);
   box-shadow: 0 0 0 3px hsl(var(--foreground) / 0.025);
 }
+.sidebar-session-run-dot.is-needs-you {
+  background: hsl(38 92% 52%);
+  box-shadow: 0 0 0 3px hsl(38 92% 52% / 0.16);
+  animation: panel-badge-pulse 2s ease-in-out infinite;
+}
 .sidebar-session-run-dot.is-working {
   background: hsl(152 70% 48%);
   box-shadow: 0 0 0 3px hsl(152 70% 48% / 0.12);
@@ -8824,8 +8826,8 @@ html.dark .chat-composer-form.glass-chrome {
 .sidebar-session-provider-icon {
   position: relative;
   display: inline-flex;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
@@ -8842,13 +8844,13 @@ html.dark .chat-composer-form.glass-chrome {
 
 .sidebar-session-provider-icon > img,
 .sidebar-session-provider-icon > svg {
-  width: 29px !important;
-  height: 29px !important;
+  width: 23px !important;
+  height: 23px !important;
 }
 
 .sidebar-session-provider-icon > img.object-cover {
-  width: 33px !important;
-  height: 33px !important;
+  width: 27px !important;
+  height: 27px !important;
   border-radius: 999px;
 }
 
@@ -12816,4 +12818,28 @@ html.eink ::selection {
 .notification-deny:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Keep names readable in the compact navigation column. */
+.sidebar-session-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.sidebar-session-row:not(.is-collapsed) > a {
+  padding-inline: 8px;
+  gap: 8px;
+}
+.sidebar-session-row:focus-within {
+  outline: 2px solid hsl(var(--primary) / 0.65);
+  outline-offset: -2px;
+}
+@media (hover: none) {
+  .sidebar-session-options {
+    opacity: 1;
+  }
 }

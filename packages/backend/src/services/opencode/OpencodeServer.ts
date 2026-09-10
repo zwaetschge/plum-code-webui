@@ -641,28 +641,32 @@ export class OpencodeServer {
     return this.startPromise;
   }
 
-  private startInternal(userId?: string): Promise<string> {
-    return new Promise<string>(async (resolve, reject) => {
-      this.shuttingDown = false;
-      this.sseConnected = false;
-      this.sseReconnectDelayMs = 500;
-      this.credentialOwnerUserId = userId || null;
-      this.credentialFingerprint = await getOpenCodeProviderCredentialFingerprint(userId);
+  private async startInternal(userId?: string): Promise<string> {
+    // Everything that can throw asynchronously happens before the Promise
+    // executor below. Inside an async executor a rejection from these awaits
+    // would escape without settling the promise, and start() caches that
+    // never-settling promise until the backend restarts.
+    this.shuttingDown = false;
+    this.sseConnected = false;
+    this.sseReconnectDelayMs = 500;
+    this.credentialOwnerUserId = userId || null;
+    this.credentialFingerprint = await getOpenCodeProviderCredentialFingerprint(userId);
 
-      if (this.tenantPaths) ensureOpenCodeTenantDirectories(this.tenantPaths);
-      const commandEnv = buildOpenCodeCommandEnv();
-      const env = {
-        ...buildOpenCodeServerProcessEnv(commandEnv),
-        ...(await buildIntegrationEnv()),
-        ...(await buildOpenCodeProviderCredentialEnv(userId)),
-        OPENCODE_CONFIG_DIR: this.tenantPaths?.configDir || commandEnv.OPENCODE_CONFIG_DIR || '',
-        OPENCODE_DATA_DIR: this.tenantPaths?.dataDir || commandEnv.OPENCODE_DATA_DIR || '',
-        WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
-        WEBUI_HOOK_SECRET: config.hookSecret,
-        WEBUI_SESSION_CONTEXT_FILE:
-          this.tenantPaths?.sessionContextFile || WEBUI_SESSION_CONTEXT_FILE,
-      };
+    if (this.tenantPaths) ensureOpenCodeTenantDirectories(this.tenantPaths);
+    const commandEnv = buildOpenCodeCommandEnv();
+    const env = {
+      ...buildOpenCodeServerProcessEnv(commandEnv),
+      ...(await buildIntegrationEnv()),
+      ...(await buildOpenCodeProviderCredentialEnv(userId)),
+      OPENCODE_CONFIG_DIR: this.tenantPaths?.configDir || commandEnv.OPENCODE_CONFIG_DIR || '',
+      OPENCODE_DATA_DIR: this.tenantPaths?.dataDir || commandEnv.OPENCODE_DATA_DIR || '',
+      WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
+      WEBUI_HOOK_SECRET: config.hookSecret,
+      WEBUI_SESSION_CONTEXT_FILE:
+        this.tenantPaths?.sessionContextFile || WEBUI_SESSION_CONTEXT_FILE,
+    };
 
+    return new Promise<string>((resolve, reject) => {
       const proc = cpSpawn(
         CLI_PROVIDERS.opencode.command,
         ['serve', '--port', '0', '--hostname', '127.0.0.1'],

@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.settings
 
+import com.claudewebui.app.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -63,6 +64,11 @@ fun CliToolsScreen(
     viewModel: SettingsViewModel,
     onNavigateBack: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
 
     // Load CLI tools when screen appears
@@ -85,10 +91,10 @@ fun CliToolsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("CLI Tools", fontWeight = FontWeight.SemiBold) },
+                title = { Text(screenResources.getString(R.string.settings_cli_tools_4b238), fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = screenResources.getString(R.string.settings_back_b52b3))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -111,20 +117,20 @@ fun CliToolsScreen(
                     onValueChange = viewModel::setCliToolSearchQuery,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    placeholder = { Text("Search tools…") },
+                        .padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.sm),
+                    placeholder = { Text(screenResources.getString(R.string.settings_search_tools_97829)) },
                     leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(screenTokens.sizing.iconMd))
                     },
                     trailingIcon = {
                         AnimatedVisibility(visible = query.isNotBlank(), enter = fadeIn(), exit = fadeOut()) {
                             IconButton(onClick = { viewModel.setCliToolSearchQuery("") }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Close, contentDescription = screenResources.getString(R.string.settings_clear_719ea), modifier = Modifier.size(screenTokens.sizing.iconInline))
                             }
                         }
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(screenTokens.radius.md),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                         focusedLabelColor = MaterialTheme.colorScheme.primary,
@@ -137,18 +143,18 @@ fun CliToolsScreen(
                 val enabledCount = state.cliTools.count { it.enabled }
                 val totalCount = state.cliTools.size
                 Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.xs),
+                    horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
                             .background(PlumGreen.copy(alpha = 0.15f))
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .padding(horizontal = screenTokens.spacing.sm, vertical = screenTokens.spacing.xs),
                     ) {
                         Text(
-                            "$enabledCount / $totalCount enabled",
+                            screenResources.getString(R.string.settings_1_s_2_s_enabled_82c3a, enabledCount, totalCount),
                             style = MaterialTheme.typography.labelSmall,
                             color = PlumGreen,
                             fontWeight = FontWeight.Medium,
@@ -161,7 +167,7 @@ fun CliToolsScreen(
             if (builtinTools.isNotEmpty()) {
                 item {
                     ToolSectionHeader(
-                        label = "Built-in",
+                        label = screenResources.getString(R.string.settings_built_in_20f40),
                         icon = Icons.Default.Build,
                         color = MaterialTheme.colorScheme.primary,
                         count = builtinTools.size,
@@ -176,7 +182,7 @@ fun CliToolsScreen(
                             )
                             if (index < builtinTools.lastIndex) {
                                 HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    modifier = Modifier.padding(horizontal = screenTokens.spacing.lg),
                                     color = MaterialTheme.colorScheme.outlineVariant,
                                 )
                             }
@@ -189,7 +195,7 @@ fun CliToolsScreen(
             if (customTools.isNotEmpty()) {
                 item {
                     ToolSectionHeader(
-                        label = "Custom",
+                        label = screenResources.getString(R.string.settings_custom_081ae),
                         icon = Icons.Default.Terminal,
                         color = PlumBlue,
                         count = customTools.size,
@@ -204,7 +210,7 @@ fun CliToolsScreen(
                             )
                             if (index < customTools.lastIndex) {
                                 HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    modifier = Modifier.padding(horizontal = screenTokens.spacing.lg),
                                     color = MaterialTheme.colorScheme.outlineVariant,
                                 )
                             }
@@ -217,7 +223,7 @@ fun CliToolsScreen(
             if (mcpTools.isNotEmpty()) {
                 item {
                     ToolSectionHeader(
-                        label = "MCP-provided",
+                        label = screenResources.getString(R.string.settings_mcp_provided_04e5b),
                         icon = Icons.Default.Extension,
                         color = PlumAmber,
                         count = mcpTools.size,
@@ -232,7 +238,7 @@ fun CliToolsScreen(
                             )
                             if (index < mcpTools.lastIndex) {
                                 HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                    modifier = Modifier.padding(horizontal = screenTokens.spacing.lg),
                                     color = MaterialTheme.colorScheme.outlineVariant,
                                 )
                             }
@@ -249,16 +255,16 @@ fun CliToolsScreen(
                     ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
                         ) {
                             Icon(
                                 Icons.Default.Terminal,
                                 contentDescription = null,
-                                modifier = Modifier.size(48.dp),
+                                modifier = Modifier.size(screenTokens.sizing.touchTarget),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Text(
-                                if (query.isBlank()) "No tools available" else "No tools match \"$query\"",
+                                if (query.isBlank()) screenResources.getString(R.string.settings_no_tools_available_44310) else screenResources.getString(R.string.settings_no_tools_match_1_s_e7f18, query),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -281,12 +287,14 @@ private fun ToolSectionHeader(
     color: androidx.compose.ui.graphics.Color,
     count: Int,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Row(
-        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+        modifier = Modifier.padding(horizontal = screenTokens.spacing.xl, vertical = screenTokens.spacing.md),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
     ) {
-        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(screenTokens.sizing.iconSm))
         Text(
             label.uppercase(),
             style = MaterialTheme.typography.labelSmall,
@@ -297,7 +305,7 @@ private fun ToolSectionHeader(
             modifier = Modifier
                 .clip(RoundedCornerShape(4.dp))
                 .background(color.copy(alpha = 0.1f))
-                .padding(horizontal = 6.dp, vertical = 2.dp),
+                .padding(horizontal = screenTokens.spacing.inline, vertical = screenTokens.spacing.xxs),
         ) {
             Text(
                 count.toString(),
@@ -312,11 +320,13 @@ private fun ToolSectionHeader(
 
 @Composable
 private fun ToolGroupCard(content: @Composable () -> Unit) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(16.dp),
+            .padding(horizontal = screenTokens.spacing.lg),
+        shape = RoundedCornerShape(screenTokens.radius.lg),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
@@ -332,6 +342,8 @@ private fun ToolRow(
     tool: CliTool,
     onToggle: (Boolean) -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     val categoryColor = when (tool.category) {
         CliToolCategory.BUILTIN -> MaterialTheme.colorScheme.primary
         CliToolCategory.CUSTOM -> PlumBlue
@@ -360,7 +372,7 @@ private fun ToolRow(
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(screenTokens.radius.chip))
                     .background(categoryColor.copy(alpha = if (tool.enabled) 0.15f else 0.07f)),
                 contentAlignment = Alignment.Center,
             ) {

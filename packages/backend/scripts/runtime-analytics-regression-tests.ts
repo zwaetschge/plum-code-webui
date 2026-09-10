@@ -22,9 +22,8 @@ import { createTestSchema, dropTestSchema, useTestSchema } from '../src/db/testi
 
 useTestSchema();
 
-const { insertUsageHistoryTurn, reconcileStaleRunningSessions } = await import(
-  '../src/db/index.js'
-);
+const { insertUsageHistoryTurn, reconcileStaleRunningSessions } =
+  await import('../src/db/index.js');
 const { all: pgAll, run: pgRun } = await import('../src/db/pg.js');
 
 await createTestSchema();
@@ -125,6 +124,68 @@ try {
     0,
     'startup reconciliation should be repeatable'
   );
+
+  // Exercise the real HTTP route against Postgres: repeated timezone bind
+  // parameters in SELECT/GROUP BY are different expressions to its planner.
+  const { default: express } = await import('express');
+  const { default: jwt } = await import('jsonwebtoken');
+  const { config } = await import('../src/config.js');
+  const { default: analyticsRouter } = await import('../src/routes/analytics.js');
+  await pgRun("UPDATE usage_history SET created_at = '2026-07-31 23:45:00'");
+  await pgRun(`INSERT INTO session_events (id, user_id, session_id, event_type, context_used_percent, created_at)
+    VALUES ('snapshot-1', 'user-1', 'pi-session', 'context_snapshot', 42, '2026-07-31 23:45:00'),
+           ('compact-1', 'user-1', 'pi-session', 'compact', 0, '2026-07-31 23:45:00')`);
+  const app = express();
+  app.use('/api/analytics', analyticsRouter);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  const address = server.address() as { port: number };
+  const headers = { Authorization: `Bearer ${jwt.sign({ userId: 'user-1' }, config.jwtSecret)}` };
+  try {
+    for (const tz of [0, 330, -300]) {
+      for (const query of [
+        'period=all',
+        'period=24h&granularity=hour',
+        'period=24h&granularity=day',
+        'period=30d',
+      ]) {
+        const response = await fetch(
+          `http://127.0.0.1:${address.port}/api/analytics/timeline?${query}&tz=${tz}`,
+          { headers }
+        );
+        const body = (await response.json()) as {
+          data: Array<{
+            date: string;
+            total_tokens: number;
+            requests: number;
+            context_snapshots: number;
+            compact_events: number;
+            max_context_used_percent: number;
+            providers: Record<string, { tokens: number }>;
+            models: Record<string, unknown>;
+          }>;
+        };
+        assert.equal(response.status, 200, `timeline ${query}, tz=${tz}: ${JSON.stringify(body)}`);
+        if (query === 'period=all') {
+          assert.equal(body.data.length, 1);
+          const bucket = body.data[0];
+          assert.equal(bucket.date, tz === 330 ? '2026-08' : '2026-07');
+          assert.equal(bucket.total_tokens, 195);
+          assert.equal(bucket.requests, 2);
+          assert.equal(bucket.context_snapshots, 1);
+          assert.equal(bucket.compact_events, 1);
+          assert.equal(bucket.max_context_used_percent, 42);
+          assert.equal(bucket.providers.Pi.tokens, 175);
+          assert.equal(bucket.providers.OpenCode.tokens, 20);
+          assert.equal(Object.keys(bucket.models).length, 2);
+        }
+      }
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve()))
+    );
+  }
 
   console.log('runtime analytics regression tests passed');
 } finally {

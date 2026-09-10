@@ -5,11 +5,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class AppThemeOption(val label: String, val description: String) {
-    SYSTEM("System", "Follow device setting"),
-    DARK("Dark", "Graphite glass surface"),
-    LIGHT("Light", "Bright glass surface"),
-    EINK("E-Ink", "High contrast, no glow"),
+enum class AppThemeOption(private val labelRes: Int, private val descriptionRes: Int) {
+    SYSTEM(com.claudewebui.app.R.string.settings_theme_system, com.claudewebui.app.R.string.settings_theme_system_description),
+    DARK(com.claudewebui.app.R.string.settings_theme_dark, com.claudewebui.app.R.string.settings_theme_dark_description),
+    LIGHT(com.claudewebui.app.R.string.settings_theme_light, com.claudewebui.app.R.string.settings_theme_light_description),
+    EINK(com.claudewebui.app.R.string.settings_theme_eink, com.claudewebui.app.R.string.settings_theme_eink_description);
+
+    fun localizedLabel(resources: android.content.res.Resources): String = resources.getString(labelRes)
+    fun localizedDescription(resources: android.content.res.Resources): String = resources.getString(descriptionRes)
 }
 
 /**

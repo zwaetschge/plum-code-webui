@@ -306,8 +306,22 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
       await new Promise((r) => setTimeout(r, 100));
     }
     assert.equal(usagePosts.length, 3);
+    // Every booking carries a run id. The backend deduplicates on it, so what
+    // matters is that it is there and that two runs never share one; the value
+    // itself is per-process and deliberately unpredictable.
+    const runIds = usagePosts.map((p) => p.runId);
+    assert.ok(
+      runIds.every((id) => typeof id === 'string' && id.length > 0),
+      JSON.stringify(runIds)
+    );
+    assert.equal(new Set(runIds).size, 3, JSON.stringify(runIds));
+
+    const withoutRunId = (post: any) => {
+      const { runId: _runId, ...rest } = post ?? {};
+      return rest;
+    };
     const codexUsage = usagePosts.find((p) => p.provider === 'codex');
-    assert.deepEqual(codexUsage, {
+    assert.deepEqual(withoutRunId(codexUsage), {
       provider: 'codex',
       model: 'gpt-5.5',
       inputTokens: 100,
@@ -316,7 +330,7 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
       cacheCreationTokens: 0,
     });
     const claudeUsage = usagePosts.find((p) => p.provider === 'claude');
-    assert.deepEqual(claudeUsage, {
+    assert.deepEqual(withoutRunId(claudeUsage), {
       provider: 'claude',
       model: 'glm-5.3',
       inputTokens: 11,
@@ -326,7 +340,7 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
     });
 
     const zaiUsage = usagePosts.find((p) => p.provider === 'zai');
-    assert.deepEqual(zaiUsage, {
+    assert.deepEqual(withoutRunId(zaiUsage), {
       provider: 'zai',
       model: 'glm-5.3',
       inputTokens: 11,

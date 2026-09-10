@@ -39,7 +39,7 @@ class MessageMergeTest {
 
         assertEquals(1, merged.size)
         assertEquals("server-1", merged.single().id)
-        assertEquals(44, merged.single().eventSequence)
+        assertEquals(44L, merged.single().eventSequence)
         assertTrue(merged.single().media?.isNotEmpty() == true)
     }
 

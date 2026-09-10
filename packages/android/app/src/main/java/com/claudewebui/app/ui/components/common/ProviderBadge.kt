@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.components.common
 
+import com.claudewebui.app.ui.theme.PlumTheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,7 @@ fun ProviderBadge(
     size: BadgeSize = BadgeSize.SMALL,
     showLabel: Boolean = true,
 ) {
+    val componentTokens = PlumTheme.tokens
     val isDark = isSystemInDarkTheme()
     val theme = ProviderThemes.get(provider)
     val containerColor = ProviderThemes.containerColor(provider, isDark)
@@ -45,15 +47,15 @@ fun ProviderBadge(
 
     val (iconSize, horizontalPadding, verticalPadding, textStyle) = when (size) {
         BadgeSize.SMALL -> BadgeDimensions(
-            iconSize = 14.dp,
-            horizontalPadding = 8.dp,
-            verticalPadding = 4.dp,
+            iconSize = componentTokens.spacing.cozy,
+            horizontalPadding = componentTokens.spacing.sm,
+            verticalPadding = componentTokens.spacing.xs,
             textStyle = MaterialTheme.typography.labelSmall,
         )
         BadgeSize.MEDIUM -> BadgeDimensions(
-            iconSize = 16.dp,
-            horizontalPadding = 10.dp,
-            verticalPadding = 6.dp,
+            iconSize = componentTokens.spacing.lg,
+            horizontalPadding = componentTokens.spacing.compact,
+            verticalPadding = componentTokens.spacing.inline,
             textStyle = MaterialTheme.typography.labelMedium,
         )
     }
@@ -61,7 +63,7 @@ fun ProviderBadge(
     Surface(
         modifier = modifier,
         color = containerColor,
-        shape = RoundedCornerShape(6.dp),
+        shape = RoundedCornerShape(componentTokens.spacing.inline),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = horizontalPadding, vertical = verticalPadding),
@@ -74,7 +76,7 @@ fun ProviderBadge(
                 tint = contentColor,
             )
             if (showLabel) {
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(componentTokens.spacing.xs))
                 Text(
                     text = theme.displayName,
                     style = textStyle,
@@ -99,15 +101,16 @@ private data class BadgeDimensions(
 @Preview(showBackground = true, backgroundColor = 0xFFF0EFEA)
 @Composable
 private fun ProviderBadgePreviewLight() {
+    val componentTokens = PlumTheme.tokens
     ClaudeWebUITheme(darkTheme = false) {
         Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
+            modifier = Modifier.padding(componentTokens.spacing.lg),
         ) {
             CliProvider.entries
                 .filter { it != CliProvider.UNKNOWN }
                 .forEach { provider ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm)) {
                         ProviderBadge(provider = provider, size = BadgeSize.SMALL)
                         ProviderBadge(provider = provider, size = BadgeSize.MEDIUM)
                         ProviderBadge(provider = provider, size = BadgeSize.SMALL, showLabel = false)
@@ -120,10 +123,11 @@ private fun ProviderBadgePreviewLight() {
 @Preview(showBackground = true, backgroundColor = 0xFF141413)
 @Composable
 private fun ProviderBadgePreviewDark() {
+    val componentTokens = PlumTheme.tokens
     ClaudeWebUITheme(darkTheme = true) {
         Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
+            modifier = Modifier.padding(componentTokens.spacing.lg),
         ) {
             CliProvider.entries
                 .filter { it != CliProvider.UNKNOWN }

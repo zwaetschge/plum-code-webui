@@ -46,6 +46,7 @@
     "@agentclientprotocol/sdk": "0.23.0",
     "@octokit/rest": "^21.0.2",
     "@plum-code-webui/shared": "workspace:*",
+    "archiver": "5.3.2",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.7.0",
     "compression": "^1.8.1",
@@ -58,7 +59,7 @@
     "helmet": "^8.0.0",
     "http-proxy": "^1.18.1",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^2.2.0",
+    "multer": "^2.3.0",
     "nanoid": "^5.1.16",
     "node-pty": "^1.0.0",
     "passport": "^0.7.0",
@@ -72,6 +73,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.4",
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.12",
     "@types/compression": "^1.8.1",

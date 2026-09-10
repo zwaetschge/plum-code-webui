@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.common
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -41,7 +44,7 @@ private val OfflineBannerText = Color.White
  * Auto-dismisses when [isOffline] returns to false.
  *
  * @param isOffline whether the app currently has no server connection
- * @param onRetry called when the user taps "Retry"
+ * @param onRetry called when the user taps stringResource(R.string.component_retry)
  * @param pendingCount number of queued messages; shown in the label if > 0
  */
 @Composable
@@ -51,6 +54,7 @@ fun ConnectivityBanner(
     pendingCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
+    val componentTokens = PlumTheme.tokens
     AnimatedVisibility(
         visible = isOffline,
         enter = expandVertically(
@@ -67,7 +71,7 @@ fun ConnectivityBanner(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(OfflineBannerBackground)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = componentTokens.spacing.lg, vertical = componentTokens.spacing.sm),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -76,14 +80,14 @@ fun ConnectivityBanner(
                     imageVector = Icons.Default.CloudOff,
                     contentDescription = null,
                     tint = OfflineBannerText,
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(componentTokens.sizing.iconInline)
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(componentTokens.spacing.sm))
                 Text(
                     text = if (pendingCount > 0) {
-                        "No connection · $pendingCount message(s) queued"
+                        stringResource(R.string.component_offline_queued, pendingCount)
                     } else {
-                        "No connection"
+                        stringResource(R.string.component_no_connection)
                     },
                     color = OfflineBannerText,
                     fontSize = 13.sp,
@@ -93,13 +97,13 @@ fun ConnectivityBanner(
             TextButton(onClick = onRetry) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
-                    contentDescription = "Retry",
+                    contentDescription = stringResource(R.string.component_retry),
                     tint = OfflineBannerText,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(componentTokens.sizing.iconSm)
                 )
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(componentTokens.spacing.xs))
                 Text(
-                    "Retry",
+                    stringResource(R.string.component_retry),
                     color = OfflineBannerText,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold

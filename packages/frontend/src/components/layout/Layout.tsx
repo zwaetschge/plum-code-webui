@@ -12,6 +12,7 @@ import type { Session, ApiResponse, UsageSnapshot, UserSettings } from '@plum-co
 import { ProviderLogo } from '@/components/branding/ProviderLogo';
 import { UI_PROVIDER_META, toUiProvider } from '@/lib/providers';
 import { AppBackground } from '@/components/effects/AppBackground';
+import { OutboxPanel } from '@/components/chat/OutboxPanel';
 import { CommandPalette } from '@/components/CommandPalette';
 import { getSessionRunState } from '@/lib/sessionRunState';
 import { cn } from '@/lib/utils';
@@ -82,6 +83,12 @@ export function Layout() {
   );
   const sessionQueue = useSessionStore((state) =>
     headerSessionId ? state.queueState[headerSessionId] : undefined
+  );
+  const sessionLifecycle = useSessionStore((state) =>
+    headerSessionId ? state.lifecycle[headerSessionId] : undefined
+  );
+  const sessionPendingApprovals = useSessionStore((state) =>
+    headerSessionId ? state.pendingApprovalCounts[headerSessionId] : undefined
   );
 
   const { data: settings } = useQuery({
@@ -179,9 +186,13 @@ export function Layout() {
       streamingContent: sessionHasStreamingContent ? 'streaming' : undefined,
       tools: sessionToolExecutions,
       queue: sessionQueue,
+      lifecycle: sessionLifecycle,
+      pendingApprovals: sessionPendingApprovals,
     });
   }, [
     activeSession,
+    sessionLifecycle,
+    sessionPendingApprovals,
     sessionActiveAgent,
     sessionActivity,
     sessionAgentRuns,
@@ -314,6 +325,7 @@ export function Layout() {
       {/* Global command palette (Cmd/Ctrl+K) */}
       <CommandPalette />
       <GlobalMessageSearchDialog />
+      <OutboxPanel />
     </div>
   );
 }

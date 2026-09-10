@@ -727,6 +727,8 @@ router.get('/timeline', async (req: Request, res: Response) => {
       dateFormat = '%Y-%m';
     }
 
+    // Group by the selected bucket. Repeating its timezone placeholder creates
+    // distinct PostgreSQL parameters ($1 vs $N), so the expressions do not match.
     const timeline = await pgAll(
       `
       SELECT
@@ -739,13 +741,12 @@ router.get('/timeline', async (req: Request, res: Response) => {
         COUNT(*) as requests
       FROM usage_history
       WHERE user_id = ? ${dateFilter.sql}
-      GROUP BY strftime('${dateFormat}', created_at, ?)
+      GROUP BY 1
       ORDER BY date ASC
     `,
       tzModifier,
       authReq.userId,
-      ...dateFilter.params,
-      tzModifier
+      ...dateFilter.params
     );
 
     const providerRows = (await pgAll(
@@ -762,13 +763,12 @@ router.get('/timeline', async (req: Request, res: Response) => {
         COUNT(*) as requests
       FROM usage_history
       WHERE user_id = ? ${dateFilter.sql}
-      GROUP BY strftime('${dateFormat}', created_at, ?), provider, model
+      GROUP BY 1, provider, model
       ORDER BY date ASC
     `,
       tzModifier,
       authReq.userId,
-      ...dateFilter.params,
-      tzModifier
+      ...dateFilter.params
     )) as unknown as Array<{
       date: string;
       model: string | null;
@@ -832,13 +832,12 @@ router.get('/timeline', async (req: Request, res: Response) => {
         MAX(context_used_percent) as max_context_used_percent
       FROM session_events
       WHERE user_id = ? ${dateFilter.sql}
-      GROUP BY strftime('${dateFormat}', created_at, ?), event_type
+      GROUP BY 1, event_type
       ORDER BY date ASC
     `,
       tzModifier,
       authReq.userId,
-      ...dateFilter.params,
-      tzModifier
+      ...dateFilter.params
     )) as unknown as Array<{
       date: string;
       event_type: string;

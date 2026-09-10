@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { writeFileAtomicSync } from './atomicWrite.js';
 import {
   getOpenCodeBuildAgentPrompt,
   getOpenCodePrimaryAgent,
@@ -135,8 +136,7 @@ function writeIfChanged(filePath: string, content: string): boolean {
     existing = null;
   }
   if (existing === content) return false;
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, content);
+  writeFileAtomicSync(filePath, content, { mode: 0o644 });
   return true;
 }
 

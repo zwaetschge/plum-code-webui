@@ -10,6 +10,10 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.claudewebui.app.core.network.BackgroundApi
+import com.claudewebui.app.core.notifications.AttentionSync
+import com.claudewebui.app.core.notifications.NotificationPreferences
+import com.claudewebui.app.core.security.SessionRenewal
 import java.util.concurrent.TimeUnit
 
 /**
@@ -26,12 +30,31 @@ class WidgetRefreshWorker(
         val context = applicationContext
         val hasWidgets = WidgetHub.hasAnyWidgets(context)
         val hasWatch = com.claudewebui.app.wear.WearSync.hasPairedNode(context)
+        // Attention sync has no surface to feed, so it is kept alive by the
+        // notification settings rather than by a placed widget.
+        val wantsAttention = WidgetDataFetcher.isSignedIn() &&
+            NotificationPreferences.canPostNotifications(context)
         // Nothing left to feed — stop burning battery every 15 minutes. The
         // next widget placement or app start schedules it again.
-        if (!hasWidgets && !hasWatch) {
+        if (!hasWidgets && !hasWatch && !wantsAttention) {
             WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_WORK)
             return Result.success()
         }
+
+        // The only path that still runs when the app has not been opened for
+        // days, which is exactly when a 7-day token quietly expires and takes
+        // the widgets and the watch tile down with it. Cheap: [renewIfDue]
+        // returns immediately unless the token is inside its renewal window.
+        SessionRenewal.renewIfDue(BackgroundApi.client) {}
+
+        // Runs whether or not any widget is placed, because this is the only
+        // notification path that outlives the app process: without it a pending
+        // approval or a failed session is silent until someone opens the app.
+        AttentionSync.run(context)
+
+        // The snapshot costs several analytics queries; skip it entirely when
+        // only the attention sync above is keeping this worker alive.
+        if (!hasWidgets && !hasWatch) return Result.success()
 
         val snapshot = WidgetDataFetcher.fetch(context)
         if (hasWidgets) {

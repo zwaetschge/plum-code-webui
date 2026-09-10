@@ -1,4 +1,4 @@
-import { get as pgGet } from '../db/pg.js';
+import { get as pgGet, all as pgAll } from '../db/pg.js';
 import { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
@@ -145,6 +145,14 @@ export function getProcessManager(): ClaudeProcessManager {
     throw new Error('ProcessManager not initialized. Call setupWebSocket first.');
   }
   return _processManager;
+}
+
+/** Notify both open conversations and the owner's other connected devices. */
+export function emitSessionChats(
+  userId: string,
+  data: Parameters<ServerToClientEvents['session:chats']>[0]
+): void {
+  _io?.to(`session:${data.sessionId}`).to(`user:${userId}`).emit('session:chats', data);
 }
 
 /** Immediately revoke live sockets and stop active CLI sessions for a user. */
@@ -349,6 +357,46 @@ export function setupWebSocket(httpServer: HttpServer): Server {
           sessionId,
           error: logError('session:subscribe-recovery', sessionId, err) || 'Failed to recover Kimi',
         });
+      }
+    });
+
+    /**
+     * Subscribe to every session this user owns, in one call.
+     *
+     * A client that supervises the whole account used to emit
+     * `session:subscribe` once per session: N ownership queries and, worse, N
+     * `recoverInterruptedKimiTurn` calls fanned out on every reconnect. This
+     * resolves ownership with a single query and joins the rooms directly.
+     * Recovery stays on the per-session path, because it belongs to opening a
+     * conversation, not to watching one.
+     */
+    socket.on('session:subscribe-all', async (acknowledge) => {
+      const userId = socket.data.userId;
+      if (!userId) {
+        acknowledge?.({ sessionIds: [] });
+        return;
+      }
+      try {
+        const rows = (await pgAll(
+          `SELECT id FROM sessions
+             WHERE user_id = ? AND COALESCE(archived, 0) = 0
+             ORDER BY updated_at DESC
+             LIMIT 200`,
+          userId
+        )) as Array<{ id: string }>;
+
+        const sessionIds = rows.map((row) => row.id);
+        await Promise.all(
+          sessionIds.map(async (sessionId) => {
+            socket.data.subscribedSessions.add(sessionId);
+            await socket.join(`session:${sessionId}`);
+          })
+        );
+        console.log(`Socket ${socket.id} subscribed to ${sessionIds.length} owned sessions`);
+        acknowledge?.({ sessionIds });
+      } catch (err) {
+        logError('session:subscribe-all', userId, err);
+        acknowledge?.({ sessionIds: [] });
       }
     });
 
@@ -834,8 +882,14 @@ export function setupWebSocket(httpServer: HttpServer): Server {
         // getSessionBufferStatus signals needsFullResync when the circular buffer rolled
         // over since lastTimestamp — client should then fetch full state via REST instead
         // of trusting the truncated replay.
-        const { items: bufferedMessages, needsFullResync } =
-          await processManager.getSessionBufferStatus(sessionId, lastTimestamp, lastSequence);
+        const {
+          items: bufferedMessages,
+          needsFullResync: bufferNeedsFullResync,
+          highWatermark,
+        } = await processManager.getSessionBufferStatus(sessionId, lastTimestamp, lastSequence);
+        // Missing cursors also request the clients' one-time protocol upgrade
+        // from old issued cursors that could skip an unfinished message write.
+        const needsFullResync = lastSequence === undefined || bufferNeedsFullResync;
         const syncState = await getSessionSyncState(sessionId, socket.data.userId);
 
         console.log(
@@ -844,6 +898,9 @@ export function setupWebSocket(httpServer: HttpServer): Server {
 
         socket.emit('session:reconnected', {
           sessionId,
+          activeChatId: syncState.activeChatId,
+          isBusy: processManager.getSessionRuntimeSnapshot(sessionId).busy,
+          streamingSnapshot: processManager.getStreamingSnapshot(sessionId),
           // A truncated replay must not advance per-item cursors either. REST
           // replaces it atomically when a gap is known.
           bufferedMessages: needsFullResync ? [] : bufferedMessages,
@@ -851,17 +908,18 @@ export function setupWebSocket(httpServer: HttpServer): Server {
           needsFullResync,
           // Never advance a client cursor across a known replay gap. The REST
           // snapshot carries the authoritative watermark after it is applied.
-          ...(needsFullResync ? {} : { highWatermark: syncState.highWatermark }),
+          ...(needsFullResync ? {} : { highWatermark }),
           snapshotRevision: syncState.snapshotRevision,
         });
       } else {
         const syncState = await getSessionSyncState(sessionId, socket.data.userId);
         const needsFullResync =
-          lastSequence === undefined
-            ? syncState.highWatermark > 0
-            : lastSequence < syncState.highWatermark;
+          lastSequence === undefined ? true : lastSequence < syncState.highWatermark;
         socket.emit('session:reconnected', {
           sessionId,
+          activeChatId: syncState.activeChatId,
+          isBusy: processManager.getSessionRuntimeSnapshot(sessionId).busy,
+          streamingSnapshot: processManager.getStreamingSnapshot(sessionId),
           bufferedMessages: [],
           isRunning: false,
           needsFullResync,

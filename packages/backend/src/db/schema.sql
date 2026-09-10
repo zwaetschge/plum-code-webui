@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS "gateway_tokens" (
   "name" TEXT NOT NULL,
   "token_hash" TEXT NOT NULL,
   "token_prefix" TEXT NOT NULL,
+  "scope" TEXT NOT NULL DEFAULT 'write',
   "revoked" BIGINT NOT NULL DEFAULT 0,
   "last_used_at" TEXT,
   "created_at" TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
@@ -534,7 +535,10 @@ CREATE TABLE IF NOT EXISTS "usage_history" (
   "model" TEXT,
   "created_at" TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
   "provider" TEXT NOT NULL DEFAULT 'unknown',
-  "turn_id" TEXT DEFAULT NULL,
+  -- NOT NULL on purpose: NULLs are distinct inside a unique index, so a
+  -- nullable turn id would let rows escape idx_usage_history_turn, the only
+  -- thing standing between a retried write and a double-booked turn.
+  "turn_id" TEXT NOT NULL,
   PRIMARY KEY ("id")
 );
 
@@ -869,6 +873,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS "idx_messages_client_delivery" ON "messages" (
 CREATE INDEX IF NOT EXISTS "idx_messages_session_chat" ON "messages" ("session_id", "chat_id");
 CREATE INDEX IF NOT EXISTS "idx_messages_session_created" ON "messages" ("session_id", "created_at");
 CREATE INDEX IF NOT EXISTS "idx_messages_session_id" ON "messages" ("session_id");
+-- Partial on purpose: only assistant messages are ever counted by the unread
+-- badge, so the index stays off the write path for user messages.
+CREATE INDEX IF NOT EXISTS "idx_messages_unread" ON "messages" ("session_id", "chat_id", "seq") WHERE "role" = 'assistant';
 CREATE INDEX IF NOT EXISTS "idx_notes_session_id" ON "notes" ("session_id");
 CREATE INDEX IF NOT EXISTS "idx_notes_user_id" ON "notes" ("user_id");
 CREATE INDEX IF NOT EXISTS "idx_notifications_request_id" ON "notifications" ("request_id");
@@ -904,6 +911,9 @@ CREATE INDEX IF NOT EXISTS "idx_trusted_devices_fingerprint" ON "trusted_devices
 CREATE INDEX IF NOT EXISTS "idx_trusted_devices_user_id" ON "trusted_devices" ("user_id");
 CREATE INDEX IF NOT EXISTS "idx_turn_diffs_session" ON "turn_diffs" ("session_id", "created_at");
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_usage_history_turn" ON "usage_history" ("session_id", "provider", "turn_id");
+-- The retention pass deletes by recorded_at on a timer; without this it is a
+-- sequential scan of the table it exists to keep small.
+CREATE INDEX IF NOT EXISTS "idx_usage_limit_snapshots_recorded" ON "usage_limit_snapshots" ("recorded_at");
 CREATE INDEX IF NOT EXISTS "idx_usage_history_provider_created" ON "usage_history" ("provider", "created_at");
 CREATE INDEX IF NOT EXISTS "idx_usage_history_session_created" ON "usage_history" ("session_id", "created_at");
 CREATE INDEX IF NOT EXISTS "idx_usage_history_user_created" ON "usage_history" ("user_id", "created_at");
@@ -921,11 +931,8 @@ CREATE INDEX IF NOT EXISTS "idx_message_media_seq" ON "message_media" ("seq");
 CREATE INDEX IF NOT EXISTS "idx_messages_seq" ON "messages" ("seq");
 CREATE INDEX IF NOT EXISTS "idx_session_chats_seq" ON "session_chats" ("seq");
 
--- 40 tables, 57 foreign keys, 86 indexes
+-- 40 tables, 57 foreign keys, 89 indexes
 
-CREATE INDEX IF NOT EXISTS "idx_messages_seq" ON "messages" ("seq");
-CREATE INDEX IF NOT EXISTS "idx_message_media_seq" ON "message_media" ("seq");
-CREATE INDEX IF NOT EXISTS "idx_session_chats_seq" ON "session_chats" ("seq");
 CREATE INDEX IF NOT EXISTS "idx_session_events_seq" ON "session_events" ("seq");
 
 -- Replaces the FTS5 virtual table `messages_fts`. Generated rather than

@@ -1,5 +1,7 @@
 package com.claudewebui.app.ui.screens.settings
 
+import com.claudewebui.app.ui.screens.screenErrorMessage
+import com.claudewebui.app.core.network.apiCall
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.claudewebui.app.core.network.ApiClient
@@ -61,9 +63,9 @@ class IntegrationsViewModel(private val api: ApiClient) : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             coroutineScope {
-                val comfy = async { runCatching { api.getComfyUiSettings().data }.getOrNull() }
-                val discord = async { runCatching { api.getDiscordSettings().data }.getOrNull() }
-                val ha = async { runCatching { api.getHomeAssistantSettings().data }.getOrNull() }
+                val comfy = async { apiCall { api.getComfyUiSettings().data }.getOrNull() }
+                val discord = async { apiCall { api.getDiscordSettings().data }.getOrNull() }
+                val ha = async { apiCall { api.getHomeAssistantSettings().data }.getOrNull() }
                 _uiState.update {
                     it.copy(
                         comfyUi = comfy.await(),
@@ -97,14 +99,14 @@ class IntegrationsViewModel(private val api: ApiClient) : ViewModel() {
     ) {
         viewModelScope.launch {
             _uiState.update { set(it, TestState(running = true)) }
-            val result = runCatching { call() }
+            val result = apiCall { call() }
             _uiState.update {
                 set(
                     it,
                     TestState(
                         running = false,
                         ok = result.getOrNull() ?: false,
-                        message = result.exceptionOrNull()?.message
+                        message = result.exceptionOrNull()?.screenErrorMessage("settings", "probe")
                             ?: if (result.getOrNull() == true) "Reachable" else "Failed",
                     ),
                 )
@@ -117,11 +119,11 @@ class IntegrationsViewModel(private val api: ApiClient) : ViewModel() {
     private fun save(notice: String, block: suspend () -> Unit) {
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, saveError = null, savedNotice = null) }
-            val result = runCatching { block() }
+            val result = apiCall { block() }
             _uiState.update {
                 it.copy(
                     isSaving = false,
-                    saveError = result.exceptionOrNull()?.message,
+                    saveError = result.exceptionOrNull()?.screenErrorMessage("settings", "save"),
                     savedNotice = if (result.isSuccess) notice else null,
                 )
             }

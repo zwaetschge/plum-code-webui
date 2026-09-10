@@ -1,4 +1,5 @@
 import { all as pgAll } from '../db/pg.js';
+import { pruneUsageHistory } from '../db/index.js';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 
@@ -74,6 +75,13 @@ export function initUsageLimitHistoryCollector(): void {
   }
 
   const collect = () => {
+    // Retention for usage_history rides along on this tick rather than on its
+    // own timer: it is the only recurring background job in the process, the
+    // work is a single bounded DELETE, and doing it here keeps the two
+    // analytics tables ageing out on the same schedule.
+    void pruneUsageHistory().catch((error) =>
+      console.error('[USAGE LIMITS] Usage history prune failed:', error)
+    );
     void collectProviderLimitSnapshots()
       .then(({ users, requests, failures }) => {
         console.log(

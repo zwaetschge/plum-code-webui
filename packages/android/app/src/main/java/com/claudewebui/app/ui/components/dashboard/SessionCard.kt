@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.dashboard
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -140,29 +143,29 @@ fun SessionCard(
                 onDismissRequest = { showContextMenu = false },
             ) {
                 DropdownMenuItem(
-                    text = { Text("Rename") },
+                    text = { Text(stringResource(R.string.component_rename)) },
                     leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                     onClick = { showContextMenu = false; onRename() },
                 )
                 DropdownMenuItem(
-                    text = { Text("Duplicate") },
+                    text = { Text(stringResource(R.string.component_duplicate)) },
                     leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
                     onClick = { showContextMenu = false; onDuplicate() },
                 )
                 DropdownMenuItem(
-                    text = { Text("Move to Category") },
+                    text = { Text(stringResource(R.string.component_move_to_category)) },
                     leadingIcon = { Icon(Icons.Default.DriveFileMove, contentDescription = null) },
                     onClick = { showContextMenu = false; onMoveToCategory() },
                 )
                 DropdownMenuItem(
-                    text = { Text("Archive") },
+                    text = { Text(stringResource(R.string.component_archive)) },
                     leadingIcon = { Icon(Icons.Default.Archive, contentDescription = null) },
                     onClick = { showContextMenu = false; onArchive() },
                 )
                 DropdownMenuItem(
                     text = {
                         Text(
-                            text = "Delete",
+                            text = stringResource(R.string.component_delete),
                             color = MaterialTheme.colorScheme.error,
                         )
                     },
@@ -190,6 +193,7 @@ private fun SessionCardContent(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     val isDark = isSystemInDarkTheme()
     val isRunning = session.status == SessionStatus.RUNNING
 
@@ -199,26 +203,26 @@ private fun SessionCardContent(
         } else {
             MaterialTheme.colorScheme.surface
         },
-        animationSpec = tween(300),
+        animationSpec = tween(componentTokens.motion.slow),
         label = "cardColor",
     )
 
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.lg))
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,
             ),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(componentTokens.radius.lg),
         colors = CardDefaults.cardColors(containerColor = containerColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = componentTokens.spacing.lg, vertical = componentTokens.spacing.cozy),
         ) {
             // ── Top Row: Status dot + Title + Badge ──────────────────────────
             Row(
@@ -229,7 +233,7 @@ private fun SessionCardContent(
                     status = session.status.toUiStatus(),
                     size = 9.dp,
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(componentTokens.spacing.sm))
                 Text(
                     text = session.name,
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
@@ -238,7 +242,7 @@ private fun SessionCardContent(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(componentTokens.spacing.sm))
                 ProviderBadge(
                     provider = session.cliProvider.toCliProvider(),
                     size = BadgeSize.SMALL,
@@ -248,7 +252,7 @@ private fun SessionCardContent(
 
             // ── Last message preview ─────────────────────────────────────────
             if (!session.lastMessage.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(componentTokens.spacing.inline))
                 Text(
                     text = session.lastMessage,
                     style = MaterialTheme.typography.bodySmall,
@@ -260,7 +264,7 @@ private fun SessionCardContent(
             }
 
             // ── Bottom Row: timestamp + running indicator ─────────────────────
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -269,7 +273,7 @@ private fun SessionCardContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = relativeTime(session.updatedAt),
+                    text = relativeTime(session.updatedAt, androidx.compose.ui.platform.LocalContext.current),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -286,19 +290,20 @@ private fun SessionCardContent(
 
 @Composable
 private fun RunningPill() {
+    val componentTokens = PlumTheme.tokens
     Row(
         modifier = Modifier
             .background(
                 color = PlumGreen.copy(alpha = 0.12f),
                 shape = RoundedCornerShape(50),
             )
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .padding(horizontal = componentTokens.spacing.sm, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
     ) {
-        StatusDot(status = UiSessionStatus.RUNNING, size = 6.dp)
+        StatusDot(status = UiSessionStatus.RUNNING, size = componentTokens.spacing.inline)
         Text(
-            text = "Running",
+            text = stringResource(R.string.component_running),
             style = MaterialTheme.typography.labelSmall,
             color = PlumGreen,
             fontWeight = FontWeight.Medium,
@@ -310,6 +315,7 @@ private fun RunningPill() {
 
 @Composable
 private fun SwipeBackground(direction: SwipeToDismissBoxValue) {
+    val componentTokens = PlumTheme.tokens
     val archiveColor = MaterialTheme.colorScheme.secondaryContainer
     val deleteColor = MaterialTheme.colorScheme.errorContainer
 
@@ -336,16 +342,16 @@ private fun SwipeBackground(direction: SwipeToDismissBoxValue) {
 
     val iconScale by animateFloatAsState(
         targetValue = if (direction == SwipeToDismissBoxValue.Settled) 0.7f else 1f,
-        animationSpec = tween(200),
+        animationSpec = tween(componentTokens.motion.medium),
         label = "swipeIconScale",
     )
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.lg))
             .background(backgroundColor)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = componentTokens.spacing.section),
         contentAlignment = alignment,
     ) {
         Icon(
@@ -353,7 +359,7 @@ private fun SwipeBackground(direction: SwipeToDismissBoxValue) {
             contentDescription = null,
             tint = iconTint,
             modifier = Modifier
-                .size(24.dp)
+                .size(componentTokens.sizing.iconLg)
                 .scale(iconScale),
         )
     }
@@ -376,10 +382,10 @@ private fun DeleteConfirmDialog(
 ) {
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete session?") },
+        title = { Text(stringResource(R.string.component_delete_session)) },
         text = {
             Text(
-                text = "\"$sessionName\" will be permanently deleted. This cannot be undone.",
+                text = stringResource(R.string.component_delete_session_body, sessionName),
                 style = MaterialTheme.typography.bodyMedium,
             )
         },
@@ -388,14 +394,14 @@ private fun DeleteConfirmDialog(
                 onClick = onConfirm,
             ) {
                 Text(
-                    text = "Delete",
+                    text = stringResource(R.string.component_delete),
                     color = MaterialTheme.colorScheme.error,
                 )
             }
         },
         dismissButton = {
             androidx.compose.material3.TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text(stringResource(R.string.component_cancel))
             }
         },
     )
@@ -405,9 +411,10 @@ private fun DeleteConfirmDialog(
 
 @Composable
 fun SessionCardSkeleton(modifier: Modifier = Modifier) {
+    val componentTokens = PlumTheme.tokens
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(componentTokens.radius.lg),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
@@ -416,23 +423,23 @@ fun SessionCardSkeleton(modifier: Modifier = Modifier) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = componentTokens.spacing.lg, vertical = componentTokens.spacing.cozy),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
             ) {
                 ShimmerBox(width = 9.dp, height = 9.dp, roundedPercent = 50)
-                ShimmerBox(width = 160.dp, height = 14.dp, roundedPercent = 4)
+                ShimmerBox(width = 160.dp, height = componentTokens.spacing.cozy, roundedPercent = 4)
                 Spacer(modifier = Modifier.weight(1f))
                 ShimmerBox(width = 48.dp, height = 22.dp, roundedPercent = 4)
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
             ShimmerBox(modifier = Modifier.padding(start = 17.dp), width = 240.dp, height = 11.dp, roundedPercent = 4)
             Spacer(modifier = Modifier.height(5.dp))
             ShimmerBox(modifier = Modifier.padding(start = 17.dp), width = 180.dp, height = 11.dp, roundedPercent = 4)
-            Spacer(modifier = Modifier.height(8.dp))
-            ShimmerBox(modifier = Modifier.padding(start = 17.dp), width = 80.dp, height = 10.dp, roundedPercent = 4)
+            Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
+            ShimmerBox(modifier = Modifier.padding(start = 17.dp), width = 80.dp, height = componentTokens.spacing.compact, roundedPercent = 4)
         }
     }
 }
@@ -469,7 +476,7 @@ private fun CLIProvider.toCliProvider(): CliProvider = when (this) {
     CLIProvider.ZAI -> CliProvider.ZAI
 }
 
-private fun relativeTime(isoTimestamp: String): String {
+private fun relativeTime(isoTimestamp: String, context: android.content.Context): String {
     return try {
         val instant = Instant.parse(isoTimestamp)
         val now = Instant.now()
@@ -479,14 +486,14 @@ private fun relativeTime(isoTimestamp: String): String {
         val days = hours / 24
 
         when {
-            seconds < 60   -> "just now"
-            minutes < 60   -> "${minutes}m ago"
-            hours < 24     -> "${hours}h ago"
-            days == 1L     -> "yesterday"
-            days < 7       -> "${days}d ago"
+            seconds < 60   -> context.getString(R.string.component_just_now)
+            minutes < 60   -> context.getString(R.string.component_minutes_ago, minutes)
+            hours < 24     -> context.getString(R.string.component_hours_ago, hours)
+            days == 1L     -> context.getString(R.string.component_yesterday)
+            days < 7       -> context.getString(R.string.component_days_ago, days)
             else -> {
                 val local = instant.atZone(ZoneId.systemDefault()).toLocalDate()
-                "${local.dayOfMonth} ${local.month.name.take(3).lowercase().replaceFirstChar { it.uppercase() }}"
+                java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM).format(local)
             }
         }
     } catch (_: Exception) {
@@ -499,10 +506,11 @@ private fun relativeTime(isoTimestamp: String): String {
 @Preview(showBackground = true, backgroundColor = 0xFFF0EFEA)
 @Composable
 private fun SessionCardPreview() {
+    val componentTokens = PlumTheme.tokens
     ClaudeWebUITheme {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(componentTokens.spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.md),
         ) {
             SessionCard(
                 session = Session(

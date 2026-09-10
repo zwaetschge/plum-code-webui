@@ -1,5 +1,9 @@
 package com.claudewebui.app.ui.screens.chat
 
+import android.content.Context
+import com.claudewebui.app.R
+import com.claudewebui.app.core.network.apiCall
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.claudewebui.app.core.network.ApiClient
@@ -8,9 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -26,7 +28,8 @@ data class UsageUiState(
 
 class UsageViewModel(
     private val sessionId: String,
-    private val apiClient: ApiClient
+    private val apiClient: ApiClient,
+    private val appContext: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(UsageUiState())
@@ -39,7 +42,7 @@ class UsageViewModel(
     fun refreshUsage() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            runCatching {
+            apiCall {
                 val response = apiClient.getSessionUsage(sessionId)
                 if (response.success && response.data != null) {
                     // /api/analytics/sessions/:id shape: {session, totals{...},
@@ -78,13 +81,13 @@ class UsageViewModel(
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = response.error?.message ?: "Failed to load usage"
+                        error = response.error?.message ?: appContext.getString(R.string.chat_usage_load_failed)
                     )
                 }
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    error = e.message ?: "Unknown error"
+                    error = e.userMessage(appContext)
                 )
             }
         }

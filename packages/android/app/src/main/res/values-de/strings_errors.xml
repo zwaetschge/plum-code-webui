@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="error_network">Der Server ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut.</string>
+    <string name="error_unauthorized">Deine Anmeldung ist abgelaufen. Melde dich erneut an.</string>
+    <string name="error_not_found">Dieser Eintrag existiert auf dem Server nicht mehr.</string>
+    <string name="error_server_detail">%1$s (%2$d)</string>
+    <string name="error_server_unavailable">Der Server ist nicht verfügbar (%1$d). Er startet möglicherweise neu. Versuche es gleich erneut.</string>
+    <string name="error_rate_limited">Zu viele Anfragen. Warte kurz und versuche es erneut.</string>
+    <string name="error_forbidden">Du hast keine Berechtigung für diese Aktion.</string>
+    <string name="error_server">Auf dem Server ist ein Fehler aufgetreten (%1$d). Versuche es erneut.</string>
+    <string name="error_rejected">Der Server hat die Anfrage abgelehnt (%1$d).</string>
+    <string name="error_contract">Die Serverantwort passt nicht zu dieser App-Version. Aktualisiere die App oder den Server.</string>
+    <string name="error_cancelled">Abgebrochen.</string>
+    <string name="error_unknown">Ein Fehler ist aufgetreten. Versuche es erneut.</string>
+</resources>

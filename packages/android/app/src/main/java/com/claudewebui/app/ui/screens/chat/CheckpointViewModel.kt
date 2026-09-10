@@ -1,5 +1,9 @@
 package com.claudewebui.app.ui.screens.chat
 
+import android.content.Context
+import com.claudewebui.app.R
+import com.claudewebui.app.core.network.apiCall
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.claudewebui.app.core.network.ApiClient
@@ -18,7 +22,8 @@ data class CheckpointUiState(
 
 class CheckpointViewModel(
     private val sessionId: String,
-    private val apiClient: ApiClient
+    private val apiClient: ApiClient,
+    private val appContext: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CheckpointUiState())
@@ -31,7 +36,7 @@ class CheckpointViewModel(
     fun loadCheckpoints() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            runCatching {
+            apiCall {
                 val response = apiClient.getCheckpoints(sessionId)
                 if (response.success && response.data != null) {
                     _uiState.value = _uiState.value.copy(
@@ -41,13 +46,13 @@ class CheckpointViewModel(
                 } else {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = response.error?.message ?: "Failed to load checkpoints"
+                        error = response.error?.message ?: appContext.getString(R.string.chat_checkpoints_load_failed)
                     )
                 }
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    error = e.message ?: "Unknown error"
+                    error = e.userMessage(appContext)
                 )
             }
         }
@@ -55,33 +60,33 @@ class CheckpointViewModel(
 
     fun createCheckpoint(name: String, description: String?) {
         viewModelScope.launch {
-            runCatching {
+            apiCall {
                 apiClient.createCheckpoint(sessionId, CreateCheckpointInput(name, description))
                 loadCheckpoints()
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(error = e.message)
+                _uiState.value = _uiState.value.copy(error = e.userMessage(appContext))
             }
         }
     }
 
     fun restoreCheckpoint(checkpoint: Checkpoint) {
         viewModelScope.launch {
-            runCatching {
+            apiCall {
                 apiClient.restoreCheckpoint(checkpoint.id)
                 loadCheckpoints()
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(error = e.message)
+                _uiState.value = _uiState.value.copy(error = e.userMessage(appContext))
             }
         }
     }
 
     fun deleteCheckpoint(checkpoint: Checkpoint) {
         viewModelScope.launch {
-            runCatching {
+            apiCall {
                 apiClient.deleteCheckpoint(checkpoint.id)
                 loadCheckpoints()
             }.onFailure { e ->
-                _uiState.value = _uiState.value.copy(error = e.message)
+                _uiState.value = _uiState.value.copy(error = e.userMessage(appContext))
             }
         }
     }

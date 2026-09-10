@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="error_network">Can\'t reach the server. Check your connection and try again.</string>
+    <string name="error_unauthorized">Your session has expired. Sign in again.</string>
+    <string name="error_not_found">That item no longer exists on the server.</string>
+    <string name="error_server_detail">%1$s (%2$d)</string>
+    <string name="error_server_unavailable">The server is unavailable (%1$d). It may be restarting — try again shortly.</string>
+    <string name="error_rate_limited">Too many requests. Wait a moment and retry.</string>
+    <string name="error_forbidden">You do not have permission to perform this action.</string>
+    <string name="error_server">The server hit an error (%1$d). Try again.</string>
+    <string name="error_rejected">The server rejected the request (%1$d).</string>
+    <string name="error_contract">The server sent something this app version doesn\'t understand. Update the app or the server.</string>
+    <string name="error_cancelled">Cancelled.</string>
+    <string name="error_unknown">Something went wrong. Try again.</string>
+</resources>

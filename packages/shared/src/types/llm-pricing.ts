@@ -20,7 +20,7 @@ export interface ModelCostEstimate {
   known: boolean;
 }
 
-export const LLM_PRICING_RATE_CARD_VERSION = '2026-08-02-standard-api-equivalent-v9';
+export const LLM_PRICING_RATE_CARD_VERSION = '2026-09-06-standard-api-equivalent-v11';
 
 export const DEFAULT_MODEL_PRICING: ModelPricing = {
   input: 5,
@@ -181,15 +181,20 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
 
   const id = normalizeProviderModelId(provider, providerId, raw);
 
-  // OpenAI, USD per 1M tokens.
+  // OpenAI, USD per 1M tokens. Standard tier, short context (the long-context
+  // surcharge above 272k input tokens is not modelled).
+  if (id.startsWith('gpt-6-astra') || id === 'gpt-6') {
+    return price(10, 50, 1, 12.5, 'OpenAI API pricing, 2026-09-04', 'GPT-6 Astra');
+  }
+  // 5.6 Sol carries promotional pricing at least through 2026-11-21.
   if (id.startsWith('gpt-5.6-sol') || id === 'gpt-5.6') {
-    return price(5, 30, 0.5, 6.25, 'OpenAI API pricing, 2026-07-09', 'GPT-5.6 Sol');
+    return price(4, 20, 0.4, 5, 'OpenAI API pricing, 2026-09-04', 'GPT-5.6 Sol');
   }
   if (id.startsWith('gpt-5.6-terra')) {
-    return price(2.5, 15, 0.25, 3.125, 'OpenAI API pricing, 2026-07-09', 'GPT-5.6 Terra');
+    return price(2, 12, 0.2, 2.5, 'OpenAI API pricing, 2026-09-04', 'GPT-5.6 Terra');
   }
   if (id.startsWith('gpt-5.6-luna')) {
-    return price(1, 6, 0.1, 1.25, 'OpenAI API pricing, 2026-07-09', 'GPT-5.6 Luna');
+    return price(0.2, 1.2, 0.02, 0.25, 'OpenAI API pricing, 2026-09-04', 'GPT-5.6 Luna');
   }
   if (id.startsWith('gpt-5.5')) {
     return price(5, 30, 0.5, 0, 'OpenAI API pricing, 2026-06-01', 'GPT-5.5');
@@ -280,6 +285,21 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
   }
 
   // Z.AI, USD per 1M tokens.
+  if (id === 'glm-5.3-flash') {
+    // Standard API-equivalent list rates; the launch promotion is 50% off
+    // through 2026-09-09 24:00 UTC+8 (2026-09-09 16:00 UTC).
+    return price(
+      0.15,
+      0.5,
+      0.03,
+      0,
+      'Z.AI list pricing, 2026-09-06; 50% launch discount through 2026-09-09 16:00 UTC excluded',
+      'GLM-5.3-Flash'
+    );
+  }
+  if (id === 'glm-5.3') {
+    return price(1.4, 4.4, 0.26, 0, 'Z.AI pricing, 2026-09-06', 'GLM-5.3');
+  }
   if (raw === 'z-ai/glm-5.2' || raw === 'zai/glm-5.2' || id === 'glm-5.2') {
     return price(1.4, 4.4, 0.26, 0, 'Z.AI pricing, 2026-06-17', 'GLM-5.2');
   }

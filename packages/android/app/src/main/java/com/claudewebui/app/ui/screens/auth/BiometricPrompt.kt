@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.auth
 
+import com.claudewebui.app.R
 import android.os.Build
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
@@ -54,9 +55,9 @@ fun checkBiometricAvailability(context: android.content.Context): BiometricAvail
 @Composable
 fun BiometricPromptHost(
     trigger: Boolean,
-    title: String = "Authenticate",
-    subtitle: String = "Use your biometric credential to continue",
-    negativeButtonText: String = "Use password",
+    title: String = androidx.compose.ui.res.stringResource(R.string.auth_authenticate_94a01),
+    subtitle: String = androidx.compose.ui.res.stringResource(R.string.auth_use_your_biometric_credential_to_continue_41c3b),
+    negativeButtonText: String = androidx.compose.ui.res.stringResource(R.string.auth_use_password_28cbb),
     onSuccess: () -> Unit,
     onError: (errorCode: Int, message: String) -> Unit = { _, _ -> },
     onCancelled: () -> Unit = {},
@@ -128,6 +129,9 @@ fun BiometricAuthGate(
     onAuthenticated: () -> Unit,
     onSkip: () -> Unit,
 ) {
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val context = LocalContext.current
     var triggered by remember { mutableStateOf(false) }
 
@@ -146,9 +150,9 @@ fun BiometricAuthGate(
 
     BiometricPromptHost(
         trigger = triggered,
-        title = "Unlock Plum Code",
-        subtitle = "Verify your identity to continue",
-        negativeButtonText = "Cancel",
+        title = screenResources.getString(R.string.auth_unlock_plum_code_690e1),
+        subtitle = screenResources.getString(R.string.auth_verify_your_identity_to_continue_e15de),
+        negativeButtonText = screenResources.getString(R.string.auth_cancel_77dfd),
         onSuccess = {
             triggered = false
             onAuthenticated()

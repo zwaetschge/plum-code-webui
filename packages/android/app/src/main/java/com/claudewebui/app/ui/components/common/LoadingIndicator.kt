@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.components.common
 
+import com.claudewebui.app.ui.theme.PlumTheme
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -36,8 +37,9 @@ fun LoadingIndicator(
     strokeWidth: Dp = 3.dp,
     message: String? = null,
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "loading")
-    val rotation by infiniteTransition.animateFloat(
+    val componentTokens = PlumTheme.tokens
+    val infiniteTransition = if (PlumTheme.tokens.motion.reduceMotion) null else rememberInfiniteTransition(label = "loading")
+    val rotation by infiniteTransition?.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
@@ -45,7 +47,7 @@ fun LoadingIndicator(
             repeatMode = RepeatMode.Restart,
         ),
         label = "rotation",
-    )
+    ) ?: androidx.compose.runtime.rememberUpdatedState(0f)
 
     val accent = PlumAccent
     val trackColor = accent.copy(alpha = 0.12f)
@@ -58,7 +60,7 @@ fun LoadingIndicator(
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.md),
     ) {
         Box(contentAlignment = Alignment.Center) {
             Canvas(modifier = Modifier.size(size)) {
@@ -106,10 +108,11 @@ fun LoadingIndicator(
 fun LoadingIndicatorSmall(
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     LoadingIndicator(
         modifier = modifier,
-        size = 20.dp,
-        strokeWidth = 2.dp,
+        size = componentTokens.spacing.section,
+        strokeWidth = componentTokens.spacing.xxs,
     )
 }
 
@@ -118,13 +121,14 @@ fun LoadingIndicatorSmall(
 @Preview(showBackground = true, backgroundColor = 0xFFF0EFEA)
 @Composable
 private fun LoadingIndicatorPreview() {
+    val componentTokens = PlumTheme.tokens
     ClaudeWebUITheme {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(24.dp),
+            verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.xl),
         ) {
             LoadingIndicator(message = "Loading sessions...")
-            LoadingIndicator(size = 24.dp, strokeWidth = 2.dp)
+            LoadingIndicator(size = componentTokens.spacing.xl, strokeWidth = componentTokens.spacing.xxs)
             LoadingIndicatorSmall()
         }
     }

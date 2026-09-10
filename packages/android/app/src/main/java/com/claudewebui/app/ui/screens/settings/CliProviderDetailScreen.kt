@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.settings
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -78,12 +79,17 @@ fun CliProviderDetailScreen(
     viewModel: SettingsViewModel,
     onNavigateBack: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
     val provider = CLIProvider.entries.firstOrNull { it.name.equals(providerId, ignoreCase = true) }
     val config = state.cliProviders.firstOrNull { it.id.equals(providerId, ignoreCase = true) }
     val selectedModel = state.userSettings?.cliProviderModels?.get(providerId.lowercase())
         ?: config?.defaultModel
-    // Before the registry arrives, "no config" and "harness not installed" look
+    // Before the registry arrives, screenResources.getString(R.string.settings_no_config_b4b66) and screenResources.getString(R.string.settings_harness_not_installed_50f6e) look
     // identical — say which one it is instead of claiming it needs a login.
     val stillLoading = config == null && state.isLoading
 
@@ -99,16 +105,16 @@ fun CliProviderDetailScreen(
                     horizontal = if (isTabletWidth()) 40.dp else 16.dp,
                     vertical = 4.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             ) {
                 item {
                     PlumScreenHeader(
                         title = provider?.displayName ?: providerId,
-                        subtitle = "Harness status and model",
+                        subtitle = screenResources.getString(R.string.settings_harness_status_and_model_e16fa),
                         actions = {
                             PlumIconButton(
                                 Icons.AutoMirrored.Outlined.ArrowBack,
-                                "Back",
+                                screenResources.getString(R.string.settings_back_b52b3),
                                 onNavigateBack,
                             )
                         },
@@ -117,13 +123,13 @@ fun CliProviderDetailScreen(
 
                 item {
                     GlassPanel(Modifier.fillMaxWidth(), radius = 19.dp) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                        Column(Modifier.padding(screenTokens.spacing.lg), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 provider?.let {
                                     Box(Modifier.size(10.dp).background(providerColor(it), CircleShape))
                                 }
                                 Text(
-                                    "  Status",
+                                    screenResources.getString(R.string.settings_status_d4470),
                                     color = PlumText,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
@@ -131,14 +137,14 @@ fun CliProviderDetailScreen(
                                 )
                                 val available = config?.available == true
                                 when {
-                                    stillLoading -> StatusPill("Loading…", PlumMuted)
-                                    available -> StatusPill("Available", PlumGreen)
-                                    else -> StatusPill("Needs login", PlumAmber)
+                                    stillLoading -> StatusPill(screenResources.getString(R.string.settings_loading_33ce4), PlumMuted)
+                                    available -> StatusPill(screenResources.getString(R.string.settings_available_7c62a), PlumGreen)
+                                    else -> StatusPill(screenResources.getString(R.string.settings_needs_login_1867b), PlumAmber)
                                 }
                             }
-                            DetailRow("Enabled", if (config?.enabled != false) "Yes" else "No")
-                            DetailRow("Default model", config?.defaultModel ?: if (stillLoading) "…" else "—")
-                            DetailRow("Models offered", if (stillLoading) "…" else (config?.models?.size?.toString() ?: "0"))
+                            DetailRow(screenResources.getString(R.string.settings_enabled_df174), if (config?.enabled != false) screenResources.getString(R.string.settings_yes_5397e) else screenResources.getString(R.string.settings_no_816c5))
+                            DetailRow(screenResources.getString(R.string.settings_default_model_5fbae), config?.defaultModel ?: if (stillLoading) "…" else "—")
+                            DetailRow(screenResources.getString(R.string.settings_models_offered_18701), if (stillLoading) "…" else (config?.models?.size?.toString() ?: "0"))
                         }
                     }
                 }
@@ -201,11 +207,11 @@ fun CliProviderDetailScreen(
                 if (!config?.models.isNullOrEmpty()) {
                     item {
                         Text(
-                            "Model for new sessions",
+                            screenResources.getString(R.string.settings_model_for_new_sessions_844dd),
                             color = PlumText,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 4.dp),
+                            modifier = Modifier.padding(top = screenTokens.spacing.xs),
                         )
                     }
                     items(config!!.models) { model ->
@@ -235,7 +241,7 @@ fun CliProviderDetailScreen(
                             if (active) {
                                 Icon(
                                     Icons.Outlined.Check,
-                                    "Selected",
+                                    screenResources.getString(R.string.settings_selected_9a976),
                                     tint = PlumAccent,
                                     modifier = Modifier.size(19.dp),
                                 )
@@ -250,8 +256,8 @@ fun CliProviderDetailScreen(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    if (stillLoading) "Loading models…"
-                                    else "This harness reports no model list",
+                                    if (stillLoading) screenResources.getString(R.string.settings_loading_models_d23f2)
+                                    else screenResources.getString(R.string.settings_this_harness_reports_no_model_list_e6070),
                                     color = PlumMuted,
                                     fontSize = 12.sp,
                                 )
@@ -272,6 +278,11 @@ private fun ZaiApiPanel(
     onSave: (String, String, String, String, String) -> Unit,
     onReset: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     var baseUrl by remember(status?.baseUrl) {
         mutableStateOf(status?.baseUrl?.ifBlank { "https://api.z.ai/api/anthropic" }
             ?: "https://api.z.ai/api/anthropic")
@@ -283,40 +294,40 @@ private fun ZaiApiPanel(
     val canSave = baseUrl.isNotBlank() && (status?.configured == true || token.isNotBlank()) && !saving
 
     GlassPanel(Modifier.fillMaxWidth(), radius = 19.dp) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+        Column(Modifier.padding(screenTokens.spacing.lg), verticalArrangement = Arrangement.spacedBy(11.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Z.AI endpoint", color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(screenResources.getString(R.string.settings_z_ai_endpoint_67646), color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Text(
-                        "Separate from Claude subscription sessions.",
+                        screenResources.getString(R.string.settings_separate_from_claude_subscription_sessions_fd917),
                         color = PlumMuted,
                         fontSize = 11.sp,
                     )
                 }
-                StatusPill(if (status?.configured == true) "Configured" else "Not configured", if (status?.configured == true) PlumGreen else PlumMuted)
+                StatusPill(if (status?.configured == true) screenResources.getString(R.string.settings_configured_668c5) else screenResources.getString(R.string.settings_not_configured_81193), if (status?.configured == true) PlumGreen else PlumMuted)
             }
             OutlinedTextField(
                 value = baseUrl,
                 onValueChange = { baseUrl = it },
-                label = { Text("Base URL") },
+                label = { Text(screenResources.getString(R.string.settings_base_url_1dbd6)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = token,
                 onValueChange = { token = it },
-                label = { Text(if (status?.hasAuthToken == true) "New API token (leave blank to keep)" else "API token") },
-                supportingText = status?.authTokenPreview?.let { preview -> { Text("Stored: $preview") } },
+                label = { Text(if (status?.hasAuthToken == true) screenResources.getString(R.string.settings_new_api_token_leave_blank_to_keep_4b9cb) else screenResources.getString(R.string.settings_api_token_bc020)) },
+                supportingText = status?.authTokenPreview?.let { preview -> { Text(screenResources.getString(R.string.settings_stored_1_s_dbf72, preview)) } },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(value = opus, onValueChange = { opus = it }, label = { Text("Opus model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = sonnet, onValueChange = { sonnet = it }, label = { Text("Sonnet model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(value = haiku, onValueChange = { haiku = it }, label = { Text("Haiku model") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = opus, onValueChange = { opus = it }, label = { Text(screenResources.getString(R.string.settings_opus_model_2b846)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = sonnet, onValueChange = { sonnet = it }, label = { Text(screenResources.getString(R.string.settings_sonnet_model_ca6f9)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = haiku, onValueChange = { haiku = it }, label = { Text(screenResources.getString(R.string.settings_haiku_model_0e6d4)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             error?.let { Text(it, color = PlumRed, fontSize = 11.sp) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                if (status?.configured == true) ActionButton("Reset", enabled = !saving, onClick = onReset)
-                ActionButton("Save", enabled = canSave) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm, Alignment.End)) {
+                if (status?.configured == true) ActionButton(screenResources.getString(R.string.settings_reset_44c57), enabled = !saving, onClick = onReset)
+                ActionButton(screenResources.getString(R.string.settings_save_efc00), enabled = canSave) {
                     onSave(baseUrl, token, opus, sonnet, haiku)
                 }
             }
@@ -334,6 +345,11 @@ private fun RuntimeDefaultsPanel(
     onWebSearch: (String) -> Unit,
     onFastTier: (Boolean) -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val reasoningOptions = if (providerId == "codex") {
         listOf("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
     } else {
@@ -341,14 +357,14 @@ private fun RuntimeDefaultsPanel(
     }
 
     GlassPanel(Modifier.fillMaxWidth(), radius = 19.dp) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-            Text("Runtime defaults", color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Column(Modifier.padding(screenTokens.spacing.lg), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Text(screenResources.getString(R.string.settings_runtime_defaults_3c313), color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Text(
-                "Applied to new sessions and the next provider turn.",
+                screenResources.getString(R.string.settings_applied_to_new_sessions_and_the_next_provider_turn_735d9),
                 color = PlumMuted,
                 fontSize = 12.sp,
             )
-            Text("Reasoning", color = PlumMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(screenResources.getString(R.string.settings_reasoning_e272c), color = PlumMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             reasoningOptions.chunked(4).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     row.forEach { option ->
@@ -363,7 +379,7 @@ private fun RuntimeDefaultsPanel(
             }
 
             if (providerId == "codex") {
-                Text("Web search", color = PlumMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(screenResources.getString(R.string.settings_web_search_381ce), color = PlumMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     listOf("auto", "cached", "live", "disabled").forEach { option ->
                         ChoiceChip(
@@ -375,8 +391,8 @@ private fun RuntimeDefaultsPanel(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Fast service tier", color = PlumText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Text("Uses priority processing when the model supports it.", color = PlumMuted, fontSize = 11.sp)
+                        Text(screenResources.getString(R.string.settings_fast_service_tier_252e4), color = PlumText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(screenResources.getString(R.string.settings_uses_priority_processing_when_the_model_supports_it_8f8aa), color = PlumMuted, fontSize = 11.sp)
                     }
                     Switch(checked = codexFast, onCheckedChange = onFastTier)
                 }
@@ -428,26 +444,31 @@ private fun CliLoginPanel(
     onSubmitCode: (String) -> Unit,
     onCancel: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val clipboard = LocalClipboardManager.current
     val uriHandler = LocalUriHandler.current
     var code by remember(login?.id) { mutableStateOf("") }
 
     GlassPanel(Modifier.fillMaxWidth(), radius = 19.dp) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-            Text("Sign in", color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Column(Modifier.padding(screenTokens.spacing.lg), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Text(screenResources.getString(R.string.settings_sign_in_ada2e), color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
 
             when {
                 login == null -> {
                     Text(
                         if (available) {
-                            "This harness is signed in. Run it again to switch accounts."
+                            screenResources.getString(R.string.settings_this_harness_is_signed_in_run_it_again_to_switch_accounts_b23bc)
                         } else {
-                            "Run the harness login on the server and follow it here."
+                            screenResources.getString(R.string.settings_run_the_harness_login_on_the_server_and_follow_it_here_af50d)
                         },
                         color = PlumMuted,
                         fontSize = 12.sp,
                     )
-                    ActionButton(if (available) "Sign in again" else "Sign in") { onStart() }
+                    ActionButton(if (available) screenResources.getString(R.string.settings_sign_in_again_7842f) else screenResources.getString(R.string.settings_sign_in_ada2e)) { onStart() }
                 }
 
                 login.status == "starting" -> {
@@ -455,32 +476,32 @@ private fun CliLoginPanel(
                         CircularProgressIndicator(
                             color = PlumAccent,
                             strokeWidth = 2.dp,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(screenTokens.sizing.iconSm),
                         )
-                        Text("  Starting $providerId login…", color = PlumMuted, fontSize = 12.sp)
+                        Text(screenResources.getString(R.string.settings_starting_1_s_login_9c0a9, providerId), color = PlumMuted, fontSize = 12.sp)
                     }
-                    ActionButton("Cancel") { onCancel() }
+                    ActionButton(screenResources.getString(R.string.settings_cancel_77dfd)) { onCancel() }
                 }
 
                 login.status == "completed" -> {
-                    Text("Signed in successfully.", color = PlumGreen, fontSize = 12.sp)
-                    ActionButton("Done") { onCancel() }
+                    Text(screenResources.getString(R.string.settings_signed_in_successfully_d4c69), color = PlumGreen, fontSize = 12.sp)
+                    ActionButton(screenResources.getString(R.string.settings_done_e9b45)) { onCancel() }
                 }
 
                 login.status == "error" -> {
-                    Text(login.error ?: "Login failed", color = PlumRed, fontSize = 12.sp)
-                    ActionButton("Try again") { onStart() }
+                    Text(login.error ?: screenResources.getString(R.string.settings_login_failed_c00f6), color = PlumRed, fontSize = 12.sp)
+                    ActionButton(screenResources.getString(R.string.settings_try_again_042c8)) { onStart() }
                 }
 
                 else -> {
                     login.verificationCode?.let { verification ->
-                        Text("Enter this code:", color = PlumMuted, fontSize = 11.sp)
+                        Text(screenResources.getString(R.string.settings_enter_this_code_443aa), color = PlumMuted, fontSize = 11.sp)
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(screenTokens.radius.md))
                                 .background(PlumSubtleFill)
-                                .border(1.dp, PlumBorder, RoundedCornerShape(12.dp))
+                                .border(1.dp, PlumBorder, RoundedCornerShape(screenTokens.radius.md))
                                 .clickable { clipboard.setText(AnnotatedString(verification)) }
                                 .padding(13.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -492,22 +513,22 @@ private fun CliLoginPanel(
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.weight(1f),
                             )
-                            Text("Copy", color = PlumAccent, fontSize = 12.sp)
+                            Text(screenResources.getString(R.string.settings_copy_af74f), color = PlumAccent, fontSize = 12.sp)
                         }
                     }
                     login.loginUrl?.let { loginUrl ->
-                        ActionButton("Open sign-in page") { uriHandler.openUri(loginUrl) }
+                        ActionButton(screenResources.getString(R.string.settings_open_sign_in_page_b324e)) { uriHandler.openUri(loginUrl) }
                         Text(loginUrl, color = PlumMuted, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     if (login.needsCode) {
                         OutlinedTextField(
                             value = code,
                             onValueChange = { code = it },
-                            label = { Text("Code from the provider") },
+                            label = { Text(screenResources.getString(R.string.settings_code_from_the_provider_7cbb8)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        ActionButton("Submit code", enabled = code.isNotBlank()) { onSubmitCode(code.trim()) }
+                        ActionButton(screenResources.getString(R.string.settings_submit_code_32aef), enabled = code.isNotBlank()) { onSubmitCode(code.trim()) }
                     }
                     if (login.output.isNotBlank()) {
                         Text(
@@ -518,7 +539,7 @@ private fun CliLoginPanel(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    ActionButton("Cancel") { onCancel() }
+                    ActionButton(screenResources.getString(R.string.settings_cancel_77dfd)) { onCancel() }
                 }
             }
 
@@ -529,6 +550,8 @@ private fun CliLoginPanel(
 
 @Composable
 private fun ActionButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Text(
         label,
         color = if (enabled) PlumText else PlumMuted,
@@ -538,7 +561,7 @@ private fun ActionButton(label: String, enabled: Boolean = true, onClick: () -> 
             .clip(RoundedCornerShape(50))
             .background(if (enabled) PlumAccent.copy(alpha = .18f) else PlumSubtleFill)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.compact),
     )
 }
 

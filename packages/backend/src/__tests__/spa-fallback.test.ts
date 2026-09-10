@@ -45,10 +45,9 @@ test('the SPA fallback matches nested routes and paths with dots', async () => {
 
 test('the pattern in index.ts is the one under test', async () => {
   // Guards against the source drifting away from what this file proves.
-  const source = await (await import('node:fs/promises')).readFile(
-    new URL('../index.ts', import.meta.url),
-    'utf8'
-  );
+  const source = await (
+    await import('node:fs/promises')
+  ).readFile(new URL('../index.ts', import.meta.url), 'utf8');
   assert.ok(
     source.includes(`app.get('${SPA_PATTERN}'`),
     `index.ts must register the SPA fallback as ${SPA_PATTERN}`

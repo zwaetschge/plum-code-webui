@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_authenticate_94a01">Authenticate</string>
+    <string name="auth_back_to_login_b5cd3">Back to Login</string>
+    <string name="auth_cancel_77dfd">Cancel</string>
+    <string name="auth_change_64fbd">Change</string>
+    <string name="auth_change_server_c30a8">Change Server</string>
+    <string name="auth_clear_719ea">Clear</string>
+    <string name="auth_connect_b6546">Connect</string>
+    <string name="auth_connect_to_server_ca09a">Connect to Server</string>
+    <string name="auth_connecting_fd3e7">Connecting…</string>
+    <string name="auth_connecting_to_server_f54a0">Connecting to server…</string>
+    <string name="auth_connection_failed_4a7b9">Connection Failed</string>
+    <string name="auth_continue_with_authelia_c00fb">Continue with Authelia</string>
+    <string name="auth_continue_with_github_baf2c">Continue with GitHub</string>
+    <string name="auth_continue_with_google_ccc5b">Continue with Google</string>
+    <string name="auth_dev_login_no_auth_12d9f">Dev login (no auth)</string>
+    <string name="auth_enter_the_url_of_your_plum_code_webui_instance_37deb">Enter the URL of your Plum Code WebUI instance</string>
+    <string name="auth_hide_password_e4012">Hide password</string>
+    <string name="auth_keep_me_signed_in_5955c">Keep me signed in</string>
+    <string name="auth_or_17583">or</string>
+    <string name="auth_password_8be3c">Password</string>
+    <string name="auth_recent_servers_6392d">Recent servers</string>
+    <string name="auth_remove_e9639">Remove</string>
+    <string name="auth_server_url_1d5d1">Server URL</string>
+    <string name="auth_show_password_044b8">Show password</string>
+    <string name="auth_sign_in_ada2e">Sign in</string>
+    <string name="auth_sign_in_failed_9c06f">Sign In Failed</string>
+    <string name="auth_signing_you_in_10d06">Signing you in…</string>
+    <string name="auth_try_again_cef2f">Try Again</string>
+    <string name="auth_unlock_plum_code_690e1">Unlock Plum Code</string>
+    <string name="auth_use_password_28cbb">Use password</string>
+    <string name="auth_use_username_password_ab851">Use username &amp; password</string>
+    <string name="auth_use_your_biometric_credential_to_continue_41c3b">Use your biometric credential to continue</string>
+    <string name="auth_username_84c29">Username</string>
+    <string name="auth_verify_your_identity_to_continue_e15de">Verify your identity to continue</string>
+</resources>

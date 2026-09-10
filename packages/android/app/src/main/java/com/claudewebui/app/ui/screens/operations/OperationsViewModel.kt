@@ -1,5 +1,9 @@
 package com.claudewebui.app.ui.screens.operations
 
+import com.claudewebui.app.core.network.apiCall
+import com.claudewebui.app.core.network.AppError
+import com.claudewebui.app.core.network.toAppError
+import com.claudewebui.app.ui.screens.screenErrorMessage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.claudewebui.app.core.network.ApiClient
@@ -63,22 +67,31 @@ class OperationsViewModel(private val api: ApiClient) : ViewModel() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             var denied = false
+            var failureMessage: String? = null
+            fun recordFailure(failure: Throwable) {
+                val error = failure.toAppError()
+                if (error is AppError.Server && error.status == 403) {
+                    denied = true
+                } else if (failureMessage == null) {
+                    failureMessage = failure.screenErrorMessage("operations", "load")
+                }
+            }
             coroutineScope {
-                val status = async { runCatching { api.getDockerStatus().data }.getOrNull() }
+                val status = async { apiCall { api.getDockerStatus().data }.onFailure(::recordFailure).getOrNull() }
                 val containers =
-                    async { runCatching { api.getDockerContainers().data }.getOrNull() }
+                    async { apiCall { api.getDockerContainers().data }.onFailure(::recordFailure).getOrNull() }
                 val watchdogs = async {
-                    runCatching { api.getWatchdogs().data }
-                        .onFailure { denied = true }
+                    apiCall { api.getWatchdogs().data }
+                        .onFailure(::recordFailure)
                         .getOrNull()
                 }
                 val stats = async {
-                    runCatching { api.getAdminStats().data }
-                        .onFailure { denied = true }
+                    apiCall { api.getAdminStats().data }
+                        .onFailure(::recordFailure)
                         .getOrNull()
                 }
-                val users = async { runCatching { api.getAdminUsers().data }.getOrNull() }
-                val audit = async { runCatching { api.getAuditLog(60).data }.getOrNull() }
+                val users = async { apiCall { api.getAdminUsers().data }.onFailure(::recordFailure).getOrNull() }
+                val audit = async { apiCall { api.getAuditLog(60).data }.onFailure(::recordFailure).getOrNull() }
 
                 val resolvedStatus = status.await()
                 val resolvedContainers = containers.await().orEmpty()
@@ -100,6 +113,7 @@ class OperationsViewModel(private val api: ApiClient) : ViewModel() {
                         audit = resolvedAudit,
                         isLoading = false,
                         adminDenied = denied && resolvedStats == null,
+                        error = failureMessage,
                     )
                 }
             }

@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -31,29 +34,30 @@ fun CompactBoundaryCard(
     content: String,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     val summary = content.lineSequence()
         .map { it.trim() }
         .firstOrNull { it.isNotEmpty() }
-        ?: "Context compacted"
+        ?: stringResource(R.string.component_context_compacted)
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.md))
             .background(PlumSubtleFill)
-            .border(1.dp, PlumBorder, RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            .border(1.dp, PlumBorder, RoundedCornerShape(componentTokens.radius.md))
+            .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.xxs),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "⟢",
                 style = MaterialTheme.typography.labelMedium,
                 color = PlumAccent,
-                modifier = Modifier.padding(end = 6.dp),
+                modifier = Modifier.padding(end = componentTokens.spacing.inline),
             )
             Text(
-                "Context compacted",
+                stringResource(R.string.component_context_compacted),
                 style = MaterialTheme.typography.labelMedium,
                 color = PlumAccent,
                 fontWeight = FontWeight.Bold,

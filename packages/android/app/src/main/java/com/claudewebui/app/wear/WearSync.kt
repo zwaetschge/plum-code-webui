@@ -9,7 +9,8 @@ import org.json.JSONObject
 
 /**
  * Phone → watch mirror of the widget snapshot. One DataItem at /plum/snapshot
- * carries the quick stats and the pending approvals; the watch app, tile and
+ * carries the quick stats, the pending approvals and the open questions; the
+ * watch app, tile and
  * complication all read from it. Every call is best-effort — devices without
  * Play Services or a paired watch just no-op.
  */
@@ -17,6 +18,7 @@ object WearSync {
 
     const val PATH_SNAPSHOT = "/plum/snapshot"
     const val PATH_APPROVAL_RESPONSE = "/plum/approval-response"
+    const val PATH_QUESTION_RESPONSE = "/plum/question-response"
 
     const val KEY_JSON = "json"
 
@@ -47,6 +49,21 @@ object WearSync {
                             put("sessionName", approval.sessionName)
                             put("toolName", approval.toolName)
                             put("requestId", approval.requestId)
+                        })
+                    }
+                })
+                // Only the options are mirrored, not the whole request: the watch
+                // answers by label, and the phone owns the REST call.
+                put("questions", JSONArray().apply {
+                    snapshot.questions.forEach { question ->
+                        put(JSONObject().apply {
+                            put("sessionId", question.sessionId)
+                            put("sessionName", question.sessionName)
+                            put("requestId", question.requestId)
+                            put("providerSessionId", question.providerSessionId)
+                            put("prompt", question.prompt)
+                            put("answerable", question.answerable)
+                            put("options", JSONArray(question.options))
                         })
                     }
                 })

@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.devtools
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -28,11 +29,15 @@ import com.claudewebui.app.ui.components.common.PlumMuted
 import com.claudewebui.app.ui.components.common.PlumRed
 import com.claudewebui.app.ui.components.common.PlumText
 
-private enum class CollabTab(val label: String) {
-    PULLS("Pull requests"),
-    RUNS("CI"),
-    ISSUES("Issues"),
-    RELEASES("Releases"),
+private enum class CollabTab(private val labelRes: Int) {
+    PULLS(R.string.devtools_pull_requests_80302),
+    RUNS(R.string.devtools_ci_13844),
+    ISSUES(R.string.devtools_issues_30ce4),
+    RELEASES(R.string.devtools_releases_8fa41);
+
+    val label: String
+        @androidx.compose.runtime.Composable get() = androidx.compose.ui.res.stringResource(labelRes)
+
 }
 
 /**
@@ -43,6 +48,11 @@ private enum class CollabTab(val label: String) {
  */
 @Composable
 fun GitHubCollabPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val uriHandler = LocalUriHandler.current
     var tab by remember { mutableStateOf(CollabTab.PULLS) }
     var composing by remember { mutableStateOf(false) }
@@ -57,7 +67,7 @@ fun GitHubCollabPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    state.repoInfo?.nameWithOwner?.takeIf { it.isNotBlank() } ?: "GitHub",
+                    state.repoInfo?.nameWithOwner?.takeIf { it.isNotBlank() } ?: screenResources.getString(R.string.devtools_github_5442e),
                     color = PlumText,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
@@ -65,10 +75,10 @@ fun GitHubCollabPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                ActionText("Reload", busy) { viewModel.loadCollaboration() }
+                ActionText(screenResources.getString(R.string.devtools_reload_cce71), busy) { viewModel.loadCollaboration() }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline)) {
                 CollabTab.entries.forEach { entry ->
                     CollabTabChip(entry.label, tab == entry) { tab = entry }
                 }
@@ -79,19 +89,19 @@ fun GitHubCollabPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                     OutlinedTextField(
                         value = title,
                         onValueChange = { title = it },
-                        label = { Text("Title") },
+                        label = { Text(screenResources.getString(R.string.devtools_title_768e0)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     OutlinedTextField(
                         value = body,
                         onValueChange = { body = it },
-                        label = { Text("Description (optional)") },
+                        label = { Text(screenResources.getString(R.string.devtools_description_optional_388de)) },
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ActionText("Cancel", false) { composing = false }
-                        ActionText("Create", busy || title.isBlank()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.md)) {
+                        ActionText(screenResources.getString(R.string.devtools_cancel_77dfd), false) { composing = false }
+                        ActionText(screenResources.getString(R.string.devtools_create_6e157), busy || title.isBlank()) {
                             if (tab == CollabTab.PULLS) {
                                 viewModel.createPullRequest(title, body)
                             } else {
@@ -104,7 +114,7 @@ fun GitHubCollabPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                     }
                 } else {
                     ActionText(
-                        if (tab == CollabTab.PULLS) "New pull request" else "New issue",
+                        if (tab == CollabTab.PULLS) screenResources.getString(R.string.devtools_new_pull_request_b0a42) else screenResources.getString(R.string.devtools_new_issue_051fb),
                         busy,
                     ) { composing = true }
                 }
@@ -113,7 +123,7 @@ fun GitHubCollabPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
             when (tab) {
                 CollabTab.PULLS ->
                     if (state.pullRequests.isEmpty()) {
-                        EmptyLine("No open pull requests")
+                        EmptyLine(screenResources.getString(R.string.devtools_no_open_pull_requests_dd307))
                     } else {
                         state.pullRequests.forEach { pr ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -135,7 +145,7 @@ fun GitHubCollabPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
-                                ActionText("Merge", busy || pr.isDraft) {
+                                ActionText(screenResources.getString(R.string.devtools_merge_ea8f0), busy || pr.isDraft) {
                                     viewModel.mergePullRequest(pr.number)
                                 }
                             }
@@ -144,7 +154,7 @@ fun GitHubCollabPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
 
                 CollabTab.RUNS ->
                     if (state.workflowRuns.isEmpty()) {
-                        EmptyLine("No workflow runs")
+                        EmptyLine(screenResources.getString(R.string.devtools_no_workflow_runs_70e8a))
                     } else {
                         state.workflowRuns.forEach { run ->
                             val failed = run.status == "completed" && run.conclusion != "success"
@@ -169,7 +179,7 @@ fun GitHubCollabPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                                     )
                                 }
                                 if (failed) {
-                                    ActionText("Re-run", busy) {
+                                    ActionText(screenResources.getString(R.string.devtools_re_run_a7c77), busy) {
                                         viewModel.rerunWorkflow(run.databaseId)
                                     }
                                 }
@@ -179,7 +189,7 @@ fun GitHubCollabPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
 
                 CollabTab.ISSUES ->
                     if (state.issues.isEmpty()) {
-                        EmptyLine("No open issues")
+                        EmptyLine(screenResources.getString(R.string.devtools_no_open_issues_82714))
                     } else {
                         state.issues.forEach { issue ->
                             Column(
@@ -207,7 +217,7 @@ fun GitHubCollabPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
 
                 CollabTab.RELEASES ->
                     if (state.releases.isEmpty()) {
-                        EmptyLine("No releases")
+                        EmptyLine(screenResources.getString(R.string.devtools_no_releases_2d555))
                     } else {
                         state.releases.forEach { release ->
                             Column(Modifier.fillMaxWidth()) {
@@ -251,12 +261,14 @@ private fun checkTone(state: String?) = when (state) {
 /** TabChip in DevToolsScreen.kt is file-private, so this panel carries its own. */
 @Composable
 private fun CollabTabChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Text(
         label,
         color = if (selected) PlumAccent else PlumMuted,
         fontSize = 12.sp,
         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-        modifier = Modifier.clickable(onClick = onClick).padding(vertical = 2.dp),
+        modifier = Modifier.clickable(onClick = onClick).padding(vertical = screenTokens.spacing.xxs),
     )
 }
 
@@ -267,13 +279,15 @@ private fun EmptyLine(label: String) {
 
 @Composable
 private fun ActionText(label: String, disabled: Boolean, onClick: () -> Unit) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Text(
         label,
         color = if (disabled) PlumMuted else PlumAccent,
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier
-            .padding(start = 12.dp)
+            .padding(start = screenTokens.spacing.md)
             .clickable(enabled = !disabled, onClick = onClick),
     )
 }

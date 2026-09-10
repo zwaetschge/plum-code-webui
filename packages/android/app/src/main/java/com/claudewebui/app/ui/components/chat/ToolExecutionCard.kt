@@ -1,5 +1,9 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
@@ -35,13 +39,14 @@ fun ToolExecutionCard(
     modifier: Modifier = Modifier,
     initiallyExpanded: Boolean = false,
 ) {
+    val componentTokens = PlumTheme.tokens
     var expanded by remember(tool.toolId) {
         mutableStateOf(initiallyExpanded || tool.status == ToolStatus.STARTED)
     }
 
     val chevronAngle by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(200),
+        animationSpec = tween(componentTokens.motion.medium),
         label = "chevron",
     )
 
@@ -51,8 +56,8 @@ fun ToolExecutionCard(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize(),
-        shape = RoundedCornerShape(8.dp),
+            .animateContentSize(animationSpec = componentTokens.motion.tweenMedium()),
+        shape = RoundedCornerShape(componentTokens.radius.sm),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 0.dp,
         border = androidx.compose.foundation.BorderStroke(
@@ -66,16 +71,16 @@ fun ToolExecutionCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { expanded = !expanded }
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                    .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.compact),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
             ) {
                 // Tool icon
                 Icon(
                     imageVector = toolConfig.icon,
                     contentDescription = tool.toolName,
                     tint = toolConfig.color,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(componentTokens.sizing.iconSm),
                 )
 
                 // Tool name
@@ -107,10 +112,10 @@ fun ToolExecutionCard(
                 // Expand/collapse icon
                 Icon(
                     imageVector = Icons.Filled.KeyboardArrowDown,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    contentDescription = if (expanded) stringResource(R.string.component_collapse) else stringResource(R.string.component_expand),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
-                        .size(16.dp)
+                        .size(componentTokens.sizing.iconSm)
                         .rotate(chevronAngle),
                 )
             }
@@ -126,7 +131,7 @@ fun ToolExecutionCard(
                         .fillMaxWidth()
                         .background(
                             color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            shape = RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp),
+                            shape = RoundedCornerShape(bottomStart = componentTokens.spacing.sm, bottomEnd = componentTokens.spacing.sm),
                         )
                 ) {
                     // Divider
@@ -138,7 +143,7 @@ fun ToolExecutionCard(
                     // Input section
                     tool.input?.let { input ->
                         ExpandedSection(
-                            label = "Input",
+                            label = stringResource(R.string.component_input),
                             content = formatJson(input),
                             isCode = true,
                         )
@@ -148,7 +153,7 @@ fun ToolExecutionCard(
                     tool.result?.let { result ->
                         if (result.isNotBlank()) {
                             ExpandedSection(
-                                label = "Output",
+                                label = stringResource(R.string.component_output),
                                 content = result,
                                 isCode = true,
                                 isSuccess = true,
@@ -159,7 +164,7 @@ fun ToolExecutionCard(
                     // Error section
                     tool.error?.let { error ->
                         ExpandedSection(
-                            label = "Error",
+                            label = stringResource(R.string.component_error),
                             content = error,
                             isCode = false,
                             isError = true,
@@ -180,6 +185,7 @@ private fun ExpandedSection(
     isError: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     val textColor = when {
         isError -> MaterialTheme.colorScheme.error
         isSuccess -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -189,8 +195,8 @@ private fun ExpandedSection(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
+        verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
     ) {
         Text(
             text = label,
@@ -201,7 +207,7 @@ private fun ExpandedSection(
         )
 
         val displayContent = content.take(2000).let {
-            if (content.length > 2000) "$it\n… (truncated)" else it
+            if (content.length > 2000) stringResource(R.string.component_truncated, it) else it
         }
 
         Text(
@@ -222,40 +228,41 @@ private fun StatusBadge(
     color: Color,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     when (status) {
         ToolStatus.STARTED -> {
-            val infiniteTransition = rememberInfiniteTransition(label = "spinner")
-            val rotation by infiniteTransition.animateFloat(
+            val infiniteTransition = if (PlumTheme.tokens.motion.reduceMotion) null else rememberInfiniteTransition(label = "spinner")
+            val rotation by infiniteTransition?.animateFloat(
                 initialValue = 0f,
                 targetValue = 360f,
                 animationSpec = infiniteRepeatable(
                     animation = tween(800, easing = LinearEasing)
                 ),
                 label = "rotation",
-            )
+            ) ?: androidx.compose.runtime.rememberUpdatedState(0f)
             Icon(
                 imageVector = Icons.Outlined.Refresh,
-                contentDescription = "Running",
+                contentDescription = stringResource(R.string.component_running),
                 tint = color,
                 modifier = modifier
-                    .size(14.dp)
+                    .size(componentTokens.sizing.iconXs)
                     .rotate(rotation),
             )
         }
         ToolStatus.COMPLETED -> {
             Icon(
                 imageVector = Icons.Filled.CheckCircle,
-                contentDescription = "Completed",
+                contentDescription = stringResource(R.string.component_completed),
                 tint = color,
-                modifier = modifier.size(14.dp),
+                modifier = modifier.size(componentTokens.sizing.iconXs),
             )
         }
         ToolStatus.ERROR -> {
             Icon(
                 imageVector = Icons.Filled.Cancel,
-                contentDescription = "Error",
+                contentDescription = stringResource(R.string.component_error),
                 tint = color,
-                modifier = modifier.size(14.dp),
+                modifier = modifier.size(componentTokens.sizing.iconXs),
             )
         }
     }
@@ -270,29 +277,31 @@ private data class ToolConfig(
     val extractPreview: (ToolExecution) -> String?,
 )
 
+@Composable
+
 private fun toolConfig(toolName: String): ToolConfig {
     val name = toolName.lowercase()
     return when {
         name == "read" -> ToolConfig(
-            label = "Read File",
+            label = stringResource(R.string.component_read_file),
             icon = Icons.Outlined.Description,
             color = Color(0xFF3B82F6),
             extractPreview = { tool -> extractStringField(tool.input, "file_path") },
         )
         name == "write" -> ToolConfig(
-            label = "Write File",
+            label = stringResource(R.string.component_write_file),
             icon = Icons.Outlined.Edit,
             color = Color(0xFF22C55E),
             extractPreview = { tool -> extractStringField(tool.input, "file_path") },
         )
         name == "edit" || name == "multiedit" -> ToolConfig(
-            label = if (name == "multiedit") "Multi-Edit" else "Edit File",
+            label = if (name == "multiedit") stringResource(R.string.component_multi_edit) else stringResource(R.string.component_edit_file),
             icon = Icons.Outlined.DriveFileRenameOutline,
             color = Color(0xFFF59E0B),
             extractPreview = { tool -> extractStringField(tool.input, "file_path") },
         )
         name == "bash" -> ToolConfig(
-            label = "Bash",
+            label = stringResource(R.string.component_bash),
             icon = Icons.Outlined.Terminal,
             color = Color(0xFF8B5CF6),
             extractPreview = { tool ->
@@ -300,19 +309,19 @@ private fun toolConfig(toolName: String): ToolConfig {
             },
         )
         name == "glob" -> ToolConfig(
-            label = "Find Files",
+            label = stringResource(R.string.component_find_files),
             icon = Icons.Outlined.FolderOpen,
             color = Color(0xFF06B6D4),
             extractPreview = { tool -> extractStringField(tool.input, "pattern") },
         )
         name == "grep" -> ToolConfig(
-            label = "Search",
+            label = stringResource(R.string.component_search),
             icon = Icons.Outlined.Search,
             color = Color(0xFFEC4899),
             extractPreview = { tool -> extractStringField(tool.input, "pattern") },
         )
         name == "agent" || name.contains("agent") -> ToolConfig(
-            label = "Agent",
+            label = stringResource(R.string.component_agent),
             icon = Icons.Outlined.Psychology,
             color = Color(0xFFCC785C),
             extractPreview = { tool ->
@@ -321,19 +330,19 @@ private fun toolConfig(toolName: String): ToolConfig {
             },
         )
         name == "todowrite" -> ToolConfig(
-            label = "Update Todos",
+            label = stringResource(R.string.component_update_todos),
             icon = Icons.Outlined.Checklist,
             color = Color(0xFF10B981),
             extractPreview = { _ -> null },
         )
         name == "websearch" -> ToolConfig(
-            label = "Web Search",
+            label = stringResource(R.string.component_web_search),
             icon = Icons.Outlined.TravelExplore,
             color = Color(0xFF3B82F6),
             extractPreview = { tool -> extractStringField(tool.input, "query") },
         )
         name == "webfetch" -> ToolConfig(
-            label = "Fetch URL",
+            label = stringResource(R.string.component_fetch_url),
             icon = Icons.Outlined.Language,
             color = Color(0xFF3B82F6),
             extractPreview = { tool -> extractStringField(tool.input, "url") },

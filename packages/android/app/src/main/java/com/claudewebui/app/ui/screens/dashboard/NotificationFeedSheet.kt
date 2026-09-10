@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.dashboard
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,32 +56,37 @@ fun NotificationFeedContent(
     onClearAll: () -> Unit,
     onRespond: (AppNotification, Boolean) -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.md),
+        verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Notifications", color = PlumText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(screenResources.getString(R.string.dashboard_notifications_753a2), color = PlumText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             if (unreadCount > 0) {
                 Spacer(Modifier.size(8.dp))
                 Box(
                     Modifier
                         .clip(RoundedCornerShape(9.dp))
                         .background(PlumAccent.copy(alpha = .18f))
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                        .padding(horizontal = screenTokens.spacing.sm, vertical = screenTokens.spacing.xxs),
                 ) {
-                    Text("$unreadCount new", color = PlumAccent, fontSize = 11.sp)
+                    Text(screenResources.getString(R.string.dashboard_1_s_new_f595b, unreadCount), color = PlumAccent, fontSize = 11.sp)
                 }
             }
             Spacer(Modifier.weight(1f))
-            SheetAction("Mark read", onMarkAllRead)
+            SheetAction(screenResources.getString(R.string.dashboard_mark_read_3bf98), onMarkAllRead)
             Spacer(Modifier.size(10.dp))
-            SheetAction("Clear", onClearAll)
+            SheetAction(screenResources.getString(R.string.dashboard_clear_719ea), onClearAll)
         }
 
         if (notifications.isEmpty()) {
             Text(
-                "Nothing yet. Replies, approvals and budget alerts land here.",
+                screenResources.getString(R.string.dashboard_nothing_yet_replies_approvals_and_budget_alerts_land_here_8a6cb),
                 color = PlumMuted,
                 fontSize = 13.sp,
             )
@@ -90,7 +96,7 @@ fun NotificationFeedContent(
         LazyColumn(
             modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp),
             contentPadding = PaddingValues(bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
         ) {
             items(notifications, key = { it.id }) { item ->
                 NotificationRow(item, onOpenSession, onRespond)
@@ -105,6 +111,11 @@ private fun NotificationRow(
     onOpenSession: (String) -> Unit,
     onRespond: (AppNotification, Boolean) -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val unread = item.readAt == null
     val accent = when (item.kind) {
         "approval", "question", "usage_alert" -> PlumAmber
@@ -153,9 +164,9 @@ private fun NotificationRow(
                 )
             }
             if (canAnswer) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AnswerButton("Allow", PlumGreen, Modifier.weight(1f)) { onRespond(item, true) }
-                    AnswerButton("Deny", PlumRed, Modifier.weight(1f)) { onRespond(item, false) }
+                Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)) {
+                    AnswerButton(screenResources.getString(R.string.dashboard_allow_3ad0e), PlumGreen, Modifier.weight(1f)) { onRespond(item, true) }
+                    AnswerButton(screenResources.getString(R.string.dashboard_deny_53577), PlumRed, Modifier.weight(1f)) { onRespond(item, false) }
                 }
             }
         }
@@ -196,10 +207,15 @@ private fun SheetAction(label: String, onClick: () -> Unit) {
 /** Bell with an unread badge. */
 @Composable
 fun NotificationBell(unreadCount: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Box(modifier = modifier.size(48.dp), contentAlignment = Alignment.Center) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    Box(modifier = modifier.size(screenTokens.sizing.touchTarget), contentAlignment = Alignment.Center) {
         Box(
             Modifier
-                .size(48.dp)
+                .size(screenTokens.sizing.touchTarget)
                 .clip(CircleShape)
                 .border(1.dp, PlumBorderSoft, CircleShape)
                 .clickable(onClick = onClick),
@@ -208,8 +224,8 @@ fun NotificationBell(unreadCount: Int, onClick: () -> Unit, modifier: Modifier =
             Icon(
                 Icons.Outlined.Notifications,
                 contentDescription = if (unreadCount > 0) {
-                    "Notifications, $unreadCount unread"
-                } else "Notifications",
+                    screenResources.getString(R.string.dashboard_notifications_1_s_unread_8712c, unreadCount)
+                } else screenResources.getString(R.string.dashboard_notifications_753a2),
                 tint = if (unreadCount > 0) PlumAccent else PlumText,
                 modifier = Modifier.size(22.dp),
             )
@@ -223,7 +239,7 @@ fun NotificationBell(unreadCount: Int, onClick: () -> Unit, modifier: Modifier =
                     .offset(x = 2.dp, y = (-2).dp)
                     .clip(CircleShape)
                     .background(PlumRed)
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                    .padding(horizontal = screenTokens.spacing.xs, vertical = 1.dp),
             ) {
                 Text(
                     if (unreadCount > 9) "9+" else "$unreadCount",

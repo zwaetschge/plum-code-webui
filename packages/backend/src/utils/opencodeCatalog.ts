@@ -2,12 +2,21 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { writeFileAtomicSync } from './atomicWrite.js';
 
 export type OpenCodeProviderSource = 'models.dev' | 'cli' | 'config' | 'fallback';
+
+/** Per-model token limits as models.dev publishes them (`limit.context/output`). */
+export interface OpenCodeModelLimit {
+  context?: number;
+  output?: number;
+}
 
 export interface OpenCodeProviderInfo {
   name: string;
   models: string[];
+  /** Keyed by model id; only present for models the cache carries limits for. */
+  modelLimits?: Record<string, OpenCodeModelLimit>;
   description: string;
   env?: string[];
   api?: string;
@@ -295,6 +304,31 @@ function modelIdsFromRaw(models: unknown): string[] {
   return [...ids];
 }
 
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+function modelLimitsFromRaw(models: unknown): Record<string, OpenCodeModelLimit> | undefined {
+  const modelRecord = asRecord(models);
+  if (!modelRecord) return undefined;
+
+  const limits: Record<string, OpenCodeModelLimit> = {};
+  for (const [modelKey, rawModel] of Object.entries(modelRecord)) {
+    const model = asRecord(rawModel);
+    const limit = asRecord(model?.limit);
+    if (!limit) continue;
+    const rawId = model?.id;
+    const modelId = typeof rawId === 'string' && rawId.trim() ? rawId.trim() : modelKey.trim();
+    const context = positiveInteger(limit.context);
+    const output = positiveInteger(limit.output);
+    if (!modelId || (!context && !output)) continue;
+    limits[modelId] = { ...(context ? { context } : {}), ...(output ? { output } : {}) };
+  }
+  return Object.keys(limits).length > 0 ? limits : undefined;
+}
+
 function mergeProvider(
   catalog: OpenCodeProviderCatalog,
   id: string,
@@ -306,9 +340,14 @@ function mergeProvider(
     return;
   }
 
+  const modelLimits =
+    existing.modelLimits || info.modelLimits
+      ? { ...info.modelLimits, ...existing.modelLimits }
+      : undefined;
   catalog[id] = {
     name: existing.name || info.name,
     models: [...new Set([...existing.models, ...info.models])],
+    ...(modelLimits ? { modelLimits } : {}),
     description: existing.description || info.description,
     env: existing.env ?? info.env,
     api: existing.api ?? info.api,
@@ -352,12 +391,14 @@ export function parseOpenCodeModelsCache(raw: string): OpenCodeProviderCatalog {
     const doc = typeof rawDoc === 'string' && rawDoc.trim() ? rawDoc.trim() : undefined;
     const models = modelIdsFromRaw(provider.models);
     if (!id || models.length === 0) continue;
+    const modelLimits = modelLimitsFromRaw(provider.models);
 
     const name =
       typeof rawName === 'string' && rawName.trim() ? rawName.trim() : humanizeProviderId(id);
     mergeProvider(catalog, id, {
       name,
       models,
+      ...(modelLimits ? { modelLimits } : {}),
       description: providerDescription({ env, api, doc, source: 'models.dev' }),
       env,
       api,
@@ -367,6 +408,58 @@ export function parseOpenCodeModelsCache(raw: string): OpenCodeProviderCatalog {
   }
 
   return sortOpenCodeProviderCatalog(catalog);
+}
+
+const MODELS_DEV_URL = 'https://models.dev/api.json';
+const MODELS_DEV_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+let modelsDevRefresh: Promise<boolean> | null = null;
+
+/**
+ * Populate the models.dev cache OpenCode would normally write itself.
+ *
+ * OpenCode only writes `~/.cache/opencode/models.json` when its own server
+ * fetches the catalog; in a Pi-only or fresh container the file never exists,
+ * so every provider fell back to the CLI list without per-model limits — and
+ * Pi then assumed 128k for models that actually have 1M. Fetch it ourselves,
+ * at most once a day, and never block a caller on the network.
+ */
+export async function refreshOpenCodeModelsCache(
+  options: { force?: boolean } = {}
+): Promise<boolean> {
+  const cachePath = getOpenCodeModelsCachePath();
+  if (!options.force) {
+    try {
+      const age = Date.now() - fs.statSync(cachePath).mtimeMs;
+      if (age < MODELS_DEV_CACHE_MAX_AGE_MS) return false;
+    } catch {
+      // Missing: fetch below.
+    }
+  }
+  if (modelsDevRefresh) return modelsDevRefresh;
+  modelsDevRefresh = (async () => {
+    try {
+      const response = await fetch(MODELS_DEV_URL, { signal: AbortSignal.timeout(20_000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const raw = await response.text();
+      // Validate before touching the cache: a partial body must not replace a
+      // good file with an unparsable one.
+      const providers = Object.keys(parseOpenCodeModelsCache(raw)).length;
+      if (providers === 0) throw new Error('catalog is empty');
+      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+      writeFileAtomicSync(cachePath, raw, { mode: 0o644 });
+      resetOpenCodeProviderCatalogCache();
+      console.log(`[OPENCODE-CATALOG] models.dev cache refreshed (${providers} providers)`);
+      return true;
+    } catch (error) {
+      console.warn(
+        `[OPENCODE-CATALOG] models.dev refresh failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return false;
+    } finally {
+      modelsDevRefresh = null;
+    }
+  })();
+  return modelsDevRefresh;
 }
 
 function readOpenCodeModelsCache(): OpenCodeProviderCatalog {

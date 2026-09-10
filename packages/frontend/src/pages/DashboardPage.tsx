@@ -51,6 +51,7 @@ import { DiscoveredProjects } from '@/components/projects';
 import { ProviderLogo } from '@/components/branding/ProviderLogo';
 import { RenameSessionDialog } from '@/components/session/RenameSessionDialog';
 import { SessionIcon } from '@/components/session/SessionIcon';
+import { useShallow } from 'zustand/react/shallow';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useCategoryStore } from '@/stores/categoryStore';
 import { api, ApiError } from '@/services/api';
@@ -248,6 +249,10 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  // Only the slices the cards actually read. Subscribing to the store object
+  // woke the dashboard for every message, permission prompt and editor
+  // keystroke of every session as well; the live status shown here needs seven
+  // of the twenty-one records.
   const {
     setSessions,
     sessions,
@@ -258,7 +263,23 @@ export function DashboardPage() {
     streamingContent,
     toolExecutions,
     queueState,
-  } = useSessionStore();
+    lifecycle,
+    pendingApprovalCounts,
+  } = useSessionStore(
+    useShallow((s) => ({
+      setSessions: s.setSessions,
+      sessions: s.sessions,
+      updateSession: s.updateSession,
+      activity: s.activity,
+      activeAgent: s.activeAgent,
+      agentRuns: s.agentRuns,
+      streamingContent: s.streamingContent,
+      toolExecutions: s.toolExecutions,
+      queueState: s.queueState,
+      lifecycle: s.lifecycle,
+      pendingApprovalCounts: s.pendingApprovalCounts,
+    }))
+  );
   const { categories, fetchCategories, createCategory } = useCategoryStore();
 
   const [showNewSession, setShowNewSession] = useState(searchParams.get('new') === 'true');
@@ -524,10 +545,22 @@ export function DashboardPage() {
             streamingContent: streamingContent[session.id],
             tools: toolExecutions[session.id],
             queue: queueState[session.id],
+            lifecycle: lifecycle[session.id],
+            pendingApprovals: pendingApprovalCounts[session.id],
           }),
         ])
       ),
-    [activity, activeAgent, agentRuns, queueState, sessions, streamingContent, toolExecutions]
+    [
+      activity,
+      activeAgent,
+      agentRuns,
+      lifecycle,
+      pendingApprovalCounts,
+      queueState,
+      sessions,
+      streamingContent,
+      toolExecutions,
+    ]
   );
   const dashboardSessionGroups = useMemo(() => {
     if (normalizedDashboardSearch) {

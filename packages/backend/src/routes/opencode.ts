@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { execFileSync } from 'child_process';
+import { clearPendingQuestion } from '../services/pendingQuestions.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import {
   buildOpenCodeCommandEnv,
@@ -305,6 +306,10 @@ router.post('/questions/respond', requireAuth, async (req, res) => {
       result.data.providerSessionId,
       userId
     );
+    // Either way the question is settled: a 404 means the provider has already
+    // forgotten it, so leaving it in the registry would keep a dead prompt on
+    // the widget and the watch.
+    clearPendingQuestion(result.data.requestId);
     if (!handled) {
       return res
         .status(404)
@@ -336,6 +341,10 @@ router.post('/questions/reject', requireAuth, async (req, res) => {
       result.data.providerSessionId,
       userId
     );
+    // Either way the question is settled: a 404 means the provider has already
+    // forgotten it, so leaving it in the registry would keep a dead prompt on
+    // the widget and the watch.
+    clearPendingQuestion(result.data.requestId);
     if (!handled) {
       return res
         .status(404)

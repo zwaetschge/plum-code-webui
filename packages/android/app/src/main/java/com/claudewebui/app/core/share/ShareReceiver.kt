@@ -1,5 +1,7 @@
 package com.claudewebui.app.core.share
 
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import android.app.Activity
 import android.content.ClipData
 import android.content.Intent
@@ -240,11 +242,11 @@ private fun SessionPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Send to session") },
+        title = { Text(stringResource(R.string.native_send_to_session)) },
         text = {
             val payloadSummary = when (payload) {
                 is SharePayload.Text -> "\"${payload.text.take(60)}${if (payload.text.length > 60) "…" else ""}\""
-                is SharePayload.Image -> "Image"
+                is SharePayload.Image -> stringResource(R.string.native_image)
                 is SharePayload.File -> payload.filename
             }
             Column {
@@ -260,7 +262,7 @@ private fun SessionPickerDialog(
                     else -> {
                         if (s.isEmpty()) {
                             Text(
-                                text = "No existing sessions",
+                                text = stringResource(R.string.native_no_existing_sessions),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -303,7 +305,7 @@ private fun SessionPickerDialog(
                 TextButton(onClick = onNewSession) {
                     Icon(Icons.Default.Add, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
-                    Text("New session")
+                    Text(stringResource(R.string.native_new_session))
                 }
                 Spacer(Modifier.width(8.dp))
                 Button(
@@ -314,12 +316,12 @@ private fun SessionPickerDialog(
                     },
                     enabled = selectedId != null || sessions?.isEmpty() == true
                 ) {
-                    Text("Send")
+                    Text(stringResource(R.string.native_send))
                 }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.native_cancel)) }
         }
     )
 }

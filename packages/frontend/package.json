@@ -10,6 +10,7 @@
     "test:pi-settings": "node scripts/pi-settings-tab-tests.mjs",
     "test:recent-sessions": "node scripts/recent-sessions-limit-tests.mjs",
     "test:session-list-polling": "node scripts/session-list-polling-tests.mjs",
+    "test:chat-sync": "tsx scripts/chat-sync-regression-tests.ts",
     "test:chat-delivery": "tsx scripts/chat-delivery-regression-tests.ts",
     "test:dashboard-ux": "node scripts/dashboard-ux-regression-tests.mjs",
     "test:message-history": "node scripts/message-history-regression-tests.mjs && ../backend/node_modules/.bin/tsx scripts/message-history-merge-tests.ts",

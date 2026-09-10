@@ -19,23 +19,50 @@ const createRepoSchema = z.object({
   auto_init: z.boolean().optional(),
 });
 
+// `z.string().url()` happily accepts `file://`, `git://` and `ssh://`, which as a
+// clone source reads local directories and as a remote is somewhere to push
+// commits to. The service layer enforces the same rule for every caller; this is
+// the earlier, cheaper rejection.
+const githubUrlSchema = z
+  .string()
+  .url()
+  .refine(
+    (value) => {
+      if (/^git@github\.com:[\w.-]+\/[\w.-]+(\.git)?$/.test(value)) return true;
+      try {
+        const parsed = new URL(value);
+        const host = parsed.hostname.toLowerCase();
+        return parsed.protocol === 'https:' && (host === 'github.com' || host === 'www.github.com');
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Must be an https://github.com/... URL' }
+  );
+
+/** A ref or remote name that git would otherwise read as an option. */
+const gitNameSchema = z
+  .string()
+  .min(1)
+  .refine((value) => !value.startsWith('-'), { message: 'Must not start with "-"' });
+
 const cloneRepoSchema = z.object({
-  url: z.string().url(),
+  url: githubUrlSchema,
   targetDir: z.string().min(1),
-  branch: z.string().optional(),
+  branch: gitNameSchema.optional(),
 });
 
 const pushSchema = z.object({
   workingDirectory: z.string().min(1),
-  remote: z.string().optional(),
-  branch: z.string().optional(),
+  remote: gitNameSchema.optional(),
+  branch: gitNameSchema.optional(),
   force: z.boolean().optional(),
 });
 
 const addRemoteSchema = z.object({
   workingDirectory: z.string().min(1),
-  remoteName: z.string().min(1),
-  repoUrl: z.string().url(),
+  remoteName: gitNameSchema,
+  repoUrl: githubUrlSchema,
 });
 
 // Validate token

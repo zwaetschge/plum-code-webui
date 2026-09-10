@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.operations
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -63,6 +64,11 @@ fun OperationsScreen(
     viewModel: OperationsViewModel,
     onNavigateBack: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
     val wide = isTabletWidth()
 
@@ -76,36 +82,45 @@ fun OperationsScreen(
                     horizontal = if (wide) 40.dp else 16.dp,
                     vertical = 4.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             ) {
                 item {
                     PlumScreenHeader(
-                        title = "Operations",
+                        title = screenResources.getString(R.string.operations_operations_a1fda),
                         subtitle = state.dockerStatus?.let { status ->
                             if (status.available) {
-                                "Docker ${status.serverVersion ?: "connected"}"
+                                screenResources.getString(R.string.operations_docker_1_s_8184b, status.serverVersion ?: screenResources.getString(R.string.operations_connected_c5e23))
                             } else {
-                                status.error ?: "Docker unavailable"
+                                status.error ?: screenResources.getString(R.string.operations_docker_unavailable_61df4)
                             }
-                        } ?: "Containers, watchdogs and access",
+                        } ?: screenResources.getString(R.string.operations_containers_watchdogs_and_access_2ae75),
                         actions = {
-                            PlumIconButton(Icons.Outlined.Refresh, "Reload", viewModel::load)
+                            PlumIconButton(Icons.Outlined.Refresh, screenResources.getString(R.string.operations_reload_cce71), viewModel::load)
                             PlumIconButton(
                                 Icons.AutoMirrored.Outlined.ArrowBack,
-                                "Back",
+                                screenResources.getString(R.string.operations_back_b52b3),
                                 onNavigateBack,
                             )
                         },
                     )
                 }
 
+                state.error?.let { message ->
+                    item {
+                        com.claudewebui.app.ui.components.common.ErrorCard(
+                            message = message,
+                            onRetry = viewModel::load,
+                        )
+                    }
+                }
+
                 state.stats?.let { stats ->
                     item {
                         val metrics = listOf(
-                            "Users" to stats.userCount.toString(),
-                            "Sessions" to stats.sessionCount.toString(),
-                            "Running" to stats.runningSessionCount.toString(),
-                            "Audit" to stats.auditCount.toString(),
+                            screenResources.getString(R.string.operations_users_57f2b) to stats.userCount.toString(),
+                            screenResources.getString(R.string.operations_sessions_e11e3) to stats.sessionCount.toString(),
+                            screenResources.getString(R.string.operations_running_73989) to stats.runningSessionCount.toString(),
+                            screenResources.getString(R.string.operations_audit_fa170) to stats.auditCount.toString(),
                         )
                         val perRow = metricColumns()
                         Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -141,18 +156,18 @@ fun OperationsScreen(
                 item {
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                     ) {
-                        TabChip("Containers", state.tab == OperationsTab.CONTAINERS) {
+                        TabChip(screenResources.getString(R.string.operations_containers_e040a), state.tab == OperationsTab.CONTAINERS) {
                             viewModel.selectTab(OperationsTab.CONTAINERS)
                         }
-                        TabChip("Watchdogs", state.tab == OperationsTab.WATCHDOGS) {
+                        TabChip(screenResources.getString(R.string.operations_watchdogs_fbf2c), state.tab == OperationsTab.WATCHDOGS) {
                             viewModel.selectTab(OperationsTab.WATCHDOGS)
                         }
-                        TabChip("Users", state.tab == OperationsTab.USERS) {
+                        TabChip(screenResources.getString(R.string.operations_users_57f2b), state.tab == OperationsTab.USERS) {
                             viewModel.selectTab(OperationsTab.USERS)
                         }
-                        TabChip("Audit", state.tab == OperationsTab.AUDIT) {
+                        TabChip(screenResources.getString(R.string.operations_audit_fa170), state.tab == OperationsTab.AUDIT) {
                             viewModel.selectTab(OperationsTab.AUDIT)
                         }
                     }
@@ -171,7 +186,7 @@ fun OperationsScreen(
                     when (state.tab) {
                         OperationsTab.CONTAINERS -> {
                             if (state.containers.isEmpty()) {
-                                item { EmptyCard("No containers visible") }
+                                item { EmptyCard(screenResources.getString(R.string.operations_no_containers_visible_5f733)) }
                             }
                             items(state.containers, key = { it.id }) { ContainerRow(it) }
                         }
@@ -181,9 +196,9 @@ fun OperationsScreen(
                                 item {
                                     EmptyCard(
                                         if (state.adminDenied) {
-                                            "Admin access required"
+                                            screenResources.getString(R.string.operations_admin_access_required_737b1)
                                         } else {
-                                            "No watchdogs configured"
+                                            screenResources.getString(R.string.operations_no_watchdogs_configured_d7503)
                                         },
                                     )
                                 }
@@ -196,9 +211,9 @@ fun OperationsScreen(
                                 item {
                                     EmptyCard(
                                         if (state.adminDenied) {
-                                            "Admin access required"
+                                            screenResources.getString(R.string.operations_admin_access_required_737b1)
                                         } else {
-                                            "No users"
+                                            screenResources.getString(R.string.operations_no_users_c4b06)
                                         },
                                     )
                                 }
@@ -211,9 +226,9 @@ fun OperationsScreen(
                                 item {
                                     EmptyCard(
                                         if (state.adminDenied) {
-                                            "Admin access required"
+                                            screenResources.getString(R.string.operations_admin_access_required_737b1)
                                         } else {
-                                            "No audit entries"
+                                            screenResources.getString(R.string.operations_no_audit_entries_01c84)
                                         },
                                     )
                                 }
@@ -254,8 +269,10 @@ private fun EmptyCard(message: String) {
 
 @Composable
 private fun ContainerRow(container: DockerContainer) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     GlassPanel(Modifier.fillMaxWidth(), radius = 16.dp) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Column(Modifier.fillMaxWidth().padding(screenTokens.spacing.cozy), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     container.name,
@@ -294,8 +311,13 @@ private fun ContainerRow(container: DockerContainer) {
 
 @Composable
 private fun WatchdogRow(watchdog: Watchdog) {
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     GlassPanel(Modifier.fillMaxWidth(), radius = 16.dp) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Column(Modifier.fillMaxWidth().padding(screenTokens.spacing.cozy), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     watchdog.containerName.ifBlank { watchdog.containerId.take(12) },
@@ -306,7 +328,7 @@ private fun WatchdogRow(watchdog: Watchdog) {
                     modifier = Modifier.weight(1f),
                 )
                 StatusPill(
-                    if (watchdog.enabled) "enabled" else "paused",
+                    if (watchdog.enabled) screenResources.getString(R.string.operations_enabled_3ea3f) else screenResources.getString(R.string.operations_paused_11b1b),
                     if (watchdog.enabled) PlumGreen else PlumMuted,
                 )
             }
@@ -316,7 +338,7 @@ private fun WatchdogRow(watchdog: Watchdog) {
                 fontSize = 11.sp,
             )
             watchdog.lastIncidentAt?.let {
-                Text("Last incident ${it.take(19)}", color = PlumAmber, fontSize = 11.sp)
+                Text(screenResources.getString(R.string.operations_last_incident_1_s_199b2, it.take(19)), color = PlumAmber, fontSize = 11.sp)
             }
         }
     }
@@ -324,9 +346,14 @@ private fun WatchdogRow(watchdog: Watchdog) {
 
 @Composable
 private fun UserRow(user: AdminUser) {
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     GlassPanel(Modifier.fillMaxWidth(), radius = 16.dp) {
         Row(
-            Modifier.fillMaxWidth().padding(14.dp),
+            Modifier.fillMaxWidth().padding(screenTokens.spacing.cozy),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
@@ -339,7 +366,7 @@ private fun UserRow(user: AdminUser) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${user.email} · ${user.sessionCount} sessions",
+                    screenResources.getString(R.string.operations_1_s_2_s_sessions_f7a3d, user.email, user.sessionCount),
                     color = PlumMuted,
                     fontSize = 11.sp,
                     maxLines = 1,
@@ -359,8 +386,10 @@ private fun UserRow(user: AdminUser) {
 
 @Composable
 private fun AuditRow(entry: AuditLogEntry) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     GlassPanel(Modifier.fillMaxWidth(), radius = 14.dp) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Column(Modifier.fillMaxWidth().padding(screenTokens.spacing.md), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
                 entry.action,
                 color = PlumText,

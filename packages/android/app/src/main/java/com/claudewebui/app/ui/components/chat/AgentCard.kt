@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
@@ -38,11 +41,12 @@ fun AgentCard(
     modifier: Modifier = Modifier,
     initiallyExpanded: Boolean = false,
 ) {
+    val componentTokens = PlumTheme.tokens
     val agentInfo = ToolIconMapper.forAgent(agentType)
     var expanded by remember { mutableStateOf(initiallyExpanded || status == ToolStatus.STARTED) }
     val chevronAngle by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(200),
+        animationSpec = tween(componentTokens.motion.medium),
         label = "chevron",
     )
 
@@ -53,8 +57,8 @@ fun AgentCard(
     }
 
     // Animated border for running state
-    val infiniteTransition = rememberInfiniteTransition(label = "agentBorder")
-    val borderAlpha by infiniteTransition.animateFloat(
+    val infiniteTransition = if (PlumTheme.tokens.motion.reduceMotion) null else rememberInfiniteTransition(label = "agentBorder")
+    val borderAlpha by infiniteTransition?.animateFloat(
         initialValue = 0.4f,
         targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
@@ -62,19 +66,19 @@ fun AgentCard(
             repeatMode = RepeatMode.Reverse,
         ),
         label = "borderAlpha",
-    )
+    ) ?: androidx.compose.runtime.rememberUpdatedState(0.4f)
     val activeBorderAlpha = if (status == ToolStatus.STARTED) borderAlpha else 0.35f
 
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .animateContentSize()
+            .animateContentSize(animationSpec = componentTokens.motion.tweenMedium())
             .border(
                 width = 1.dp,
                 color = borderColor.copy(alpha = activeBorderAlpha),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(componentTokens.radius.chip),
             ),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(componentTokens.radius.chip),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Column {
@@ -83,9 +87,9 @@ fun AgentCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { if (tools.isNotEmpty()) expanded = !expanded }
-                    .padding(12.dp),
+                    .padding(componentTokens.spacing.md),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.compact),
             ) {
                 // Agent icon with tinted background
                 Box(
@@ -93,7 +97,7 @@ fun AgentCard(
                         .size(36.dp)
                         .background(
                             color = agentInfo.color.copy(alpha = 0.12f),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(componentTokens.radius.sm),
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -103,13 +107,13 @@ fun AgentCard(
                             imageVector = Icons.Filled.CheckCircle,
                             contentDescription = null,
                             tint = Color(0xFF22C55E),
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(componentTokens.sizing.iconMd),
                         )
                         ToolStatus.ERROR -> Icon(
                             imageVector = Icons.Filled.Cancel,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(componentTokens.sizing.iconMd),
                         )
                     }
                 }
@@ -117,7 +121,7 @@ fun AgentCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.inline),
                     ) {
                         Icon(
                             imageVector = agentInfo.icon,
@@ -136,7 +140,7 @@ fun AgentCard(
                         }
                     }
                     description?.let {
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(componentTokens.spacing.xxs))
                         Text(
                             text = it,
                             style = MaterialTheme.typography.bodySmall,
@@ -159,10 +163,10 @@ fun AgentCard(
                         )
                     }
                     if (tools.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(componentTokens.spacing.xs))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.xxs),
                         ) {
                             Text(
                                 text = "${tools.size}",
@@ -174,14 +178,14 @@ fun AgentCard(
                                 imageVector = Icons.Outlined.Build,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(10.dp),
+                                modifier = Modifier.size(componentTokens.spacing.compact),
                             )
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowDown,
-                                contentDescription = if (expanded) "Collapse" else "Expand",
+                                contentDescription = if (expanded) stringResource(R.string.component_collapse) else stringResource(R.string.component_expand),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
-                                    .size(16.dp)
+                                    .size(componentTokens.sizing.iconSm)
                                     .rotate(chevronAngle),
                             )
                         }
@@ -200,7 +204,7 @@ fun AgentCard(
                         .fillMaxWidth()
                         .background(
                             color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            shape = RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp),
+                            shape = RoundedCornerShape(bottomStart = componentTokens.spacing.compact, bottomEnd = componentTokens.spacing.compact),
                         ),
                 ) {
                     HorizontalDivider(
@@ -209,14 +213,14 @@ fun AgentCard(
                     )
 
                     Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(componentTokens.spacing.compact),
+                        verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.inline),
                     ) {
                         // Section header
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.padding(bottom = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.inline),
+                            modifier = Modifier.padding(bottom = componentTokens.spacing.xxs),
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.Build,
@@ -225,7 +229,7 @@ fun AgentCard(
                                 modifier = Modifier.size(11.dp),
                             )
                             Text(
-                                text = "Tool Calls",
+                                text = stringResource(R.string.component_tool_calls),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                 fontSize = 10.sp,
@@ -236,7 +240,7 @@ fun AgentCard(
                         tools.forEach { tool ->
                             ToolExecutionCard(
                                 tool = tool,
-                                modifier = Modifier.padding(start = 8.dp),
+                                modifier = Modifier.padding(start = componentTokens.spacing.sm),
                             )
                         }
                     }
@@ -250,29 +254,31 @@ fun AgentCard(
 
 @Composable
 private fun AgentSpinner(color: Color) {
-    val infiniteTransition = rememberInfiniteTransition(label = "agentSpinner")
-    val rotation by infiniteTransition.animateFloat(
+    val componentTokens = PlumTheme.tokens
+    val infiniteTransition = if (PlumTheme.tokens.motion.reduceMotion) null else rememberInfiniteTransition(label = "agentSpinner")
+    val rotation by infiniteTransition?.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
             animation = tween(1200, easing = LinearEasing),
         ),
         label = "spin",
-    )
+    ) ?: androidx.compose.runtime.rememberUpdatedState(0f)
     Icon(
         imageVector = Icons.Outlined.AutoMode,
-        contentDescription = "Running",
+        contentDescription = stringResource(R.string.component_running),
         tint = color,
         modifier = Modifier
-            .size(20.dp)
+            .size(componentTokens.sizing.iconMd)
             .rotate(rotation),
     )
 }
 
 @Composable
 private fun RunningPill() {
-    val infiniteTransition = rememberInfiniteTransition(label = "runningPill")
-    val alpha by infiniteTransition.animateFloat(
+    val componentTokens = PlumTheme.tokens
+    val infiniteTransition = if (PlumTheme.tokens.motion.reduceMotion) null else rememberInfiniteTransition(label = "runningPill")
+    val alpha by infiniteTransition?.animateFloat(
         initialValue = 0.5f,
         targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
@@ -280,13 +286,13 @@ private fun RunningPill() {
             repeatMode = RepeatMode.Reverse,
         ),
         label = "pillAlpha",
-    )
+    ) ?: androidx.compose.runtime.rememberUpdatedState(0.5f)
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(componentTokens.radius.panel),
         color = Color(0xFF22C55E).copy(alpha = 0.12f),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            modifier = Modifier.padding(horizontal = componentTokens.spacing.inline, vertical = componentTokens.spacing.xxs),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
@@ -299,7 +305,7 @@ private fun RunningPill() {
                     )
             )
             Text(
-                text = "running",
+                text = stringResource(R.string.component_running),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF22C55E).copy(alpha = alpha),
                 fontSize = 9.sp,

@@ -1,5 +1,9 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -43,6 +47,7 @@ fun PermissionRequestCard(
     onAction: (PermissionAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     val haptic = LocalHapticFeedback.current
     val toolInfo = ToolIconMapper.forTool(request.toolName)
     val isDestructive = isDestructiveOperation(request)
@@ -68,7 +73,7 @@ fun PermissionRequestCard(
             timerProgress > 0.25f -> Color(0xFFF59E0B)
             else -> Color(0xFFEF4444)
         },
-        animationSpec = tween(300),
+        animationSpec = tween(componentTokens.motion.slow),
         label = "timerColor",
     )
 
@@ -89,29 +94,29 @@ fun PermissionRequestCard(
             .border(
                 width = 1.dp,
                 color = cardBorderColor,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(componentTokens.radius.md),
             ),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(componentTokens.radius.md),
         color = cardBgColor,
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(componentTokens.spacing.cozy)) {
 
             // ── Top: permission type header ───────────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
             ) {
                 // Permission icon (lock with exclamation for destructive)
                 Box(
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(componentTokens.spacing.xxl)
                         .background(
                             color = if (isDestructive)
                                 Color(0xFFEF4444).copy(alpha = 0.12f)
                             else
                                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(componentTokens.radius.sm),
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -119,19 +124,19 @@ fun PermissionRequestCard(
                         imageVector = if (isDestructive) Icons.Outlined.Warning else Icons.Outlined.Lock,
                         contentDescription = null,
                         tint = if (isDestructive) Color(0xFFEF4444) else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(componentTokens.sizing.iconSm),
                     )
                 }
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (isDestructive) "Permission Required — Destructive" else "Permission Required",
+                        text = if (isDestructive) stringResource(R.string.component_permission_required_destructive) else stringResource(R.string.component_permission_required),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = if (isDestructive) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "The active agent wants to use a tool",
+                        text = stringResource(R.string.component_the_active_agent_wants_to_use_a_tool),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
@@ -150,7 +155,7 @@ fun PermissionRequestCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.md))
 
             // ── Tool info row ─────────────────────────────────────────────────
             Row(
@@ -158,17 +163,17 @@ fun PermissionRequestCard(
                     .fillMaxWidth()
                     .background(
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(componentTokens.radius.sm),
                     )
-                    .padding(10.dp),
+                    .padding(componentTokens.spacing.compact),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.compact),
             ) {
                 Icon(
                     imageVector = toolInfo.icon,
                     contentDescription = null,
                     tint = toolInfo.color,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(componentTokens.sizing.iconInline),
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -190,14 +195,14 @@ fun PermissionRequestCard(
 
             // ── Command / path preview ────────────────────────────────────────
             extractCommandPreview(request)?.let { preview ->
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
                 CommandPreview(
                     text = preview,
                     isDestructive = isDestructive,
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.cozy))
 
             // ── Action buttons ────────────────────────────────────────────────
             // The backend is authoritative. Keep the controls usable after the
@@ -221,12 +226,12 @@ fun PermissionRequestCard(
 
             // ── Timer progress bar ────────────────────────────────────────────
             if (!awaitingServer) {
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(componentTokens.spacing.compact))
                 LinearProgressIndicator(
                     progress = { timerProgress },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(2.dp)
+                        .height(componentTokens.spacing.xxs)
                         .clip(RoundedCornerShape(1.dp)),
                     color = timerColor,
                     trackColor = timerColor.copy(alpha = 0.15f),
@@ -240,23 +245,24 @@ fun PermissionRequestCard(
 
 @Composable
 private fun CountdownChip(seconds: Int, color: Color, progress: Float) {
+    val componentTokens = PlumTheme.tokens
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(componentTokens.radius.panel),
         color = color.copy(alpha = 0.12f),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = componentTokens.spacing.sm, vertical = componentTokens.spacing.xs),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
         ) {
             Icon(
                 imageVector = Icons.Outlined.Timer,
                 contentDescription = null,
                 tint = color,
-                modifier = Modifier.size(12.dp),
+                modifier = Modifier.size(componentTokens.spacing.md),
             )
             Text(
-                text = "${seconds}s",
+                text = stringResource(R.string.component_seconds, seconds),
                 style = MaterialTheme.typography.labelSmall,
                 color = color,
                 fontWeight = FontWeight.SemiBold,
@@ -268,21 +274,23 @@ private fun CountdownChip(seconds: Int, color: Color, progress: Float) {
 
 @Composable
 private fun AwaitingServerChip() {
+    val componentTokens = PlumTheme.tokens
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(componentTokens.radius.panel),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
     ) {
         Text(
-            text = "Checking…",
+            text = stringResource(R.string.component_checking),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = componentTokens.spacing.sm, vertical = componentTokens.spacing.xs),
         )
     }
 }
 
 @Composable
 private fun CommandPreview(text: String, isDestructive: Boolean) {
+    val componentTokens = PlumTheme.tokens
     val bgColor = if (isDestructive) Color(0xFFEF4444).copy(alpha = 0.06f)
     else MaterialTheme.colorScheme.surfaceContainerHighest
     val borderColor = if (isDestructive) Color(0xFFEF4444).copy(alpha = 0.2f)
@@ -291,11 +299,11 @@ private fun CommandPreview(text: String, isDestructive: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(color = bgColor, shape = RoundedCornerShape(6.dp))
-            .border(width = 0.5.dp, color = borderColor, shape = RoundedCornerShape(6.dp))
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .background(color = bgColor, shape = RoundedCornerShape(componentTokens.spacing.inline))
+            .border(width = 0.5.dp, color = borderColor, shape = RoundedCornerShape(componentTokens.spacing.inline))
+            .padding(horizontal = componentTokens.spacing.compact, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
     ) {
         Icon(
             imageVector = Icons.Outlined.Terminal,
@@ -323,15 +331,16 @@ private fun PermissionActions(
     onAllowAlways: () -> Unit,
     onDeny: () -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
     ) {
         // Deny button — always first, muted
         OutlinedButton(
             onClick = onDeny,
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.weight(1f).testTag("permission-action-deny"),
+            contentPadding = PaddingValues(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
             colors = ButtonDefaults.outlinedButtonColors(
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ),
@@ -339,11 +348,11 @@ private fun PermissionActions(
             Icon(
                 imageVector = Icons.Outlined.Block,
                 contentDescription = null,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(componentTokens.sizing.iconXs),
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(componentTokens.spacing.xs))
             Text(
-                text = "Deny",
+                text = stringResource(R.string.component_deny),
                 style = MaterialTheme.typography.labelMedium,
             )
         }
@@ -351,8 +360,8 @@ private fun PermissionActions(
         // Allow once button
         FilledTonalButton(
             onClick = onAllow,
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.weight(1f).testTag("permission-action-allow_once"),
+            contentPadding = PaddingValues(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
             colors = ButtonDefaults.filledTonalButtonColors(
                 containerColor = if (isDestructive)
                     Color(0xFFEF4444).copy(alpha = 0.15f)
@@ -367,11 +376,11 @@ private fun PermissionActions(
             Icon(
                 imageVector = Icons.Outlined.Check,
                 contentDescription = null,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(componentTokens.sizing.iconXs),
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(componentTokens.spacing.xs))
             Text(
-                text = "Allow",
+                text = stringResource(R.string.component_allow),
                 style = MaterialTheme.typography.labelMedium,
             )
         }
@@ -380,8 +389,8 @@ private fun PermissionActions(
         if (!isDestructive) {
             FilledTonalButton(
                 onClick = onAllowAlways,
-                modifier = Modifier.weight(1.3f),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.weight(1.3f).testTag("permission-action-allow_project"),
+                contentPadding = PaddingValues(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
                 colors = ButtonDefaults.filledTonalButtonColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -390,11 +399,11 @@ private fun PermissionActions(
                 Icon(
                     imageVector = Icons.Outlined.CheckCircle,
                     contentDescription = null,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(componentTokens.sizing.iconXs),
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(componentTokens.spacing.xs))
                 Text(
-                    text = "Allow Always",
+                    text = stringResource(R.string.component_allow_always),
                     style = MaterialTheme.typography.labelMedium,
                 )
             }

@@ -1,5 +1,10 @@
 package com.claudewebui.app.ui.screens.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+
+import com.claudewebui.app.R
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,10 +19,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.claudewebui.app.data.model.Checkpoint
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -31,6 +34,7 @@ fun CheckpointScreen(
     onRestoreCheckpoint: (Checkpoint) -> Unit,
     onDeleteCheckpoint: (Checkpoint) -> Unit
 ) {
+    val t = PlumTheme.tokens
     var showCreateDialog by remember { mutableStateOf(false) }
     var checkpointToRestore by remember { mutableStateOf<Checkpoint?>(null) }
     var checkpointToDelete by remember { mutableStateOf<Checkpoint?>(null) }
@@ -40,9 +44,9 @@ fun CheckpointScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("Checkpoints")
+                        Text(stringResource(R.string.chat_panel_checkpoints))
                         Text(
-                            "${checkpoints.size} restore point(s)",
+                            stringResource(R.string.chat_restore_point_count, checkpoints.size),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -50,12 +54,12 @@ fun CheckpointScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.chat_back))
                     }
                 },
                 actions = {
                     IconButton(onClick = { showCreateDialog = true }) {
-                        Icon(Icons.Default.AddCircleOutline, contentDescription = "Create checkpoint")
+                        Icon(Icons.Default.AddCircleOutline, contentDescription = stringResource(R.string.chat_create_checkpoint))
                     }
                 }
             )
@@ -64,7 +68,7 @@ fun CheckpointScreen(
             ExtendedFloatingActionButton(
                 onClick = { showCreateDialog = true },
                 icon = { Icon(Icons.Default.Bookmark, contentDescription = null) },
-                text = { Text("Create Checkpoint") }
+                text = { Text(stringResource(R.string.chat_create_checkpoint_title)) }
             )
         }
     ) { paddingValues ->
@@ -80,9 +84,9 @@ fun CheckpointScreen(
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
-                            start = 16.dp,
-                            end = 16.dp,
-                            top = 16.dp,
+                            start = t.spacing.lg,
+                            end = t.spacing.lg,
+                            top = t.spacing.lg,
                             bottom = 100.dp
                         ),
                         verticalArrangement = Arrangement.spacedBy(0.dp)
@@ -127,35 +131,34 @@ fun CheckpointScreen(
                     tint = MaterialTheme.colorScheme.primary
                 )
             },
-            title = { Text("Restore Checkpoint?") },
+            title = { Text(stringResource(R.string.chat_restore_checkpoint_title)) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(t.spacing.sm)) {
                     Text(
-                        "Restore to: \"${checkpoint.name}\"",
+                        stringResource(R.string.chat_restore_named, checkpoint.name),
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        "This will revert all messages after this checkpoint. " +
-                            "This action cannot be undone.",
+                        stringResource(R.string.chat_restore_warning),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(t.radius.sm)
                     ) {
                         Row(
-                            modifier = Modifier.padding(10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            modifier = Modifier.padding(t.spacing.compact),
+                            horizontalArrangement = Arrangement.spacedBy(t.spacing.inline)
                         ) {
                             Icon(
                                 Icons.Default.Warning,
                                 contentDescription = null,
-                                modifier = Modifier.size(14.dp),
+                                modifier = Modifier.size(t.spacing.cozy),
                                 tint = MaterialTheme.colorScheme.onErrorContainer
                             )
                             Text(
-                                "Destructive operation — messages will be lost",
+                                stringResource(R.string.chat_restore_destructive),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
@@ -173,14 +176,14 @@ fun CheckpointScreen(
                         containerColor = MaterialTheme.colorScheme.primary
                     )
                 ) {
-                    Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Restore")
+                    Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(t.spacing.lg))
+                    Spacer(Modifier.width(t.spacing.xs))
+                    Text(stringResource(R.string.chat_restore))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { checkpointToRestore = null }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.chat_cancel))
                 }
             }
         )
@@ -190,9 +193,9 @@ fun CheckpointScreen(
     checkpointToDelete?.let { checkpoint ->
         AlertDialog(
             onDismissRequest = { checkpointToDelete = null },
-            title = { Text("Delete Checkpoint?") },
+            title = { Text(stringResource(R.string.chat_delete_checkpoint_title)) },
             text = {
-                Text("Delete \"${checkpoint.name}\"? This cannot be undone.")
+                Text(stringResource(R.string.chat_delete_named, checkpoint.name))
             },
             confirmButton = {
                 TextButton(
@@ -204,12 +207,12 @@ fun CheckpointScreen(
                         contentColor = MaterialTheme.colorScheme.error
                     )
                 ) {
-                    Text("Delete")
+                    Text(stringResource(R.string.chat_delete_action))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { checkpointToDelete = null }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.chat_cancel))
                 }
             }
         )
@@ -224,30 +227,31 @@ private fun CheckpointTimelineItem(
     onRestore: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val t = PlumTheme.tokens
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(t.spacing.md)
     ) {
         // Timeline column
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.width(24.dp)
+            modifier = Modifier.width(t.spacing.xl)
         ) {
             // Top connector line
             if (!isFirst) {
                 Box(
                     modifier = Modifier
-                        .width(2.dp)
-                        .height(12.dp)
+                        .width(t.spacing.xxs)
+                        .height(t.spacing.md)
                         .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                 )
             } else {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(t.spacing.md))
             }
             // Dot
             Box(
                 modifier = Modifier
-                    .size(14.dp)
+                    .size(t.spacing.cozy)
                     .clip(CircleShape)
                     .background(
                         if (isFirst) MaterialTheme.colorScheme.primary
@@ -258,7 +262,7 @@ private fun CheckpointTimelineItem(
             if (!isLast) {
                 Box(
                     modifier = Modifier
-                        .width(2.dp)
+                        .width(t.spacing.xxs)
                         .weight(1f)
                         .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                 )
@@ -269,13 +273,13 @@ private fun CheckpointTimelineItem(
         Card(
             modifier = Modifier
                 .weight(1f)
-                .padding(bottom = 12.dp),
-            shape = RoundedCornerShape(12.dp),
+                .padding(bottom = t.spacing.md),
+            shape = RoundedCornerShape(t.radius.md),
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
             Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.padding(t.spacing.cozy),
+                verticalArrangement = Arrangement.spacedBy(t.spacing.inline)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -291,11 +295,11 @@ private fun CheckpointTimelineItem(
                     if (isFirst) {
                         Surface(
                             color = MaterialTheme.colorScheme.primaryContainer,
-                            shape = RoundedCornerShape(4.dp)
+                            shape = RoundedCornerShape(t.spacing.xs)
                         ) {
                             Text(
-                                "Latest",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                stringResource(R.string.chat_checkpoint_latest),
+                                modifier = Modifier.padding(horizontal = t.spacing.inline, vertical = t.spacing.xxs),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
@@ -310,11 +314,11 @@ private fun CheckpointTimelineItem(
                     )
                 }
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(t.spacing.md)
                 ) {
                     MetaChip(
                         icon = Icons.Default.ChatBubbleOutline,
-                        text = "${checkpoint.messageCount} messages"
+                        text = stringResource(R.string.chat_message_count, checkpoint.messageCount)
                     )
                     MetaChip(
                         icon = Icons.Default.Schedule,
@@ -334,14 +338,14 @@ private fun CheckpointTimelineItem(
                         )
                     ) {
                         Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Delete", style = MaterialTheme.typography.labelMedium)
+                        Spacer(Modifier.width(t.spacing.xs))
+                        Text(stringResource(R.string.chat_delete_action), style = MaterialTheme.typography.labelMedium)
                     }
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(t.spacing.xs))
                     FilledTonalButton(onClick = onRestore) {
                         Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Restore", style = MaterialTheme.typography.labelMedium)
+                        Spacer(Modifier.width(t.spacing.xs))
+                        Text(stringResource(R.string.chat_restore), style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -354,6 +358,7 @@ private fun MetaChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     text: String
 ) {
+    val t = PlumTheme.tokens
     Row(
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -361,7 +366,7 @@ private fun MetaChip(
         Icon(
             icon,
             contentDescription = null,
-            modifier = Modifier.size(12.dp),
+            modifier = Modifier.size(t.spacing.md),
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
@@ -377,6 +382,7 @@ private fun CreateCheckpointDialog(
     onDismiss: () -> Unit,
     onCreate: (name: String, description: String?) -> Unit
 ) {
+    val t = PlumTheme.tokens
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
 
@@ -385,24 +391,24 @@ private fun CreateCheckpointDialog(
         icon = {
             Icon(Icons.Default.Bookmark, contentDescription = null)
         },
-        title = { Text("Create Checkpoint") },
+        title = { Text(stringResource(R.string.chat_create_checkpoint_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(t.spacing.md)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Name *") },
+                    label = { Text(stringResource(R.string.chat_name_required)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("e.g. Before refactor") }
+                    placeholder = { Text(stringResource(R.string.chat_checkpoint_name_placeholder)) }
                 )
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Description (optional)") },
+                    label = { Text(stringResource(R.string.chat_description_optional)) },
                     maxLines = 3,
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("What state are you saving?") }
+                    placeholder = { Text(stringResource(R.string.chat_checkpoint_description_placeholder)) }
                 )
             }
         },
@@ -413,21 +419,22 @@ private fun CreateCheckpointDialog(
                 },
                 enabled = name.isNotBlank()
             ) {
-                Text("Create")
+                Text(stringResource(R.string.chat_create))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.chat_cancel)) }
         }
     )
 }
 
 @Composable
 private fun EmptyCheckpointsView(modifier: Modifier = Modifier) {
+    val t = PlumTheme.tokens
     Column(
-        modifier = modifier.padding(32.dp),
+        modifier = modifier.padding(t.spacing.xxl),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(t.spacing.md)
     ) {
         Icon(
             Icons.Default.BookmarkBorder,
@@ -436,12 +443,12 @@ private fun EmptyCheckpointsView(modifier: Modifier = Modifier) {
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
         )
         Text(
-            "No checkpoints yet",
+            stringResource(R.string.chat_no_checkpoints),
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
-            "Create a checkpoint to save the current state of this session",
+            stringResource(R.string.chat_checkpoint_empty_detail),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         )

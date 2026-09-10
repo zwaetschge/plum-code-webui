@@ -1,5 +1,6 @@
 package com.claudewebui.app.core.tiles
 
+import com.claudewebui.app.R
 import android.content.Intent
 import android.os.Build
 import android.service.quicksettings.Tile
@@ -73,14 +74,14 @@ class QuickTileService : TileService() {
             state = if (count > 0) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                subtitle = if (count > 0) "$count running" else "No sessions"
+                subtitle = if (count > 0) getString(R.string.native_tile_running, count) else getString(R.string.native_tile_no_sessions)
             }
 
             // contentDescription for accessibility
             contentDescription = if (count > 0) {
-                "$count active Plum Code session${if (count != 1) "s" else ""}"
+                getString(R.string.native_tile_active, count)
             } else {
-                "Plum Code — tap to start a session"
+                getString(R.string.native_tile_start)
             }
 
             updateTile()

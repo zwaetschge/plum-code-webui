@@ -45,14 +45,16 @@ Node `>=20`, pnpm `>=9`; the package manager is pinned to `pnpm@9.15.0`.
 Entry: `packages/backend/src/index.ts`. Routes are in `src/routes/`; services are in `src/services/`. `src/services/claude/ClaudeProcessManager.ts` manages provider lifecycles and streams Socket.IO events.
 
 - **Codex:** one `codex exec --json` per turn. `translateCodexMessage` streams `item.delta`, `agent_message.delta`, `text.delta`, and `response.output_text.delta`, with `item.completed` fallback. `buildCodexContextPrefix()` prepends up to 40 stored turns, limited to 24k characters, as `[Prior conversation context]`; Codex has no native `--resume`.
-- **OpenCode:** per-user HTTP/SSE server with native streaming and resume. Config, data, OAuth, and account state live under `~/.opencode/users/<sha256-user-key>`; never assign legacy global OAuth state to users. It routes models including `z-ai/glm-*` and Kimi.
-- **Pi:** persistent JSONL RPC using OpenCode connections/models, shared skills, converted agents, and the MCP bridge. `pi-antigravity` supplies Google Antigravity because Pi dropped built-in support in `0.71.0`; `resolvePiExtensionPaths()` provisions it and `PI_ANTIGRAVITY_MODELS` mirrors its catalog. It needs one `/login antigravity` per user and may violate Google's ToS according to the package README.
+- **OpenCode:** per-user HTTP/SSE server with native streaming/resume. Config, data, OAuth, and account state live under `~/.opencode/users/<sha256-user-key>`; never assign legacy global OAuth state. It routes models including `z-ai/glm-*` and Kimi.
+- **Pi:** persistent JSONL RPC using OpenCode connections/models, shared skills, converted agents, and the MCP bridge. `pi-antigravity` supplies Google Antigravity because Pi dropped built-in support in `0.71.0`; `resolvePiExtensionPaths()` provisions it and `PI_ANTIGRAVITY_MODELS` mirrors its catalog. It needs one `/login antigravity` per user and may violate Google's ToS according to the package README. `syncPiConfig()` writes `contextWindow` per model into `models.json` (models.dev limit, else `lookupContextWindow()`). `refreshOpenCodeModelsCache()` fetches `https://models.dev/api.json` into `~/.cache/opencode/models.json` at startup and before each Pi sync (daily, 20 s timeout) because OpenCode never writes that cache in a Pi-only container. Pi's `turn_end` fires per LLM round and threshold compaction runs only after `agent_end`, so `handlePiCompactionEnd()` nudges every automatic compaction; a `compaction_end` without `result` is a failed compaction and only surfaces the error. `syncPiConfig()` sets `compaction.reserveTokens` to 40k unless the user set one.
 - **Kimi Code:** persistent `kimi acp` stdio with native resume, cancellation, streaming, and queued follow-ups. **Do not regress to `kimi -p`.**
 - **Claude Code:** legacy persistent stream-json transport.
 
 Input may queue while a provider is active; interrupts cancel the current turn. Key events: `session:output`, `session:message`, `session:thinking`, `session:tool_use`, `session:agent`, and `session:status`.
 
-**Auth:** Express sessions, JWT, Passport GitHub/Google OAuth, and a Basic Auth guard backed by `app_config`. Harness login routes are `/auth/codex`, `/auth/opencode`, `/auth/pi`, and `/auth/claude`; `/auth/providers` uses `isProviderAvailable()`.
+`session:subscribe-all` joins an account-wide room. Its `session:lifecycle` beat carries `status`, `busy`, `queueDepth`, `activitySummary`, `pendingApprovals`, and `pendingQuestions`.
+
+**Auth:** Express sessions, JWT, Passport GitHub/Google OAuth, and Basic Auth guard backed by `app_config`. Harness login routes are `/auth/codex`, `/auth/opencode`, `/auth/pi`, and `/auth/claude`; `/auth/providers` uses `isProviderAvailable()`. `POST /api/auth/refresh` trades a valid JWT for a fresh one. `GET /api/permissions/pending` returns every approval blocking the caller's sessions.
 
 **Admin/helper LLM:** `packages/backend/src/utils/adminLLM.ts` provides one-shot completions, preferring Codex → OpenCode → Claude unless `ADMIN_LLM_PROVIDER` overrides it. `routes/git.ts` uses it at `/generate-commit-message`. Codex helper calls must retain `--ephemeral`.
 
@@ -138,8 +140,7 @@ Set `basic_auth_enabled` to `false` to disable it.
 - The catalog is available through Settings → Extensions → Skills, `GET /api/claude-config/skills?library=all`, and `node /app/scripts/capability-catalog.mjs search "<task>"`.
 - External packs sync from `/mnt/user/AI/Skills`, `/mnt/unraid/AI/Skills`, then comma-separated `WEBUI_SKILLS_DIRS`. `.skill.zip` imports respect catalog state, aliases, and tombstones.
 - Managed blocks in `AGENTS.md` and `CLAUDE.md` update per session; preserve custom text outside them.
-
-The 37 design and 32 writing profiles are session presentation layers, not executable skills; legacy names remain searchable aliases.
+- The 37 design and 32 writing profiles are session presentation layers, not executable skills; legacy names remain searchable aliases.
 
 ## Environment Variables
 
@@ -187,9 +188,7 @@ The WebUI connects directly to ComfyUI; there is no LoRA Tester sidecar.
 
 `krea2-t2i` `ResolutionSelector` labels aspect ratios differently from Flux (`1:1 (Square)` versus `1:1 (Perfect Square)`). `workflows.ts` translates input values: an unknown combo value is **not** rejected by ComfyUI, and can report success without an image.
 
-- URL resolution: `app_config.comfyui_url` → `$COMFYUI_URL` → `http://192.168.1.23:8188`; settings are re-read for every job.
-- `scripts/mcp-servers/comfyui.mjs` exposes `generate_image`, `generate_image_quality`, `edit_image`, and `inpaint_image`, calling `POST /api/comfyui/internal/generate` with inherited `WEBUI_HOOK_SECRET`.
-- `/generated/*.png` requires Passport session authentication.
+URL resolution: `app_config.comfyui_url` → `$COMFYUI_URL` → `http://192.168.1.23:8188`; settings are re-read for every job. `scripts/mcp-servers/comfyui.mjs` exposes `generate_image`, `generate_image_quality`, `edit_image`, and `inpaint_image`, calling `POST /api/comfyui/internal/generate` with inherited `WEBUI_HOOK_SECRET`. `/generated/*.png` requires Passport session authentication.
 
 MCP tools bind at CLI spawn; start a new session after registration changes. URL changes apply to new jobs immediately.
 
@@ -215,22 +214,22 @@ Zero-dependency bridges are registered in `~/.claude/settings.json` and mirrored
 
 ### The Godot engine container
 
-The WebUI image is Alpine/musl and the official Godot build is glibc-linked, so the engine cannot run in this container — `gcompat` is not enough. `docker/godot/Dockerfile` builds `plum-godot:latest` (Godot 4.7.2 on `eclipse-temurin:17-jdk-noble`) with export templates, the Android SDK, build-tools, `apksigner`, a debug keystore, and pre-patched editor settings for the SDK/JDK paths:
+The WebUI image is Alpine/musl and the official Godot build is glibc-linked, so the engine cannot run in this container. `docker/godot/Dockerfile` builds `plum-godot:latest` (Godot 4.7.2 on `eclipse-temurin:17-jdk-noble`) with export templates, the Android SDK, build-tools, `apksigner`, a debug keystore, and pre-patched editor settings:
 
 ```bash
 docker build -t plum-godot:latest docker/godot     # no --progress flag: legacy builder, no buildx
 ```
 
-`godot.mjs` runs every engine command as a one-shot `docker run` through `docker-socket-proxy` (`docker exec` is blocked there by design). Because the sibling container's volumes are resolved by the **host** daemon, the bridge reads its own mount table with `docker inspect $(hostname)` and re-mounts each host source at the destination path we know it by, so paths are identical on both sides.
+`godot.mjs` runs engine commands as one-shot `docker run` through `docker-socket-proxy`; `docker exec` is blocked by design. The bridge reads its mount table with `docker inspect $(hostname)` and re-mounts each host source at the same destination path.
 
-- **Project paths must live under a shared bind mount** (`/mnt/user`, `/mnt/cache`, `/workspace`). `/tmp` is invisible to the engine, so `godot_run_gdscript` puts its scratch script inside the project when running in docker mode.
+- **Project paths must live under a shared bind mount** (`/mnt/user`, `/mnt/cache`, `/workspace`). `/tmp` is invisible to the engine, so `godot_run_gdscript` puts its scratch script inside the project in docker mode.
 - `GODOT_BIN` is intentionally empty; a local binary would be preferred if one existed. `GODOT_DOCKER_IMAGE` and `GODOT_DOCKER_DISABLED` override the fallback.
-- `godot_add_android_preset` writes `export_presets.cfg` (GUI-authored but CLI-read) **and** sets `rendering/textures/vram_compression/import_etc2_astc=true`, which the exporter hard-requires and which has no CLI flag.
+- `godot_add_android_preset` writes `export_presets.cfg` and sets `rendering/textures/vram_compression/import_etc2_astc=true`, which the exporter hard-requires and which has no CLI flag.
 - `godot_export_android` returns the APK path. The engine container has no adb, so install through android-builder. That container mounts different host paths, so **stage the APK somewhere both see** (for example `/mnt/user/Zwischenspeicher/`). The Godot 4 launcher activity is `com.godot.game.GodotAppLauncher`.
 
 ### Blender to Godot
 
-`py3-numpy` is installed in the WebUI image because Blender's `io_scene_gltf2` addon imports numpy at registration; without it `bpy.ops.export_scene.gltf` does not exist and the handoff silently has no exporter. Note that `hasattr(bpy.ops.export_scene, "gltf")` cannot detect this — `bpy.ops` namespaces resolve lazily. Probe with `"gltf" in dir(bpy.ops.export_scene)`.
+`py3-numpy` is installed in the WebUI image because Blender's `io_scene_gltf2` addon imports numpy at registration; without it `bpy.ops.export_scene.gltf` does not exist and the handoff silently has no exporter. `hasattr(bpy.ops.export_scene, "gltf")` cannot detect this; probe with `"gltf" in dir(bpy.ops.export_scene)`.
 
 Export `.glb` from Blender into the Godot project (`.blend` import would need Blender reachable from the engine container, and it is not), then `godot_import_assets`. Blender is Z-up and Godot Y-up; the glTF exporter converts, so do not add a compensating rotation.
 
@@ -238,12 +237,12 @@ Godot projects should use the `game-engines` skill and android-builder for phone
 
 ## Control Gateway
 
-An external supervisor—Hermes, an OpenCode or Codex CLI, or a script—uses the same API as the user.
+An external supervisor uses the same API as the user.
 
 - Issue a token in Settings → General → Control gateway. The `plum_gw_…` secret is shown once.
 - Send `Authorization: Bearer plum_gw_…`. `resolveAuthenticatedUserId()` resolves it to the owner, so every `requireAuth` route works: sessions, messages, approvals, git, analytics, and settings.
-- `GET /api/gateway/overview` returns sessions with `busy`, `queueDepth`, `activitySummary`, `pendingApprovals`, and `needsAttention`.
-- `GET /api/gateway/events` is an SSE stream: `assistant_message`, `user_message`, `turn_complete`.
+- `GET /api/gateway/overview` returns sessions with `busy`, `queueDepth`, `activitySummary`, `pendingApprovals`, `pendingQuestions`, and `needsAttention`. A session blocked on an agent question counts as needing attention.
+- `GET /api/gateway/events` is an SSE stream: `assistant_message`, `user_message`, `turn_complete`. `GATEWAY_SSE_MAX_PER_USER` (default `4`) caps concurrent streams per user; beyond it the request gets `429`.
 - Gateway tokens cannot manage gateway tokens (`403 GATEWAY_FORBIDDEN`); revocation is immediate and the next request returns 401.
 - Admin-only routes still require an admin owner; the token inherits, but does not exceed, that role.
 

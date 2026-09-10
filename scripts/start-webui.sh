@@ -106,10 +106,20 @@ if [[ ! -d "${ROOT_DIR}/node_modules" ]]; then
 fi
 
 generate_secret() {
-  python - <<'PY'
+  # The container image ships python3 and openssl but no `python` alias, and
+  # this script runs under `set -euo pipefail`, so calling `python` aborted the
+  # start before the backend was ever launched.
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PYSECRET'
 import secrets
 print(secrets.token_hex(16))
-PY
+PYSECRET
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 16
+  else
+    echo "Neither python3 nor openssl is available to generate a secret." >&2
+    return 1
+  fi
 }
 
 if [[ -z "${SESSION_SECRET:-}" ]]; then

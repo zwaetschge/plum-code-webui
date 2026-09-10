@@ -1,3 +1,4 @@
+import { useChatDraft } from '@/hooks/useChatDraft';
 import { useState, useRef, useCallback, useMemo, memo, useEffect } from 'react';
 import {
   MessageCircle,
@@ -135,6 +136,7 @@ function generateId() {
 }
 
 interface ChatInputProps {
+  chatId: string | null;
   sessionId: string;
   onSendMessage: (message: string, options?: ChatSendOptions) => ChatSendResult;
   onSendMessageWithFiles: (
@@ -167,6 +169,7 @@ interface ChatInputProps {
 
 export const ChatInput = memo(function ChatInput({
   sessionId,
+  chatId,
   onSendMessage,
   onSendMessageWithFiles,
   onCommandExecute,
@@ -191,7 +194,7 @@ export const ChatInput = memo(function ChatInput({
   queueDepth = 0,
   onOpenRun,
 }: ChatInputProps) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useChatDraft(sessionId, chatId);
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [showCommandMenu, setShowCommandMenu] = useState(false);
   const [commandMenuIndex, setCommandMenuIndex] = useState(0);
@@ -209,10 +212,13 @@ export const ChatInput = memo(function ChatInput({
 
   // Dictation appends to whatever is already typed rather than replacing it.
   const voice = useVoiceInput(
-    useCallback((text: string) => {
-      setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${text}` : text));
-      inputRef.current?.focus();
-    }, [])
+    useCallback(
+      (text: string) => {
+        setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${text}` : text));
+        inputRef.current?.focus();
+      },
+      [setInput]
+    )
   );
 
   useEffect(() => {
@@ -235,7 +241,7 @@ export const ChatInput = memo(function ChatInput({
     };
     window.addEventListener('plum:quote-message', onQuote);
     return () => window.removeEventListener('plum:quote-message', onQuote);
-  }, []);
+  }, [setInput]);
 
   useEffect(
     () => () => {
@@ -255,7 +261,6 @@ export const ChatInput = memo(function ChatInput({
     uploadAbortRef.current?.abort();
     uploadAbortRef.current = null;
     setAttachments([]);
-    setInput('');
     setDeliveryState(null);
     setAttachmentError('');
     setIsDraggingFiles(false);
@@ -275,13 +280,14 @@ export const ChatInput = memo(function ChatInput({
         event as CustomEvent<{
           clientMessageId: string;
           sessionId: string;
-          status: 'queued' | 'sent' | 'failed';
+          status: 'queued' | 'sent' | 'failed' | 'discarded';
           error?: string;
         }>
       ).detail;
       if (!detail || detail.sessionId !== sessionId) return;
       setDeliveryState((current) => {
         if (!current || current.clientMessageId !== detail.clientMessageId) return current;
+        if (detail.status === 'discarded') return null;
         return {
           ...current,
           status: detail.status,
@@ -495,7 +501,7 @@ export const ChatInput = memo(function ChatInput({
         });
         attachmentsRef.current = [];
         setAttachments([]);
-        setInput('');
+        setInput((current) => (current === draft.message ? '' : current));
         setShowCommandMenu(false);
         setUploadProgress({});
         if (inputRef.current) inputRef.current.style.height = 'auto';
@@ -513,7 +519,7 @@ export const ChatInput = memo(function ChatInput({
         if (uploadAbortRef.current === uploadController) uploadAbortRef.current = null;
       }
     },
-    [onSendMessage, onSendMessageWithFiles]
+    [onSendMessage, onSendMessageWithFiles, setInput]
   );
 
   const handleSubmit = useCallback(
@@ -535,7 +541,7 @@ export const ChatInput = memo(function ChatInput({
       if (currentInput.startsWith('/') && currentAttachments.length === 0) {
         setShowCommandMenu(false);
         await onCommandExecute(currentInput);
-        setInput('');
+        setInput((current) => (current === currentInput ? '' : current));
         if (inputRef.current) inputRef.current.style.height = 'auto';
         return;
       }
@@ -556,6 +562,7 @@ export const ChatInput = memo(function ChatInput({
       deliveryPending,
       onCommandExecute,
       sendDraft,
+      setInput,
     ]
   );
 
@@ -592,18 +599,21 @@ export const ChatInput = memo(function ChatInput({
           : undefined
     : undefined;
 
-  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    setInput(value);
-    setDeliveryState((current) => (current?.status === 'failed' ? null : current));
-    // Show command menu when typing /
-    if (value.startsWith('/') && !value.includes(' ')) {
-      setShowCommandMenu(true);
-      setCommandMenuIndex(0);
-    } else {
-      setShowCommandMenu(false);
-    }
-  }, []);
+  const handleInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = e.target.value;
+      setInput(value);
+      setDeliveryState((current) => (current?.status === 'failed' ? null : current));
+      // Show command menu when typing /
+      if (value.startsWith('/') && !value.includes(' ')) {
+        setShowCommandMenu(true);
+        setCommandMenuIndex(0);
+      } else {
+        setShowCommandMenu(false);
+      }
+    },
+    [setInput]
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -629,14 +639,17 @@ export const ChatInput = memo(function ChatInput({
         handleSubmit(e as unknown as React.FormEvent);
       }
     },
-    [showCommandMenu, filteredCommands, commandMenuIndex, handleSubmit]
+    [showCommandMenu, filteredCommands, commandMenuIndex, handleSubmit, setInput]
   );
 
-  const handleCommandSelect = useCallback((cmd: Command) => {
-    setInput(`/${cmd.name} `);
-    setShowCommandMenu(false);
-    inputRef.current?.focus();
-  }, []);
+  const handleCommandSelect = useCallback(
+    (cmd: Command) => {
+      setInput(`/${cmd.name} `);
+      setShowCommandMenu(false);
+      inputRef.current?.focus();
+    },
+    [setInput]
+  );
 
   // Helper to get icon for attachment type
   const getAttachmentIcon = (type: AttachmentType) => {

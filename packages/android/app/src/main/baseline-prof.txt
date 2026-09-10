@@ -1,0 +1,72 @@
+# Hand-authored baseline profile for Plum Code (Android).
+#
+# AGP 8.x compiles src/main/baseline-prof.txt into the APK/AAB automatically;
+# androidx.profileinstaller writes it into ART's profile directory on first
+# launch so the cold-start and chat paths are AOT-compiled before the
+# device has collected any JIT samples of its own.
+#
+# H = hot, S = startup, P = post-startup. Method rules use `->name(args)ret`,
+# class rules end with `;`. Wildcards keep the file valid across refactors;
+# `Lcom/claudewebui/app/**;` pre-verifies every app class so class loading
+# on the main thread does not stall on verification.
+#
+# Regenerate with a Macrobenchmark once one exists; until then keep this in
+# sync with the cold-start path: Application -> Koin -> MainActivity ->
+# navigation -> dashboard -> chat.
+
+# --- App: process start and first frame ---------------------------------------
+HSPLcom/claudewebui/app/ClaudeWebUIApp;->**(**)**
+HSPLcom/claudewebui/app/MainActivity;->**(**)**
+HSPLcom/claudewebui/app/ComposableSingletons$MainActivityKt;->**(**)**
+HSPLcom/claudewebui/app/BuildConfig;->**(**)**
+HSPLcom/claudewebui/app/di/**;->**(**)**
+HSPLcom/claudewebui/app/core/diagnostics/**;->**(**)**
+HSPLcom/claudewebui/app/core/security/**;->**(**)**
+HSPLcom/claudewebui/app/core/network/**;->**(**)**
+HSPLcom/claudewebui/app/core/notifications/LocalNotificationManager;->**(**)**
+HSPLcom/claudewebui/app/core/notifications/NotificationService;->**(**)**
+
+# --- Persistence: Room opens and the first session/message reads ---------------
+HSPLcom/claudewebui/app/data/local/**;->**(**)**
+HSPLcom/claudewebui/app/data/repository/**;->**(**)**
+HSPLcom/claudewebui/app/data/model/**;->**(**)**
+
+# --- Navigation, theme, first screens ------------------------------------------
+HSPLcom/claudewebui/app/navigation/**;->**(**)**
+HSPLcom/claudewebui/app/ui/theme/**;->**(**)**
+HSPLcom/claudewebui/app/ui/screens/auth/**;->**(**)**
+HSPLcom/claudewebui/app/ui/screens/dashboard/**;->**(**)**
+HSPLcom/claudewebui/app/ui/screens/chat/**;->**(**)**
+HSPLcom/claudewebui/app/ui/components/**;->**(**)**
+
+# --- Pre-verify every app class -----------------------------------------------
+Lcom/claudewebui/app/**;
+
+# --- Libraries touched before the first frame ---------------------------------
+# Koin container + Android context module
+Lorg/koin/**;
+HSPLorg/koin/core/**;->**(**)**
+HSPLorg/koin/android/**;->**(**)**
+# Room runtime (database open, DAO invalidation tracker)
+Landroidx/room/**;
+HSPLandroidx/room/**;->**(**)**
+Landroidx/sqlite/**;
+# kotlinx.serialization (session/message JSON)
+Lkotlinx/serialization/**;
+HSPLkotlinx/serialization/json/**;->**(**)**
+# Ktor client (ApiClient construction, first requests)
+Lio/ktor/**;
+HSPLio/ktor/client/**;->**(**)**
+# Socket.IO + Engine.IO (SocketManager.connect on the dashboard)
+Lio/socket/**;
+HSPLio/socket/**;->**(**)**
+# Encrypted prefs (TokenStore.init) and Tink primitives behind it
+Landroidx/security/crypto/**;
+HSPLandroidx/security/crypto/**;->**(**)**
+# Compose runtime/UI/Material3 hot paths are covered by the AndroidX-shipped
+# library profiles; only the navigation host is listed so the first NavHost
+# composition is compiled.
+Landroidx/navigation/**;
+HSPLandroidx/navigation/compose/**;->**(**)**
+# Coroutines dispatchers created at process start
+HSPLkotlinx/coroutines/**;->**(**)**

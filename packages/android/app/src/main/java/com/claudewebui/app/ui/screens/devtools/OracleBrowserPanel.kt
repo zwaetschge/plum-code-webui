@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.devtools
 
+import com.claudewebui.app.R
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -45,6 +46,11 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun OracleBrowserPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val browser = state.oracle
     var targetUrl by remember { mutableStateOf("") }
     var textInput by remember { mutableStateOf("") }
@@ -65,7 +71,7 @@ fun OracleBrowserPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
         }
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md)) {
         GlassPanel(Modifier.fillMaxWidth(), radius = 17.dp) {
             Column(
                 Modifier.fillMaxWidth().padding(15.dp),
@@ -74,7 +80,7 @@ fun OracleBrowserPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            browser?.title?.takeIf(String::isNotBlank) ?: "Oracle browser",
+                            browser?.title?.takeIf(String::isNotBlank) ?: screenResources.getString(R.string.devtools_oracle_browser_1c11f),
                             color = PlumText,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -82,9 +88,9 @@ fun OracleBrowserPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                         )
                         Text(
                             when (browser?.mode) {
-                                "manual" -> "Embedded browser"
-                                "remote" -> "Remote browser"
-                                else -> "Profile copy"
+                                "manual" -> screenResources.getString(R.string.devtools_embedded_browser_a0345)
+                                "remote" -> screenResources.getString(R.string.devtools_remote_browser_f26c1)
+                                else -> screenResources.getString(R.string.devtools_profile_copy_f4df5)
                             },
                             color = PlumMuted,
                             fontSize = 11.sp,
@@ -110,24 +116,24 @@ fun OracleBrowserPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                 OutlinedTextField(
                     value = targetUrl,
                     onValueChange = { targetUrl = it },
-                    label = { Text("URL") },
+                    label = { Text(screenResources.getString(R.string.devtools_url_0e2d9)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)) {
                     if (browser?.running == true) {
-                        OracleChip("Go", state.isOracleActionPending) {
+                        OracleChip(screenResources.getString(R.string.devtools_go_2e0b4), state.isOracleActionPending) {
                             viewModel.navigateOracle(targetUrl)
                         }
-                        OracleChip("Reload", state.isOracleActionPending) {
+                        OracleChip(screenResources.getString(R.string.devtools_reload_cce71), state.isOracleActionPending) {
                             viewModel.reloadOracle()
                         }
-                        OracleChip("Stop", state.isOracleActionPending, destructive = true) {
+                        OracleChip(screenResources.getString(R.string.devtools_stop_9e253), state.isOracleActionPending, destructive = true) {
                             viewModel.stopOracle()
                         }
                     } else {
-                        OracleChip("Start", state.isOracleActionPending) {
+                        OracleChip(screenResources.getString(R.string.devtools_start_952f3), state.isOracleActionPending) {
                             viewModel.startOracle(targetUrl)
                         }
                     }
@@ -140,11 +146,11 @@ fun OracleBrowserPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
 
             GlassPanel(Modifier.fillMaxWidth(), radius = 17.dp) {
                 Column(
-                    Modifier.fillMaxWidth().padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.fillMaxWidth().padding(screenTokens.spacing.cozy),
+                    verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                 ) {
                     Text(
-                        "Input",
+                        screenResources.getString(R.string.devtools_input_b568d),
                         color = PlumText,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
@@ -152,11 +158,11 @@ fun OracleBrowserPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                     OutlinedTextField(
                         value = textInput,
                         onValueChange = { textInput = it },
-                        label = { Text("Text to type") },
+                        label = { Text(screenResources.getString(R.string.devtools_text_to_type_e9a85)) },
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        OracleChip("Type", textInput.isEmpty()) {
+                        OracleChip(screenResources.getString(R.string.devtools_type_3deb7), textInput.isEmpty()) {
                             viewModel.sendOracleText(textInput)
                             textInput = ""
                         }
@@ -167,12 +173,12 @@ fun OracleBrowserPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                        OracleChip("Scroll up", false) { viewModel.scrollOracle(-520f) }
-                        OracleChip("Scroll down", false) { viewModel.scrollOracle(520f) }
+                        OracleChip(screenResources.getString(R.string.devtools_scroll_up_4d07e), false) { viewModel.scrollOracle(-520f) }
+                        OracleChip(screenResources.getString(R.string.devtools_scroll_down_3a2e1), false) { viewModel.scrollOracle(520f) }
                     }
                     Text(
-                        "Tap the browser image to click. Text and special keys are sent " +
-                            "through the controls above.",
+                        screenResources.getString(R.string.devtools_tap_the_browser_image_to_click_text_and_special_keys_are_sent_58bae) +
+                            screenResources.getString(R.string.devtools_through_the_controls_above_bba65),
                         color = PlumMuted,
                         fontSize = 10.sp,
                     )
@@ -184,6 +190,9 @@ fun OracleBrowserPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
 
 @Composable
 private fun OracleFrame(state: DevToolsUiState, viewModel: DevToolsViewModel) {
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val frame = state.oracleFrame
     val bitmap = remember(frame) {
         frame?.let { bytes ->
@@ -216,7 +225,7 @@ private fun OracleFrame(state: DevToolsUiState, viewModel: DevToolsViewModel) {
             } else {
                 Image(
                     painter = BitmapPainter(bitmap),
-                    contentDescription = "Oracle browser frame",
+                    contentDescription = screenResources.getString(R.string.devtools_oracle_browser_frame_10315),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxWidth().aspectRatio(ratio),
                 )
@@ -232,6 +241,8 @@ private fun OracleChip(
     destructive: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Text(
         label,
         color = if (disabled) PlumMuted else if (destructive) PlumRed else PlumText,
@@ -243,6 +254,6 @@ private fun OracleChip(
                 if (destructive) PlumRed.copy(alpha = .12f) else PlumAccent.copy(alpha = .18f),
             )
             .clickable(enabled = !disabled, onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 8.dp),
+            .padding(horizontal = 13.dp, vertical = screenTokens.spacing.sm),
     )
 }

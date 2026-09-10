@@ -140,6 +140,36 @@ export const rateLimiters = {
     message: 'Sending messages too quickly, please slow down',
   }),
 
+  // Localhost port probing: 12 per minute. One request opens up to 48 outbound
+  // connections to 127.0.0.1, so an unlimited endpoint is a scan amplifier
+  // against whatever else runs in the container.
+  portProbe: createRateLimiter({
+    name: 'portProbe',
+    windowMs: 60 * 1000,
+    maxRequests: 12,
+    message: 'Scanning preview ports too quickly, please wait',
+  }),
+
+  // Speech-to-text: 20 per minute. Each request forwards up to 25 MB to an
+  // external Whisper service, so this is both an egress and a cost limit.
+  transcribe: createRateLimiter({
+    name: 'transcribe',
+    windowMs: 60 * 1000,
+    maxRequests: 20,
+    message: 'Too many transcription requests, please wait',
+  }),
+
+  // Provider quota lookups: 60 per minute. Each one is an outbound call to
+  // Anthropic, OpenAI or Z.AI with the user's own OAuth token, so an unlimited
+  // endpoint lets a stuck frontend poll loop burn through the upstream's own
+  // rate limit and get the account throttled.
+  usageLimits: createRateLimiter({
+    name: 'usageLimits',
+    windowMs: 60 * 1000,
+    maxRequests: 60,
+    message: 'Too many quota lookups, please wait',
+  }),
+
   // Image generation: 5 per minute
   imageGeneration: createRateLimiter({
     name: 'imageGeneration',

@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.activity
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,18 +20,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.FilterAlt
 import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.PauseCircle
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material3.TextButton
+import com.claudewebui.app.data.local.entity.OutboxStatus
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -47,8 +47,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.claudewebui.app.data.model.Session
-import com.claudewebui.app.data.model.SessionStatus
+import com.claudewebui.app.core.network.ConnectionState
+import com.claudewebui.app.core.network.SocketManager
+import com.claudewebui.app.ui.components.dashboard.IdlePrefs
+import com.claudewebui.app.ui.components.dashboard.SessionActivity
+import com.claudewebui.app.ui.components.dashboard.SessionState
+import com.claudewebui.app.ui.components.dashboard.SupervisedSession
+import com.claudewebui.app.ui.components.dashboard.accentFor
+import com.claudewebui.app.ui.components.dashboard.superviseSessions
 import com.claudewebui.app.ui.components.common.GlassPanel
 import com.claudewebui.app.ui.components.common.MainDestination
 import com.claudewebui.app.ui.components.common.PlumAccent
@@ -63,7 +69,6 @@ import com.claudewebui.app.ui.components.common.PlumIconButton
 import com.claudewebui.app.ui.components.common.PlumMuted
 import com.claudewebui.app.ui.components.common.PlumRed
 import com.claudewebui.app.ui.components.common.PlumScreenHeader
-import com.claudewebui.app.ui.components.common.PlumSubtleFill
 import com.claudewebui.app.ui.components.common.PlumText
 import com.claudewebui.app.ui.components.common.SectionHeading
 import com.claudewebui.app.ui.components.common.Sparkline
@@ -71,10 +76,19 @@ import com.claudewebui.app.ui.components.common.StatusPill
 import com.claudewebui.app.ui.components.common.providerColor
 import com.claudewebui.app.ui.components.common.sessionModel
 import com.claudewebui.app.ui.screens.dashboard.DashboardViewModel
+import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 
-private enum class ActivityFilter(val label: String) {
-    ALL("All"), AGENTS("Agents"), TOOLS("Tools"), PERMISSIONS("Permissions"), ERRORS("Errors")
+private enum class ActivityFilter(private val labelRes: Int, val activity: SessionActivity?) {
+    ALL(R.string.activity_all_6a720, null),
+    NEEDS_YOU(R.string.activity_needs_you_0d9d0, SessionActivity.NEEDS_YOU),
+    WORKING(R.string.activity_working_3b4df, SessionActivity.WORKING),
+    QUEUED(R.string.activity_queued_6a599, SessionActivity.QUEUED),
+    FAILED(R.string.activity_failed_09fef, SessionActivity.FAILED);
+
+    val label: String
+        @androidx.compose.runtime.Composable get() = androidx.compose.ui.res.stringResource(labelRes)
+
 }
 
 @Composable
@@ -82,138 +96,130 @@ fun ActivityScreen(
     onNavigateMain: (MainDestination) -> Unit,
     onOpenSession: (String) -> Unit,
     viewModel: DashboardViewModel = koinViewModel(),
+    activityViewModel: ActivityViewModel = koinViewModel(),
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
+    val activity by activityViewModel.uiState.collectAsState()
+    val outbox by activityViewModel.outbox.collectAsState()
+    var showOutbox by remember { mutableStateOf(false) }
+    val socket: SocketManager = koinInject()
+    val connection by socket.connectionState.collectAsState()
+    val idleAfter by IdlePrefs.threshold.collectAsState()
     var filter by remember { mutableStateOf(ActivityFilter.ALL) }
-    val sessions = when (filter) {
-        ActivityFilter.ERRORS -> state.sessions.filter { it.status == SessionStatus.ERROR }
-        else -> state.sessions
+
+    // Ordered by urgency, not by recency: the whole point of this screen is that
+    // the session that has been blocked for an hour outranks the one that
+    // printed a token a second ago. superviseSessions already orders groups
+    // that way, so flattening it keeps one definition of "urgent".
+    val ranked = remember(state.sessions, idleAfter) {
+        superviseSessions(state.sessions, idleAfterMinutes = idleAfter.minutes).flatMap { it.sessions }
     }
-    val running = state.sessions.count { it.status == SessionStatus.RUNNING }
-    val waiting = state.sessions.count { it.status == SessionStatus.STOPPED }
-    val errors = state.sessions.count { it.status == SessionStatus.ERROR }
+    val rows = remember(ranked, filter) {
+        filter.activity?.let { wanted -> ranked.filter { it.state.activity == wanted } } ?: ranked
+    }
+    val counts = remember(ranked) { ranked.groupingBy { it.state.activity }.eachCount() }
+    val needsYou = counts[SessionActivity.NEEDS_YOU] ?: 0
+    val working = counts[SessionActivity.WORKING] ?: 0
+    val queued = counts[SessionActivity.QUEUED] ?: 0
+    val failed = counts[SessionActivity.FAILED] ?: 0
 
     PlumBackdrop {
         PlumNavScaffold(
             selected = MainDestination.ACTIVITY,
             onNavigate = onNavigateMain,
-            badgeCount = errors,
+            badgeCount = needsYou + failed,
         ) { padding ->
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
                 contentPadding = PaddingValues(bottom = 18.dp + padding.calculateBottomPadding()),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.cozy),
             ) {
                 item {
                     PlumScreenHeader(
-                        title = "Activity",
-                        subtitle = "Realtime overview of agents, tools and events",
-                        live = true,
+                        title = screenResources.getString(R.string.activity_activity_81c0d),
+                        subtitle = screenResources.getString(R.string.activity_realtime_overview_of_agents_tools_and_events_a04c0),
+                        live = connection == ConnectionState.CONNECTED,
                         actions = {
-                            PlumIconButton(Icons.Outlined.FilterAlt, "Filter", {})
-                            PlumIconButton(Icons.Outlined.Search, "Search", {})
+                            PlumIconButton(
+                                icon = Icons.Outlined.Refresh,
+                                contentDescription = screenResources.getString(R.string.activity_refresh_56e3b),
+                                onClick = {
+                                    viewModel.refresh()
+                                    activityViewModel.refresh()
+                                },
+                            )
                         },
                     )
                 }
-                // Durable notification feed: what happened while the app was
-                // closed, not just what the live socket happens to deliver.
-                if (state.notifications.isNotEmpty()) {
-                    item {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "Notifications" +
-                                    if (state.unreadNotifications > 0) " (${state.unreadNotifications})" else "",
-                                color = PlumText,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                "Mark read",
-                                color = PlumAccent,
-                                fontSize = 12.sp,
-                                modifier = Modifier
-                                    .clickable { viewModel.markNotificationsRead() }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                            )
-                            Text(
-                                "Clear",
-                                color = PlumMuted,
-                                fontSize = 12.sp,
-                                modifier = Modifier
-                                    .clickable { viewModel.clearNotifications() }
-                                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                            )
-                        }
+                item {
+                    TextButton(onClick = { showOutbox = !showOutbox }, modifier = Modifier.padding(horizontal = screenTokens.spacing.cozy)) {
+                        Text(screenResources.getString(R.string.activity_outbox_1_s_this_device_9640e, outbox.size))
                     }
-                    items(state.notifications.take(20), key = { it.id }) { note ->
+                }
+                if (showOutbox) {
+                    if (outbox.isEmpty()) item {
+                        Text(screenResources.getString(R.string.activity_no_messages_waiting_to_be_sent_1f175), modifier = Modifier.padding(horizontal = screenTokens.spacing.section), color = PlumMuted)
+                    }
+                    items(outbox, key = { "outbox_${it.clientMessageId}" }) { entry ->
                         Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (note.readAt == null) PlumSubtleFill else Color.Transparent)
-                                .clickable {
-                                    viewModel.markNotificationsRead(listOf(note.id))
-                                    note.sessionId?.let(onOpenSession)
-                                }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            Modifier.padding(horizontal = screenTokens.spacing.cozy).fillMaxWidth()
+                                .background(LocalPlumPalette.current.surfaceStrong, RoundedCornerShape(screenTokens.radius.lg))
+                                .padding(screenTokens.spacing.lg),
+                            verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                         ) {
-                            Text(
-                                note.title,
-                                color = when (note.kind) {
-                                    "error" -> PlumRed
-                                    "approval", "question", "usage_alert" -> PlumAmber
-                                    "goal" -> PlumGreen
-                                    else -> PlumText
-                                },
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            note.body?.takeIf { it.isNotBlank() }?.let {
-                                Text(
-                                    it,
-                                    color = PlumMuted,
-                                    fontSize = 11.sp,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                            Text(state.sessions.find { it.id == entry.sessionId }?.name ?: screenResources.getString(R.string.activity_unavailable_session_64980), fontWeight = FontWeight.SemiBold)
+                            Text(screenResources.getString(R.string.activity_chat_1_s_2_s_6330a, entry.chatId ?: screenResources.getString(R.string.activity_original_chat_b08b0), java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(entry.createdAt))), color = PlumMuted)
+                            Text(entry.content, maxLines = 5, overflow = TextOverflow.Ellipsis)
+                            Text(entry.error ?: screenResources.getString(R.string.activity_waiting_for_server_confirmation_2d41d), color = if (entry.deliveryStatus == OutboxStatus.FAILED) PlumRed else PlumMuted)
+                            Row {
+                                TextButton(onClick = { onOpenSession(entry.sessionId) }) { Text(screenResources.getString(R.string.activity_open_session_77709)) }
+                                if (entry.deliveryStatus == OutboxStatus.FAILED) {
+                                    TextButton(onClick = { activityViewModel.discardFailed(entry.clientMessageId) }) { Text(screenResources.getString(R.string.activity_discard_36fff), color = PlumRed) }
+                                }
                             }
                         }
                     }
                 }
-
                 item {
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = screenTokens.spacing.cozy),
+                        horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                     ) {
-                        ActivityMetric("Running", running, Icons.Outlined.PlayCircle, PlumGreen, Modifier.weight(1f))
-                        ActivityMetric("Waiting", waiting, Icons.Outlined.PauseCircle, PlumAmber, Modifier.weight(1f))
-                        ActivityMetric("Tools", 0, Icons.Outlined.Build, PlumBlue, Modifier.weight(1f))
-                        ActivityMetric("Permissions", 0, Icons.Outlined.Security, PlumAccent, Modifier.weight(1f))
-                        ActivityMetric("Errors", errors, Icons.Outlined.ErrorOutline, PlumRed, Modifier.weight(1f))
+                        ActivityMetric(screenResources.getString(R.string.activity_needs_you_0d9d0), needsYou, Icons.Outlined.Security, PlumAmber, Modifier.weight(1f))
+                        ActivityMetric(screenResources.getString(R.string.activity_working_3b4df), working, Icons.Outlined.PlayCircle, PlumGreen, Modifier.weight(1f))
+                        ActivityMetric(screenResources.getString(R.string.activity_queued_6a599), queued, Icons.Outlined.Layers, PlumAccent, Modifier.weight(1f))
+                        ActivityMetric(screenResources.getString(R.string.activity_failed_09fef), failed, Icons.Outlined.ErrorOutline, PlumRed, Modifier.weight(1f))
+                        // The only tile with a history behind it, so the only
+                        // one that draws a curve.
+                        ActivityMetric(
+                            label = screenResources.getString(R.string.activity_requests_24h_f8785),
+                            value = activity.requestsToday.toInt(),
+                            icon = Icons.Outlined.Bolt,
+                            color = PlumBlue,
+                            modifier = Modifier.weight(1f),
+                            trend = activity.requestsPerHour,
+                        )
                     }
                 }
                 item {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = screenTokens.spacing.cozy),
+                        horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                     ) {
                         ActivityFilter.entries.forEach { option ->
                             Box(
                                 Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(screenTokens.radius.md))
                                     .background(if (filter == option) LocalPlumPalette.current.selectionTint else Color.Transparent)
-                                    .border(1.dp, if (filter == option) PlumAccent else PlumBorder, RoundedCornerShape(12.dp))
+                                    .border(1.dp, if (filter == option) PlumAccent else PlumBorder, RoundedCornerShape(screenTokens.radius.md))
                                     .clickable { filter = option }
-                                    .padding(vertical = 10.dp),
+                                    .padding(vertical = screenTokens.spacing.compact),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
@@ -228,34 +234,38 @@ fun ActivityScreen(
                 }
                 item {
                     SectionHeading(
-                        title = "Live Activity",
-                        modifier = Modifier.padding(horizontal = 16.dp),
+                        title = screenResources.getString(R.string.activity_live_activity_93df4),
+                        modifier = Modifier.padding(horizontal = screenTokens.spacing.lg),
                         trailing = {
-                            Text("Clear completed", color = PlumAccent, fontSize = 13.sp)
+                            Text(
+                                if (rows.isEmpty()) "" else screenResources.getQuantityString(R.plurals.activity_session_count, rows.size, rows.size),
+                                color = PlumMuted,
+                                fontSize = 13.sp,
+                            )
                         },
                     )
                 }
-                item {
-                    GlassPanel(Modifier.fillMaxWidth().padding(horizontal = 14.dp), radius = 18.dp) {
-                        if (sessions.isEmpty()) {
+                if (rows.isEmpty()) {
+                    item {
+                        GlassPanel(Modifier.fillMaxWidth().padding(horizontal = screenTokens.spacing.cozy), radius = 18.dp) {
                             Column(
                                 Modifier.fillMaxWidth().padding(34.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 Icon(Icons.Outlined.CheckCircle, null, tint = PlumMuted, modifier = Modifier.size(30.dp))
                                 Spacer(Modifier.height(8.dp))
-                                Text("No matching activity", color = PlumText, fontWeight = FontWeight.SemiBold)
-                                Text("New live events will appear here.", color = PlumMuted, fontSize = 12.sp)
+                                Text(screenResources.getString(R.string.activity_no_matching_activity_26303), color = PlumText, fontWeight = FontWeight.SemiBold)
+                                Text(screenResources.getString(R.string.activity_new_live_events_will_appear_here_31fb0), color = PlumMuted, fontSize = 12.sp)
                             }
-                        } else {
-                            Column {
-                                sessions.forEachIndexed { index, session ->
-                                    ActivityRow(session = session, onClick = { onOpenSession(session.id) })
-                                    if (index < sessions.lastIndex) {
-                                        Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(1.dp).background(PlumBorder))
-                                    }
-                                }
-                            }
+                        }
+                    }
+                } else {
+                    // One lazy item per row. The list used to be a Column inside
+                    // a single item, which composed and measured every session
+                    // on screen even when forty of them were below the fold.
+                    items(rows, key = { it.session.id }) { row ->
+                        GlassPanel(Modifier.fillMaxWidth().padding(horizontal = screenTokens.spacing.cozy), radius = 18.dp) {
+                            ActivityRow(row = row, onClick = { onOpenSession(row.session.id) })
                         }
                     }
                 }
@@ -264,9 +274,18 @@ fun ActivityScreen(
                         Modifier.fillMaxWidth().padding(horizontal = 18.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(Modifier.size(8.dp).background(PlumGreen, CircleShape))
-                        Text("  Connected to plum-code-webui", color = PlumMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                        Text("Last update: just now", color = PlumMuted, fontSize = 12.sp)
+                        val (dot, text) = when (connection) {
+                            ConnectionState.CONNECTED -> PlumGreen to screenResources.getString(R.string.activity_connected_to_plum_code_webui_82f9f)
+                            ConnectionState.CONNECTING -> PlumAmber to screenResources.getString(R.string.activity_connecting_fd3e7)
+                            ConnectionState.RECONNECTING -> PlumAmber to screenResources.getString(R.string.activity_reconnecting_8a8b9)
+                            ConnectionState.ERROR -> PlumRed to screenResources.getString(R.string.activity_connection_failed_202ca)
+                            ConnectionState.DISCONNECTED -> PlumMuted to screenResources.getString(R.string.activity_offline_showing_cached_state_56761)
+                        }
+                        Box(Modifier.size(8.dp).background(dot, CircleShape))
+                        Text("  $text", color = PlumMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        activity.error?.let {
+                            Text(screenResources.getString(R.string.activity_history_unavailable_5bcef), color = PlumMuted, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -281,34 +300,41 @@ private fun ActivityMetric(
     icon: ImageVector,
     color: Color,
     modifier: Modifier = Modifier,
+    trend: List<Float> = emptyList(),
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     GlassPanel(modifier.height(112.dp), radius = 16.dp) {
         Column(
-            Modifier.fillMaxSize().padding(horizontal = 7.dp, vertical = 12.dp),
+            Modifier.fillMaxSize().padding(horizontal = 7.dp, vertical = screenTokens.spacing.md),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
             Box(Modifier.size(31.dp).background(color.copy(alpha = .16f), CircleShape), contentAlignment = Alignment.Center) {
-                Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
+                Icon(icon, null, tint = color, modifier = Modifier.size(screenTokens.sizing.iconInline))
             }
             Text(value.toString(), color = color, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             Text(label, color = PlumMuted, fontSize = 9.sp, maxLines = 1)
-            Sparkline(color, listOf(1f, 1f, 2f, 1f, 3f, 2f, value.toFloat().coerceAtLeast(1f)), Modifier.fillMaxWidth().height(11.dp))
+            // No invented shape: a tile without real history keeps the space and
+            // draws nothing.
+            if (trend.size >= 2) {
+                Sparkline(color, trend, Modifier.fillMaxWidth().height(11.dp))
+            } else {
+                Spacer(Modifier.height(11.dp))
+            }
         }
     }
 }
 
 @Composable
-private fun ActivityRow(session: Session, onClick: () -> Unit) {
-    val color = when (session.status) {
-        SessionStatus.RUNNING -> PlumGreen
-        SessionStatus.STOPPED -> PlumMuted
-        SessionStatus.ERROR -> PlumRed
-    }
-    val label = when (session.status) {
-        SessionStatus.RUNNING -> "Running"
-        SessionStatus.STOPPED -> "Completed"
-        SessionStatus.ERROR -> "Error"
-    }
+private fun ActivityRow(row: SupervisedSession, onClick: () -> Unit) {
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val session = row.session
+    val state: SessionState = row.state
+    val accent = accentFor(state)
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(15.dp),
         verticalAlignment = Alignment.Top,
@@ -319,10 +345,14 @@ private fun ActivityRow(session: Session, onClick: () -> Unit) {
         ) {
             Icon(Icons.Outlined.PlayCircle, null, tint = providerColor(session.cliProvider), modifier = Modifier.size(23.dp))
         }
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+        Column(Modifier.weight(1f).padding(horizontal = screenTokens.spacing.md)) {
             Text(session.name, color = PlumText, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // What the agent is actually doing, falling back to the last thing
+            // it said. "Session ready" was shown even for a failed session.
             Text(
-                session.lastMessage ?: "Session ready",
+                session.activitySummary?.takeIf { it.isNotBlank() }
+                    ?: session.lastMessage?.takeIf { it.isNotBlank() }
+                    ?: screenResources.getString(R.string.activity_nothing_in_progress_a710d),
                 color = PlumMuted,
                 fontSize = 13.sp,
                 maxLines = 1,
@@ -331,9 +361,11 @@ private fun ActivityRow(session: Session, onClick: () -> Unit) {
             Text("${sessionModel(session)}  •  ${session.workingDirectory.substringAfterLast('/')}", color = PlumMuted, fontSize = 11.sp)
         }
         Column(horizontalAlignment = Alignment.End) {
-            StatusPill(label, color)
+            // The verdict, which already carries the queue depth, the approval
+            // count and how long it has been quiet.
+            StatusPill(state.label, accent)
             Spacer(Modifier.height(7.dp))
-            Icon(Icons.Outlined.MoreVert, "More", tint = PlumMuted, modifier = Modifier.size(20.dp))
+            Icon(Icons.Outlined.MoreVert, screenResources.getString(R.string.activity_more_4bab2), tint = PlumMuted, modifier = Modifier.size(screenTokens.sizing.iconMd))
         }
     }
 }

@@ -16,11 +16,9 @@ process.env.ENCRYPTION_KEY = 'websocket-auth-test-encryption-key-00000000000';
 process.env.WEBUI_DATA_DIR = temporaryDirectory;
 process.env.WEBUI_SUPPRESS_BOOTSTRAP_CREDENTIAL_LOG = '1';
 
-const { useTestSchema, createTestSchema, dropTestSchema } = await import(
-  '../src/db/testing.js'
-);
+const { useTestSchema, createTestSchema, dropTestSchema } = await import('../src/db/testing.js');
 useTestSchema();
-const { all: pgAll, get: pgGet, run: pgRun } = await import('../src/db/pg.js');
+const { run: pgRun } = await import('../src/db/pg.js');
 await createTestSchema();
 const { disconnectUserSockets, setupWebSocket } = await import('../src/websocket/index.js');
 const { revokeUserHttpSessions } = await import('../src/services/SqliteSessionStore.js');

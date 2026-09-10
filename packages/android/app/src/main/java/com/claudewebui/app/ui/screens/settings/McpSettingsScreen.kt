@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.settings
 
+import com.claudewebui.app.R
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -94,6 +95,11 @@ fun McpSettingsScreen(
     viewModel: SettingsViewModel,
     onNavigateBack: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
@@ -104,10 +110,10 @@ fun McpSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("MCP Servers", fontWeight = FontWeight.SemiBold) },
+                title = { Text(screenResources.getString(R.string.settings_mcp_servers_3c23b), fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = screenResources.getString(R.string.settings_back_b52b3))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -121,7 +127,7 @@ fun McpSettingsScreen(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = Color.White,
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Add MCP server")
+                Icon(Icons.Default.Add, contentDescription = screenResources.getString(R.string.settings_add_mcp_server_fea74))
             }
         },
         containerColor = MaterialTheme.colorScheme.background,
@@ -131,8 +137,8 @@ fun McpSettingsScreen(
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
         ) {
             if (state.mcpServers.isEmpty()) {
                 Box(
@@ -141,21 +147,21 @@ fun McpSettingsScreen(
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
                     ) {
                         Icon(
                             Icons.Default.Extension,
                             contentDescription = null,
-                            modifier = Modifier.size(48.dp),
+                            modifier = Modifier.size(screenTokens.sizing.touchTarget),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            "No MCP servers configured",
+                            screenResources.getString(R.string.settings_no_mcp_servers_configured_a6d33),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            "Tap + to connect a Model Context Protocol server",
+                            screenResources.getString(R.string.settings_tap_to_connect_a_model_context_protocol_server_b2c77),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -236,11 +242,16 @@ private fun McpServerCard(
     onDelete: () -> Unit,
     onTest: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(screenTokens.radius.lg),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Column {
@@ -249,11 +260,11 @@ private fun McpServerCard(
                     Text(server.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
                 },
                 supportingContent = {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.xxs)) {
                         // Type badge
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline),
                         ) {
                             Box(
                                 modifier = Modifier
@@ -264,7 +275,7 @@ private fun McpServerCard(
                                         else
                                             MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                                     )
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    .padding(horizontal = screenTokens.spacing.inline, vertical = screenTokens.spacing.xxs),
                             ) {
                                 Text(
                                     text = server.type.name,
@@ -284,7 +295,7 @@ private fun McpServerCard(
                                     ),
                             )
                             Text(
-                                if (server.enabled) "Enabled" else "Disabled",
+                                if (server.enabled) screenResources.getString(R.string.settings_enabled_df174) else screenResources.getString(R.string.settings_disabled_f4f44),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -306,7 +317,7 @@ private fun McpServerCard(
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(screenTokens.radius.md))
                             .background(PlumBlue.copy(alpha = 0.15f)),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -334,7 +345,7 @@ private fun McpServerCard(
             )
 
             HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(horizontal = screenTokens.spacing.lg),
                 color = MaterialTheme.colorScheme.outlineVariant,
             )
 
@@ -342,8 +353,8 @@ private fun McpServerCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(horizontal = screenTokens.spacing.md, vertical = screenTokens.spacing.sm),
+                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Test button
@@ -351,7 +362,7 @@ private fun McpServerCard(
                     onClick = onTest,
                     enabled = testResult !is TestResult.Testing,
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(screenTokens.radius.chip),
                 ) {
                     AnimatedContent(
                         targetState = testResult,
@@ -360,32 +371,32 @@ private fun McpServerCard(
                     ) { result ->
                         when (result) {
                             is TestResult.Testing -> Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                                Text("Testing…", style = MaterialTheme.typography.labelMedium)
+                                CircularProgressIndicator(modifier = Modifier.size(screenTokens.sizing.iconXs), strokeWidth = 2.dp)
+                                Text(screenResources.getString(R.string.settings_testing_95c45), style = MaterialTheme.typography.labelMedium)
                             }
                             is TestResult.Success -> Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = PlumGreen, modifier = Modifier.size(14.dp))
-                                Text("Connected", style = MaterialTheme.typography.labelMedium, color = PlumGreen)
+                                Icon(Icons.Default.Check, contentDescription = null, tint = PlumGreen, modifier = Modifier.size(screenTokens.sizing.iconXs))
+                                Text(screenResources.getString(R.string.settings_connected_c2f9b), style = MaterialTheme.typography.labelMedium, color = PlumGreen)
                             }
                             is TestResult.Failure -> Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = null, tint = PlumRed, modifier = Modifier.size(14.dp))
-                                Text("Failed", style = MaterialTheme.typography.labelMedium, color = PlumRed)
+                                Icon(Icons.Default.Close, contentDescription = null, tint = PlumRed, modifier = Modifier.size(screenTokens.sizing.iconXs))
+                                Text(screenResources.getString(R.string.settings_failed_09fef), style = MaterialTheme.typography.labelMedium, color = PlumRed)
                             }
                             else -> Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Text("Test", style = MaterialTheme.typography.labelMedium)
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(screenTokens.sizing.iconXs))
+                                Text(screenResources.getString(R.string.settings_test_640ab), style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
@@ -395,17 +406,17 @@ private fun McpServerCard(
                 IconButton(onClick = onToggleExpand) {
                     Icon(
                         if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = if (isExpanded) "Collapse" else "Show tools",
+                        contentDescription = if (isExpanded) screenResources.getString(R.string.settings_collapse_9cf18) else screenResources.getString(R.string.settings_show_tools_063a5),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
 
                 IconButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Default.Edit, contentDescription = screenResources.getString(R.string.settings_edit_53016), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
                 IconButton(onClick = { showDeleteConfirm = true }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = PlumRed)
+                    Icon(Icons.Default.Delete, contentDescription = screenResources.getString(R.string.settings_delete_f6fdb), tint = PlumRed)
                 }
             }
 
@@ -418,12 +429,12 @@ private fun McpServerCard(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.sm),
                 ) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Available tools",
+                        screenResources.getString(R.string.settings_available_tools_e7b87),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold,
@@ -431,7 +442,7 @@ private fun McpServerCard(
                     Spacer(Modifier.height(8.dp))
                     // Placeholder — real implementation would fetch tools from server
                     Text(
-                        "Tools are discovered when the server connects.\nEnable the server and test connection to populate.",
+                        screenResources.getString(R.string.settings_tools_are_discovered_when_the_server_connects_enable_the_server_a_7e2df),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -439,7 +450,7 @@ private fun McpServerCard(
                     if (server.args.isNotEmpty()) {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Args: ${server.args.joinToString(" ")}",
+                            screenResources.getString(R.string.settings_args_1_s_0d9aa, server.args.joinToString(" ")),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -447,7 +458,7 @@ private fun McpServerCard(
                     if (server.env.isNotEmpty()) {
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Env: ${server.env.keys.joinToString(", ")}",
+                            screenResources.getString(R.string.settings_env_1_s_edb51, server.env.keys.joinToString(", ")),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -461,16 +472,16 @@ private fun McpServerCard(
     if (showDeleteConfirm) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Remove MCP server") },
-            text = { Text("Remove '${server.name}'? This cannot be undone.") },
+            title = { Text(screenResources.getString(R.string.settings_remove_mcp_server_75ae1)) },
+            text = { Text(screenResources.getString(R.string.settings_remove_1_s_this_cannot_be_undone_88c2e, server.name)) },
             confirmButton = {
                 TextButton(
                     onClick = { showDeleteConfirm = false; onDelete() },
                     colors = ButtonDefaults.textButtonColors(contentColor = PlumRed),
-                ) { Text("Remove") }
+                ) { Text(screenResources.getString(R.string.settings_remove_e9639)) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showDeleteConfirm = false }) { Text(screenResources.getString(R.string.settings_cancel_77dfd)) }
             },
         )
     }
@@ -491,6 +502,11 @@ private fun McpServerEditForm(
     ) -> Unit,
     onCancel: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     var name by remember { mutableStateOf(server?.name ?: "") }
     var selectedType by remember { mutableStateOf(server?.type ?: McpServerType.SSE) }
     var url by remember { mutableStateOf(server?.url ?: "") }
@@ -504,11 +520,11 @@ private fun McpServerEditForm(
         modifier = Modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(horizontal = screenTokens.spacing.xl, vertical = screenTokens.spacing.lg),
+        verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.lg),
     ) {
         Text(
-            text = if (server == null) "Add MCP Server" else "Edit MCP Server",
+            text = if (server == null) screenResources.getString(R.string.settings_add_mcp_server_c76ec) else screenResources.getString(R.string.settings_edit_mcp_server_00d68),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
         )
@@ -517,17 +533,17 @@ private fun McpServerEditForm(
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
-            label = { Text("Server name") },
+            label = { Text(screenResources.getString(R.string.settings_server_name_73882)) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(screenTokens.radius.md),
             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, focusedLabelColor = MaterialTheme.colorScheme.primary),
         )
 
         // Type selector
         Column {
             Text(
-                "Transport type",
+                screenResources.getString(R.string.settings_transport_type_a7f6a),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -541,8 +557,8 @@ private fun McpServerEditForm(
                         label = {
                             Text(
                                 when (type) {
-                                    McpServerType.SSE -> "SSE (HTTP)"
-                                    McpServerType.SUBPROCESS -> "Subprocess"
+                                    McpServerType.SSE -> screenResources.getString(R.string.settings_sse_http_f5261)
+                                    McpServerType.SUBPROCESS -> screenResources.getString(R.string.settings_subprocess_231ca)
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                             )
@@ -554,22 +570,22 @@ private fun McpServerEditForm(
 
         // Type-specific fields
         AnimatedVisibility(visible = selectedType == McpServerType.SSE) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md)) {
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
-                    label = { Text("Server URL") },
+                    label = { Text(screenResources.getString(R.string.settings_server_url_1d5d1)) },
                     placeholder = { Text("https://mcp.example.com/sse") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(screenTokens.radius.md),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, focusedLabelColor = MaterialTheme.colorScheme.primary),
                 )
                 OutlinedTextField(
                     value = authToken,
                     onValueChange = { authToken = it },
-                    label = { Text("Auth token (optional)") },
+                    label = { Text(screenResources.getString(R.string.settings_auth_token_optional_aa591)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     visualTransformation = if (tokenVisible) VisualTransformation.None else PasswordVisualTransformation(),
@@ -578,48 +594,50 @@ private fun McpServerEditForm(
                         IconButton(onClick = { tokenVisible = !tokenVisible }) {
                             Icon(
                                 if (tokenVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
+                                contentDescription = screenResources.getString(
+                                    if (tokenVisible) R.string.settings_hide_token else R.string.settings_show_token,
+                                ),
+                                modifier = Modifier.size(screenTokens.sizing.iconMd),
                             )
                         }
                     },
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(screenTokens.radius.md),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, focusedLabelColor = MaterialTheme.colorScheme.primary),
                 )
             }
         }
 
         AnimatedVisibility(visible = selectedType == McpServerType.SUBPROCESS) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md)) {
                 OutlinedTextField(
                     value = command,
                     onValueChange = { command = it },
-                    label = { Text("Command") },
+                    label = { Text(screenResources.getString(R.string.settings_command_89018)) },
                     placeholder = { Text("npx @mcp-server/package") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(screenTokens.radius.md),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, focusedLabelColor = MaterialTheme.colorScheme.primary),
                 )
                 OutlinedTextField(
                     value = argsText,
                     onValueChange = { argsText = it },
-                    label = { Text("Arguments (space-separated)") },
+                    label = { Text(screenResources.getString(R.string.settings_arguments_space_separated_37bad)) },
                     placeholder = { Text("--port 3000 --verbose") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(screenTokens.radius.md),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, focusedLabelColor = MaterialTheme.colorScheme.primary),
                 )
                 OutlinedTextField(
                     value = envText,
                     onValueChange = { envText = it },
-                    label = { Text("Environment (KEY=VALUE, one per line)") },
+                    label = { Text(screenResources.getString(R.string.settings_environment_key_value_one_per_line_7a8d6)) },
                     placeholder = { Text("API_KEY=abc123\nDEBUG=true") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
                     maxLines = 4,
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(screenTokens.radius.md),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary, focusedLabelColor = MaterialTheme.colorScheme.primary),
                 )
             }
@@ -627,11 +645,11 @@ private fun McpServerEditForm(
 
         // Buttons
         Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             modifier = Modifier.fillMaxWidth(),
         ) {
             TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
-                Text("Cancel")
+                Text(screenResources.getString(R.string.settings_cancel_77dfd))
             }
             Button(
                 onClick = {
@@ -657,10 +675,10 @@ private fun McpServerEditForm(
                     (selectedType == McpServerType.SUBPROCESS && command.isNotBlank())
                 ),
                 modifier = Modifier.weight(2f),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(screenTokens.radius.md),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             ) {
-                Text(if (server == null) "Add" else "Save")
+                Text(if (server == null) screenResources.getString(R.string.settings_add_61cc5) else screenResources.getString(R.string.settings_save_efc00))
             }
         }
 

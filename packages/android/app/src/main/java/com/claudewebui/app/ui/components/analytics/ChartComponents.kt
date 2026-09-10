@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.components.analytics
 
+import com.claudewebui.app.ui.theme.PlumTheme
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -68,6 +69,7 @@ fun HorizontalBarChart(
     labelWidth: Dp = 80.dp,
     animDurationMs: Int = 700
 ) {
+    val componentTokens = PlumTheme.tokens
     if (items.isEmpty()) return
 
     val maxVal = items.maxOf { it.value }.coerceAtLeast(0.001f)
@@ -87,7 +89,7 @@ fun HorizontalBarChart(
 
     Canvas(modifier = modifier.fillMaxWidth().height((totalHeight / 2.5f).dp)) {
         val labelWidthPx = labelWidth.toPx()
-        val availableWidth = size.width - labelWidthPx - 8.dp.toPx()
+        val availableWidth = size.width - labelWidthPx - componentTokens.spacing.sm.toPx()
         val barH = barHeightPx.dp.toPx()
         val gap = gapPx.dp.toPx()
 
@@ -129,7 +131,7 @@ fun HorizontalBarChart(
                 valueText,
                 style = TextStyle(fontSize = 10.sp, color = item.color, fontWeight = FontWeight.SemiBold)
             )
-            val vx = labelWidthPx + fillWidth + 4.dp.toPx()
+            val vx = labelWidthPx + fillWidth + componentTokens.spacing.xs.toPx()
             if (vx + vMeasured.size.width < size.width) {
                 drawText(
                     textLayoutResult = vMeasured,
@@ -151,6 +153,7 @@ fun DonutChart(
     strokeWidth: Dp = 28.dp,
     animDurationMs: Int = 900
 ) {
+    val componentTokens = PlumTheme.tokens
     if (items.isEmpty()) return
 
     val total = items.sumOf { it.value.toDouble() }.toFloat().coerceAtLeast(0.001f)
@@ -198,7 +201,7 @@ fun DonutChart(
                 main,
                 topLeft = Offset(
                     (size.width - main.size.width) / 2f,
-                    size.height / 2f - main.size.height.toFloat() - 2.dp.toPx()
+                    size.height / 2f - main.size.height.toFloat() - componentTokens.spacing.xxs.toPx()
                 )
             )
         }
@@ -211,7 +214,7 @@ fun DonutChart(
                 sub,
                 topLeft = Offset(
                     (size.width - sub.size.width) / 2f,
-                    size.height / 2f + 2.dp.toPx()
+                    size.height / 2f + componentTokens.spacing.xxs.toPx()
                 )
             )
         }
@@ -229,6 +232,7 @@ fun LineChart(
     showGradient: Boolean = true,
     animDurationMs: Int = 800
 ) {
+    val componentTokens = PlumTheme.tokens
     if (points.size < 2) return
 
     val progress = remember { Animatable(0f) }
@@ -242,7 +246,7 @@ fun LineChart(
     val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
 
     Canvas(modifier = modifier) {
-        val labelHeight = 20.dp.toPx()
+        val labelHeight = componentTokens.spacing.section.toPx()
         val chartHeight = size.height - labelHeight
         val chartWidth = size.width
 
@@ -328,7 +332,7 @@ fun LineChart(
             animatedPoints.forEachIndexed { idx, p ->
                 val x = xOf(idx)
                 val y = yOf(p.value)
-                drawCircle(Color.White, radius = 4.dp.toPx(), center = Offset(x, y))
+                drawCircle(Color.White, radius = componentTokens.spacing.xs.toPx(), center = Offset(x, y))
                 drawCircle(lineColor, radius = 2.5.dp.toPx(), center = Offset(x, y))
             }
         }
@@ -345,7 +349,7 @@ fun LineChart(
                     measured,
                     topLeft = Offset(
                         (xOf(idx) - measured.size.width / 2f).coerceIn(0f, chartWidth - measured.size.width),
-                        chartHeight + 4.dp.toPx()
+                        chartHeight + componentTokens.spacing.xs.toPx()
                     )
                 )
             }
@@ -364,6 +368,7 @@ fun ActivityHeatmap(
     baseColor: Color = Color(0xFF2B75E2),
     animDurationMs: Int = 600
 ) {
+    val componentTokens = PlumTheme.tokens
     if (days.isEmpty()) return
 
     val progress = remember { Animatable(0f) }
@@ -377,7 +382,7 @@ fun ActivityHeatmap(
     val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
 
     val maxMessages = days.maxOf { it.messageCount }.coerceAtLeast(1)
-    val labelHeightPx = 20.dp
+    val labelHeightPx = componentTokens.spacing.section
 
     Canvas(modifier = modifier.height(cellSize + labelHeightPx + cellGap)) {
         val cell = cellSize.toPx()
@@ -392,7 +397,7 @@ fun ActivityHeatmap(
                 color = surfaceVariant,
                 topLeft = Offset(x, labelHeightPx.toPx()),
                 size = Size(cell, cell),
-                cornerRadius = CornerRadius(6.dp.toPx())
+                cornerRadius = CornerRadius(componentTokens.spacing.inline.toPx())
             )
 
             // Heat fill
@@ -401,7 +406,7 @@ fun ActivityHeatmap(
                     color = baseColor.copy(alpha = 0.15f + intensity * 0.75f),
                     topLeft = Offset(x, labelHeightPx.toPx()),
                     size = Size(cell, cell),
-                    cornerRadius = CornerRadius(6.dp.toPx())
+                    cornerRadius = CornerRadius(componentTokens.spacing.inline.toPx())
                 )
             }
 
@@ -482,6 +487,7 @@ fun VerticalBarChart(
     modifier: Modifier = Modifier,
     animDurationMs: Int = 700
 ) {
+    val componentTokens = PlumTheme.tokens
     if (points.isEmpty()) return
 
     val progress = remember { Animatable(0f) }
@@ -495,7 +501,7 @@ fun VerticalBarChart(
     val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
 
     Canvas(modifier = modifier) {
-        val labelH = 18.dp.toPx()
+        val labelH = componentTokens.spacing.headerHorizontal.toPx()
         val chartH = size.height - labelH
         val maxVal = points.maxOf { it.avgDurationMin }.coerceAtLeast(0.001)
         val barW = (size.width / points.size) * 0.6f
@@ -515,14 +521,14 @@ fun VerticalBarChart(
                 color = barColor.copy(alpha = 0.2f),
                 topLeft = Offset(cx - barW / 2f, 0f),
                 size = Size(barW, chartH),
-                cornerRadius = CornerRadius(4.dp.toPx())
+                cornerRadius = CornerRadius(componentTokens.spacing.xs.toPx())
             )
-            if (barHeight > 4.dp.toPx()) {
+            if (barHeight > componentTokens.spacing.xs.toPx()) {
                 drawRoundRect(
                     color = barColor,
                     topLeft = Offset(cx - barW / 2f, chartH - barHeight),
                     size = Size(barW, barHeight),
-                    cornerRadius = CornerRadius(4.dp.toPx())
+                    cornerRadius = CornerRadius(componentTokens.spacing.xs.toPx())
                 )
             }
 
@@ -532,7 +538,7 @@ fun VerticalBarChart(
             )
             drawText(
                 label,
-                topLeft = Offset(cx - label.size.width / 2f, chartH + 4.dp.toPx())
+                topLeft = Offset(cx - label.size.width / 2f, chartH + componentTokens.spacing.xs.toPx())
             )
         }
     }

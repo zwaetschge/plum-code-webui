@@ -145,8 +145,12 @@ test('routing, credential boundaries and usage accounting', async () => {
   });
   const zai = await startStub((_req, res) => {
     res.writeHead(200, { 'content-type': 'text/event-stream' });
-    res.write('event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":10}}}\n\n');
-    res.write('event: message_delta\ndata: {"type":"message_delta","usage":{"input_tokens":10,"output_tokens":40}}\n\n');
+    res.write(
+      'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":10}}}\n\n'
+    );
+    res.write(
+      'event: message_delta\ndata: {"type":"message_delta","usage":{"input_tokens":10,"output_tokens":40}}\n\n'
+    );
     res.end('event: message_stop\ndata: {"type":"message_stop"}\n\n');
   });
 

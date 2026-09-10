@@ -10,10 +10,11 @@ import {
 } from '../services/cli-providers.js';
 import { getEnabledCliProvidersForUser, getZaiApiConfigForUser } from './settings.js';
 import { readOpenCodeProvidersForUser } from '../utils/opencodeProviderKeys.js';
-import fs from 'fs';
-import path from 'path';
-import { hasPiAntigravityExtension } from '../utils/piConfig.js';
-import { getPiModelsForUser } from '../utils/piConfig.js';
+import {
+  getPiModelsForUser,
+  hasPiAntigravityExtension,
+  hasPiAntigravityLogin,
+} from '../utils/piConfig.js';
 import type { ApiResponse } from '@plum-code-webui/shared';
 
 const router = Router();
@@ -60,15 +61,9 @@ function readPiAntigravityState(userId: string): {
 } {
   const available = hasPiAntigravityExtension();
   if (!available) return { available: false, authenticated: false };
-
-  const segment = userId.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) || 'default';
-  const authFile = path.join(os.homedir(), '.pi', 'webui-users', segment, 'agent', 'auth.json');
-  try {
-    const parsed = JSON.parse(fs.readFileSync(authFile, 'utf8')) as Record<string, unknown>;
-    return { available: true, authenticated: Object.keys(parsed).includes('antigravity') };
-  } catch {
-    return { available: true, authenticated: false };
-  }
+  // Shared with the model list, which gates the Antigravity models on the same
+  // answer. Two copies of the path and the key name drifted apart too easily.
+  return { available: true, authenticated: hasPiAntigravityLogin(userId) };
 }
 
 /**

@@ -1,5 +1,12 @@
 package com.claudewebui.app.ui.components.dashboard
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.role
+import com.claudewebui.app.R
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -85,6 +92,7 @@ fun CategoryManager(
     onDelete: (id: String) -> Unit,
     onReorder: (List<Category>) -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var showAddForm by remember { mutableStateOf(false) }
@@ -101,8 +109,8 @@ fun CategoryManager(
         dragHandle = {
             Box(
                 modifier = Modifier
-                    .padding(top = 12.dp, bottom = 4.dp)
-                    .size(width = 36.dp, height = 4.dp)
+                    .padding(top = componentTokens.spacing.md, bottom = componentTokens.spacing.xs)
+                    .size(width = 36.dp, height = componentTokens.spacing.xs)
                     .clip(RoundedCornerShape(50))
                     .background(MaterialTheme.colorScheme.outlineVariant),
             )
@@ -113,8 +121,8 @@ fun CategoryManager(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .imePadding()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp),
+                .padding(horizontal = componentTokens.spacing.xl)
+                .padding(bottom = componentTokens.spacing.xxl),
         ) {
             // ── Header ───────────────────────────────────────────────────────
             Row(
@@ -122,7 +130,7 @@ fun CategoryManager(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Categories",
+                    text = stringResource(R.string.component_categories),
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
                     modifier = Modifier.weight(1f),
                 )
@@ -136,13 +144,13 @@ fun CategoryManager(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
-                        contentDescription = "Add category",
-                        modifier = Modifier.size(18.dp),
+                        contentDescription = stringResource(R.string.component_add_category),
+                        modifier = Modifier.size(componentTokens.sizing.iconInline),
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.lg))
 
             // ── Add / Edit Form ───────────────────────────────────────────────
             if (showAddForm || editingCategory != null) {
@@ -162,7 +170,7 @@ fun CategoryManager(
                         editingCategory = null
                     },
                 )
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(componentTokens.spacing.lg))
             }
 
             // ── Category List ─────────────────────────────────────────────────
@@ -175,13 +183,13 @@ fun CategoryManager(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "No categories yet",
+                            text = stringResource(R.string.component_no_categories_yet),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(componentTokens.spacing.inline))
                         TextButton(onClick = { showAddForm = true }) {
-                            Text("Create your first category")
+                            Text(stringResource(R.string.component_create_your_first_category))
                         }
                     }
                 }
@@ -194,7 +202,7 @@ fun CategoryManager(
                         .fillMaxWidth()
                         .height(minOf(orderedCategories.size * 68, 340).dp),
                     state = rememberLazyListState(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.inline),
                 ) {
                     itemsIndexed(
                         items = orderedCategories,
@@ -229,10 +237,10 @@ fun CategoryManager(
     deletingCategory?.let { cat ->
         AlertDialog(
             onDismissRequest = { deletingCategory = null },
-            title = { Text("Delete category?") },
+            title = { Text(stringResource(R.string.component_delete_category)) },
             text = {
                 Text(
-                    "\"${cat.name}\" will be deleted. Sessions in this category won't be affected.",
+                    stringResource(R.string.component_delete_category_body, cat.name),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },
@@ -241,12 +249,12 @@ fun CategoryManager(
                     onDelete(cat.id)
                     deletingCategory = null
                 }) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.component_delete), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deletingCategory = null }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.component_cancel))
                 }
             },
         )
@@ -265,22 +273,23 @@ private fun CategoryRow(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.md))
             .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.compact),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Color indicator
         Box(
             modifier = Modifier
-                .size(12.dp)
+                .size(componentTokens.spacing.md)
                 .clip(RoundedCornerShape(50))
                 .background(parseHexColor(category.color)),
         )
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(componentTokens.spacing.md))
 
         // Name
         Text(
@@ -295,21 +304,21 @@ private fun CategoryRow(
         Icon(
             imageVector = Icons.Default.DragHandle,
             contentDescription = null,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(componentTokens.sizing.iconInline),
             tint = MaterialTheme.colorScheme.outlineVariant,
         )
 
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(componentTokens.spacing.xs))
 
         // Edit
         IconButton(
             onClick = onEdit,
-            modifier = Modifier.size(32.dp),
+            modifier = Modifier.size(componentTokens.sizing.touchTarget),
         ) {
             Icon(
                 imageVector = Icons.Default.Edit,
-                contentDescription = "Edit",
-                modifier = Modifier.size(16.dp),
+                contentDescription = stringResource(R.string.component_edit),
+                modifier = Modifier.size(componentTokens.sizing.iconSm),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -317,12 +326,12 @@ private fun CategoryRow(
         // Delete
         IconButton(
             onClick = onDelete,
-            modifier = Modifier.size(32.dp),
+            modifier = Modifier.size(componentTokens.sizing.touchTarget),
         ) {
             Icon(
                 imageVector = Icons.Default.Delete,
-                contentDescription = "Delete",
-                modifier = Modifier.size(16.dp),
+                contentDescription = stringResource(R.string.component_delete),
+                modifier = Modifier.size(componentTokens.sizing.iconSm),
                 tint = MaterialTheme.colorScheme.error,
             )
         }
@@ -338,29 +347,30 @@ private fun CategoryForm(
     onSubmit: (name: String, color: String) -> Unit,
     onCancel: () -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     var name by remember(initial) { mutableStateOf(initial?.name ?: "") }
     var selectedColor by remember(initial) { mutableStateOf(initial?.color ?: presetColors.first()) }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.lg))
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(16.dp),
+            .padding(componentTokens.spacing.lg),
     ) {
         Text(
-            text = if (initial != null) "Edit category" else "New category",
+            text = if (initial != null) stringResource(R.string.component_edit_category) else stringResource(R.string.component_new_category),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(componentTokens.spacing.md))
 
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Category name") },
+            placeholder = { Text(stringResource(R.string.component_category_name)) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.Words,
@@ -369,21 +379,21 @@ private fun CategoryForm(
             keyboardActions = KeyboardActions(
                 onDone = { if (name.isNotBlank()) onSubmit(name.trim(), selectedColor) }
             ),
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(componentTokens.radius.chip),
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(componentTokens.spacing.md))
 
         Text(
-            text = "Color",
+            text = stringResource(R.string.component_color),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
 
         FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
+            verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
         ) {
             presetColors.forEach { colorHex ->
                 ColorSwatch(
@@ -394,7 +404,7 @@ private fun CategoryForm(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(componentTokens.spacing.lg))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -402,15 +412,15 @@ private fun CategoryForm(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(onClick = onCancel) {
-                Text("Cancel")
+                Text(stringResource(R.string.component_cancel))
             }
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(componentTokens.spacing.sm))
             Button(
                 onClick = { if (name.isNotBlank()) onSubmit(name.trim(), selectedColor) },
                 enabled = name.isNotBlank(),
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(componentTokens.radius.chip),
             ) {
-                Text(if (initial != null) "Save" else "Create")
+                Text(if (initial != null) stringResource(R.string.component_save) else stringResource(R.string.component_create))
             }
         }
     }
@@ -424,22 +434,25 @@ private fun ColorSwatch(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     val color = parseHexColor(colorHex)
+    val description = stringResource(R.string.component_color_choice, colorHex)
     val borderColor by animateColorAsState(
         targetValue = if (isSelected) color else Color.Transparent,
-        animationSpec = tween(150),
+        animationSpec = tween(componentTokens.motion.fast),
         label = "swatchBorder",
     )
 
     Box(
         modifier = Modifier
-            .size(32.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .size(componentTokens.sizing.touchTarget)
+            .semantics { contentDescription = description; selected = isSelected; role = androidx.compose.ui.semantics.Role.RadioButton }
+            .clip(RoundedCornerShape(componentTokens.radius.sm))
             .background(color)
             .border(
                 width = 2.5.dp,
                 color = borderColor,
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(componentTokens.radius.sm),
             )
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -448,7 +461,7 @@ private fun ColorSwatch(
             Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = null,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(componentTokens.sizing.iconSm),
                 tint = Color.White,
             )
         }

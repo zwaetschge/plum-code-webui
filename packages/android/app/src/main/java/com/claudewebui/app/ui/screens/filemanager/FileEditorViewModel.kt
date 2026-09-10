@@ -1,5 +1,7 @@
 package com.claudewebui.app.ui.screens.filemanager
 
+import com.claudewebui.app.ui.screens.screenErrorMessage
+import com.claudewebui.app.core.network.apiCall
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.claudewebui.app.core.network.ApiClient
@@ -43,7 +45,7 @@ class FileEditorViewModel(
     fun load() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            val result = runCatching {
+            val result = apiCall {
                 val response = api.getFileContent(path)
                 if (!response.success || response.data == null) {
                     error(response.error?.message ?: "Could not read file")
@@ -61,7 +63,7 @@ class FileEditorViewModel(
                     }
                 }
                 .onFailure { failure ->
-                    _uiState.update { it.copy(isLoading = false, error = failure.message) }
+                    _uiState.update { it.copy(isLoading = false, error = failure.screenErrorMessage("filemanager", "load")) }
                 }
         }
     }
@@ -75,7 +77,7 @@ class FileEditorViewModel(
         if (!state.hasChanges || state.isSaving) return
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, error = null) }
-            val result = runCatching {
+            val result = apiCall {
                 val response = api.saveFileContent(path, state.draft)
                 if (!response.success) {
                     error(response.error?.message ?: "Could not save file")
@@ -90,7 +92,7 @@ class FileEditorViewModel(
                     }
                 }
                 .onFailure { failure ->
-                    _uiState.update { it.copy(isSaving = false, error = failure.message) }
+                    _uiState.update { it.copy(isSaving = false, error = failure.screenErrorMessage("filemanager", "save")) }
                 }
         }
     }

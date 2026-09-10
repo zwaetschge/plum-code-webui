@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -51,48 +54,49 @@ fun LegacyPermissionCard(
     onDeny: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
-        shape = RoundedCornerShape(12.dp),
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(componentTokens.radius.md)),
+        shape = RoundedCornerShape(componentTokens.radius.md),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(componentTokens.spacing.cozy)) {
             Text(
-                text = "Permission required",
+                text = stringResource(R.string.component_permission_required),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            val tools = request.denials.joinToString(", ") { it.toolName }.ifBlank { "tools" }
+            Spacer(modifier = Modifier.height(componentTokens.spacing.xs))
+            val tools = request.denials.joinToString(", ") { it.toolName }.ifBlank { stringResource(R.string.component_tools) }
             Text(
-                text = "The agent wants to use: $tools",
+                text = stringResource(R.string.component_agent_wants_tools, tools),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.md))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
             ) {
                 OutlinedButton(
                     onClick = onDeny,
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
                 ) {
-                    Icon(Icons.Outlined.Block, contentDescription = null, modifier = Modifier.width(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Deny", style = MaterialTheme.typography.labelMedium)
+                    Icon(Icons.Outlined.Block, contentDescription = null, modifier = Modifier.width(componentTokens.spacing.cozy))
+                    Spacer(modifier = Modifier.width(componentTokens.spacing.xs))
+                    Text(stringResource(R.string.component_deny), style = MaterialTheme.typography.labelMedium)
                 }
                 FilledTonalButton(
                     onClick = onApprove,
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
                 ) {
-                    Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.width(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Approve & retry", style = MaterialTheme.typography.labelMedium)
+                    Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.width(componentTokens.spacing.cozy))
+                    Spacer(modifier = Modifier.width(componentTokens.spacing.xs))
+                    Text(stringResource(R.string.component_approve_retry), style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
@@ -111,6 +115,7 @@ fun QuestionPromptCard(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     // question index -> selected labels
     val selections = remember(request.requestId) { mutableStateMapOf<Int, Set<String>>() }
     // question index -> free-text answer (custom questions)
@@ -119,39 +124,39 @@ fun QuestionPromptCard(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
-        shape = RoundedCornerShape(12.dp),
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(componentTokens.radius.md)),
+        shape = RoundedCornerShape(componentTokens.radius.md),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(componentTokens.spacing.cozy)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Outlined.QuestionAnswer,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.width(18.dp),
+                    modifier = Modifier.width(componentTokens.spacing.headerHorizontal),
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(componentTokens.spacing.sm))
                 Text(
-                    text = "The agent needs input",
+                    text = stringResource(R.string.component_the_agent_needs_input),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
 
             request.questions.forEachIndexed { index, question ->
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(componentTokens.spacing.compact))
                 Text(
                     text = question.question,
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium,
                 )
                 if (question.options.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(componentTokens.spacing.inline))
                     LazyRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        contentPadding = PaddingValues(end = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.inline),
+                        contentPadding = PaddingValues(end = componentTokens.spacing.sm),
                     ) {
                         items(question.options) { option ->
                             val selected = selections[index]?.contains(option.label) == true
@@ -171,12 +176,12 @@ fun QuestionPromptCard(
                     }
                 }
                 if (question.custom) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(componentTokens.spacing.inline))
                     OutlinedTextField(
                         value = customText[index].orEmpty(),
                         onValueChange = { customText[index] = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Custom answer", fontSize = 12.sp) },
+                        placeholder = { Text(stringResource(R.string.component_custom_answer), fontSize = 12.sp) },
                         textStyle = MaterialTheme.typography.bodySmall,
                         minLines = 1,
                         maxLines = 3,
@@ -184,17 +189,17 @@ fun QuestionPromptCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(componentTokens.spacing.md))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
             ) {
                 OutlinedButton(
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
                 ) {
-                    Text("Dismiss", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.component_dismiss), style = MaterialTheme.typography.labelMedium)
                 }
                 val canSend = request.questions.indices.all { i ->
                     !selections[i].isNullOrEmpty() || !customText[i].isNullOrBlank() ||
@@ -215,9 +220,9 @@ fun QuestionPromptCard(
                     },
                     enabled = canSend,
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
                 ) {
-                    Text("Send", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.component_send), style = MaterialTheme.typography.labelMedium)
                 }
             }
         }

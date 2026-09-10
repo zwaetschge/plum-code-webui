@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.memory
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.WindowInsets
@@ -70,6 +71,11 @@ fun MemoryScreen(
     viewModel: MemoryViewModel,
     onNavigateBack: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
     var showCreate by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
@@ -78,12 +84,12 @@ fun MemoryScreen(
     if (showCreate) {
         AlertDialog(
             onDismissRequest = { showCreate = false },
-            title = { Text("New memory") },
+            title = { Text(screenResources.getString(R.string.memory_new_memory_c8ff7)) },
             text = {
                 OutlinedTextField(
                     value = newName,
                     onValueChange = { newName = it },
-                    label = { Text("File name") },
+                    label = { Text(screenResources.getString(R.string.memory_file_name_09979)) },
                     placeholder = { Text("deployment-notes") },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
@@ -97,10 +103,10 @@ fun MemoryScreen(
                     viewModel.create(newName)
                     newName = ""
                     showCreate = false
-                }) { Text("Create", color = PlumAccent) }
+                }) { Text(screenResources.getString(R.string.memory_create_6e157), color = PlumAccent) }
             },
             dismissButton = {
-                TextButton(onClick = { showCreate = false }) { Text("Cancel", color = PlumMuted) }
+                TextButton(onClick = { showCreate = false }) { Text(screenResources.getString(R.string.memory_cancel_77dfd), color = PlumMuted) }
             },
         )
     }
@@ -117,22 +123,22 @@ fun MemoryScreen(
                     horizontal = if (wide) 40.dp else 16.dp,
                     vertical = 4.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             ) {
                 item {
                     PlumScreenHeader(
-                        title = "Memory",
-                        subtitle = state.memoryDir.ifBlank { "Persistent notes for this workspace" },
+                        title = screenResources.getString(R.string.memory_memory_89c8a),
+                        subtitle = state.memoryDir.ifBlank { screenResources.getString(R.string.memory_persistent_notes_for_this_workspace_abbc9) },
                         actions = {
                             PlumIconButton(
                                 Icons.Outlined.Add,
-                                "New memory",
+                                screenResources.getString(R.string.memory_new_memory_c8ff7),
                                 onClick = { showCreate = true },
                             )
-                            PlumIconButton(Icons.Outlined.Refresh, "Reload", viewModel::load)
+                            PlumIconButton(Icons.Outlined.Refresh, screenResources.getString(R.string.memory_reload_cce71), viewModel::load)
                             PlumIconButton(
                                 Icons.AutoMirrored.Outlined.ArrowBack,
-                                "Back",
+                                screenResources.getString(R.string.memory_back_b52b3),
                                 onNavigateBack,
                             )
                         },
@@ -143,8 +149,8 @@ fun MemoryScreen(
                     item {
                         GlassPanel(Modifier.fillMaxWidth(), radius = 18.dp) {
                             Column(
-                                Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                Modifier.padding(screenTokens.spacing.cozy),
+                                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact),
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
@@ -157,9 +163,9 @@ fun MemoryScreen(
                                     )
                                     Text(
                                         when {
-                                            state.isSaving -> "Saving…"
-                                            state.hasChanges -> "Unsaved"
-                                            else -> "Saved"
+                                            state.isSaving -> screenResources.getString(R.string.memory_saving_56a22)
+                                            state.hasChanges -> screenResources.getString(R.string.memory_unsaved_2ab06)
+                                            else -> screenResources.getString(R.string.memory_saved_c0ae8)
                                         },
                                         color = if (state.hasChanges) PlumAccent else PlumMuted,
                                         fontSize = 11.sp,
@@ -185,9 +191,9 @@ fun MemoryScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Box(Modifier.weight(1f))
-                                    Chip("Close", enabled = true, onClick = viewModel::closeEditor)
+                                    Chip(screenResources.getString(R.string.memory_close_bbfa7), enabled = true, onClick = viewModel::closeEditor)
                                     Chip(
-                                        "Save",
+                                        screenResources.getString(R.string.memory_save_efc00),
                                         enabled = state.hasChanges && !state.isSaving,
                                         onClick = viewModel::save,
                                     )
@@ -212,15 +218,15 @@ fun MemoryScreen(
                             Column(
                                 Modifier.fillMaxWidth().padding(28.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.xs),
                             ) {
                                 Text(
-                                    "No memory files",
+                                    screenResources.getString(R.string.memory_no_memory_files_d97c4),
                                     color = PlumText,
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 Text(
-                                    "Memories written by the agent show up here.",
+                                    screenResources.getString(R.string.memory_memories_written_by_the_agent_show_up_here_08dc5),
                                     color = PlumMuted,
                                     fontSize = 12.sp,
                                 )
@@ -243,9 +249,9 @@ fun MemoryScreen(
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(screenTokens.radius.md))
                                 .background(PlumSubtleFill)
-                                .padding(12.dp),
+                                .padding(screenTokens.spacing.md),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -255,7 +261,7 @@ fun MemoryScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
-                                "Dismiss",
+                                screenResources.getString(R.string.memory_dismiss_70afe),
                                 color = PlumAccent,
                                 fontSize = 12.sp,
                                 modifier = Modifier.clickable(onClick = viewModel::dismissError),
@@ -275,9 +281,14 @@ private fun MemoryRow(
     onOpen: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     GlassPanel(Modifier.fillMaxWidth(), radius = 16.dp) {
         Row(
-            Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(14.dp),
+            Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(screenTokens.spacing.cozy),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(11.dp),
         ) {
@@ -285,7 +296,7 @@ private fun MemoryRow(
                 Icons.Outlined.Description,
                 null,
                 tint = if (selected) PlumAccent else PlumMuted,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(screenTokens.sizing.iconMd),
             )
             Column(Modifier.weight(1f)) {
                 Text(
@@ -304,13 +315,13 @@ private fun MemoryRow(
             }
             Icon(
                 Icons.Outlined.Delete,
-                "Delete",
+                screenResources.getString(R.string.memory_delete_f6fdb),
                 tint = PlumRed,
                 modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .size(screenTokens.sizing.touchTarget)
+                    .clip(RoundedCornerShape(screenTokens.radius.chip))
                     .clickable(onClick = onDelete)
-                    .padding(7.dp),
+                    .padding(screenTokens.spacing.cozy),
             )
         }
     }

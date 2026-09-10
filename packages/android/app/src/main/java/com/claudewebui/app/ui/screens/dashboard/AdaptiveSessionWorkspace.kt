@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.dashboard
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -86,6 +87,11 @@ fun AdaptiveSessionWorkspace(
     initialSessionId: String? = null,
     viewModel: DashboardViewModel = koinViewModel(),
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
     var selectedSessionId by rememberSaveable { mutableStateOf(initialSessionId) }
     var selectedMessageId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -136,15 +142,15 @@ fun AdaptiveSessionWorkspace(
                     // The pane has no background of its own, so it takes the
                     // status bar inset here; the chat pane handles its own.
                     .padding(top = padding.calculateTopPadding())
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.md),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             ) {
                 // Title row. The actions used to share a row with the search field,
                 // which squeezed it to about 150dp and wrapped its placeholder onto
                 // a second line. They get their own row; the search gets the pane.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Sessions",
+                        screenResources.getString(R.string.dashboard_sessions_e11e3),
                         color = PlumText,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
@@ -168,27 +174,27 @@ fun AdaptiveSessionWorkspace(
                         modifier = Modifier.size(38.dp),
                     )
                     Spacer(Modifier.size(4.dp))
-                    PlumIconButton(Icons.Outlined.Add, "New session", onClick = { showCreate = true })
+                    PlumIconButton(Icons.Outlined.Add, screenResources.getString(R.string.dashboard_new_session_5c881), onClick = { showCreate = true })
                     Spacer(Modifier.size(4.dp))
-                    PlumIconButton(Icons.Outlined.Settings, "Settings", onClick = onNavigateToSettings)
+                    PlumIconButton(Icons.Outlined.Settings, screenResources.getString(R.string.dashboard_settings_c7f73), onClick = onNavigateToSettings)
                 }
                 DashboardSearchField(
                     value = state.searchQuery,
                     onValueChange = viewModel::setSearchQuery,
                     placeholder = if (state.searchScope == DashboardSearchScope.MESSAGES) {
-                        "Search messages"
-                    } else "Search sessions",
+                        screenResources.getString(R.string.dashboard_search_messages_abea6)
+                    } else screenResources.getString(R.string.dashboard_search_sessions_646db),
                     showShortcutHint = false,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)) {
                     FilterPill(
-                        label = "Sessions",
+                        label = screenResources.getString(R.string.dashboard_sessions_e11e3),
                         selected = state.searchScope == DashboardSearchScope.SESSIONS,
                         onClick = { viewModel.setSearchScope(DashboardSearchScope.SESSIONS) },
                     )
                     FilterPill(
-                        label = "Messages",
+                        label = screenResources.getString(R.string.dashboard_messages_f1702),
                         selected = state.searchScope == DashboardSearchScope.MESSAGES,
                         onClick = { viewModel.setSearchScope(DashboardSearchScope.MESSAGES) },
                     )
@@ -241,7 +247,7 @@ fun AdaptiveSessionWorkspace(
                     Column(
                         Modifier.align(Alignment.Center),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                     ) {
                         Icon(
                             Icons.Outlined.ChatBubbleOutline,
@@ -249,9 +255,9 @@ fun AdaptiveSessionWorkspace(
                             tint = PlumMuted,
                             modifier = Modifier.size(34.dp),
                         )
-                        Text("Select a session", color = PlumText, fontSize = 15.sp)
+                        Text(screenResources.getString(R.string.dashboard_select_a_session_2f0b7), color = PlumText, fontSize = 15.sp)
                         Text(
-                            "Pick one on the left, or start a new session.",
+                            screenResources.getString(R.string.dashboard_pick_one_on_the_left_or_start_a_new_session_e1876),
                             color = PlumMuted,
                             fontSize = 12.sp,
                         )
@@ -338,6 +344,11 @@ fun AdaptiveSessionWorkspace(
 
 @Composable
 private fun SplitSessionRow(session: Session, selected: Boolean, onClick: () -> Unit) {
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     val statusColor = when (session.status) {
         SessionStatus.RUNNING -> PlumGreen
         SessionStatus.ERROR -> PlumAmber
@@ -356,7 +367,7 @@ private fun SplitSessionRow(session: Session, selected: Boolean, onClick: () -> 
                 role = Role.Button
                 this.selected = selected
             }
-            .padding(12.dp),
+            .padding(screenTokens.spacing.md),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -372,7 +383,7 @@ private fun SplitSessionRow(session: Session, selected: Boolean, onClick: () -> 
                     modifier = Modifier.weight(1f),
                 )
                 if (session.unreadCount > 0) {
-                    Text("${session.unreadCount} new", color = PlumAccent, fontSize = 11.sp)
+                    Text(screenResources.getString(R.string.dashboard_1_s_new_f595b, session.unreadCount), color = PlumAccent, fontSize = 11.sp)
                 }
             }
             Text(
@@ -388,17 +399,22 @@ private fun SplitSessionRow(session: Session, selected: Boolean, onClick: () -> 
 
 @Composable
 private fun SplitMessageRow(result: MessageSearchResult, query: String, onClick: () -> Unit) {
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .glassSurface(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
             .semantics { role = Role.Button }
-            .padding(12.dp),
+            .padding(screenTokens.spacing.md),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                result.sessionName ?: "Session",
+                result.sessionName ?: screenResources.getString(R.string.dashboard_session_f7f19),
                 color = PlumText,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,

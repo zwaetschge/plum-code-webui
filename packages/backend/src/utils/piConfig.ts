@@ -1,7 +1,11 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { getOpenCodeProviderCatalog, type OpenCodeProviderCatalog } from './opencodeCatalog.js';
+import {
+  getOpenCodeProviderCatalog,
+  refreshOpenCodeModelsCache,
+  type OpenCodeProviderCatalog,
+} from './opencodeCatalog.js';
 import {
   getOpenCodeCredentialEnvVars,
   readOpenCodeProvidersForUser,
@@ -12,10 +16,16 @@ import {
   resolveOpenCodeTenantPaths,
 } from '../services/opencode/tenantPaths.js';
 import { syncProviderLinks } from './providerLinks.js';
+import { lookupContextWindow } from './contextWindow.js';
+import { writeFileAtomicSync } from './atomicWrite.js';
 
 const CLAUDE_AGENTS_DIR = path.join(os.homedir(), '.claude', 'agents');
 const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json');
 const PI_ROOT = path.join(os.homedir(), '.pi', 'webui-users');
+/** Headroom Pi keeps before auto-compaction (`contextWindow - reserveTokens`). */
+export const PI_COMPACTION_RESERVE_TOKENS = 40_000;
+/** Upper bound for `maxTokens` written into Pi's models.json. */
+export const PI_MAX_TOKENS_CAP = 32_768;
 
 interface ClaudeMcpServer {
   type?: string;
@@ -61,8 +71,7 @@ function writeJsonIfChanged(filePath: string, value: unknown): void {
     // Created below.
   }
   if (current === next) return;
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, next, { encoding: 'utf8', mode: 0o600 });
+  writeFileAtomicSync(filePath, next, { mode: 0o600 });
 }
 
 function writeTextIfChanged(filePath: string, value: string): void {
@@ -73,8 +82,7 @@ function writeTextIfChanged(filePath: string, value: string): void {
     // Created below.
   }
   if (current === value) return;
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, value, 'utf8');
+  writeFileAtomicSync(filePath, value, { mode: 0o644 });
 }
 
 function safeUserSegment(userId: string): string {
@@ -149,12 +157,26 @@ export function buildPiProviderConfig(
     api: inferPiApi(provider.id),
     apiKey: `$${envVar}`,
     authHeader: true,
-    models: modelIds.map((modelId) => ({
-      id: modelId,
-      name: humanizeModel(modelId),
-      reasoning: modelSupportsReasoning(modelId),
-      input: modelSupportsImages(modelId) ? ['text', 'image'] : ['text'],
-    })),
+    models: modelIds.map((modelId) => {
+      // Pi defaults an unspecified window to 128k. Without this every
+      // WebUI-provisioned model compacted at ~112k and the context tracker read
+      // 128k no matter which model ran. Catalog limits win; otherwise the shared
+      // family table; unknown families stay unset so Pi's conservative default
+      // applies rather than a guess.
+      const limit = catalogProvider?.modelLimits?.[modelId];
+      const contextWindow = limit?.context ?? lookupContextWindow(`${provider.id}/${modelId}`);
+      return {
+        id: modelId,
+        name: humanizeModel(modelId),
+        reasoning: modelSupportsReasoning(modelId),
+        input: modelSupportsImages(modelId) ? ['text', 'image'] : ['text'],
+        ...(contextWindow ? { contextWindow } : {}),
+        // models.dev's `output` is the model's ceiling (131k for Qwen Max). Some
+        // OpenAI-compatible endpoints reserve `max_tokens` out of the window up
+        // front, so keep the request budget modest; Pi's own default is 16k.
+        ...(limit?.output ? { maxTokens: Math.min(limit.output, PI_MAX_TOKENS_CAP) } : {}),
+      };
+    }),
   };
 }
 
@@ -223,9 +245,12 @@ async function buildPiProvidersForUser(userId: string): Promise<{
 
 export async function getPiModelsForUser(userId: string): Promise<string[]> {
   const models = (await buildPiProvidersForUser(userId)).models;
-  // Extension-provided models are not in the registry, so append them when the
-  // extension ships in this image. The user still has to /login antigravity.
-  if (!hasPiAntigravityExtension()) return models;
+  // Extension-provided models are not in the registry, so append them — but only
+  // once this user has actually completed `/login antigravity`. Offering them on
+  // extension presence alone put seven models in the picker that every account
+  // could select and none could use: the turn failed with an unknown-provider
+  // error deep in Pi, far from the dropdown that suggested it.
+  if (!hasPiAntigravityExtension() || !hasPiAntigravityLogin(userId)) return models;
   return [...new Set([...models, ...PI_ANTIGRAVITY_MODELS])];
 }
 
@@ -385,9 +410,31 @@ export function hasPiAntigravityExtension(): boolean {
   return resolvePiExtensionPaths().some((entry) => entry.includes('pi-antigravity'));
 }
 
+/**
+ * True when this user has completed `/login antigravity`.
+ *
+ * Pi has no CLI-level login for it — the OAuth flow runs inside a session — and
+ * stores the result in the per-user agent dir's auth.json alongside every other
+ * credential, so the presence of the provider key is the only signal available
+ * outside Pi's own process.
+ */
+export function hasPiAntigravityLogin(userId: string): boolean {
+  const authFile = path.join(PI_ROOT, safeUserSegment(userId), 'agent', 'auth.json');
+  try {
+    const parsed = JSON.parse(fs.readFileSync(authFile, 'utf8')) as unknown;
+    if (!isRecord(parsed)) return false;
+    return Object.keys(parsed).some((key) => key.toLowerCase().startsWith('antigravity'));
+  } catch {
+    return false;
+  }
+}
+
 export async function syncPiConfig(userId: string): Promise<PiConfigSyncResult> {
   const agentDir = path.join(PI_ROOT, safeUserSegment(userId), 'agent');
   fs.mkdirSync(agentDir, { recursive: true });
+  // Per-model context windows come from models.dev; make sure the cache exists
+  // before the catalog is read. Bounded by a 20 s timeout, silent on failure.
+  await refreshOpenCodeModelsCache();
 
   const tenantPaths = resolveOpenCodeTenantPaths(userId);
   ensureOpenCodeTenantDirectories(tenantPaths);
@@ -407,10 +454,22 @@ export async function syncPiConfig(userId: string): Promise<PiConfigSyncResult> 
 
   const extensions = resolvePiExtensionPaths();
   const currentSettings = readJsonObject(path.join(agentDir, 'settings.json'));
+  const currentCompaction = isRecord(currentSettings.compaction) ? currentSettings.compaction : {};
   writeJsonIfChanged(path.join(agentDir, 'settings.json'), {
     ...currentSettings,
     defaultProjectTrust: 'always',
     enableInstallTelemetry: false,
+    // Pi only checks the threshold after a whole agent run, and one agentic run
+    // adds 30-40k tokens of tool output. With the 16k default a 128k model went
+    // from "fine" to the hard limit inside a single run, and the summariser no
+    // longer fitted either. Compact earlier; a user-set value wins.
+    compaction: {
+      ...currentCompaction,
+      reserveTokens:
+        typeof currentCompaction.reserveTokens === 'number'
+          ? currentCompaction.reserveTokens
+          : PI_COMPACTION_RESERVE_TOKENS,
+    },
     extensions,
   });
 

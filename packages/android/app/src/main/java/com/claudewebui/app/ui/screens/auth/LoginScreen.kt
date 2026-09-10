@@ -191,10 +191,12 @@ private fun BrandHeader(
     modifier: Modifier = Modifier,
     subtitle: String = "Sign in to your workspace",
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
     ) {
         Image(
             // The adaptive launcher resource resolves to an XML adaptive-icon on
@@ -241,6 +243,11 @@ private fun AuthMethodSelectionView(
     viewModel: LoginViewModel,
     onChangeServer: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     var showBasicAuth by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
@@ -250,9 +257,9 @@ private fun AuthMethodSelectionView(
             .verticalScroll(rememberScrollState())
             .systemBarsPadding()
             .imePadding()
-            .padding(horizontal = 24.dp, vertical = 40.dp),
+            .padding(horizontal = screenTokens.spacing.xl, vertical = 40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(24.dp),
+        verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.xl),
     ) {
         BrandHeader()
 
@@ -265,7 +272,7 @@ private fun AuthMethodSelectionView(
         // Auth options card
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(screenTokens.radius.lg),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
             ),
@@ -273,23 +280,23 @@ private fun AuthMethodSelectionView(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(screenTokens.spacing.section),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             ) {
                 Text(
-                    text = "Sign in",
+                    text = screenResources.getString(R.string.auth_sign_in_ada2e),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
 
                 if (authConfig.proxyAuthEnabled) {
                     OAuthButton(
-                        label = "Continue with Authelia",
+                        label = screenResources.getString(R.string.auth_continue_with_authelia_c00fb),
                         iconContent = {
                             Icon(
                                 Icons.Default.Lock,
                                 contentDescription = null,
-                                modifier = Modifier.size(20.dp),
+                                modifier = Modifier.size(screenTokens.sizing.iconMd),
                             )
                         },
                         onClick = {
@@ -304,9 +311,9 @@ private fun AuthMethodSelectionView(
                 // Google OAuth
                 if (authConfig.googleOAuthEnabled) {
                     OAuthButton(
-                        label = "Continue with Google",
+                        label = screenResources.getString(R.string.auth_continue_with_google_ccc5b),
                         iconContent = {
-                            GoogleIconSvg(modifier = Modifier.size(20.dp))
+                            GoogleIconSvg(modifier = Modifier.size(screenTokens.sizing.iconMd))
                         },
                         onClick = { /* Launch Custom Tab / WebView */ },
                     )
@@ -315,12 +322,12 @@ private fun AuthMethodSelectionView(
                 // GitHub OAuth
                 if (authConfig.githubOAuthEnabled) {
                     OAuthButton(
-                        label = "Continue with GitHub",
+                        label = screenResources.getString(R.string.auth_continue_with_github_baf2c),
                         iconContent = {
                             Icon(
                                 Icons.Default.Person,
                                 contentDescription = null,
-                                modifier = Modifier.size(20.dp),
+                                modifier = Modifier.size(screenTokens.sizing.iconMd),
                             )
                         },
                         onClick = { /* Launch Custom Tab */ },
@@ -347,7 +354,7 @@ private fun AuthMethodSelectionView(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(screenTokens.radius.chip),
                         border = androidx.compose.foundation.BorderStroke(
                             1.dp,
                             MaterialTheme.colorScheme.outline,
@@ -356,10 +363,10 @@ private fun AuthMethodSelectionView(
                         Icon(
                             Icons.Default.Lock,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(screenTokens.sizing.iconInline),
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("Use username & password")
+                        Text(screenResources.getString(R.string.auth_use_username_password_ab851))
                     }
                 }
 
@@ -383,7 +390,7 @@ private fun AuthMethodSelectionView(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
-                            "Dev login (no auth)",
+                            screenResources.getString(R.string.auth_dev_login_no_auth_12d9f),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -401,6 +408,11 @@ private fun BasicAuthForm(
     viewModel: LoginViewModel,
     onCancel: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -413,15 +425,15 @@ private fun BasicAuthForm(
     val passwordFocus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md)) {
         // Username
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Username") },
+            label = { Text(screenResources.getString(R.string.auth_username_84c29)) },
             leadingIcon = {
-                Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(screenTokens.sizing.iconMd))
             },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
@@ -433,7 +445,7 @@ private fun BasicAuthForm(
             ),
             singleLine = true,
             isError = authState is AuthState.Error,
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(screenTokens.radius.chip),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
                 focusedLabelColor = MaterialTheme.colorScheme.primary,
@@ -447,16 +459,16 @@ private fun BasicAuthForm(
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(passwordFocus),
-            label = { Text("Password") },
+            label = { Text(screenResources.getString(R.string.auth_password_8be3c)) },
             leadingIcon = {
-                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(screenTokens.sizing.iconMd))
             },
             trailingIcon = {
                 IconButton(onClick = { passwordVisible = !passwordVisible }) {
                     Icon(
                         if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = if (passwordVisible) "Hide password" else "Show password",
-                        modifier = Modifier.size(20.dp),
+                        contentDescription = if (passwordVisible) screenResources.getString(R.string.auth_hide_password_e4012) else screenResources.getString(R.string.auth_show_password_044b8),
+                        modifier = Modifier.size(screenTokens.sizing.iconMd),
                     )
                 }
             },
@@ -473,7 +485,7 @@ private fun BasicAuthForm(
             ),
             singleLine = true,
             isError = authState is AuthState.Error,
-            shape = RoundedCornerShape(10.dp),
+            shape = RoundedCornerShape(screenTokens.radius.chip),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
                 focusedLabelColor = MaterialTheme.colorScheme.primary,
@@ -488,14 +500,14 @@ private fun BasicAuthForm(
         ) {
             if (errorMessage != null) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
                         Icons.Default.Close,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(screenTokens.sizing.iconXs),
                     )
                     Text(
                         text = errorMessage,
@@ -517,7 +529,7 @@ private fun BasicAuthForm(
                 colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary),
             )
             Text(
-                text = "Keep me signed in",
+                text = screenResources.getString(R.string.auth_keep_me_signed_in_5955c),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -525,21 +537,21 @@ private fun BasicAuthForm(
 
         // Actions
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
             modifier = Modifier.fillMaxWidth(),
         ) {
             TextButton(
                 onClick = onCancel,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("Cancel")
+                Text(screenResources.getString(R.string.auth_cancel_77dfd))
             }
 
             Button(
                 onClick = { viewModel.loginBasicAuth(username, password) },
                 modifier = Modifier.weight(2f).height(48.dp),
                 enabled = username.isNotBlank() && password.isNotBlank() && !isLoading,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(screenTokens.radius.chip),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = Color.White,
@@ -552,12 +564,12 @@ private fun BasicAuthForm(
                 ) { loading ->
                     if (loading) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(screenTokens.sizing.iconInline),
                             color = Color.White,
                             strokeWidth = 2.dp,
                         )
                     } else {
-                        Text("Sign in", style = MaterialTheme.typography.labelLarge)
+                        Text(screenResources.getString(R.string.auth_sign_in_ada2e), style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
@@ -573,12 +585,14 @@ private fun OAuthButton(
     iconContent: @Composable () -> Unit,
     onClick: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     OutlinedButton(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
             .height(48.dp),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(screenTokens.radius.chip),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
             MaterialTheme.colorScheme.outline,
@@ -602,12 +616,17 @@ private fun ConnectedServerChip(
     url: String,
     onChangeServer: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(screenTokens.radius.panel))
             .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = screenTokens.spacing.md, vertical = screenTokens.spacing.inline),
+        horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -627,7 +646,7 @@ private fun ConnectedServerChip(
             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
         ) {
             Text(
-                "Change",
+                screenResources.getString(R.string.auth_change_64fbd),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -639,17 +658,22 @@ private fun ConnectedServerChip(
 
 @Composable
 private fun OrDivider() {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
     ) {
         HorizontalDivider(
             modifier = Modifier.weight(1f),
             color = MaterialTheme.colorScheme.outlineVariant,
         )
         Text(
-            text = "or",
+            text = screenResources.getString(R.string.auth_or_17583),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -664,13 +688,18 @@ private fun OrDivider() {
 
 @Composable
 private fun ConnectingView() {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.lg),
         ) {
             CircularProgressIndicator(
                 color = MaterialTheme.colorScheme.primary,
@@ -678,7 +707,7 @@ private fun ConnectingView() {
                 strokeWidth = 3.dp,
             )
             Text(
-                "Connecting to server…",
+                screenResources.getString(R.string.auth_connecting_to_server_f54a0),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -688,13 +717,18 @@ private fun ConnectingView() {
 
 @Composable
 private fun AuthenticatingView() {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.lg),
         ) {
             CircularProgressIndicator(
                 color = MaterialTheme.colorScheme.primary,
@@ -702,7 +736,7 @@ private fun AuthenticatingView() {
                 strokeWidth = 3.dp,
             )
             Text(
-                "Signing you in…",
+                screenResources.getString(R.string.auth_signing_you_in_10d06),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -719,21 +753,26 @@ private fun ErrorView(
     onRetry: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .systemBarsPadding()
-            .padding(24.dp),
+            .padding(screenTokens.spacing.xl),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+            verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.section),
         ) {
             Box(
                 modifier = Modifier
                     .size(64.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(screenTokens.radius.lg))
                     .background(MaterialTheme.colorScheme.errorContainer),
                 contentAlignment = Alignment.Center,
             ) {
@@ -746,7 +785,7 @@ private fun ErrorView(
             }
 
             Text(
-                text = if (isConnectionError) "Connection Failed" else "Sign In Failed",
+                text = if (isConnectionError) screenResources.getString(R.string.auth_connection_failed_4a7b9) else screenResources.getString(R.string.auth_sign_in_failed_9c06f),
                 style = MaterialTheme.typography.headlineSmall,
                 color = MaterialTheme.colorScheme.onBackground,
                 textAlign = TextAlign.Center,
@@ -760,31 +799,31 @@ private fun ErrorView(
             )
 
             Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Button(
                     onClick = onRetry,
                     modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(screenTokens.radius.md),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 ) {
-                    Text(if (isConnectionError) "Try Again" else "Back to Login")
+                    Text(if (isConnectionError) screenResources.getString(R.string.auth_try_again_cef2f) else screenResources.getString(R.string.auth_back_to_login_b5cd3))
                 }
 
                 if (!isConnectionError) {
                     OutlinedButton(
                         onClick = onBack,
                         modifier = Modifier.fillMaxWidth().height(48.dp),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(screenTokens.radius.md),
                     ) {
                         Icon(
                             Icons.Default.ArrowBack,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(screenTokens.sizing.iconInline),
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text("Change Server")
+                        Text(screenResources.getString(R.string.auth_change_server_c30a8))
                     }
                 }
             }

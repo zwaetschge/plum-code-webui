@@ -1,5 +1,6 @@
 package com.claudewebui.app.data.local.dao
 
+import androidx.paging.PagingSource
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
@@ -24,6 +25,13 @@ interface MessageDao {
             ") ORDER BY timestamp ASC, eventSequence ASC, id ASC"
     )
     fun getByChat(sessionId: String, chatId: String?, limit: Int): Flow<List<MessageEntity>>
+
+    /** Newest first: Paging loads the live tail first and older rows on demand. */
+    @Query(
+        "SELECT * FROM messages WHERE sessionId = :sessionId AND chatId IS :chatId " +
+            "ORDER BY timestamp DESC, eventSequence DESC, id DESC"
+    )
+    fun pageByChat(sessionId: String, chatId: String?): PagingSource<Int, MessageEntity>
 
     /** Insert a single message, replacing on conflict (e.g. streaming update). */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -70,7 +78,7 @@ interface MessageDao {
         """
         SELECT * FROM messages
         WHERE sessionId = :sessionId AND chatId IS :chatId
-        ORDER BY timestamp DESC
+        ORDER BY timestamp DESC, eventSequence DESC, id DESC
         LIMIT :limit
         """
     )

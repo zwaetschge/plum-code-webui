@@ -62,6 +62,22 @@ data class OutboxEntity(
     val deliveryStatus: OutboxStatus
         get() = runCatching { OutboxStatus.valueOf(status) }.getOrDefault(OutboxStatus.FAILED)
 
+    /** Moving a failed send is a new delivery; old upload IDs belong to its old chat. */
+    fun retarget(chatId: String?, newClientMessageId: String): OutboxEntity {
+        require(deliveryStatus == OutboxStatus.FAILED)
+        require(newClientMessageId != clientMessageId)
+        return OutboxEntity(
+            clientMessageId = newClientMessageId,
+            sessionId = sessionId,
+            chatId = chatId,
+            content = content,
+            activeFollowupMode = activeFollowupMode,
+            attachmentsJson = OutboxEntity.attachmentsJson(attachments.map {
+                it.copy(uploadId = null, progress = 0f, uploadedChunks = emptyList(), totalChunks = 0, error = null)
+            }),
+        )
+    }
+
     companion object {
         fun attachmentsJson(value: List<PersistedOutboxAttachment>): String = outboxJson.encodeToString(value)
         fun uploadIdsJson(value: List<String>): String = outboxJson.encodeToString(value)

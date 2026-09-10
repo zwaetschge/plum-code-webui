@@ -1,3 +1,5 @@
+import { createHash } from 'crypto';
+
 import {
   get as pgGet,
   all as pgAll,
@@ -20,9 +22,12 @@ import type {
   ToolActionSummary,
   SessionSendDisposition,
   DiscordAlertEventType,
+  SessionLifecycleReason,
   DiscordAlertSeverity,
   PendingPermission,
+  PendingQuestionItem,
   PermissionRequestData,
+  StreamingMessage,
 } from '@plum-code-webui/shared';
 import { estimateModelCost } from '@plum-code-webui/shared';
 import {
@@ -109,7 +114,9 @@ import {
 import { captureKimiUsageCursor, readKimiUsageSince } from '../../utils/kimiTurnUsage.js';
 import {
   getSessionSyncState,
+  captureSessionSnapshotWatermark,
   nextSessionEventSequence,
+  settleSessionEventSequence,
   resolveSessionSendChatId,
 } from '../sessionSync.js';
 import { markChatUploadsConsumed } from '../chatUploads.js';
@@ -2843,6 +2850,8 @@ interface ClaudeProcess {
   // write a prompt until `turn_end`. Compaction can land in that window.
   piTurnInFlight?: boolean;
   piCompactContinuations?: number;
+  /** `stopReason` of the last assistant round (`stop`, `length`, `error`, ...). */
+  piLastStopReason?: string;
   piCompactResumeTimer?: ReturnType<typeof setTimeout>;
   // Per-subagent-thread cumulative snapshot, so a resumed exec books only the
   // delta each spawned agent added during the current turn.
@@ -3248,14 +3257,37 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
     existingSequence?: number
   ): Promise<number | undefined> {
     const buffered = await this.bufferMessage(sessionId, type, data, existingSequence);
-    emitLive(buffered?.data ?? data);
-    if (!buffered) return undefined;
-    this.io.to(`session:${sessionId}`).emit('session:cursor', {
-      sessionId,
-      sequence: buffered.sequence,
-      timestamp: buffered.timestamp,
-    });
-    return buffered.sequence;
+    if (buffered) {
+      emitLive(buffered.data);
+      settleSessionEventSequence(sessionId, buffered.sequence);
+      this.io.to(`session:${sessionId}`).emit('session:cursor', {
+        sessionId,
+        sequence: captureSessionSnapshotWatermark(sessionId) ?? buffered.sequence,
+        timestamp: buffered.timestamp,
+      });
+      return buffered.sequence;
+    }
+
+    // No live process — the session was stopped or cleaned up between producing
+    // this event and emitting it. Its replay buffer is gone, but the sequence
+    // counter lives in Postgres, so the event can still be numbered. That
+    // matters: the client orders on `eventSequence ?? 0`, so an unnumbered late
+    // event sorts to the very top of the transcript and is discarded by any
+    // `preserveAfterSequence` filter. No cursor goes out, because nothing is
+    // buffered for a reconnecting client to replay.
+    let sequence = existingSequence;
+    if (sequence === undefined) {
+      try {
+        sequence = await this.allocateEventSequence(sessionId);
+      } catch {
+        // The session row itself is gone. Nothing left to number against.
+        emitLive(data);
+        return undefined;
+      }
+    }
+    emitLive({ ...data, eventSequence: sequence });
+    settleSessionEventSequence(sessionId, sequence);
+    return undefined;
   }
 
   private compactActivityText(value: string | null | undefined, maxLength = 120): string | null {
@@ -3636,6 +3668,113 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
     this.emitBufferedEvent(sessionId, 'status', data, (sequenced) => {
       this.io.to(`session:${sessionId}`).emit('session:status', sequenced);
     });
+    void this.emitLifecycle(sessionId, data.status === 'error' ? 'error' : 'idle');
+  }
+
+  /** Owner per session, so a lifecycle beat costs no query on the hot path. */
+  private readonly lifecycleOwners = new Map<string, string>();
+  /** Last payload emitted per session, to suppress repeats. */
+  private readonly lifecycleFingerprints = new Map<string, string>();
+
+  private async resolveSessionOwner(sessionId: string): Promise<string | null> {
+    const live = this.processes.get(sessionId)?.userId;
+    if (live) {
+      this.lifecycleOwners.set(sessionId, live);
+      return live;
+    }
+    const cached = this.lifecycleOwners.get(sessionId);
+    if (cached) return cached;
+    const row = (await pgGet('SELECT user_id as userId FROM sessions WHERE id = ?', sessionId)) as
+      | { userId: string }
+      | undefined;
+    if (!row?.userId) return null;
+    this.lifecycleOwners.set(sessionId, row.userId);
+    return row.userId;
+  }
+
+  /**
+   * Tell every one of this user's clients that one session changed, on the
+   * account-wide room instead of the session room.
+   *
+   * Following N sessions used to mean joining N rooms and receiving each
+   * session's full output stream — the phone paid for tokens it would never
+   * render just to learn that a session had gone quiet. This carries the
+   * verdict only. Repeats are dropped, so a chatty turn produces one beat when
+   * it starts and one when it ends rather than one per token; the edges a
+   * client must never miss (an approval, a question, an error) always go out.
+   */
+  /**
+   * Park a question in the user-wide registry so background surfaces can see
+   * and answer it. Resolving the owner is a DB round trip, hence fire-and-forget.
+   */
+  private async registerQuestion(
+    sessionId: string,
+    event: { requestId: string; providerSessionId?: string; questions: PendingQuestionItem[] }
+  ): Promise<void> {
+    try {
+      const userId = await this.resolveSessionOwner(sessionId);
+      if (!userId) return;
+      const { registerPendingQuestion } = await import('../pendingQuestions.js');
+      registerPendingQuestion({
+        userId,
+        sessionId,
+        requestId: event.requestId,
+        providerSessionId: event.providerSessionId,
+        questions: event.questions,
+      });
+    } catch (error) {
+      console.warn('[Questions] failed to register pending question:', error);
+    }
+  }
+
+  private async emitLifecycle(sessionId: string, reason: SessionLifecycleReason): Promise<void> {
+    try {
+      const userId = await this.resolveSessionOwner(sessionId);
+      if (!userId) return;
+
+      const runtime = this.getSessionRuntimeSnapshot(sessionId);
+      const { listPendingPermissionsForUser } = await import('../../routes/permissions.js');
+      const pendingApprovals = listPendingPermissionsForUser(userId).filter(
+        (request) => request.sessionId === sessionId
+      ).length;
+      const { listPendingQuestionsForUser } = await import('../pendingQuestions.js');
+      const pendingQuestions = listPendingQuestionsForUser(userId).filter(
+        (question) => question.sessionId === sessionId
+      ).length;
+
+      const status: 'running' | 'stopped' | 'error' =
+        reason === 'error' ? 'error' : runtime.running ? 'running' : 'stopped';
+      const effectiveReason: SessionLifecycleReason =
+        reason === 'idle' && runtime.busy ? 'busy' : reason;
+
+      const payload = {
+        sessionId,
+        reason: effectiveReason,
+        status,
+        busy: runtime.busy,
+        queueDepth: runtime.queueDepth,
+        pendingApprovals,
+        pendingQuestions,
+        activitySummary: runtime.activitySummary,
+        lastActivityAt: runtime.lastActivityAt,
+        at: new Date().toISOString(),
+      };
+
+      // `at` is excluded on purpose — a beat that says nothing new is not news
+      // just because time passed.
+      const fingerprint = JSON.stringify({ ...payload, at: undefined });
+      const alwaysEmit =
+        effectiveReason === 'approval' ||
+        effectiveReason === 'question' ||
+        effectiveReason === 'error';
+      if (!alwaysEmit && this.lifecycleFingerprints.get(sessionId) === fingerprint) return;
+      this.lifecycleFingerprints.set(sessionId, fingerprint);
+
+      this.io.to(`user:${userId}`).emit('session:lifecycle', payload);
+    } catch (error) {
+      // Advisory signal: never let it break the turn that produced it.
+      console.warn('[Lifecycle] skipped:', error);
+    }
   }
 
   private async notifyDiscordSessionEvent(
@@ -4222,7 +4361,7 @@ Discord Main Gateway:
       proc.previousTotalCostUsd = proc.totalCostUsd;
       proc.totalCostUsd += turnCostUsd;
       await this.emitUsage(sessionId, proc);
-      this.saveUsageToDatabase(sessionId, proc);
+      await this.saveUsageToDatabase(sessionId, proc);
     } catch (error) {
       console.warn('[CODEX] Failed to flush usage after process exit:', error);
     }
@@ -4238,6 +4377,7 @@ Discord Main Gateway:
     this.emitBufferedEvent(sessionId, 'permission_request', data, (sequenced) => {
       this.io.to(`session:${sessionId}`).emit('session:permission_request', sequenced);
     });
+    void this.emitLifecycle(sessionId, 'approval');
   }
 
   /**
@@ -4248,38 +4388,84 @@ Discord Main Gateway:
     sessionId: string,
     sinceTimestamp?: number,
     sinceSequence?: number
-  ): Promise<{ items: BufferedMessage[]; needsFullResync: boolean }> {
+  ): Promise<{ items: BufferedMessage[]; needsFullResync: boolean; highWatermark: number }> {
+    const { highWatermark } = await getSessionSyncState(sessionId);
     const proc = this.processes.get(sessionId);
     if (!proc) {
       if (sinceSequence !== undefined) {
-        const highWatermark = (await getSessionSyncState(sessionId)).highWatermark;
-        return { items: [], needsFullResync: sinceSequence < highWatermark };
+        return { items: [], needsFullResync: sinceSequence < highWatermark, highWatermark };
       }
-      return { items: [], needsFullResync: false };
+      return { items: [], needsFullResync: highWatermark > 0, highWatermark };
     }
 
+    const all = proc.outputBuffer
+      .getAll()
+      .filter((message) => (message.sequence ?? 0) <= highWatermark)
+      .sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
     if (sinceSequence !== undefined) {
-      const all = proc.outputBuffer.getAll();
       const items = all.filter((message) => (message.sequence ?? 0) > sinceSequence);
-      const highWatermark = (await getSessionSyncState(sessionId)).highWatermark;
-      const earliest = items[0]?.sequence;
+      let expected = sinceSequence + 1;
+      let hasGap = false;
+      for (const item of items) {
+        if (item.sequence !== expected) hasGap = true;
+        expected = (item.sequence ?? expected) + 1;
+      }
       return {
         items,
-        needsFullResync:
-          (earliest !== undefined && earliest > sinceSequence + 1) ||
-          (items.length === 0 && sinceSequence < highWatermark),
+        needsFullResync: hasGap || expected <= highWatermark,
+        highWatermark,
       };
     }
 
     if (sinceTimestamp) {
-      return proc.outputBuffer.getSinceWithStatus((msg) => msg.timestamp >= sinceTimestamp);
+      const status = proc.outputBuffer.getSinceWithStatus((msg) => msg.timestamp >= sinceTimestamp);
+      return {
+        items: all.filter((msg) => msg.timestamp >= sinceTimestamp),
+        needsFullResync: status.needsFullResync,
+        highWatermark,
+      };
     }
-    return { items: proc.outputBuffer.getAll(), needsFullResync: false };
+    return {
+      items: all,
+      needsFullResync:
+        all.length !== highWatermark || all.some((item, index) => item.sequence !== index + 1),
+      highWatermark,
+    };
   }
 
   // Check if a session is running (for reconnection)
   isSessionRunning(sessionId: string): boolean {
     return this.processes.has(sessionId);
+  }
+
+  /** Read immediately before emitting reconnect; no await may split this snapshot and its packet. */
+  getStreamingSnapshot(sessionId: string): StreamingMessage | null {
+    const proc = this.processes.get(sessionId);
+    if (!proc?.isStreaming) return null;
+    const content =
+      proc.cliProvider === 'opencode'
+        ? [...(proc.partStreams?.values() ?? [])]
+            .filter(
+              (part) => part.type === 'text' && part.messageId === proc.opencodeActiveMessageId
+            )
+            .map((part) => (part.cleaned ?? part.text).slice(part.savedCleanedLength ?? 0))
+            .join('')
+        : proc.streamingText;
+    if (!content || content.trim() === proc.lastSavedAssistantContent) return null;
+    return {
+      sessionId,
+      chatId: proc.currentChatId ?? null,
+      content,
+      isComplete: false,
+    };
+  }
+
+  /** Preserve the live turn's ownership when the legacy main chat gains a real id. */
+  materializeMainChat(sessionId: string, mainChatId: string): void {
+    const proc = this.processes.get(sessionId);
+    if (!proc) return;
+    if (proc.providerChatId === null) proc.providerChatId = mainChatId;
+    if (proc.currentChatId === null) proc.currentChatId = mainChatId;
   }
 
   // Empty the replay buffer so a rewound session doesn't replay messages that were
@@ -5043,6 +5229,29 @@ Discord Main Gateway:
 
     this.processes.set(sessionId, claudeProcess);
 
+    // Before the first await, not after. A failed spawn (a missing binary, most
+    // often) emits 'error' from process.nextTick, and nextTick runs ahead of
+    // promise microtasks — so an error handler registered after `await pgRun`
+    // below is registered too late, and Node treats the unhandled 'error' as a
+    // fatal exception for the whole backend.
+    proc.on('error', async (err) => {
+      console.error(`${providerConfig.name} process error [${sessionId}]:`, err);
+      // Tell the client. Without this the session just went to 'stopped' and the
+      // user was left looking at a chat that had silently stopped answering.
+      this.io.to(`session:${sessionId}`).emit('session:error', {
+        sessionId,
+        error: `${providerConfig.name} failed to start: ${err.message}`,
+      });
+      await this.notifyDiscordSessionEvent(sessionId, {
+        eventType: 'session.error',
+        severity: 'error',
+        title: 'Session process error',
+        summary: err.message,
+      });
+
+      await this.cleanupProcess(sessionId, claudeProcess);
+    });
+
     await pgRun(
       'UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       'running',
@@ -5055,9 +5264,7 @@ Discord Main Gateway:
     });
 
     // Handle stdout - JSON messages
-    proc.stdout?.on('data', async (data: Buffer) => {
-      await this.handleJsonOutput(sessionId, data.toString());
-    });
+    this.attachJsonStdoutHandler(proc, sessionId);
 
     if (cliProvider === 'pi') {
       // Capture Pi's native session id/model after RPC initialization. The
@@ -5103,17 +5310,41 @@ Discord Main Gateway:
       }
       await this.cleanupProcess(sessionId, claudeProcess);
     });
+  }
 
-    proc.on('error', async (err) => {
-      console.error(`${providerConfig.name} process error [${sessionId}]:`, err);
-      await this.notifyDiscordSessionEvent(sessionId, {
-        eventType: 'session.error',
-        severity: 'error',
-        title: 'Session process error',
-        summary: err.message,
-      });
-
-      await this.cleanupProcess(sessionId, claudeProcess);
+  /**
+   * Attach the stdout reader that feeds `handleJsonOutput`, one chunk at a time.
+   *
+   * `stdout.on('data', async …)` looks like it serializes, but Node never awaits
+   * a listener: the moment the handler suspends on a database write or an event
+   * sequence allocation, the stream emits the next chunk and a second
+   * `handleJsonOutput` runs concurrently against the same `proc.buffer`,
+   * `proc.streamingText`, `proc.currentTool*` and `proc.pendingToolResults`.
+   * Interleaved, the two runs tear a JSON line in half across a 64 KiB chunk
+   * boundary, append streaming text twice, or write two assistant messages for
+   * one turn. Chaining each chunk onto a single promise keeps at most one run in
+   * flight per child, in arrival order.
+   *
+   * `setEncoding('utf8')` is part of the fix: decoding each Buffer separately
+   * splits any multi-byte character that straddles a chunk boundary, which for
+   * German output means a mangled umlaut every few thousand tokens. The stream's
+   * own StringDecoder carries the partial sequence over.
+   */
+  private attachJsonStdoutHandler(
+    child: ChildProcess,
+    sessionId: string,
+    onChunk?: () => void
+  ): void {
+    if (!child.stdout) return;
+    child.stdout.setEncoding('utf8');
+    let chain: Promise<void> = Promise.resolve();
+    child.stdout.on('data', (chunk: string) => {
+      onChunk?.();
+      chain = chain
+        .then(() => this.handleJsonOutput(sessionId, chunk))
+        .catch((error) => {
+          console.error(`[${sessionId}] Failed to process CLI output:`, error);
+        });
     });
   }
 
@@ -5271,6 +5502,7 @@ Discord Main Gateway:
 
     if (type === 'agent_start') {
       proc.isStreaming = true;
+      proc.piTurnInFlight = true;
       proc.currentActivitySummary = 'Agent working';
       this.io.to(`session:${sessionId}`).emit('session:thinking', {
         sessionId,
@@ -5383,8 +5615,11 @@ Discord Main Gateway:
         proc.totalCostUsd += Math.max(0, cost.total);
       }
       proc.isStreaming = false;
-      proc.piTurnInFlight = false;
-      proc.piCompactContinuations = 0;
+      proc.piLastStopReason =
+        message && typeof message.stopReason === 'string' ? message.stopReason : undefined;
+      // `turn_end` fires after every LLM round, tool rounds included — the
+      // prompt itself is only over at `agent_end`. Clearing the in-flight flag
+      // here made every later compaction look like a manual `/compact`.
       return { type: 'result' };
     }
 
@@ -5407,6 +5642,12 @@ Discord Main Gateway:
 
     if (type === 'agent_end') {
       proc.isStreaming = false;
+      proc.piTurnInFlight = false;
+      // A run that ended because the model chose to stop is real progress. A
+      // `length`/`error` end at the context limit is not: refilling the budget
+      // there let a session at the hard limit loop forever — one tool call,
+      // overflow, failed compaction, nudge, repeat.
+      if (proc.piLastStopReason === 'stop') proc.piCompactContinuations = 0;
       return null;
     }
 
@@ -5423,10 +5664,13 @@ Discord Main Gateway:
    * Decide whether Pi needs a nudge after compaction.
    *
    * Pi resumes by itself in the overflow-recovery path (`willRetry`), and a
-   * manual `/compact` has no turn to resume. Everything else used to leave the
-   * turn dead with the thinking indicator stuck on: the compaction consumed the
-   * turn, and the user's actual request was never finished. Schedule a nudge and
-   * cancel it the moment Pi shows any sign of progress on its own.
+   * manual `/compact` between turns has no turn to resume. Threshold compaction
+   * is different: Pi runs it only after `agent_end` and then deliberately stops
+   * ("user continues manually"), which in the WebUI meant every auto-compacted
+   * task sat waiting for a typed "continue". Schedule a nudge for automatic
+   * compaction and cancel it the moment Pi shows any sign of progress on its
+   * own (a queued follow-up, or the pre-prompt compaction that precedes a new
+   * user message).
    */
   private async handlePiCompactionEnd(
     sessionId: string,
@@ -5456,12 +5700,42 @@ Discord Main Gateway:
       return null;
     }
 
+    // Pi reports a failed compaction as `compaction_end` without a result and
+    // with `errorMessage` (summariser overflowed, overflow recovery already
+    // spent). The context is exactly as full as before, so nudging only burns
+    // another full-window request; tell the user what Pi told us instead.
+    const errorMessage =
+      typeof event.errorMessage === 'string' && event.errorMessage.trim()
+        ? event.errorMessage.trim()
+        : null;
+    if (errorMessage || !isRecordValue(event.result)) {
+      this.clearPiCompactResumeTimer(proc);
+      proc.piTurnInFlight = false;
+      proc.isStreaming = false;
+      console.warn(
+        `[PI] Compaction failed (${reason}) [${sessionId}]: ${errorMessage ?? 'no result'}`
+      );
+      await this.emitCompact(sessionId, {
+        sessionId,
+        message:
+          'Pi could not compact the context. Switch to a model with a larger context ' +
+          'window (/model) or start a new session.',
+        reason: 'context-limit',
+        error: errorMessage ?? 'Compaction produced no summary',
+        // The boundary card only expands `summary`; Pi's own explanation
+        // ("switch to a larger-context model") belongs where the user can read it.
+        summary: errorMessage ?? undefined,
+      });
+      stopThinking();
+      return null;
+    }
+
     this.resetCurrentContextUsage(proc);
 
     // Overflow recovery: Pi retries the aborted turn itself.
     if (event.willRetry === true) return null;
 
-    if (!proc.piTurnInFlight) {
+    if (reason === 'manual' && !proc.piTurnInFlight) {
       // Manual `/compact` between turns. Nothing to resume, but the thinking
       // indicator was switched on when the command was written to stdin.
       stopThinking();
@@ -5489,8 +5763,8 @@ Discord Main Gateway:
       const current = this.processes.get(sessionId);
       if (!current || current !== proc || current.cliProvider !== 'pi') return;
       current.piCompactResumeTimer = undefined;
-      if (!current.piTurnInFlight) return;
       current.piCompactContinuations = (current.piCompactContinuations ?? 0) + 1;
+      current.piTurnInFlight = true;
       console.log(
         `[PI] Resuming turn after ${reason} compaction (attempt ${current.piCompactContinuations}) [${sessionId}]`
       );
@@ -6730,6 +7004,13 @@ Discord Main Gateway:
         this.emitBufferedEvent(sessionId, 'question', questionEvent, (sequenced) => {
           this.io.to(`session:${sessionId}`).emit('session:question_request', sequenced);
         });
+        // Remember it for the surfaces that are not holding a socket open. The
+        // frame above only reaches whoever is subscribed to this session right
+        // now; a widget or a watch learns about the block from the registry.
+        // Registered before the beat, so the beat already counts this question.
+        void this.registerQuestion(sessionId, questionEvent).then(() =>
+          this.emitLifecycle(sessionId, 'question')
+        );
         await this.notifyDiscordSessionEvent(sessionId, {
           eventType: 'session.needs_input',
           severity: 'warning',
@@ -7061,7 +7342,7 @@ Discord Main Gateway:
       proc.opencodeActiveMessageId = null;
       proc.opencodeMessageOrder = [];
       await this.emitUsage(sessionId, proc);
-      this.saveUsageToDatabase(sessionId, proc);
+      await this.saveUsageToDatabase(sessionId, proc);
     } finally {
       proc.opencodeUsageBaseline = null;
       proc.opencodeUsageFinalizing = false;
@@ -7190,9 +7471,7 @@ Discord Main Gateway:
     proc.codexTotalTokenUsage = undefined;
 
     // Re-attach output handlers
-    newChildProc.stdout?.on('data', async (data: Buffer) => {
-      await this.handleJsonOutput(sessionId, data.toString());
-    });
+    this.attachJsonStdoutHandler(newChildProc, sessionId);
     newChildProc.stderr?.on('data', (data: Buffer) => {
       console.error(`Claude stderr [${sessionId}]:`, data.toString());
     });
@@ -7233,6 +7512,13 @@ Discord Main Gateway:
             );
           }
           managedProc.codexIdle = true;
+          // Codex is one process per turn, so between turns there is no child.
+          // Leaving the exited handle in place meant everything that reaches for
+          // `proc.process` while the session is idle — Stop closing stdin,
+          // interrupt sending SIGINT — worked against a dead pid and silently
+          // did nothing. The virtual placeholder is what the other one-shot
+          // paths already use.
+          managedProc.process = createVirtualChildProcess();
           managedProc.codexPreemptingForSteer = false;
           managedProc.streamingText = '';
           managedProc.isStreaming = false;
@@ -7258,6 +7544,10 @@ Discord Main Gateway:
     });
     newChildProc.on('error', async (err) => {
       console.error(`Claude process error [${sessionId}]:`, err);
+      this.io.to(`session:${sessionId}`).emit('session:error', {
+        sessionId,
+        error: `Codex process error: ${err.message}`,
+      });
       await this.notifyDiscordSessionEvent(sessionId, {
         eventType: 'session.error',
         severity: 'error',
@@ -7502,6 +7792,39 @@ Discord Main Gateway:
   }
 
   // Save usage to database - called ONCE per turn when result is received
+  /**
+   * Content-addressed id for usage that reached us without a turn to hang it
+   * on. Deterministic so the same figures always book to the same row.
+   */
+  private deriveUsageTurnId(sessionId: string, proc: ClaudeProcess): string {
+    const digest = createHash('sha256')
+      .update(
+        [
+          sessionId,
+          proc.cliProvider,
+          proc.model ?? '',
+          proc.turnInputTokens,
+          proc.turnOutputTokens,
+          proc.turnCacheReadTokens,
+          proc.turnCacheCreationTokens,
+          proc.totalInputTokens,
+          proc.totalOutputTokens,
+          proc.cacheReadTokens,
+          proc.cacheCreationTokens,
+        ].join(':')
+      )
+      .digest('hex')
+      .slice(0, 24);
+    return `auto-${digest}`;
+  }
+
+  /**
+   * Book one turn's token usage. The single analytics write path.
+   *
+   * Must be awaited. It is idempotent per turn id and swallows its own errors,
+   * so the only thing an un-awaited call buys is a race with process exit — and
+   * losing the last turn of a session is losing money that was already spent.
+   */
   private async saveUsageToDatabase(sessionId: string, proc: ClaudeProcess): Promise<void> {
     // Claude Code's final result aggregates the whole turn including its
     // subagents — and a subagent routed to Z.AI was already booked by the
@@ -7534,7 +7857,14 @@ Discord Main Gateway:
 
     // Calculate cost from tokens (not from CLI cumulative value)
     const turnCostUsd = proc.turnCostUsd ?? this.calculateTurnCost(proc);
-    const turnId = (proc.currentUsageTurnId ??= nanoid());
+    // Normally the queue id of the turn being answered. The fallback is for
+    // usage that arrives with no turn attached at all, and it is derived from
+    // the counters rather than random: a random id makes every retry of the
+    // same write look like a new turn, which is precisely what the shutdown
+    // flush and `flushCodexUsageOnExit` would trigger. The running totals are
+    // part of the digest and only ever grow, so two consecutive turns cannot
+    // collide.
+    const turnId = (proc.currentUsageTurnId ??= this.deriveUsageTurnId(sessionId, proc));
 
     try {
       const inserted = await insertUsageHistoryTurn({
@@ -7562,7 +7892,7 @@ Discord Main Gateway:
       } else {
         console.log(`[USAGE] Skipped duplicate ${proc.cliProvider} turn ${turnId}`);
       }
-      this.flushSubagentUsage(sessionId, proc, turnId);
+      await this.flushSubagentUsage(sessionId, proc, turnId);
       proc.turnCostUsd = undefined;
     } catch (error) {
       console.error('[USAGE] Failed to save usage to database:', error);
@@ -8014,7 +8344,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
 
       // Save usage to database - ONLY HERE at the end of the turn
       // Cost is calculated from tokens, not from CLI cumulative value
-      this.saveUsageToDatabase(sessionId, proc);
+      await this.saveUsageToDatabase(sessionId, proc);
     }
 
     // Handle content_block_start - begin streaming text
@@ -8276,7 +8606,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     const createdAt = new Date().toISOString();
     // The provider turn owns its thread even if another device changes the
     // session-wide active chat before this response finishes.
-    const chatId = proc?.currentChatId ?? (await getSessionSyncState(sessionId)).activeChatId;
+    let chatId = proc ? proc.currentChatId : (await getSessionSyncState(sessionId)).activeChatId;
     const eventSequence = await this.allocateEventSequence(sessionId);
 
     // This runs from child 'exit' handlers among other places; a throw there
@@ -8294,12 +8624,19 @@ The planning phase is complete. You are now in Auto-Accept mode.
         deliveredContent,
         eventSequence
       );
+      // Materialisation may have run while this INSERT awaited Postgres. A
+      // captured null still belongs to the old main chat, never the new one.
+      if (chatId === null && proc?.currentChatId) {
+        chatId = proc.currentChatId;
+        await pgRun('UPDATE messages SET chat_id = ? WHERE id = ?', chatId, messageId);
+      }
       await pgRun(
         'UPDATE sessions SET last_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         deliveredContent.substring(0, 200),
         sessionId
       );
     } catch (error) {
+      settleSessionEventSequence(sessionId, eventSequence);
       console.error(`[SAVE] Failed to persist assistant message [${sessionId}]:`, error);
       return;
     }
@@ -8429,6 +8766,40 @@ The planning phase is complete. You are now in Auto-Accept mode.
       return proc.claudeQueuedTurns ?? [];
     }
     return [];
+  }
+
+  /**
+   * Drop every queued follow-up turn for a session.
+   *
+   * Used by restart and by interrupt. Interrupt needs it because the queues
+   * survived the abort signal: the Codex exit handler reads a non-zero exit with
+   * pending follow-ups as a steering interrupt and immediately drains the next
+   * queued turn, so pressing Stop after sending three messages ended the first
+   * one and started the second. Stop has to mean all of the outstanding work,
+   * not just the turn that happens to be running.
+   */
+  private discardQueuedTurns(sessionId: string, proc: ClaudeProcess): void {
+    const discarded =
+      (proc.codexQueuedTurns?.length ?? 0) +
+      (proc.opencodeQueuedTurns?.length ?? 0) +
+      (proc.claudeQueuedTurns?.length ?? 0) +
+      (proc.kimiQueuedTurns?.length ?? 0);
+    proc.codexQueuedTurns = [];
+    proc.codexSteerDraining = false;
+    proc.codexPreemptingForSteer = false;
+    proc.opencodeQueuedTurns = [];
+    proc.opencodeQueueDraining = false;
+    proc.opencodeIdle = true;
+    proc.claudeQueuedTurns = [];
+    proc.claudeQueueDraining = false;
+    proc.claudeIdle = true;
+    proc.kimiQueuedTurns = [];
+    proc.kimiQueueDraining = false;
+    proc.kimiIdle = true;
+    this.emitQueueState(sessionId, proc);
+    if (discarded > 0) {
+      console.log(`[SESSION] Discarded ${discarded} queued turn(s) [${sessionId}]`);
+    }
   }
 
   private emitQueueState(sessionId: string, proc: ClaudeProcess): void {
@@ -8850,7 +9221,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
       await this.emitUsage(sessionId, proc);
       const text = proc.streamingText.trim();
       if (text) await this.saveAssistantMessage(sessionId, text);
-      this.saveUsageToDatabase(sessionId, proc);
+      await this.saveUsageToDatabase(sessionId, proc);
       console.log(`[KIMI ACP] Turn completed [${sessionId}] reason=${response.stopReason}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -8995,10 +9366,9 @@ The planning phase is complete. You are now in Auto-Accept mode.
       isThinking: true,
     });
 
-    child.stdout?.on('data', async (data: Buffer) => {
+    this.attachJsonStdoutHandler(child, sessionId, () => {
       receivedStructuredOutput = true;
       clearTimeout(quietProgressTimer);
-      await this.handleJsonOutput(sessionId, data.toString());
     });
     child.stderr?.on('data', (data: Buffer) => {
       const chunk = data.toString();
@@ -9055,7 +9425,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
       managedProc.streamingText = '';
       managedProc.isStreaming = false;
       managedProc.codexIdle = true;
-      this.saveUsageToDatabase(sessionId, managedProc);
+      await this.saveUsageToDatabase(sessionId, managedProc);
       this.io.to(`session:${sessionId}`).emit('session:thinking', {
         sessionId,
         isThinking: false,
@@ -9748,115 +10118,128 @@ ${proc.contextReminder.summary}
     const updateLastMessage = options?.updateLastMessage ?? defaultRecordMessage;
     const recordedMessageId = nanoid();
     const recordedCreatedAt = new Date().toISOString();
-    const recordedChatId = targetChatId;
+    let recordedChatId = targetChatId;
     let recordedEventSequence: number | undefined;
 
     if (recordMessage) {
       // Save user message and emit to frontend (show original message, images as metadata)
       recordedEventSequence = await this.allocateEventSequence(sessionId);
-      await pgRun(
-        `INSERT INTO messages (
-           id, session_id, chat_id, role, content, client_message_id, event_sequence
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        recordedMessageId,
-        sessionId,
-        recordedChatId,
-        'user',
-        message, // Store only the user's original message
-        options?.clientMessageId ?? null,
-        recordedEventSequence
-      );
-      // Keep the session list preview in sync with the newest activity — previously
-      // only assistant replies touched last_message, so user-only sessions showed
-      // a stale preview until Claude responded.
-      const preview = message.length > 200 ? message.slice(0, 200) : message;
-      await pgRun(
-        'UPDATE sessions SET last_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        preview,
-        sessionId
-      );
-
-      // Persist every accepted upload as durable chat media. Clients render
-      // from `media` (served via /api/sessions/:id/media/:mediaId); the raw
-      // attachment paths are server-local and the one-shot legacy metadata is
-      // not part of REST history.
-      let userMedia: Awaited<ReturnType<typeof persistMessageMedia>> = [];
-      const uploadedMedia: PendingChatMedia[] = [
-        ...filePaths.map((file, index) => ({
-          kind: 'file' as const,
-          filePath: file.path,
-          allowedRoots: [path.join(proc.workingDirectory, '.claude-webui-attachments')],
-          filename: file.originalFilename,
-          mimeType: file.mimeType,
-          source: 'user' as const,
-          sourceId: `upload:${recordedMessageId}:file:${index}`,
-        })),
-        ...inlineTextContents.map((file, index) => ({
-          kind: 'buffer' as const,
-          buffer: Buffer.from(file.content, 'utf8'),
-          filename: file.originalFilename,
-          mimeType: file.mimeType,
-          source: 'user' as const,
-          sourceId: `upload:${recordedMessageId}:inline:${index}`,
-        })),
-      ];
-      if (uploadedMedia.length > 0) {
-        try {
-          userMedia = await persistMessageMedia({
-            messageId: recordedMessageId,
-            sessionId,
-            userId,
-            media: uploadedMedia,
-          });
-        } catch (error) {
-          console.error(`[MEDIA] Failed to persist user media [${sessionId}]:`, error);
-          await pgRun('DELETE FROM messages WHERE id = ?', recordedMessageId);
-          throw new Error(
-            `Failed to persist message attachments: ${error instanceof Error ? error.message : String(error)}`
+      try {
+        await pgRun(
+          `INSERT INTO messages (
+             id, session_id, chat_id, role, content, client_message_id, event_sequence
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          recordedMessageId,
+          sessionId,
+          recordedChatId,
+          'user',
+          message, // Store only the user's original message
+          options?.clientMessageId ?? null,
+          recordedEventSequence
+        );
+        if (recordedChatId === null && proc.currentChatId !== null) {
+          recordedChatId = proc.currentChatId;
+          await pgRun(
+            'UPDATE messages SET chat_id = ? WHERE id = ?',
+            recordedChatId,
+            recordedMessageId
           );
         }
-      }
+        // Keep the session list preview in sync with the newest activity — previously
+        // only assistant replies touched last_message, so user-only sessions showed
+        // a stale preview until Claude responded.
+        const preview = message.length > 200 ? message.slice(0, 200) : message;
+        await pgRun(
+          'UPDATE sessions SET last_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          preview,
+          sessionId
+        );
 
-      if (options?.uploadIds?.length) {
-        try {
-          markChatUploadsConsumed(
-            userId,
-            sessionId,
-            options.uploadIds,
-            recordedMessageId,
-            options.clientMessageId ?? ''
-          );
-        } catch (error) {
-          await pgRun('DELETE FROM messages WHERE id = ?', recordedMessageId);
-          throw error;
+        // Persist every accepted upload as durable chat media. Clients render
+        // from `media` (served via /api/sessions/:id/media/:mediaId); the raw
+        // attachment paths are server-local and the one-shot legacy metadata is
+        // not part of REST history.
+        let userMedia: Awaited<ReturnType<typeof persistMessageMedia>> = [];
+        const uploadedMedia: PendingChatMedia[] = [
+          ...filePaths.map((file, index) => ({
+            kind: 'file' as const,
+            filePath: file.path,
+            allowedRoots: [path.join(proc.workingDirectory, '.claude-webui-attachments')],
+            filename: file.originalFilename,
+            mimeType: file.mimeType,
+            source: 'user' as const,
+            sourceId: `upload:${recordedMessageId}:file:${index}`,
+          })),
+          ...inlineTextContents.map((file, index) => ({
+            kind: 'buffer' as const,
+            buffer: Buffer.from(file.content, 'utf8'),
+            filename: file.originalFilename,
+            mimeType: file.mimeType,
+            source: 'user' as const,
+            sourceId: `upload:${recordedMessageId}:inline:${index}`,
+          })),
+        ];
+        if (uploadedMedia.length > 0) {
+          try {
+            userMedia = await persistMessageMedia({
+              messageId: recordedMessageId,
+              sessionId,
+              userId,
+              media: uploadedMedia,
+            });
+          } catch (error) {
+            console.error(`[MEDIA] Failed to persist user media [${sessionId}]:`, error);
+            await pgRun('DELETE FROM messages WHERE id = ?', recordedMessageId);
+            throw new Error(
+              `Failed to persist message attachments: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
         }
+
+        if (options?.uploadIds?.length) {
+          try {
+            markChatUploadsConsumed(
+              userId,
+              sessionId,
+              options.uploadIds,
+              recordedMessageId,
+              options.clientMessageId ?? ''
+            );
+          } catch (error) {
+            await pgRun('DELETE FROM messages WHERE id = ?', recordedMessageId);
+            throw error;
+          }
+        }
+
+        // Emit user message to frontend so it appears in chat
+        const userMessage = {
+          id: recordedMessageId,
+          sessionId,
+          chatId: recordedChatId,
+          role: 'user',
+          content: message,
+          createdAt: recordedCreatedAt,
+          clientMessageId: options?.clientMessageId,
+          eventSequence: recordedEventSequence,
+          images: imageMetadata.length > 0 ? imageMetadata : undefined,
+          attachments: attachmentMetadata.length > 0 ? attachmentMetadata : undefined,
+          ...(userMedia.length > 0 ? { media: userMedia } : {}),
+        } as const;
+        await this.emitBufferedEvent(
+          sessionId,
+          'message',
+          userMessage,
+          (sequenced) => {
+            this.io.to(`session:${sessionId}`).emit('session:message', sequenced);
+          },
+          recordedEventSequence
+        );
+
+        this.events.emit('userMessage', sessionId, message);
+      } catch (error) {
+        settleSessionEventSequence(sessionId, recordedEventSequence);
+        throw error;
       }
-
-      // Emit user message to frontend so it appears in chat
-      const userMessage = {
-        id: recordedMessageId,
-        sessionId,
-        chatId: recordedChatId,
-        role: 'user',
-        content: message,
-        createdAt: recordedCreatedAt,
-        clientMessageId: options?.clientMessageId,
-        eventSequence: recordedEventSequence,
-        images: imageMetadata.length > 0 ? imageMetadata : undefined,
-        attachments: attachmentMetadata.length > 0 ? attachmentMetadata : undefined,
-        ...(userMedia.length > 0 ? { media: userMedia } : {}),
-      } as const;
-      this.emitBufferedEvent(
-        sessionId,
-        'message',
-        userMessage,
-        (sequenced) => {
-          this.io.to(`session:${sessionId}`).emit('session:message', sequenced);
-        },
-        recordedEventSequence
-      );
-
-      this.events.emit('userMessage', sessionId, message);
     }
 
     if (proc.cliProvider === 'codex') {
@@ -10090,6 +10473,11 @@ ${proc.contextReminder.summary}
 
     console.log(`Interrupting session [${sessionId}]`);
 
+    // Stop means stop: everything the user queued while the session was busy is
+    // dropped too, before the abort signal goes out. Otherwise the provider's
+    // exit handler sees pending follow-ups and starts the next one.
+    this.discardQueuedTurns(sessionId, proc);
+
     // An explicit interrupt ends the turn — drop any pending compaction nudge.
     this.clearPiCompactResumeTimer(proc);
     proc.piTurnInFlight = false;
@@ -10154,6 +10542,12 @@ ${proc.contextReminder.summary}
     // should not leave a working credential behind.
     modelRouter.unregisterSession(sessionId);
 
+    // Nothing is waiting on an answer once the process is gone; a question left
+    // in the registry would keep a stopped session flagged as needing you.
+    void import('../pendingQuestions.js').then(({ clearPendingQuestionsForSession }) =>
+      clearPendingQuestionsForSession(sessionId)
+    );
+
     if (proc.serverBacked && proc.cliProvider === 'opencode') {
       this.detachProcessForRestart(proc);
       await this.cleanupProcess(sessionId, proc);
@@ -10163,12 +10557,16 @@ ${proc.contextReminder.summary}
     // Close stdin to signal end
     proc.process.stdin?.end();
 
-    setTimeout(async () => {
+    // A grace period for a clean exit after stdin closes, then force it.
+    // Unreferenced so that stopping the last session does not hold the event
+    // loop open for two more seconds during a shutdown.
+    const forceKill = setTimeout(async () => {
       if (this.processes.get(sessionId) === proc) {
         terminateManagedProcess(proc.process);
         await this.cleanupProcess(sessionId, proc);
       }
     }, 2000);
+    forceKill.unref();
   }
 
   private detachProcessForRestart(proc: ClaudeProcess): void {
@@ -10238,19 +10636,7 @@ ${proc.contextReminder.summary}
         throw new Error('Unauthorized');
       }
 
-      proc.codexQueuedTurns = [];
-      proc.codexSteerDraining = false;
-      proc.codexPreemptingForSteer = false;
-      proc.opencodeQueuedTurns = [];
-      proc.opencodeQueueDraining = false;
-      proc.opencodeIdle = true;
-      proc.claudeQueuedTurns = [];
-      proc.claudeQueueDraining = false;
-      proc.claudeIdle = true;
-      proc.kimiQueuedTurns = [];
-      proc.kimiQueueDraining = false;
-      proc.kimiIdle = true;
-      this.emitQueueState(sessionId, proc);
+      this.discardQueuedTurns(sessionId, proc);
       // Stop the provider transport immediately. Server-backed OpenCode sessions
       // need an HTTP abort plus handler cleanup; their virtual child kill is a no-op.
       this.detachProcessForRestart(proc);
@@ -10587,7 +10973,9 @@ ${proc.contextReminder.summary}
           ? !proc.opencodeIdle || queueItems.length > 0 || hasActiveSubagents
           : isClaudeTransportProvider(proc.cliProvider)
             ? proc.claudeIdle === false || queueItems.length > 0 || hasActiveSubagents
-            : proc.isStreaming || !!proc.currentToolName || hasActiveSubagents;
+            : proc.cliProvider === 'kimi'
+              ? proc.kimiIdle === false || queueItems.length > 0 || hasActiveSubagents
+              : proc.isStreaming || !!proc.currentToolName || hasActiveSubagents;
     const activitySummary = this.getActivitySummary(proc, busy, queueItems.length);
 
     return {
@@ -10626,6 +11014,24 @@ ${proc.contextReminder.summary}
     }
 
     console.log(`[SHUTDOWN] Terminating ${sessionIds.length} Claude process(es)`);
+
+    // Book whatever the live processes have accumulated before they are killed.
+    // Usage is written once per completed turn, so a rebuild or a SIGTERM
+    // landing mid-turn used to throw away every token the turn had spent —
+    // real money already charged upstream, invisible in the analytics. The
+    // write is keyed by turn id and skips a zero-token turn, so a process that
+    // already booked its turn simply logs a duplicate and moves on.
+    await Promise.all(
+      sessionIds.map(async (sessionId) => {
+        const proc = this.processes.get(sessionId);
+        if (!proc) return;
+        try {
+          await this.saveUsageToDatabase(sessionId, proc);
+        } catch (err) {
+          console.warn(`[SHUTDOWN] Usage flush failed for ${sessionId}:`, err);
+        }
+      })
+    );
 
     for (const sessionId of sessionIds) {
       const proc = this.processes.get(sessionId);
@@ -10915,9 +11321,7 @@ ${proc.contextReminder.summary}
     this.processes.set(sessionId, claudeProcess);
 
     // Setup handlers
-    newProc.stdout?.on('data', async (data: Buffer) => {
-      await this.handleJsonOutput(sessionId, data.toString());
-    });
+    this.attachJsonStdoutHandler(newProc, sessionId);
 
     newProc.stderr?.on('data', (data: Buffer) => {
       console.error(`Claude stderr [${sessionId}]:`, data.toString());
@@ -10930,6 +11334,10 @@ ${proc.contextReminder.summary}
 
     newProc.on('error', async (err) => {
       console.error(`Claude process error [${sessionId}]:`, err);
+      this.io.to(`session:${sessionId}`).emit('session:error', {
+        sessionId,
+        error: `Session process error: ${err.message}`,
+      });
       await this.notifyDiscordSessionEvent(sessionId, {
         eventType: 'session.error',
         severity: 'error',

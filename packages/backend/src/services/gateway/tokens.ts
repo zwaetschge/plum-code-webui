@@ -1,6 +1,7 @@
 import { get as pgGet, all as pgAll, run as pgRun } from '../../db/pg.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { nanoid } from 'nanoid';
+import { AppError } from '../../middleware/errorHandler.js';
 
 /**
  * Credentials for an external supervisor.
@@ -13,6 +14,15 @@ import { nanoid } from 'nanoid';
  */
 
 export const GATEWAY_TOKEN_PREFIX = 'plum_gw_';
+
+/**
+ * Ceiling on live tokens per user. Minting is unauthenticated-adjacent in the
+ * sense that any session can do it, and a token never expires on its own, so
+ * without a cap a scripted loop grows the table without bound and every
+ * incoming request pays for the extra hash comparisons. Twenty is far more
+ * supervisors than anyone runs; the message tells the user to revoke first.
+ */
+export const GATEWAY_TOKEN_LIMIT = 20;
 
 /**
  * `read` may only issue safe HTTP methods; `write` is the previous behaviour,
@@ -41,6 +51,18 @@ export async function createGatewayToken(
   name: string,
   scope: GatewayScope = 'write'
 ): Promise<{ token: string; row: GatewayTokenRow }> {
+  const active = (await pgGet(
+    'SELECT COUNT(*) AS count FROM gateway_tokens WHERE user_id = ? AND revoked = 0',
+    userId
+  )) as { count?: number | string } | undefined;
+  if (Number(active?.count ?? 0) >= GATEWAY_TOKEN_LIMIT) {
+    throw new AppError(
+      `You already have ${GATEWAY_TOKEN_LIMIT} active gateway tokens — revoke one first.`,
+      429,
+      'GATEWAY_TOKEN_LIMIT'
+    );
+  }
+
   const secret = randomBytes(32).toString('base64url');
   const token = `${GATEWAY_TOKEN_PREFIX}${secret}`;
   const id = nanoid();

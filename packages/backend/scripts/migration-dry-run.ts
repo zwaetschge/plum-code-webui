@@ -25,9 +25,8 @@ process.env.SESSION_SECRET ||= 'migration-dry-run-session-secret-000000000000000
 process.env.JWT_SECRET ||= 'migration-dry-run-jwt-secret-0000000000000000000';
 process.env.ENCRYPTION_KEY ||= 'migration-dry-run-encryption-key-000000000000';
 
-const { useTestSchema, createTestSchema, dropTestSchema, databaseReachable } = await import(
-  '../src/db/testing.js'
-);
+const { useTestSchema, createTestSchema, dropTestSchema, databaseReachable } =
+  await import('../src/db/testing.js');
 useTestSchema();
 
 const { all: pgAll } = await import('../src/db/pg.js');

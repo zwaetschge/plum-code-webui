@@ -61,8 +61,9 @@ export function SubagentUpstreamsSection() {
   const { data: stored } = useQuery({
     queryKey: ['subagent-upstreams'],
     queryFn: async () => {
-      const response =
-        await api.get<ApiEnvelope<UpstreamStatus[]>>('/api/settings/subagent-upstreams');
+      const response = await api.get<ApiEnvelope<UpstreamStatus[]>>(
+        '/api/settings/subagent-upstreams'
+      );
       return response.data.data;
     },
   });
@@ -111,16 +112,18 @@ export function SubagentUpstreamsSection() {
       <div>
         <p className="text-sm font-medium">Subagent-Upstreams (weitere Provider)</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Beliebige Anthropic-kompatible Endpoints. Ein Agent, dessen Modellfeld eine der
-          Modell-IDs nennt, läuft über diesen Anbieter, während der Hauptagent auf dem Claude-Abo
-          bleibt. Muster mit <code>*</code> am Ende matchen als Präfix (z.&nbsp;B.{' '}
-          <code>kimi-*</code>). GLM-Modelle routen auch ohne Eintrag über die Z.AI-Konfiguration
-          oben.
+          Beliebige Anthropic-kompatible Endpoints. Ein Agent, dessen Modellfeld eine der Modell-IDs
+          nennt, läuft über diesen Anbieter, während der Hauptagent auf dem Claude-Abo bleibt.
+          Muster mit <code>*</code> am Ende matchen als Präfix (z.&nbsp;B. <code>kimi-*</code>).
+          GLM-Modelle routen auch ohne Eintrag über die Z.AI-Konfiguration oben.
         </p>
       </div>
 
       {edited.map((row, index) => (
-        <div key={row.id ?? `new-${index}`} className="space-y-2 rounded-lg border border-border/50 p-3">
+        <div
+          key={row.id ?? `new-${index}`}
+          className="space-y-2 rounded-lg border border-border/50 p-3"
+        >
           <div className="flex items-center gap-2">
             <Input
               value={row.label}
@@ -148,7 +151,9 @@ export function SubagentUpstreamsSection() {
             type="password"
             value={row.authToken}
             onChange={(e) => update(index, { authToken: e.target.value })}
-            placeholder={row.hasStoredToken ? 'Token gespeichert — leer lassen zum Behalten' : 'API-Token'}
+            placeholder={
+              row.hasStoredToken ? 'Token gespeichert — leer lassen zum Behalten' : 'API-Token'
+            }
             className="h-9"
           />
           <Input

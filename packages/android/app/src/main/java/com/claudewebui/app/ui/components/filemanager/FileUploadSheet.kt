@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.filemanager
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -31,6 +34,7 @@ fun FileUploadSheet(
     onUploadComplete: () -> Unit,
     viewModel: FileManagerViewModel
 ) {
+    val componentTokens = PlumTheme.tokens
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
 
@@ -67,9 +71,9 @@ fun FileUploadSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = componentTokens.spacing.lg)
+                .padding(bottom = componentTokens.spacing.xxl),
+            verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.lg)
         ) {
             // Header
             Row(
@@ -78,31 +82,31 @@ fun FileUploadSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Upload Files",
+                    stringResource(R.string.component_upload_files),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold
                 )
                 TextButton(onClick = onDismiss) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.component_cancel))
                 }
             }
 
             // Upload destination
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(componentTokens.radius.sm)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(componentTokens.spacing.md),
+                    horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         Icons.Default.Folder,
                         contentDescription = null,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(componentTokens.sizing.iconSm),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
@@ -118,15 +122,15 @@ fun FileUploadSheet(
             // Source buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm)
             ) {
                 OutlinedButton(
                     onClick = { filePickerLauncher.launch("*/*") },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Storage")
+                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(componentTokens.sizing.iconInline))
+                    Spacer(Modifier.width(componentTokens.spacing.inline))
+                    Text(stringResource(R.string.component_storage))
                 }
                 OutlinedButton(
                     onClick = {
@@ -136,16 +140,16 @@ fun FileUploadSheet(
                     },
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Camera")
+                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(componentTokens.sizing.iconInline))
+                    Spacer(Modifier.width(componentTokens.spacing.inline))
+                    Text(stringResource(R.string.component_camera))
                 }
             }
 
             // Selected files list
             if (selectedFiles.isNotEmpty()) {
                 Text(
-                    "${selectedFiles.size} file(s) selected",
+                    stringResource(R.string.component_selected_files, selectedFiles.size),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -154,14 +158,14 @@ fun FileUploadSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 200.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(componentTokens.radius.sm))
                         .border(
                             1.dp,
                             MaterialTheme.colorScheme.outlineVariant,
-                            RoundedCornerShape(8.dp)
+                            RoundedCornerShape(componentTokens.radius.sm)
                         ),
-                    contentPadding = PaddingValues(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    contentPadding = PaddingValues(componentTokens.spacing.xs),
+                    verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.xxs)
                 ) {
                     items(selectedFiles) { (uri, name) ->
                         SelectedFileItem(
@@ -178,27 +182,27 @@ fun FileUploadSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(100.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(componentTokens.radius.md))
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                         .border(
-                            width = 2.dp,
+                            width = componentTokens.spacing.xxs,
                             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(componentTokens.radius.md)
                         ),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.inline)
                     ) {
                         Icon(
                             Icons.Default.CloudUpload,
                             contentDescription = null,
-                            modifier = Modifier.size(32.dp),
+                            modifier = Modifier.size(componentTokens.spacing.xxl),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
                         Text(
-                            "Select files to upload",
+                            stringResource(R.string.component_select_files_to_upload),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
@@ -208,12 +212,12 @@ fun FileUploadSheet(
 
             // Upload progress
             if (state.isUploading) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Uploading...", style = MaterialTheme.typography.bodySmall)
+                        Text(stringResource(R.string.component_uploading), style = MaterialTheme.typography.bodySmall)
                         Text(
                             "${((state.uploadProgress ?: 0f) * 100).toInt()}%",
                             style = MaterialTheme.typography.bodySmall
@@ -230,16 +234,16 @@ fun FileUploadSheet(
             state.error?.let { error ->
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(componentTokens.radius.sm)
                 ) {
                     Row(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.padding(componentTokens.spacing.md),
+                        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm)
                     ) {
                         Icon(
                             Icons.Default.Warning,
                             contentDescription = null,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(componentTokens.sizing.iconSm),
                             tint = MaterialTheme.colorScheme.onErrorContainer
                         )
                         Text(
@@ -264,18 +268,18 @@ fun FileUploadSheet(
             ) {
                 if (state.isUploading) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(componentTokens.sizing.iconInline),
+                        strokeWidth = componentTokens.spacing.xxs,
                         color = MaterialTheme.colorScheme.onPrimary
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Uploading...")
+                    Spacer(Modifier.width(componentTokens.spacing.sm))
+                    Text(stringResource(R.string.component_uploading))
                 } else {
-                    Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
+                    Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(componentTokens.sizing.iconInline))
+                    Spacer(Modifier.width(componentTokens.spacing.sm))
                     Text(
-                        if (selectedFiles.isEmpty()) "Select files first"
-                        else "Upload ${selectedFiles.size} file(s)"
+                        if (selectedFiles.isEmpty()) stringResource(R.string.component_select_files_first)
+                        else stringResource(R.string.component_upload_files_count, selectedFiles.size)
                     )
                 }
             }
@@ -288,21 +292,22 @@ private fun SelectedFileItem(
     fileName: String,
     onRemove: () -> Unit
 ) {
+    val componentTokens = PlumTheme.tokens
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(
                 MaterialTheme.colorScheme.surfaceVariant,
-                RoundedCornerShape(6.dp)
+                RoundedCornerShape(componentTokens.spacing.inline)
             )
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.inline),
+        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             Icons.Default.InsertDriveFile,
             contentDescription = null,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(componentTokens.sizing.iconSm),
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
@@ -314,12 +319,12 @@ private fun SelectedFileItem(
         )
         IconButton(
             onClick = onRemove,
-            modifier = Modifier.size(24.dp)
+            modifier = Modifier.size(componentTokens.sizing.touchTarget)
         ) {
             Icon(
                 Icons.Default.Close,
-                contentDescription = "Remove",
-                modifier = Modifier.size(14.dp),
+                contentDescription = stringResource(R.string.component_remove),
+                modifier = Modifier.size(componentTokens.sizing.iconXs),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }

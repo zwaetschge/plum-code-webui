@@ -13,7 +13,9 @@ import type {
   SessionSendAck,
   ChatUpload,
   ApiResponse,
+  Message,
 } from '@plum-code-webui/shared';
+import type { SessionChatSync } from '@/lib/sessionChatSync';
 import { useAuthStore } from '@/stores/authStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { toast } from '@/hooks/use-toast';
@@ -33,6 +35,8 @@ function generateId() {
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 const SEND_ACK_TIMEOUT_MS = 30_000;
+/** Ceiling for messages parked while a session's chat thread is still unknown. */
+const MAX_MESSAGES_HELD_FOR_CHAT_ID = 50;
 
 export type SendMessageAck =
   | SessionSendAck
@@ -68,7 +72,7 @@ export interface FileUploadOptions {
   onProgress?: (progress: FileUploadProgress) => void;
 }
 
-interface PersistedOutboxEntry {
+export interface PersistedOutboxEntry {
   version: 1;
   clientMessageId: string;
   sessionId: string;
@@ -78,12 +82,14 @@ interface PersistedOutboxEntry {
   uploadIds?: string[];
   createdAt: string;
   attempts: number;
+  error?: string;
+  retryable?: boolean;
 }
 
 type OutboxStatusDetail = {
   clientMessageId: string;
   sessionId: string;
-  status: 'queued' | 'sent' | 'failed';
+  status: 'queued' | 'sent' | 'failed' | 'discarded';
   error?: string;
 };
 
@@ -96,9 +102,19 @@ type ReliableSendEmitter = (
 ) => void;
 
 const OUTBOX_STORAGE_KEY = 'plum.chat.outbox.v1';
-const OUTBOX_MAX_ENTRIES = 50;
 const OUTBOX_RETRY_NOTICE_AFTER = 3;
-const CURSOR_STORAGE_PREFIX = 'plum.chat.cursor.v1:';
+// v1 advanced on individual events and could skip an earlier pending DB write.
+const CURSOR_STORAGE_PREFIX = 'plum.chat.cursor.v2:';
+const CURSOR_PROTOCOL_STORAGE_PREFIX = 'plum.chat.cursor-verified.v2:';
+/**
+ * How often a session's replay cursor may reach localStorage.
+ *
+ * The cursor advances on every sequenced live event, and `setItem` is a
+ * synchronous, main-thread, disk-backed write — during a fast stream that was
+ * hundreds of them a second. Only a reload reads the value back, so it is enough
+ * for it to be roughly current; the in-memory map stays exact.
+ */
+const CURSOR_PERSIST_INTERVAL_MS = 1_000;
 
 function emitOutboxStatus(detail: OutboxStatusDetail) {
   window.dispatchEvent(new CustomEvent<OutboxStatusDetail>('plum:outbox-status', { detail }));
@@ -123,16 +139,15 @@ function readOutbox(): PersistedOutboxEntry[] {
   }
 }
 
-function writeOutbox(entries: PersistedOutboxEntry[]) {
-  if (typeof window === 'undefined') return;
+function writeOutbox(entries: PersistedOutboxEntry[]): boolean {
+  if (typeof window === 'undefined') return false;
   try {
-    window.localStorage.setItem(
-      OUTBOX_STORAGE_KEY,
-      JSON.stringify(entries.slice(-OUTBOX_MAX_ENTRIES))
-    );
+    window.localStorage.setItem(OUTBOX_STORAGE_KEY, JSON.stringify(entries));
   } catch {
-    // The caller still receives a normal send error when durable storage is unavailable.
+    return false;
   }
+  window.dispatchEvent(new Event('plum:outbox-changed'));
+  return true;
 }
 
 function bytesToHex(bytes: ArrayBuffer): string {
@@ -171,8 +186,23 @@ class SocketService {
   private subscribedSessions: Set<string> = new Set();
   private activeSessions: Set<string> = new Set(); // Track sessions that are actively working
   private modeListeners: Set<(data: { sessionId: string; mode: SessionMode }) => void> = new Set();
+  private chatSyncListeners = new Set<(data: SessionChatSync) => void>();
   private lastSequenceBySession = new Map<string, number>();
+  private verifiedCursorSessions = new Set<string>();
   private activeChatBySession = new Map<string, string | null>();
+  private cursorPersistTimers = new Map<string, number>();
+  private cursorPersistPending = new Set<string>();
+  /**
+   * Live messages that arrived before we knew which chat thread the session
+   * page is showing.
+   *
+   * The thread filter is only known once `/chats` has answered, and it is
+   * dropped again on unsubscribe. Messages arriving in that window used to be
+   * let through unfiltered, which put a side thread's replies into the main
+   * transcript, where they stayed. Holding them costs nothing and the filter is
+   * applied the moment the answer lands.
+   */
+  private messagesHeldForChatId = new Map<string, Message[]>();
   private fullResyncPendingSessions = new Set<string>();
   private flushOutboxPromise: Promise<void> | null = null;
   private presenceBySession = new Map<
@@ -180,6 +210,16 @@ class SocketService {
     { state: 'active' | 'idle'; lastReadMessageId?: string | null }
   >();
   private deviceId: string | null = null;
+
+  constructor() {
+    if (typeof window === 'undefined') return;
+    // `pagehide` also covers the back/forward cache and mobile app switches,
+    // where `beforeunload` may never fire.
+    window.addEventListener('pagehide', () => this.flushCursors());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.flushCursors();
+    });
+  }
 
   connect(): TypedSocket {
     // An existing socket may be mid-reconnect (connected === false). Creating a
@@ -200,16 +240,27 @@ class SocketService {
       transports: ['websocket', 'polling'],
     });
 
+    this.registerHandlers();
+    return this.socket;
+  }
+
+  private registerHandlers(): void {
+    if (!this.socket) return;
     this.socket.on('connect', () => {
       console.log('Socket connected');
-      // Resubscribe to sessions
+      // A transport reconnect needs the missed transcript and current thread,
+      // not only membership in the session room.
       this.subscribedSessions.forEach((sessionId) => {
-        this.socket?.emit('session:subscribe', sessionId);
+        this.reconnectToSession(
+          sessionId,
+          useSessionStore.getState().lastMessageTimestamp[sessionId]
+        );
       });
       this.presenceBySession.forEach((presence, sessionId) => {
         this.emitPresence(sessionId, presence.state, presence.lastReadMessageId);
       });
       void this.flushOutbox();
+      void this.refreshPendingApprovals();
     });
 
     this.socket.on('disconnect', (reason) => {
@@ -228,27 +279,35 @@ class SocketService {
       useSessionStore.getState().appendStreamingContent(data.sessionId, data.content);
     });
 
+    this.socket.on('session:chats', (data) => {
+      this.applyChatSync(data);
+    });
+
     this.socket.on('session:message', (message) => {
-      const { addMessageIfNotExists, clearStreamingContent, setActivity } =
-        useSessionStore.getState();
       const activeChat = this.activeChatBySession.get(message.sessionId);
-      if (activeChat !== undefined && !messageBelongsToChat(message, activeChat)) return;
-      // Use addMessageIfNotExists to prevent duplicates when reconnecting
-      addMessageIfNotExists(message.sessionId, message);
-      if (typeof message.eventSequence === 'number') {
-        this.updateLastSequence(message.sessionId, message.eventSequence);
+      if (activeChat === undefined) {
+        this.holdMessageUntilChatKnown(message);
+        return;
       }
-      clearStreamingContent(message.sessionId);
-      // Tool executions stay in the timeline — they're part of the assistant
-      // turn's history and we want them to remain visible alongside the
-      // assistant's reply, not disappear when the message is saved.
-      if (message.role === 'assistant') {
-        setActivity(message.sessionId, { type: 'idle' });
-      }
+      if (!messageBelongsToChat(message, activeChat)) return;
+      this.applyIncomingMessage(message);
     });
 
     this.socket.on('session:status', (data) => {
       useSessionStore.getState().updateSessionStatus(data.sessionId, data.status);
+    });
+
+    /**
+     * Account-wide heartbeat for every session, not just the open one.
+     *
+     * `session:status` is scoped to a subscribed session room, so the sidebar
+     * could only ever show what the session list happened to contain when it
+     * was fetched. This arrives on the user room instead, which is how a row
+     * for a session nobody is looking at can go from working to waiting-on-you
+     * without a refresh.
+     */
+    this.socket.on('session:lifecycle', (event) => {
+      useSessionStore.getState().setLifecycle(event);
     });
 
     this.socket.on('session:error', (data) => {
@@ -395,6 +454,11 @@ class SocketService {
       console.log(
         `[SOCKET] session:reconnected received: ${data.bufferedMessages.length} messages, isRunning=${data.isRunning}`
       );
+      // The active thread travels in the same packet as the response snapshot.
+      // Apply it synchronously before replay; title/list refresh may follow later.
+      if (data.activeChatId !== undefined) {
+        this.applyChatSync({ sessionId: data.sessionId, activeChatId: data.activeChatId });
+      }
       if (data.needsFullResync) {
         this.fullResyncPendingSessions.add(data.sessionId);
         window.dispatchEvent(
@@ -407,15 +471,35 @@ class SocketService {
           })
         );
       } else {
-        // Each replayed event advances the cursor only after its store update.
-        // Never skip over unapplied events by trusting the aggregate watermark.
         this.replayBufferedMessages(data.sessionId, data.bufferedMessages);
+        // Individual event sequences can overtake an earlier DB write. Only
+        // the server's contiguous published watermark closes that gap safely.
+        if (typeof data.highWatermark === 'number') {
+          this.updateLastSequence(data.sessionId, data.highWatermark);
+        }
       }
 
-      // Update session status based on isRunning
-      if (data.isRunning) {
-        useSessionStore.getState().updateSessionStatus(data.sessionId, 'running');
+      if (data.streamingSnapshot !== undefined) {
+        const snapshot = data.streamingSnapshot;
+        const activeChat = this.activeChatBySession.get(data.sessionId);
+        const belongsToActiveChat =
+          snapshot?.sessionId === data.sessionId &&
+          (activeChat === undefined || normalizeMessageChatId(snapshot.chatId) === activeChat);
+        useSessionStore
+          .getState()
+          .replaceStreamingContent(
+            data.sessionId,
+            snapshot && belongsToActiveChat ? snapshot.content : ''
+          );
       }
+      if (data.isBusy === false) {
+        const store = useSessionStore.getState();
+        store.setThinking(data.sessionId, false);
+        store.setActivity(data.sessionId, { type: 'idle' });
+        this.activeSessions.delete(data.sessionId);
+      }
+      // isRunning only means a provider process exists. Thinking/activity and
+      // lifecycle events describe real work, including a persistent idle CLI.
     });
 
     this.socket.on('session:cursor', (data) => {
@@ -498,8 +582,6 @@ class SocketService {
     this.socket.on('error', (message) => {
       console.error('Socket error:', message);
     });
-
-    return this.socket;
   }
 
   private getLastSequence(sessionId: string): number | undefined {
@@ -525,11 +607,57 @@ class SocketService {
     const next = advanceMessageCursor(current, sequence);
     if (next <= current) return;
     this.lastSequenceBySession.set(sessionId, next);
+    this.persistCursorThrottled(sessionId);
+  }
+
+  /** Leading-edge throttle: write now, then at most once per interval. */
+  private persistCursorThrottled(sessionId: string): void {
+    if (this.cursorPersistTimers.has(sessionId)) {
+      this.cursorPersistPending.add(sessionId);
+      return;
+    }
+    this.writeCursor(sessionId);
+    const timer = window.setTimeout(() => {
+      this.cursorPersistTimers.delete(sessionId);
+      // Whatever the cursor reached while the window was closed gets written
+      // once here, not once per event.
+      if (this.cursorPersistPending.delete(sessionId)) this.persistCursorThrottled(sessionId);
+    }, CURSOR_PERSIST_INTERVAL_MS);
+    this.cursorPersistTimers.set(sessionId, timer);
+  }
+
+  private writeCursor(sessionId: string): void {
+    const value = this.lastSequenceBySession.get(sessionId);
+    if (value === undefined) return;
     try {
-      window.localStorage.setItem(`${CURSOR_STORAGE_PREFIX}${sessionId}`, String(next));
+      window.localStorage.setItem(`${CURSOR_STORAGE_PREFIX}${sessionId}`, String(value));
     } catch {
       // An in-memory cursor still prevents duplicate replay in this tab.
     }
+  }
+
+  /**
+   * Write every throttled cursor out. Called when the page is going away, which
+   * is the one moment the in-memory map stops being the better copy.
+   */
+  private flushCursors(): void {
+    for (const sessionId of this.cursorPersistPending) this.writeCursor(sessionId);
+    this.cursorPersistPending.clear();
+    for (const timer of this.cursorPersistTimers.values()) window.clearTimeout(timer);
+    this.cursorPersistTimers.clear();
+  }
+
+  private hasVerifiedCursorProtocol(sessionId: string): boolean {
+    if (this.verifiedCursorSessions.has(sessionId)) return true;
+    try {
+      if (window.localStorage.getItem(`${CURSOR_PROTOCOL_STORAGE_PREFIX}${sessionId}`) === '1') {
+        this.verifiedCursorSessions.add(sessionId);
+        return true;
+      }
+    } catch {
+      /* The in-memory marker still works when storage is unavailable. */
+    }
+    return false;
   }
 
   /** Current replay cursor used to decide whether a REST snapshot is stale. */
@@ -546,6 +674,7 @@ class SocketService {
   ): void {
     if (chatId !== undefined) {
       this.activeChatBySession.set(sessionId, normalizeMessageChatId(chatId) ?? null);
+      this.releaseMessagesHeldForChatId(sessionId);
     }
     if (this.fullResyncPendingSessions.has(sessionId)) {
       if (!completesFullResync) return;
@@ -555,24 +684,93 @@ class SocketService {
       this.fullResyncPendingSessions.delete(sessionId);
     }
     this.updateLastSequence(sessionId, highWatermark);
+    if (completesFullResync) {
+      this.verifiedCursorSessions.add(sessionId);
+      try {
+        window.localStorage.setItem(`${CURSOR_PROTOCOL_STORAGE_PREFIX}${sessionId}`, '1');
+      } catch {
+        /* Recovery remains verified for this tab. */
+      }
+    }
   }
 
   setSessionChat(sessionId: string, chatId: string | null): void {
-    this.activeChatBySession.set(sessionId, normalizeMessageChatId(chatId) ?? null);
+    const normalizedChat = normalizeMessageChatId(chatId) ?? null;
+    const previousChat = this.activeChatBySession.get(sessionId);
+    this.activeChatBySession.set(sessionId, normalizedChat);
+    if (previousChat !== undefined && previousChat !== normalizedChat) {
+      const store = useSessionStore.getState();
+      store.setMessages(sessionId, []);
+      store.replaceStreamingContent(sessionId, '');
+      store.clearToolExecutions(sessionId);
+      store.setThinking(sessionId, false);
+      store.setActivity(sessionId, { type: 'idle' });
+    }
+    this.releaseMessagesHeldForChatId(sessionId);
+  }
+
+  private applyChatSync(data: SessionChatSync): void {
+    this.setSessionChat(data.sessionId, data.activeChatId);
+    for (const listener of this.chatSyncListeners) listener(data);
+  }
+
+  onChatSync(listener: (data: SessionChatSync) => void): () => void {
+    this.chatSyncListeners.add(listener);
+    return () => {
+      this.chatSyncListeners.delete(listener);
+    };
+  }
+
+  /** Commit one live message to the store. Shared by the live and replay paths. */
+  private applyIncomingMessage(message: Message): void {
+    const { addMessageIfNotExists, clearStreamingContent, setActivity } =
+      useSessionStore.getState();
+    // addMessageIfNotExists rather than addMessage: the same message can arrive
+    // twice across a reconnect.
+    addMessageIfNotExists(message.sessionId, message);
+    clearStreamingContent(message.sessionId);
+    // Tool executions stay in the timeline — they're part of the assistant
+    // turn's history and we want them to remain visible alongside the
+    // assistant's reply, not disappear when the message is saved.
+    if (message.role === 'assistant') {
+      setActivity(message.sessionId, { type: 'idle' });
+    }
+  }
+
+  private holdMessageUntilChatKnown(message: Message): void {
+    const held = this.messagesHeldForChatId.get(message.sessionId) ?? [];
+    held.push(message);
+    // The window is one REST round trip. A backlog longer than this means the
+    // request failed, and the oldest entries are the least useful to keep.
+    if (held.length > MAX_MESSAGES_HELD_FOR_CHAT_ID) {
+      held.splice(0, held.length - MAX_MESSAGES_HELD_FOR_CHAT_ID);
+    }
+    this.messagesHeldForChatId.set(message.sessionId, held);
+  }
+
+  private releaseMessagesHeldForChatId(sessionId: string): void {
+    const held = this.messagesHeldForChatId.get(sessionId);
+    if (!held?.length) return;
+    this.messagesHeldForChatId.delete(sessionId);
+    const activeChat = this.activeChatBySession.get(sessionId);
+    if (activeChat === undefined) return;
+    for (const message of held) {
+      if (messageBelongsToChat(message, activeChat)) this.applyIncomingMessage(message);
+    }
   }
 
   getSessionChat(sessionId: string): string | null | undefined {
     return this.activeChatBySession.get(sessionId);
   }
 
-  private rememberOutboxEntry(entry: PersistedOutboxEntry): void {
+  private rememberOutboxEntry(entry: PersistedOutboxEntry): boolean {
     const entries = readOutbox();
     const existingIndex = entries.findIndex(
       (candidate) => candidate.clientMessageId === entry.clientMessageId
     );
     if (existingIndex >= 0) entries[existingIndex] = entry;
     else entries.push(entry);
-    writeOutbox(entries);
+    return writeOutbox(entries);
   }
 
   private removeOutboxEntry(clientMessageId: string): void {
@@ -616,12 +814,75 @@ class SocketService {
     });
   }
 
+  /**
+   * Seed the account-wide approval counts once per connect.
+   *
+   * `session:lifecycle` only fires on a change, so a session that was already
+   * blocked when this tab connected would never announce itself. One request
+   * covers every session the user owns.
+   */
+  private async refreshPendingApprovals(): Promise<void> {
+    try {
+      const response = await api.get<ApiResponse<Array<{ sessionId: string }>>>(
+        '/api/permissions/pending'
+      );
+      const counts: Record<string, number> = {};
+      for (const request of response.data.data ?? []) {
+        counts[request.sessionId] = (counts[request.sessionId] ?? 0) + 1;
+      }
+      useSessionStore.getState().setPendingApprovalCounts(counts);
+    } catch (error) {
+      // Not worth a toast: the lifecycle stream still corrects this on the next
+      // state change, and a failure here must not look like a session problem.
+      console.warn('Failed to load pending approvals:', error);
+    }
+  }
+
+  private readonly outboxInFlight = new Set<string>();
+
+  getOutboxEntries(): (PersistedOutboxEntry & { sending: boolean })[] {
+    return readOutbox().map((entry) => ({
+      ...entry,
+      sending: this.outboxInFlight.has(entry.clientMessageId),
+    }));
+  }
+
+  discardOutboxEntry(clientMessageId: string): void {
+    if (this.outboxInFlight.has(clientMessageId)) return;
+    const entry = readOutbox().find((item) => item.clientMessageId === clientMessageId);
+    if (
+      entry &&
+      writeOutbox(readOutbox().filter((item) => item.clientMessageId !== clientMessageId))
+    ) {
+      emitOutboxStatus({ clientMessageId, sessionId: entry.sessionId, status: 'discarded' });
+    }
+  }
+
+  retryOutboxEntry(clientMessageId: string): Promise<void> {
+    const entry = readOutbox().find((item) => item.clientMessageId === clientMessageId);
+    if (!entry || entry.retryable === false || this.outboxInFlight.has(clientMessageId))
+      return Promise.resolve();
+    return this.flushOutbox();
+  }
+
+  private recordOutboxFailure(clientMessageId: string, error: string, retryable: boolean): void {
+    const entry = readOutbox().find((item) => item.clientMessageId === clientMessageId);
+    if (entry) this.rememberOutboxEntry({ ...entry, error, retryable });
+  }
+
   private async flushOutbox(): Promise<void> {
     if (this.flushOutboxPromise) return this.flushOutboxPromise;
     this.flushOutboxPromise = (async () => {
       const entries = readOutbox().sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       for (const entry of entries) {
         if (!this.socket?.connected) break;
+        if (
+          entry.retryable === false ||
+          this.outboxInFlight.has(entry.clientMessageId) ||
+          !readOutbox().some((item) => item.clientMessageId === entry.clientMessageId)
+        )
+          continue;
+        this.outboxInFlight.add(entry.clientMessageId);
         const nextEntry = { ...entry, attempts: entry.attempts + 1 };
         this.rememberOutboxEntry(nextEntry);
         const acknowledgement = await this.emitReliableSend({
@@ -632,6 +893,7 @@ class SocketService {
           clientMessageId: entry.clientMessageId,
           uploadIds: entry.uploadIds,
         });
+        this.outboxInFlight.delete(entry.clientMessageId);
         if (acknowledgement.status === 'accepted') {
           this.removeOutboxEntry(entry.clientMessageId);
           emitOutboxStatus({
@@ -642,6 +904,11 @@ class SocketService {
           continue;
         }
 
+        this.recordOutboxFailure(
+          entry.clientMessageId,
+          acknowledgement.error,
+          acknowledgement.retryable
+        );
         emitOutboxStatus({
           clientMessageId: entry.clientMessageId,
           sessionId: entry.sessionId,
@@ -649,7 +916,6 @@ class SocketService {
           error: acknowledgement.error,
         });
         if (!acknowledgement.retryable) {
-          this.removeOutboxEntry(entry.clientMessageId);
           const sessionName =
             useSessionStore.getState().sessions.find((session) => session.id === entry.sessionId)
               ?.name ?? 'Unknown session';
@@ -696,14 +962,25 @@ class SocketService {
       if (typeof msg.sequence === 'number' && msg.sequence <= currentSequence) continue;
       switch (msg.type) {
         case 'output': {
-          const data = msg.data as { content: string };
+          const data = msg.data as { content: string; chatId?: string | null };
+          const activeChat = this.activeChatBySession.get(sessionId);
+          if (
+            activeChat !== undefined &&
+            data.chatId !== undefined &&
+            normalizeMessageChatId(data.chatId) !== activeChat
+          )
+            break;
           store.appendStreamingContent(sessionId, data.content);
           break;
         }
         case 'message': {
           const data = msg.data as import('@plum-code-webui/shared').Message;
           const activeChat = this.activeChatBySession.get(sessionId);
-          if (activeChat !== undefined && !messageBelongsToChat(data, activeChat)) continue;
+          if (activeChat === undefined) {
+            this.holdMessageUntilChatKnown(data);
+            continue;
+          }
+          if (!messageBelongsToChat(data, activeChat)) continue;
           // Skip if message already exists (deduplication)
           if (existingMessageIds.has(data.id)) {
             console.log(`[SOCKET] Skipping duplicate message ${data.id}`);
@@ -879,23 +1156,30 @@ class SocketService {
           break;
         }
       }
-      if (typeof msg.sequence === 'number') this.updateLastSequence(sessionId, msg.sequence);
     }
 
-    // Update last message timestamp after replay
-    if (orderedMessages.length > 0) {
-      const lastTimestamp = orderedMessages[orderedMessages.length - 1]?.timestamp || Date.now();
+    // Update last message timestamp after replay. Only the server's own stamp is
+    // usable here: the value is handed straight back on the next reconnect and
+    // compared against server-stamped buffer entries, so a `Date.now()` fallback
+    // from a fast browser clock would cut real messages out of that replay.
+    const lastTimestamp = orderedMessages[orderedMessages.length - 1]?.timestamp;
+    if (typeof lastTimestamp === 'number' && Number.isFinite(lastTimestamp)) {
       store.updateLastMessageTimestamp(sessionId, lastTimestamp);
     }
   }
 
   disconnect(): void {
+    // The throttled cursor writes have no other chance to land once the socket
+    // and its bookkeeping are gone.
+    this.flushCursors();
     this.socket?.disconnect();
     this.socket = null;
     this.subscribedSessions.clear();
     this.activeSessions.clear();
     this.lastSequenceBySession.clear();
+    this.verifiedCursorSessions.clear();
     this.activeChatBySession.clear();
+    this.messagesHeldForChatId.clear();
     this.fullResyncPendingSessions.clear();
     this.presenceBySession.clear();
   }
@@ -922,7 +1206,9 @@ class SocketService {
     // over a long-lived tab does not grow these maps without bound.
     this.activeSessions.delete(sessionId);
     this.lastSequenceBySession.delete(sessionId);
+    this.verifiedCursorSessions.delete(sessionId);
     this.activeChatBySession.delete(sessionId);
+    this.messagesHeldForChatId.delete(sessionId);
     this.fullResyncPendingSessions.delete(sessionId);
   }
 
@@ -990,7 +1276,7 @@ class SocketService {
     };
     const canPersist = !images || images.length === 0;
     if (canPersist) {
-      this.rememberOutboxEntry({
+      const persisted = this.rememberOutboxEntry({
         version: 1,
         clientMessageId,
         sessionId,
@@ -1001,6 +1287,13 @@ class SocketService {
         createdAt: new Date().toISOString(),
         attempts: 0,
       });
+      if (!persisted)
+        return Promise.resolve(
+          rejectedSend(
+            clientMessageId,
+            'Browser storage is unavailable. Your message remains in the composer.'
+          )
+        );
     }
 
     if (!this.socket?.connected) {
@@ -1018,12 +1311,20 @@ class SocketService {
       );
     }
 
+    this.outboxInFlight.add(clientMessageId);
+    window.dispatchEvent(new Event('plum:outbox-changed'));
     return this.emitReliableSend(payload).then((acknowledgement) => {
+      this.outboxInFlight.delete(clientMessageId);
       if (acknowledgement.status === 'accepted') {
         if (canPersist) this.removeOutboxEntry(clientMessageId);
         emitOutboxStatus({ clientMessageId, sessionId, status: 'sent' });
       } else {
-        if (canPersist && !acknowledgement.retryable) this.removeOutboxEntry(clientMessageId);
+        if (canPersist)
+          this.recordOutboxFailure(
+            clientMessageId,
+            acknowledgement.error,
+            acknowledgement.retryable
+          );
         emitOutboxStatus({
           clientMessageId,
           sessionId,
@@ -1290,45 +1591,82 @@ class SocketService {
     });
   }
 
+  /**
+   * Emit a command the user just triggered, or say so when it cannot go out.
+   *
+   * socket.io buffers emits across a reconnect, so a disconnected-but-existing
+   * socket still delivers once it is back. A missing socket does not — the
+   * optional-chaining emit dropped the click on the floor, which is what "Stop"
+   * doing nothing looked like from the outside.
+   */
+  private emitCommand<E extends keyof ClientToServerEvents>(
+    event: E,
+    ...args: Parameters<ClientToServerEvents[E]>
+  ): boolean {
+    if (!this.socket) {
+      toast({
+        title: 'Not connected',
+        description: 'The action was not sent. Reload the page and try again.',
+        variant: 'destructive',
+      });
+      return false;
+    }
+    this.socket.emit(event, ...args);
+    return true;
+  }
+
   interruptSession(sessionId: string): void {
-    this.socket?.emit('session:interrupt', sessionId);
+    this.emitCommand('session:interrupt', sessionId);
   }
 
   // Restart session (stop and start fresh)
   restartSession(sessionId: string): void {
     console.log(`[SOCKET] Restarting session ${sessionId}`);
-    this.socket?.emit('session:restart', sessionId);
+    this.emitCommand('session:restart', sessionId);
   }
 
   // Set session permission mode
   setSessionMode(sessionId: string, mode: SessionMode): void {
     console.log(`[SOCKET] Setting session ${sessionId} mode to ${mode}`);
-    this.socket?.emit('session:set-mode', { sessionId, mode });
+    this.emitCommand('session:set-mode', { sessionId, mode });
   }
 
   // Request to reconnect to a running session and get buffered messages
   reconnectToSession(sessionId: string, lastTimestamp?: number): void {
-    const lastSequence = this.getLastSequence(sessionId);
+    const verified = this.hasVerifiedCursorProtocol(sessionId);
+    const lastSequence = verified ? this.getLastSequence(sessionId) : undefined;
+    // One verified REST recovery repairs gaps left by the old cursor protocol.
+    if (!verified) lastTimestamp = undefined;
     console.log(
       `[SOCKET] Reconnecting to session ${sessionId}, lastTimestamp=${lastTimestamp}, lastSequence=${lastSequence}`
     );
     this.subscribedSessions.add(sessionId);
     this.setSessionPresence(sessionId, document.visibilityState === 'visible' ? 'active' : 'idle');
-    this.socket?.emit('session:reconnect', { sessionId, lastTimestamp, lastSequence });
+    // connect's handler will request the current snapshot once connected. Do not
+    // queue a second request containing a stale cursor in Socket.IO's send buffer.
+    if (this.socket?.connected) {
+      this.socket.emit('session:reconnect', { sessionId, lastTimestamp, lastSequence });
+    }
   }
 
   // Approve permission request - allow specific tools (legacy flow)
   approvePermission(sessionId: string, toolNames: string[], originalMessage: string): void {
     console.log(`[SOCKET] Approving permission for tools: ${toolNames.join(', ')}`);
+    // Emit first: clearing the prompt for a decision that never left the browser
+    // would leave the user with no way to answer it again.
+    if (
+      !this.emitCommand('session:approve_permission', { sessionId, toolNames, originalMessage })
+    ) {
+      return;
+    }
     useSessionStore.getState().clearPermissionRequest(sessionId);
-    this.socket?.emit('session:approve_permission', { sessionId, toolNames, originalMessage });
   }
 
   // Deny permission request (legacy flow)
   denyPermission(sessionId: string): void {
     console.log(`[SOCKET] Denying permission for session ${sessionId}`);
+    if (!this.emitCommand('session:deny_permission', { sessionId })) return;
     useSessionStore.getState().clearPermissionRequest(sessionId);
-    this.socket?.emit('session:deny_permission', { sessionId });
   }
 
   // Respond to a permission request (hooks-based flow)
@@ -1340,29 +1678,11 @@ class SocketService {
   ): Promise<void> {
     console.log(`[SOCKET] Responding to permission ${requestId}: ${action}`);
 
-    // Call the backend API to respond (the long-polling endpoint will pick this up)
-    const token = useAuthStore.getState().token;
-    if (!token) {
-      throw new Error('No auth token');
-    }
-
-    const response = await fetch('/api/permissions/respond', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        sessionId,
-        requestId,
-        action,
-        pattern,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to respond to permission request');
-    }
+    // Through the api client, not a bare fetch: it attaches the bearer token and
+    // `credentials: 'include'` the same way every other call does, and it turns a
+    // non-2xx into an ApiError carrying the server's message instead of a
+    // generic one. The long-polling endpoint picks the answer up from here.
+    await api.post('/api/permissions/respond', { sessionId, requestId, action, pattern });
 
     // Clear the pending permission from the store
     useSessionStore.getState().setPendingPermission(sessionId, null);
@@ -1374,23 +1694,7 @@ class SocketService {
     answers: string[][],
     providerSessionId?: string
   ): Promise<void> {
-    const token = useAuthStore.getState().token;
-    if (!token) {
-      throw new Error('No auth token');
-    }
-
-    const response = await fetch('/api/opencode/questions/respond', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ requestId, answers, providerSessionId }),
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to respond to OpenCode question');
-    }
+    await api.post('/api/opencode/questions/respond', { requestId, answers, providerSessionId });
 
     useSessionStore.getState().setPendingQuestion(sessionId, null);
   }
@@ -1400,23 +1704,7 @@ class SocketService {
     requestId: string,
     providerSessionId?: string
   ): Promise<void> {
-    const token = useAuthStore.getState().token;
-    if (!token) {
-      throw new Error('No auth token');
-    }
-
-    const response = await fetch('/api/opencode/questions/reject', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ requestId, providerSessionId }),
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to reject OpenCode question');
-    }
+    await api.post('/api/opencode/questions/reject', { requestId, providerSessionId });
 
     useSessionStore.getState().setPendingQuestion(sessionId, null);
   }

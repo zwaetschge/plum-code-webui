@@ -2,7 +2,12 @@ import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
 import { Router, type Request, type Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
-import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
+import {
+  requireAuth,
+  requireAdmin,
+  resolveAuthenticatedUserId,
+  type AuthenticatedRequest,
+} from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { auditFromRequest } from '../utils/auditLog.js';
 import { revokeUserHttpSessions } from '../services/SqliteSessionStore.js';
@@ -22,8 +27,17 @@ const router = Router();
  * CLI subprocesses already use. The maintenance script has no browser session,
  * and without the second path it could no longer take a backup at all.
  */
-function backupCallerAllowed(req: Request): boolean {
-  if ((req as AuthenticatedRequest).userId) return true;
+async function backupCallerAllowed(req: Request): Promise<boolean> {
+  // This route is registered before the router-wide requireAuth, so nothing has
+  // populated req.userId yet — the old `if (req.userId) return true` was dead
+  // code and an admin session could not actually take a backup.
+  const userId = await resolveAuthenticatedUserId(req);
+  if (userId) {
+    const row = (await pgGet(`SELECT role, status FROM users WHERE id = ?`, userId)) as unknown as
+      | { role: string; status: string }
+      | undefined;
+    if (row?.role === 'admin' && row.status !== 'suspended') return true;
+  }
   const provided = req.header('x-webui-hook-secret') || '';
   const expected = config.hookSecret;
   if (!expected || !provided) return false;
@@ -33,7 +47,7 @@ function backupCallerAllowed(req: Request): boolean {
 }
 
 router.post('/backup', async (req: Request, res: Response) => {
-  if (!backupCallerAllowed(req)) {
+  if (!(await backupCallerAllowed(req))) {
     throw new AppError('Admin session or hook secret required', 401, 'AUTH_REQUIRED');
   }
   const result = await createBackup();

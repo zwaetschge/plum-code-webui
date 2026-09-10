@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { nanoid } from 'nanoid';
 
-import { get as pgGet, run as pgRun } from './pg.js';
+import { get as pgGet, run as pgRun, transaction as pgTransaction } from './pg.js';
 
 /**
  * First-boot bootstrapping, lifted out of the migration block it used to live
@@ -73,28 +73,45 @@ export async function seedUserFromEnv(): Promise<void> {
   if (!seedEmail || !seedPassword || !seedName) return;
 
   try {
-    const existing = await pgGet('SELECT id FROM users WHERE email = ?', seedEmail);
-    if (existing) return;
+    // Cheap way out on every boot after the first, and it keeps the bcrypt
+    // round below out of the common path.
+    if (await pgGet('SELECT id FROM users WHERE email = ?', seedEmail)) return;
 
     const userId = nanoid();
     const passwordHash = bcrypt.hashSync(seedPassword, 10);
-    await pgRun(
-      `INSERT INTO users (id, email, name, avatar_url, provider, provider_id, password_hash)
-       VALUES (?, ?, ?, ?, 'cli', ?, ?)`,
-      userId,
-      seedEmail,
-      seedName,
-      null,
-      `local-cli-${seedName}`,
-      passwordHash
-    );
-    await pgRun(
-      `INSERT INTO user_settings (user_id, theme, allowed_tools)
-       VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')
-       ON CONFLICT (user_id) DO NOTHING`,
-      userId
-    );
-    console.log(`[DB] Seeded user ${seedEmail} from SEED_USER_* env vars.`);
+
+    const seeded = await pgTransaction(async (tx) => {
+      // `users.email` has an index but no unique constraint, so the check
+      // cannot be an ON CONFLICT and two replicas booting in the same second
+      // would both find nothing and both insert. The lock is keyed on the
+      // address and released with the transaction, so the second one waits and
+      // then sees the first one's row.
+      await tx.run('SELECT pg_advisory_xact_lock(hashtext(?))', `seed-user:${seedEmail}`);
+      if (await tx.get('SELECT id FROM users WHERE email = ?', seedEmail)) return false;
+
+      await tx.run(
+        `INSERT INTO users (id, email, name, avatar_url, provider, provider_id, password_hash)
+         VALUES (?, ?, ?, ?, 'cli', ?, ?)`,
+        userId,
+        seedEmail,
+        seedName,
+        null,
+        `local-cli-${seedName}`,
+        passwordHash
+      );
+      // Same transaction as the user row: a login that exists without its
+      // settings row is a half-seeded account nothing retries, because the
+      // existence check above would then find the user and stop.
+      await tx.run(
+        `INSERT INTO user_settings (user_id, theme, allowed_tools)
+         VALUES (?, 'dark', '["Bash","Read","Write","Edit","Glob","Grep"]')
+         ON CONFLICT (user_id) DO NOTHING`,
+        userId
+      );
+      return true;
+    });
+
+    if (seeded) console.log(`[DB] Seeded user ${seedEmail} from SEED_USER_* env vars.`);
   } catch (error) {
     console.error('[DB] Failed to seed user from env:', error);
   }

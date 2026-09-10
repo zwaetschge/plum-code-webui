@@ -1,5 +1,7 @@
 package com.claudewebui.app.ui.screens.devtools
 
+import com.claudewebui.app.ui.screens.screenErrorMessage
+import com.claudewebui.app.core.network.apiCall
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.claudewebui.app.core.network.ApiClient
@@ -101,9 +103,9 @@ class DevToolsViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isScanning = true, error = null) }
             coroutineScope {
-                val config = async { runCatching { api.getPreviewConfig() }.getOrNull() }
+                val config = async { apiCall { api.getPreviewConfig() }.getOrNull() }
                 val scan = async {
-                    runCatching {
+                    apiCall {
                         api.getPreviewPorts(workingDirectory.takeIf { it.isNotBlank() })
                     }
                 }
@@ -130,7 +132,7 @@ class DevToolsViewModel(
                             it.copy(
                                 previewConfig = resolvedConfig,
                                 isScanning = false,
-                                error = failure.message,
+                                error = failure.screenErrorMessage("devtools", "scanPorts"),
                             )
                         }
                     }
@@ -142,8 +144,8 @@ class DevToolsViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingGitHub = true) }
             coroutineScope {
-                val token = async { runCatching { api.validateGitHubToken().data }.getOrNull() }
-                val repos = async { runCatching { api.getGitHubRepos().data?.repos }.getOrNull() }
+                val token = async { apiCall { api.validateGitHubToken().data }.getOrNull() }
+                val repos = async { apiCall { api.getGitHubRepos().data?.repos }.getOrNull() }
                 _uiState.update {
                     it.copy(
                         tokenStatus = token.await(),
@@ -164,11 +166,11 @@ class DevToolsViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingCollab = true, error = null) }
             coroutineScope {
-                val repo = async { runCatching { api.getGitHubRepoInfo(workingDirectory).data }.getOrNull() }
-                val pulls = async { runCatching { api.getGitHubPullRequests(workingDirectory).data }.getOrNull() }
-                val runs = async { runCatching { api.getGitHubRuns(workingDirectory).data }.getOrNull() }
-                val issues = async { runCatching { api.getGitHubIssues(workingDirectory).data }.getOrNull() }
-                val releases = async { runCatching { api.getGitHubReleases(workingDirectory).data }.getOrNull() }
+                val repo = async { apiCall { api.getGitHubRepoInfo(workingDirectory).data }.getOrNull() }
+                val pulls = async { apiCall { api.getGitHubPullRequests(workingDirectory).data }.getOrNull() }
+                val runs = async { apiCall { api.getGitHubRuns(workingDirectory).data }.getOrNull() }
+                val issues = async { apiCall { api.getGitHubIssues(workingDirectory).data }.getOrNull() }
+                val releases = async { apiCall { api.getGitHubReleases(workingDirectory).data }.getOrNull() }
                 _uiState.update {
                     it.copy(
                         repoInfo = repo.await(),
@@ -228,12 +230,12 @@ class DevToolsViewModel(
     private fun collabAction(successNotice: String, block: suspend () -> Any?) {
         viewModelScope.launch {
             _uiState.update { it.copy(gitHubAction = "Working…", error = null) }
-            val result = runCatching { block() }
+            val result = apiCall { block() }
             _uiState.update {
                 it.copy(
                     gitHubAction = null,
                     notice = if (result.isSuccess) successNotice else it.notice,
-                    error = result.exceptionOrNull()?.message ?: it.error,
+                    error = result.exceptionOrNull()?.screenErrorMessage("devtools", "collabAction") ?: it.error,
                 )
             }
             if (result.isSuccess) loadCollaboration()
@@ -245,7 +247,7 @@ class DevToolsViewModel(
         if (cleanName.isEmpty()) return
         viewModelScope.launch {
             _uiState.update { it.copy(gitHubAction = "Creating repository…", error = null) }
-            runCatching {
+            apiCall {
                 val response = api.createGitHubRepo(
                     CreateRepoInput(
                         name = cleanName,
@@ -261,7 +263,7 @@ class DevToolsViewModel(
                 }
                 loadGitHub()
             }.onFailure { failure ->
-                _uiState.update { it.copy(error = failure.message ?: "Repository creation failed") }
+                _uiState.update { it.copy(error = failure.screenErrorMessage("devtools", "createRepo")) }
             }
             _uiState.update { it.copy(gitHubAction = null) }
         }
@@ -272,7 +274,7 @@ class DevToolsViewModel(
         if (repoUrl.isBlank() || target.isEmpty()) return
         viewModelScope.launch {
             _uiState.update { it.copy(gitHubAction = "Cloning repository…", error = null) }
-            runCatching {
+            apiCall {
                 val response =
                     api.cloneGitHubRepo(repoUrl, target, branch.trim().takeIf(String::isNotEmpty))
                 if (!response.success) error(response.error?.message ?: "Clone failed")
@@ -280,7 +282,7 @@ class DevToolsViewModel(
             }.onSuccess {
                 _uiState.update { it.copy(notice = "Repository cloned to $target") }
             }.onFailure { failure ->
-                _uiState.update { it.copy(error = failure.message ?: "Clone failed") }
+                _uiState.update { it.copy(error = failure.screenErrorMessage("devtools", "cloneRepo")) }
             }
             _uiState.update { it.copy(gitHubAction = null) }
         }
@@ -293,7 +295,7 @@ class DevToolsViewModel(
         }
         viewModelScope.launch {
             _uiState.update { it.copy(gitHubAction = "Pushing commits…", error = null) }
-            runCatching {
+            apiCall {
                 val response = api.pushToGitHub(
                     workingDirectory,
                     remote.trim().takeIf(String::isNotEmpty),
@@ -305,7 +307,7 @@ class DevToolsViewModel(
             }.onSuccess {
                 _uiState.update { it.copy(notice = "Push completed") }
             }.onFailure { failure ->
-                _uiState.update { it.copy(error = failure.message ?: "Push failed") }
+                _uiState.update { it.copy(error = failure.screenErrorMessage("devtools", "push")) }
             }
             _uiState.update { it.copy(gitHubAction = null) }
         }
@@ -319,7 +321,7 @@ class DevToolsViewModel(
     fun loadOracle(loadFrame: Boolean = true) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingOracle = true) }
-            runCatching { api.getOracleBrowser(sessionId) }
+            apiCall { api.getOracleBrowser(sessionId) }
                 .onSuccess { response ->
                     val browser = response.data
                     _uiState.update {
@@ -333,7 +335,7 @@ class DevToolsViewModel(
                 }
                 .onFailure { failure ->
                     _uiState.update {
-                        it.copy(isLoadingOracle = false, error = failure.message)
+                        it.copy(isLoadingOracle = false, error = failure.screenErrorMessage("devtools", "loadOracle"))
                     }
                 }
         }
@@ -341,7 +343,7 @@ class DevToolsViewModel(
 
     fun loadOracleFrame() {
         viewModelScope.launch {
-            runCatching { api.getOracleFrame(sessionId) }
+            apiCall { api.getOracleFrame(sessionId) }
                 .onSuccess { frame -> _uiState.update { it.copy(oracleFrame = frame) } }
         }
     }
@@ -349,7 +351,7 @@ class DevToolsViewModel(
     private fun oracleAction(action: suspend () -> com.claudewebui.app.data.model.ApiResponse<OracleBrowserState>) {
         viewModelScope.launch {
             _uiState.update { it.copy(isOracleActionPending = true, error = null) }
-            runCatching {
+            apiCall {
                 val response = action()
                 if (!response.success) {
                     error(response.error?.message ?: "Oracle browser action failed")
@@ -360,7 +362,7 @@ class DevToolsViewModel(
                     _uiState.update { it.copy(oracle = response.data) }
                     if (response.data?.running == true) loadOracleFrame()
                 }
-                .onFailure { failure -> _uiState.update { it.copy(error = failure.message) } }
+                .onFailure { failure -> _uiState.update { it.copy(error = failure.screenErrorMessage("devtools", "oracleAction")) } }
             _uiState.update { it.copy(isOracleActionPending = false) }
         }
     }
@@ -380,16 +382,16 @@ class DevToolsViewModel(
 
     fun clickOracle(xRatio: Float, yRatio: Float) {
         viewModelScope.launch {
-            runCatching { api.clickOracleBrowser(sessionId, xRatio, yRatio) }
-                .onFailure { failure -> _uiState.update { it.copy(error = failure.message) } }
+            apiCall { api.clickOracleBrowser(sessionId, xRatio, yRatio) }
+                .onFailure { failure -> _uiState.update { it.copy(error = failure.screenErrorMessage("devtools", "clickOracle")) } }
             loadOracleFrame()
         }
     }
 
     fun scrollOracle(deltaY: Float) {
         viewModelScope.launch {
-            runCatching { api.wheelOracleBrowser(sessionId, deltaY) }
-                .onFailure { failure -> _uiState.update { it.copy(error = failure.message) } }
+            apiCall { api.wheelOracleBrowser(sessionId, deltaY) }
+                .onFailure { failure -> _uiState.update { it.copy(error = failure.screenErrorMessage("devtools", "scrollOracle")) } }
             loadOracleFrame()
         }
     }
@@ -397,16 +399,16 @@ class DevToolsViewModel(
     fun sendOracleText(text: String) {
         if (text.isEmpty()) return
         viewModelScope.launch {
-            runCatching { api.textOracleBrowser(sessionId, text) }
-                .onFailure { failure -> _uiState.update { it.copy(error = failure.message) } }
+            apiCall { api.textOracleBrowser(sessionId, text) }
+                .onFailure { failure -> _uiState.update { it.copy(error = failure.screenErrorMessage("devtools", "sendOracleText")) } }
             loadOracleFrame()
         }
     }
 
     fun sendOracleKey(key: String, code: String? = null) {
         viewModelScope.launch {
-            runCatching { api.keyOracleBrowser(sessionId, key, code) }
-                .onFailure { failure -> _uiState.update { it.copy(error = failure.message) } }
+            apiCall { api.keyOracleBrowser(sessionId, key, code) }
+                .onFailure { failure -> _uiState.update { it.copy(error = failure.screenErrorMessage("devtools", "sendOracleKey")) } }
             loadOracleFrame()
         }
     }
@@ -418,7 +420,7 @@ class DevToolsViewModel(
         }
         viewModelScope.launch {
             // The route requires a script name; "dev" is the convention.
-            runCatching { api.startPreview(workingDirectory, script.ifBlank { "dev" }) }
+            apiCall { api.startPreview(workingDirectory, script.ifBlank { "dev" }) }
                 .onSuccess { process ->
                     _uiState.update {
                         it.copy(
@@ -428,7 +430,7 @@ class DevToolsViewModel(
                     }
                     scanPorts()
                 }
-                .onFailure { failure -> _uiState.update { it.copy(error = failure.message) } }
+                .onFailure { failure -> _uiState.update { it.copy(error = failure.screenErrorMessage("devtools", "startPreview")) } }
         }
     }
 
@@ -442,8 +444,8 @@ class DevToolsViewModel(
     fun loadDevices() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingDevices = true) }
-            val snapshot = runCatching { api.getAndroidDevices(sessionId).data }.getOrNull()
-            val emulator = runCatching { api.getAndroidEmulatorStatus().data }.getOrNull()
+            val snapshot = apiCall { api.getAndroidDevices(sessionId).data }.getOrNull()
+            val emulator = apiCall { api.getAndroidEmulatorStatus().data }.getOrNull()
             _uiState.update {
                 it.copy(
                     deviceSnapshot = snapshot ?: it.deviceSnapshot,
@@ -459,12 +461,12 @@ class DevToolsViewModel(
     private fun deviceAction(notice: String, block: suspend () -> Unit) {
         viewModelScope.launch {
             _uiState.update { it.copy(isDeviceActionPending = true, error = null) }
-            val result = runCatching { block() }
+            val result = apiCall { block() }
             _uiState.update {
                 it.copy(
                     isDeviceActionPending = false,
                     notice = if (result.isSuccess) notice else it.notice,
-                    error = result.exceptionOrNull()?.message ?: it.error,
+                    error = result.exceptionOrNull()?.screenErrorMessage("devtools", "deviceAction") ?: it.error,
                 )
             }
             loadDevices()

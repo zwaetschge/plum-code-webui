@@ -90,7 +90,7 @@ ENV XDG_RUNTIME_DIR=/tmp/runtime-node
 # The release build is native linux/amd64, so all four shipped harnesses are
 # mandatory and version-smoke-tested instead of relying on an online bootstrap.
 ARG CLAUDE_CODE_VERSION=2.1.220
-ARG CODEX_VERSION=0.144.0
+ARG CODEX_VERSION=0.153.3
 ARG OPENCODE_VERSION=1.17.17
 ARG PI_CODING_AGENT_VERSION=0.83.0
 ARG PI_MCP_ADAPTER_VERSION=2.11.0

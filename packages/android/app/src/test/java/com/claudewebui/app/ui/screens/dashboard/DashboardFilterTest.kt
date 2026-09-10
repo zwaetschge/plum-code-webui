@@ -24,7 +24,7 @@ class DashboardFilterTest {
         listOf("plum-code", "opencode", "glm-5.1").forEach { query ->
             assertEquals(
                 listOf("one"),
-                filterDashboardSessions(listOf(session), query, null, SortOrder.RECENT).map { it.id },
+                filterDashboardSessions(listOf(session), query, null).map { it.id },
             )
         }
     }

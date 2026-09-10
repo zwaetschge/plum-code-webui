@@ -78,7 +78,10 @@ export async function resolveSubagentUpstream(
   const routing = await loadUserRouting(userId);
 
   for (const upstream of routing.upstreams) {
-    if (matchUpstreamModel(upstream.models, model) || matchUpstreamModel(upstream.models, normalizeZaiModel(model))) {
+    if (
+      matchUpstreamModel(upstream.models, model) ||
+      matchUpstreamModel(upstream.models, normalizeZaiModel(model))
+    ) {
       return {
         baseUrl: upstream.baseUrl,
         authToken: upstream.authToken,

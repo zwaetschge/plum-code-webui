@@ -1,12 +1,13 @@
 import type {
   Session,
+  SessionLifecycleEvent,
   SessionQueueData,
   SubagentRun,
   ToolExecution,
 } from '@plum-code-webui/shared';
 import type { ActivityState, AgentState } from '@/stores/sessionStore';
 
-export type SessionRunTone = 'working' | 'live-idle' | 'idle' | 'error';
+export type SessionRunTone = 'needs-you' | 'working' | 'live-idle' | 'idle' | 'error';
 
 export interface LiveSessionSignals {
   activity?: ActivityState;
@@ -15,6 +16,17 @@ export interface LiveSessionSignals {
   streamingContent?: string;
   tools?: ToolExecution[];
   queue?: SessionQueueData | null;
+  /**
+   * The last account-wide lifecycle beat. Present for every session the user
+   * owns, including ones that were never opened in this tab, so it outranks
+   * `session.runtime` — that snapshot is only as fresh as the last list fetch.
+   */
+  lifecycle?: SessionLifecycleEvent | null;
+  /**
+   * Approvals blocking this session, from the account-wide bootstrap. Covers
+   * the gap before the first lifecycle beat for this session arrives.
+   */
+  pendingApprovals?: number;
 }
 
 export interface SessionRunState {
@@ -25,6 +37,8 @@ export interface SessionRunState {
   isLive: boolean;
   runningTools: number;
   queueDepth: number;
+  /** Approvals and questions blocking this session right now. */
+  pendingApprovals: number;
 }
 
 function compactDetail(value: string | null | undefined, fallback: string): string {
@@ -55,12 +69,28 @@ function describeTool(toolName: string | null | undefined): string | undefined {
   return `Using ${toolName}`;
 }
 
+/** What is actually blocking the session, in the fewest words that stay true. */
+function describeBlock(approvals: number, questions: number): string {
+  if (approvals > 0 && questions > 0) return 'Approval and question waiting';
+  if (questions > 1) return `${questions} questions waiting`;
+  if (questions === 1) return 'Waiting for an answer';
+  if (approvals > 1) return `${approvals} approvals waiting`;
+  return 'Waiting for approval';
+}
+
 export function getSessionRunState(
   session: Session,
   signals: LiveSessionSignals = {}
 ): SessionRunState {
+  const lifecycle = signals.lifecycle;
   const runningTools = (signals.tools ?? []).filter((tool) => tool.status === 'started').length;
-  const queueDepth = signals.queue?.depth ?? session.runtime?.queueDepth ?? 0;
+  const queueDepth =
+    signals.queue?.depth ?? lifecycle?.queueDepth ?? session.runtime?.queueDepth ?? 0;
+  // Approvals and questions are two ways of being blocked on the same person,
+  // so the row counts them together. Only the wording below tells them apart.
+  const approvals = lifecycle?.pendingApprovals ?? signals.pendingApprovals ?? 0;
+  const questions = lifecycle?.pendingQuestions ?? 0;
+  const pendingApprovals = approvals + questions;
   const activeSubagents = [
     ...(signals.agentRuns ?? []),
     ...(session.runtime?.subagents ?? []),
@@ -74,10 +104,27 @@ export function getSessionRunState(
     runningTools > 0 ||
     !!signals.queue?.busy;
 
-  const isWorking = !!session.runtime?.busy || hasLiveActivity;
-  const isLive = !!session.runtime?.running || session.status === 'running' || isWorking;
+  const isWorking = (lifecycle?.busy ?? !!session.runtime?.busy) || hasLiveActivity;
+  const isLive =
+    !!session.runtime?.running || (lifecycle?.status ?? session.status) === 'running' || isWorking;
 
-  if (session.status === 'error') {
+  // Blocked beats busy. A session waiting on a permission or a question is the
+  // only state where nothing moves until the user acts, so it has to be the one
+  // a glance at the row lands on first.
+  if (pendingApprovals > 0) {
+    return {
+      tone: 'needs-you',
+      label: 'Needs you',
+      detail: compactDetail(lifecycle?.activitySummary, describeBlock(approvals, questions)),
+      isWorking: false,
+      isLive: true,
+      runningTools,
+      queueDepth,
+      pendingApprovals,
+    };
+  }
+
+  if ((lifecycle?.status ?? session.status) === 'error') {
     return {
       tone: 'error',
       label: 'Error',
@@ -86,6 +133,7 @@ export function getSessionRunState(
       isLive,
       runningTools,
       queueDepth,
+      pendingApprovals,
     };
   }
 
@@ -97,6 +145,7 @@ export function getSessionRunState(
         activeSubagents[0]?.description ||
         signals.activeAgent?.description ||
         describeTool(toolName) ||
+        lifecycle?.activitySummary ||
         session.runtime?.activitySummary ||
         session.runtime?.currentAgentDescription ||
         describeTool(session.runtime?.currentToolName) ||
@@ -114,6 +163,7 @@ export function getSessionRunState(
       isLive: true,
       runningTools,
       queueDepth,
+      pendingApprovals,
     };
   }
 
@@ -126,6 +176,7 @@ export function getSessionRunState(
       isLive: true,
       runningTools,
       queueDepth,
+      pendingApprovals,
     };
   }
 
@@ -137,5 +188,6 @@ export function getSessionRunState(
     isLive: false,
     runningTools,
     queueDepth,
+    pendingApprovals,
   };
 }

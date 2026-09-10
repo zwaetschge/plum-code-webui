@@ -1,5 +1,6 @@
 package com.claudewebui.app.widget
 
+import com.claudewebui.app.R
 import android.content.Context
 import com.claudewebui.app.core.notifications.NotificationService
 import java.text.SimpleDateFormat
@@ -72,9 +73,8 @@ object UsageAlerts {
                 NotificationService.notifyUsageAlert(
                     context,
                     tag = key,
-                    title = "${limit.provider} ${limit.window} limit at ${limit.percent}%",
-                    message = "You've used ${limit.percent}% of the ${limit.provider} " +
-                        "${limit.window.lowercase()} quota.",
+                    title = context.getString(R.string.native_quota_title, limit.provider, limit.localizedWindow(context), limit.percent),
+                    message = context.getString(R.string.native_quota_body, limit.percent, limit.provider, limit.localizedWindow(context)),
                 )
             }
 
@@ -86,9 +86,8 @@ object UsageAlerts {
                 NotificationService.notifyUsageAlert(
                     context,
                     tag = key,
-                    title = "Daily cost passed $%.2f".format(budget),
-                    message = "Today's API-equivalent cost is $%.2f across all providers."
-                        .format(snapshot.today.costUsd),
+                    title = context.getString(R.string.native_cost_alert_title, budget),
+                    message = context.getString(R.string.native_cost_alert_body, snapshot.today.costUsd),
                 )
             }
         }

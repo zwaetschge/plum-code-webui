@@ -6,6 +6,7 @@
 #   JWT_SECRET=your-jwt-secret-at-least-32-characters
 #   ENCRYPTION_KEY=your-independent-encryption-key
 #   AUTH_ALLOWED_EMAILS=admin@example.com
+#   POSTGRES_PASSWORD=your-database-password
 #
 # This pull-based production compose intentionally has no insecure auth
 # defaults. Compose refuses to create the container while any required value
@@ -22,6 +23,30 @@ services:
       - 'JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set to at least 32 random characters}'
       - 'AUTH_ALLOWED_EMAILS=${AUTH_ALLOWED_EMAILS:?AUTH_ALLOWED_EMAILS must contain at least one trusted email for the public Hub deployment}'
       - 'ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set independently so stored provider credentials are encrypted}'
+      - 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for the bundled database}'
+
+  # The backend has required Postgres since the SQLite removal. Without this
+  # service the pull-based deployment started, defaulted to host "plum-postgres"
+  # with an empty password, and only failed later as an unhandled rejection
+  # during initDatabase() — a container that looks up but cannot store anything.
+  postgres:
+    image: postgres:17-alpine
+    container_name: plum-postgres-hub
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${PGDATABASE:-plumcode}
+      - POSTGRES_USER=${PGUSER:-plumcode}
+      - 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for the bundled database}'
+    volumes:
+      - plum-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${PGUSER:-plumcode} -d ${PGDATABASE:-plumcode}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - claude-network
 
   plum-code-webui:
     image: valentin2177/plum-code-webui:latest
@@ -31,14 +56,28 @@ services:
     depends_on:
       config-guard:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     ports:
-      - '5174:3001'
+      # Loopback only. This compose is meant to sit behind a reverse proxy;
+      # publishing on every interface exposed the UI directly to the LAN.
+      # Override with WEBUI_BIND=0.0.0.0 if that is genuinely what you want.
+      - '${WEBUI_BIND:-127.0.0.1}:${HUB_WEBUI_PORT:-5174}:3001'
     shm_size: '${WEBUI_SHM_SIZE:-1gb}'
     environment:
       - NODE_ENV=production
       - TZ=${TZ:-Europe/Zurich}
-      - CODEX_WEBUI_SANDBOX_MODE=${CODEX_WEBUI_SANDBOX_MODE:-danger-full-access}
-      - CODEX_WEBUI_APPROVAL_POLICY=${CODEX_WEBUI_APPROVAL_POLICY:-never}
+      - PGHOST=${PGHOST:-postgres}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGDATABASE:-plumcode}
+      - PGUSER=${PGUSER:-plumcode}
+      - 'PGPASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for the bundled database}'
+      - PGPOOL_MAX=${PGPOOL_MAX:-10}
+      # Match the portable compose. A pull-based deployment is the one most
+      # likely to be run by someone who has not read the sandbox docs, so it is
+      # the last place that should default to an unsandboxed, never-ask agent.
+      - CODEX_WEBUI_SANDBOX_MODE=${CODEX_WEBUI_SANDBOX_MODE:-workspace-write}
+      - CODEX_WEBUI_APPROVAL_POLICY=${CODEX_WEBUI_APPROVAL_POLICY:-on-request}
       - CLI_RUNNER_ACCESS=${CLI_RUNNER_ACCESS:-admin-only}
       - CLI_RUNNER_ALLOWED_EMAILS=${CLI_RUNNER_ALLOWED_EMAILS:-}
       - CHROME_BIN=${CHROME_BIN:-/usr/local/bin/plum-chromium}
@@ -132,6 +171,7 @@ services:
 
 volumes:
   claude-data:
+  plum-postgres-data:
 
 networks:
   claude-network:

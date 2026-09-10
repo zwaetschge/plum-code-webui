@@ -39,7 +39,16 @@ cd /app
 # Start rebuild-robot watcher in background
 if [ -f "/webui/scripts/rebuild-robot-sidecar.sh" ]; then
     echo "[repair-bot] Starting rebuild watcher..."
-    sh /webui/scripts/rebuild-robot-sidecar.sh &
+    # Restart the watcher if it ever exits: without it the repair-bot keeps
+    # answering health checks while silently ignoring every rebuild trigger,
+    # which looks exactly like a healthy robot from the outside.
+    (
+        while true; do
+            sh /webui/scripts/rebuild-robot-sidecar.sh || true
+            echo "[repair-bot] WARNING: rebuild watcher exited, restarting in 10s" >&2
+            sleep 10
+        done
+    ) &
     WATCHER_PID=$!
     echo "[repair-bot] Watcher started (PID: $WATCHER_PID)"
 else

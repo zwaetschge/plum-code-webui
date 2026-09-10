@@ -1,4 +1,4 @@
-import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
+import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { createHash } from 'crypto';
 import { safeDecrypt, safeEncrypt } from './encryption.js';
 import { getOpenCodeProviderCatalog, type OpenCodeProviderCatalog } from './opencodeCatalog.js';
@@ -126,33 +126,38 @@ export async function writeOpenCodeProvidersForUser(
   userId: string,
   providers: OpenCodeProvider[]
 ): Promise<void> {
-  const row = (await pgGet(
-    'SELECT settings_json FROM user_settings WHERE user_id = ?',
-    userId
-  )) as unknown as UserSettingsRow | undefined;
-
-  const settings = safeJsonParse<Record<string, unknown>>(row?.settings_json, {});
-  settings.opencodeProviders = providers;
-  const json = JSON.stringify(settings);
-
-  if (row) {
-    await pgRun('UPDATE user_settings SET settings_json = ? WHERE user_id = ?', json, userId);
-  } else {
-    await pgRun('INSERT INTO user_settings (user_id, settings_json) VALUES (?, ?)', userId, json);
-  }
+  // Merge inside Postgres rather than read-modify-write in JS. The old version
+  // parsed the whole settings blob, replaced one key and wrote it all back, so
+  // a concurrent save of any other setting — two browser tabs, or a provider
+  // key write racing the GitHub token — silently discarded whichever side
+  // committed first.
+  await pgRun(
+    `INSERT INTO user_settings (user_id, settings_json)
+          VALUES (?, ?)
+     ON CONFLICT (user_id) DO UPDATE
+            SET settings_json = (
+                  COALESCE(NULLIF(user_settings.settings_json, '')::jsonb, '{}'::jsonb)
+                  || EXCLUDED.settings_json::jsonb
+                )::text`,
+    userId,
+    JSON.stringify({ opencodeProviders: providers })
+  );
 }
 
-async function readAllEnabledOpenCodeProviders(): Promise<OpenCodeProvider[]> {
-  const rows = (await pgAll('SELECT user_id, settings_json FROM user_settings')) as unknown as
-    | UserSettingsRow[]
-    | undefined;
-  const providers: OpenCodeProvider[] = [];
-
-  for (const row of rows || []) {
-    providers.push(...parseProviders(row.settings_json).filter((provider) => provider.enabled));
-  }
-
-  return providers;
+/**
+ * Provider keys are per user, so there is no sensible answer without one.
+ *
+ * This used to merge every user's enabled providers together, which meant a
+ * spawn that reached here with no user id handed one account's API keys to
+ * whoever's session happened to trigger it. Returning nothing is the only safe
+ * reading of "I do not know whose credentials these should be" — the CLI then
+ * reports a missing key instead of quietly billing someone else.
+ */
+function warnMissingUser(caller: string): OpenCodeProvider[] {
+  console.warn(
+    `[opencode-keys] ${caller} called without a user id — no provider credentials will be supplied.`
+  );
+  return [];
 }
 
 export function maskOpenCodeProvider(
@@ -176,7 +181,7 @@ export async function buildOpenCodeProviderCredentialEnv(
 ): Promise<Record<string, string>> {
   const providers = userId
     ? (await readOpenCodeProvidersForUser(userId)).filter((provider) => provider.enabled)
-    : await readAllEnabledOpenCodeProviders();
+    : warnMissingUser('buildOpenCodeProviderCredentialEnv');
   const catalog = getOpenCodeProviderCatalog();
   const env: Record<string, string> = {};
 
@@ -195,7 +200,7 @@ export async function buildOpenCodeProviderCredentialEnv(
 export async function getOpenCodeProviderCredentialFingerprint(userId?: string): Promise<string> {
   const providers = userId
     ? (await readOpenCodeProvidersForUser(userId)).filter((provider) => provider.enabled)
-    : await readAllEnabledOpenCodeProviders();
+    : warnMissingUser('getOpenCodeProviderCredentialFingerprint');
   const payload = providers
     .map((provider) => ({
       id: provider.id,

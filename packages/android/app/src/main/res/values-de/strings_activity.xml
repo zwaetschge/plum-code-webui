@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="activity_1_s_session_2_s_0520f">%1$s Sitzungen%2$s</string>
+    <string name="activity_activity_81c0d">Aktivität</string>
+    <string name="activity_all_6a720">Alle</string>
+    <string name="activity_chat_1_s_2_s_6330a">Chat: %1$s · %2$s</string>
+    <string name="activity_connected_to_plum_code_webui_82f9f">Mit plum-code-webui verbunden</string>
+    <string name="activity_connecting_fd3e7">Verbindung wird hergestellt…</string>
+    <string name="activity_connection_failed_202ca">Verbindung fehlgeschlagen</string>
+    <string name="activity_discard_36fff">Verwerfen</string>
+    <string name="activity_failed_09fef">Fehlgeschlagen</string>
+    <string name="activity_history_unavailable_5bcef">Verlauf nicht verfügbar</string>
+    <string name="activity_live_activity_93df4">Live-Aktivität</string>
+    <string name="activity_more_4bab2">Mehr</string>
+    <string name="activity_needs_you_0d9d0">Braucht dich</string>
+    <string name="activity_new_live_events_will_appear_here_31fb0">Neue Live-Ereignisse erscheinen hier.</string>
+    <string name="activity_no_matching_activity_26303">Keine passende Aktivität</string>
+    <string name="activity_no_messages_waiting_to_be_sent_1f175">Keine Nachrichten zum Senden vorgemerkt</string>
+    <string name="activity_nothing_in_progress_a710d">Nichts in Bearbeitung</string>
+    <string name="activity_offline_showing_cached_state_56761">Offline – gespeicherter Stand wird angezeigt</string>
+    <string name="activity_open_session_77709">Sitzung öffnen</string>
+    <string name="activity_original_chat_b08b0">Ursprünglicher Chat</string>
+    <string name="activity_outbox_1_s_this_device_9640e">Postausgang (%1$s) · dieses Gerät</string>
+    <string name="activity_queued_6a599">In Warteschlange</string>
+    <string name="activity_realtime_overview_of_agents_tools_and_events_a04c0">Echtzeitübersicht über Agenten, Werkzeuge und Ereignisse</string>
+    <string name="activity_reconnecting_8a8b9">Verbindung wird erneut hergestellt…</string>
+    <string name="activity_refresh_56e3b">Aktualisieren</string>
+    <string name="activity_requests_24h_f8785">Anfragen 24 Std.</string>
+    <string name="activity_unavailable_session_64980">Sitzung nicht verfügbar</string>
+    <string name="activity_waiting_for_server_confirmation_2d41d">Wartet auf Serverbestätigung</string>
+    <string name="activity_working_3b4df">Arbeitet</string>
+    <plurals name="activity_session_count">
+        <item quantity="one">%d Sitzung</item>
+        <item quantity="other">%d Sitzungen</item>
+    </plurals>
+</resources>

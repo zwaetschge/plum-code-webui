@@ -38,23 +38,46 @@ const firstResetAt = '2026-07-28T11:00:00.000Z';
 
 await pgRun(
   `INSERT INTO usage_history (
-      user_id, session_id, input_tokens, output_tokens, cache_read_tokens,
+      user_id, session_id, turn_id, input_tokens, output_tokens, cache_read_tokens,
       cache_creation_tokens, total_tokens, provider, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  userId, 'session-1', 600, 200, 100, 0, 900, 'zai', '2026-07-28 10:04:00'
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  userId,
+  'session-1',
+  'turn-1',
+  600,
+  200,
+  100,
+  0,
+  900,
+  'zai',
+  '2026-07-28 10:04:00'
 );
 await pgRun(
   `INSERT INTO usage_history (
-      user_id, session_id, input_tokens, output_tokens, cache_read_tokens,
+      user_id, session_id, turn_id, input_tokens, output_tokens, cache_read_tokens,
       cache_creation_tokens, total_tokens, provider, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  userId, 'session-1', 100, 50, 25, 0, 175, 'z-ai', '2026-07-28 10:11:00'
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  userId,
+  'session-1',
+  'turn-2',
+  100,
+  50,
+  25,
+  0,
+  175,
+  'z-ai',
+  '2026-07-28 10:11:00'
 );
 await pgRun(
   `INSERT INTO usage_history (
-      user_id, session_id, total_tokens, provider, created_at
-    ) VALUES (?, ?, ?, ?, ?)`,
-  'other-user', 'session-2', 99_999, 'zai', '2026-07-28 10:07:00'
+      user_id, session_id, turn_id, total_tokens, provider, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?)`,
+  'other-user',
+  'session-2',
+  'turn-3',
+  99_999,
+  'zai',
+  '2026-07-28 10:07:00'
 );
 
 const initialCount = await recordUsageLimitSnapshots(

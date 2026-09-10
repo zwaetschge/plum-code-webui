@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.settings
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,21 +39,26 @@ fun PermissionsScreen(
     viewModel: SettingsViewModel,
     onNavigateBack: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     PlumBackdrop {
         Scaffold(containerColor = Color.Transparent) { padding ->
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             ) {
                 item {
                     PlumScreenHeader(
-                        title = "Permissions",
-                        subtitle = "Controls the active harness, per session",
+                        title = screenResources.getString(R.string.settings_permissions_d06d5),
+                        subtitle = screenResources.getString(R.string.settings_controls_the_active_harness_per_session_04007),
                         actions = {
                             PlumIconButton(
                                 Icons.AutoMirrored.Outlined.ArrowBack,
-                                "Back",
+                                screenResources.getString(R.string.settings_back_b52b3),
                                 onNavigateBack,
                             )
                         },
@@ -61,23 +67,23 @@ fun PermissionsScreen(
                 item {
                     PermissionFact(
                         icon = { Icon(Icons.Outlined.Security, null, tint = PlumAccent) },
-                        title = "Execution mode",
-                        body = "Open a chat, then Session settings. Plan, Auto, Manual and Danger are sent to the running provider immediately and persisted by the server.",
+                        title = screenResources.getString(R.string.settings_execution_mode_cb9e1),
+                        body = screenResources.getString(R.string.settings_open_a_chat_then_session_settings_plan_auto_manual_and_danger_are_ac545),
                     )
                 }
                 item {
                     PermissionFact(
                         icon = { Icon(Icons.Outlined.FolderOpen, null, tint = PlumAccent) },
-                        title = "Allowed directories",
-                        body = "Additional server paths are managed in the same Session settings sheet. The backend validates that each directory exists before granting access.",
+                        title = screenResources.getString(R.string.settings_allowed_directories_e2e89),
+                        body = screenResources.getString(R.string.settings_additional_server_paths_are_managed_in_the_same_session_settings_ef0d9),
                     )
                 }
                 item {
                     Text(
-                        "Tool-specific global rules are not a Plum WebUI server concept. The app no longer stores local rules that cannot be enforced.",
+                        screenResources.getString(R.string.settings_tool_specific_global_rules_are_not_a_plum_webui_server_concept_th_8da04),
                         color = PlumMuted,
                         fontSize = 12.sp,
-                        modifier = Modifier.padding(8.dp),
+                        modifier = Modifier.padding(screenTokens.spacing.sm),
                     )
                 }
             }
@@ -91,8 +97,10 @@ private fun PermissionFact(
     title: String,
     body: String,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     GlassPanel(Modifier.fillMaxWidth(), radius = 18.dp) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(screenTokens.spacing.lg), verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)) {
             icon()
             Text(title, color = PlumText, fontWeight = FontWeight.Bold)
             Text(body, color = PlumMuted, fontSize = 12.sp)

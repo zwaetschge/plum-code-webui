@@ -171,171 +171,167 @@ function serializeLoginSession(session: LoginSession) {
   };
 }
 
-router.post(
-  '/:provider/start',
-  requireAuth,
-  async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const provider = (req.params.provider || '').toLowerCase() as CLIProvider;
+router.post('/:provider/start', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const provider = (req.params.provider || '').toLowerCase() as CLIProvider;
 
-    const runnerAccess = await getRunnerAccessDecision(userId);
-    if (!runnerAccess.allowed) {
-      throw new AppError(
-        runnerAccess.reason || 'CLI runner access is not allowed for this account.',
-        403,
-        'RUNNER_ACCESS_DENIED'
-      );
-    }
-
-    // Claude and OpenCode expose dedicated auth commands. Codex uses its
-    // headless device-code flow so the browser interaction can stay in Plum.
-    const invocationArgs = resolveCliLoginInvocation(provider);
-    if (!invocationArgs) {
-      throw new AppError(
-        `CLI login is not supported for provider '${provider}'.`,
-        400,
-        'UNSUPPORTED_PROVIDER'
-      );
-    }
-
-    const parsed = startSchema.safeParse(req.body || {});
-    if (!parsed.success) {
-      throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
-    }
-
-    let activeForUser = 0;
-    let activeTotal = 0;
-    for (const existing of loginSessions.values()) {
-      if (existing.proc && existing.status !== 'completed' && existing.status !== 'error') {
-        activeTotal += 1;
-        if (existing.userId === userId) activeForUser += 1;
-      }
-    }
-    if (activeForUser >= MAX_LOGIN_SESSIONS_PER_USER) {
-      throw new AppError(
-        'You already have a CLI login in progress. Finish or wait for it to expire before starting another.',
-        429,
-        'LOGIN_CAP_USER'
-      );
-    }
-    if (activeTotal >= MAX_LOGIN_SESSIONS_TOTAL) {
-      throw new AppError(
-        'Too many concurrent CLI logins on this server. Try again shortly.',
-        429,
-        'LOGIN_CAP_GLOBAL'
-      );
-    }
-
-    const config = CLI_PROVIDERS[provider];
-    const command = config?.command || provider;
-    const loginId = nanoid();
-    const session: LoginSession = {
-      id: loginId,
-      userId,
-      provider,
-      proc: null,
-      status: 'starting',
-      output: '',
-      rawOutput: '',
-      createdAt: Date.now(),
-      waiters: [],
-    };
-
-    try {
-      const env = {
-        ...getCliEnv(),
-        HOME: os.homedir(),
-        TERM: 'xterm-256color',
-        FORCE_COLOR: '1',
-      } as Record<string, string>;
-
-      // Provider-specific env
-      if (provider === 'claude') {
-        const configOverride = process.env.WEBUI_CONFIG_HOME || process.env.CLAUDE_CONFIG_HOME;
-        if (configOverride) {
-          env.CLAUDE_CONFIG_HOME = configOverride;
-        }
-      } else if (provider === 'codex') {
-        env.CODEX_HOME = CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir());
-      } else if (provider === 'opencode') {
-        // Keep OpenCode OAuth/account state in the same per-user tenant used by
-        // that user's server. A login can never replace another user's auth.json.
-        const tenantPaths = resolveOpenCodeTenantPaths(userId);
-        ensureOpenCodeTenantDirectories(tenantPaths);
-        env.OPENCODE_CONFIG_DIR = tenantPaths.configDir;
-        env.OPENCODE_DATA_DIR = tenantPaths.dataDir;
-      } else if (provider === 'pi') {
-        // Same per-user agent dir the WebUI hands to Pi sessions, so the token
-        // lands where syncPiConfig and the model resolution look for it.
-        const segment = userId.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) || 'default';
-        const agentDir = path.join(os.homedir(), '.pi', 'webui-users', segment, 'agent');
-        fs.mkdirSync(agentDir, { recursive: true });
-        env.PI_CODING_AGENT_DIR = agentDir;
-        env.PI_TELEMETRY = '0';
-        env.PI_SKIP_VERSION_CHECK = '1';
-      } else if (provider === 'kimi') {
-        // Kimi Code CLI keeps OAuth + provider state under ~/.kimi-code by
-        // default. The device-code login prints the verification URL + user code
-        // to the TTY (merged stdout/stderr) and self-polls until the browser
-        // authorization completes; no manual code entry is required.
-      }
-
-      const loginArgs = [...invocationArgs];
-
-      const proc = pty.spawn(command, loginArgs, {
-        name: 'xterm-256color',
-        cols: 120,
-        rows: 30,
-        cwd: os.homedir(),
-        env,
-      });
-
-      session.proc = proc;
-      loginSessions.set(loginId, session);
-
-      proc.onData((data: string) => {
-        appendOutput(session, data);
-      });
-
-      proc.onExit(({ exitCode }) => {
-        finalizeSession(session, exitCode);
-      });
-
-      // Providers whose login is a TUI command need it typed after the
-      // interface has drawn; writing immediately lands before the input is
-      // wired and is swallowed.
-      const tuiInput = CLI_LOGIN_TUI_INPUT[provider];
-      if (tuiInput) {
-        const type = (value: string) => {
-          try {
-            proc.write(value);
-          } catch {
-            // The process may already be gone; onExit reports that.
-          }
-        };
-        // Three separate writes on purpose. The TUI needs to have drawn before
-        // it accepts input, and submitting in the same write as the text does
-        // not register — the command just sits in the composer.
-        setTimeout(() => type(tuiInput), 2000);
-        setTimeout(() => type('\r'), 3000);
-        setTimeout(() => type('\r'), 5000);
-      }
-    } catch (error) {
-      session.status = 'error';
-      session.error = error instanceof Error ? error.message : 'Failed to start CLI login';
-      loginSessions.set(loginId, session);
-    }
-
-    // Wait a bit for the process to start and output the URL
-    const waitTime = 600;
-    await new Promise((resolve) => setTimeout(resolve, waitTime));
-
-    res.json({
-      success: true,
-      data: serializeLoginSession(session),
-    });
+  const runnerAccess = await getRunnerAccessDecision(userId);
+  if (!runnerAccess.allowed) {
+    throw new AppError(
+      runnerAccess.reason || 'CLI runner access is not allowed for this account.',
+      403,
+      'RUNNER_ACCESS_DENIED'
+    );
   }
-);
+
+  // Claude and OpenCode expose dedicated auth commands. Codex uses its
+  // headless device-code flow so the browser interaction can stay in Plum.
+  const invocationArgs = resolveCliLoginInvocation(provider);
+  if (!invocationArgs) {
+    throw new AppError(
+      `CLI login is not supported for provider '${provider}'.`,
+      400,
+      'UNSUPPORTED_PROVIDER'
+    );
+  }
+
+  const parsed = startSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+  }
+
+  let activeForUser = 0;
+  let activeTotal = 0;
+  for (const existing of loginSessions.values()) {
+    if (existing.proc && existing.status !== 'completed' && existing.status !== 'error') {
+      activeTotal += 1;
+      if (existing.userId === userId) activeForUser += 1;
+    }
+  }
+  if (activeForUser >= MAX_LOGIN_SESSIONS_PER_USER) {
+    throw new AppError(
+      'You already have a CLI login in progress. Finish or wait for it to expire before starting another.',
+      429,
+      'LOGIN_CAP_USER'
+    );
+  }
+  if (activeTotal >= MAX_LOGIN_SESSIONS_TOTAL) {
+    throw new AppError(
+      'Too many concurrent CLI logins on this server. Try again shortly.',
+      429,
+      'LOGIN_CAP_GLOBAL'
+    );
+  }
+
+  const config = CLI_PROVIDERS[provider];
+  const command = config?.command || provider;
+  const loginId = nanoid();
+  const session: LoginSession = {
+    id: loginId,
+    userId,
+    provider,
+    proc: null,
+    status: 'starting',
+    output: '',
+    rawOutput: '',
+    createdAt: Date.now(),
+    waiters: [],
+  };
+
+  try {
+    const env = {
+      ...getCliEnv(),
+      HOME: os.homedir(),
+      TERM: 'xterm-256color',
+      FORCE_COLOR: '1',
+    } as Record<string, string>;
+
+    // Provider-specific env
+    if (provider === 'claude') {
+      const configOverride = process.env.WEBUI_CONFIG_HOME || process.env.CLAUDE_CONFIG_HOME;
+      if (configOverride) {
+        env.CLAUDE_CONFIG_HOME = configOverride;
+      }
+    } else if (provider === 'codex') {
+      env.CODEX_HOME = CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir());
+    } else if (provider === 'opencode') {
+      // Keep OpenCode OAuth/account state in the same per-user tenant used by
+      // that user's server. A login can never replace another user's auth.json.
+      const tenantPaths = resolveOpenCodeTenantPaths(userId);
+      ensureOpenCodeTenantDirectories(tenantPaths);
+      env.OPENCODE_CONFIG_DIR = tenantPaths.configDir;
+      env.OPENCODE_DATA_DIR = tenantPaths.dataDir;
+    } else if (provider === 'pi') {
+      // Same per-user agent dir the WebUI hands to Pi sessions, so the token
+      // lands where syncPiConfig and the model resolution look for it.
+      const segment = userId.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) || 'default';
+      const agentDir = path.join(os.homedir(), '.pi', 'webui-users', segment, 'agent');
+      fs.mkdirSync(agentDir, { recursive: true });
+      env.PI_CODING_AGENT_DIR = agentDir;
+      env.PI_TELEMETRY = '0';
+      env.PI_SKIP_VERSION_CHECK = '1';
+    } else if (provider === 'kimi') {
+      // Kimi Code CLI keeps OAuth + provider state under ~/.kimi-code by
+      // default. The device-code login prints the verification URL + user code
+      // to the TTY (merged stdout/stderr) and self-polls until the browser
+      // authorization completes; no manual code entry is required.
+    }
+
+    const loginArgs = [...invocationArgs];
+
+    const proc = pty.spawn(command, loginArgs, {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 30,
+      cwd: os.homedir(),
+      env,
+    });
+
+    session.proc = proc;
+    loginSessions.set(loginId, session);
+
+    proc.onData((data: string) => {
+      appendOutput(session, data);
+    });
+
+    proc.onExit(({ exitCode }) => {
+      finalizeSession(session, exitCode);
+    });
+
+    // Providers whose login is a TUI command need it typed after the
+    // interface has drawn; writing immediately lands before the input is
+    // wired and is swallowed.
+    const tuiInput = CLI_LOGIN_TUI_INPUT[provider];
+    if (tuiInput) {
+      const type = (value: string) => {
+        try {
+          proc.write(value);
+        } catch {
+          // The process may already be gone; onExit reports that.
+        }
+      };
+      // Three separate writes on purpose. The TUI needs to have drawn before
+      // it accepts input, and submitting in the same write as the text does
+      // not register — the command just sits in the composer.
+      setTimeout(() => type(tuiInput), 2000);
+      setTimeout(() => type('\r'), 3000);
+      setTimeout(() => type('\r'), 5000);
+    }
+  } catch (error) {
+    session.status = 'error';
+    session.error = error instanceof Error ? error.message : 'Failed to start CLI login';
+    loginSessions.set(loginId, session);
+  }
+
+  // Wait a bit for the process to start and output the URL
+  const waitTime = 600;
+  await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+  res.json({
+    success: true,
+    data: serializeLoginSession(session),
+  });
+});
 
 router.get('/:id', requireAuth, (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
@@ -351,46 +347,42 @@ router.get('/:id', requireAuth, (req, res) => {
   });
 });
 
-router.post(
-  '/:id/code',
-  requireAuth,
-  async (req, res) => {
-    const userId = (req as AuthenticatedRequest).userId;
-    const session = loginSessions.get(req.params.id!);
+router.post('/:id/code', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const session = loginSessions.get(req.params.id!);
 
-    if (!session || session.userId !== userId) {
-      throw new AppError('Login session not found', 404, 'NOT_FOUND');
-    }
+  if (!session || session.userId !== userId) {
+    throw new AppError('Login session not found', 404, 'NOT_FOUND');
+  }
 
-    const parsed = codeSchema.safeParse(req.body);
-    if (!parsed.success) {
-      throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
-    }
+  const parsed = codeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
+  }
 
-    if (!session.proc) {
-      res.json({
-        success: true,
-        data: serializeLoginSession(session),
-      });
-      return;
-    }
-
-    const code = parsed.data.code.trim();
-    session.proc.write(code + '\r');
-
-    try {
-      await waitForCompletion(session, 60 * 1000);
-    } catch (error) {
-      session.status = 'error';
-      session.error = error instanceof Error ? error.message : 'Login timed out';
-    }
-
+  if (!session.proc) {
     res.json({
       success: true,
       data: serializeLoginSession(session),
     });
+    return;
   }
-);
+
+  const code = parsed.data.code.trim();
+  session.proc.write(code + '\r');
+
+  try {
+    await waitForCompletion(session, 60 * 1000);
+  } catch (error) {
+    session.status = 'error';
+    session.error = error instanceof Error ? error.message : 'Login timed out';
+  }
+
+  res.json({
+    success: true,
+    data: serializeLoginSession(session),
+  });
+});
 
 router.delete('/:id', requireAuth, (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;

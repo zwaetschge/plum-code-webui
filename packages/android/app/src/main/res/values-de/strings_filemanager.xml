@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="filemanager_back_b52b3">Zurück</string>
+    <string name="filemanager_cancel_77dfd">Abbrechen</string>
+    <string name="filemanager_clear_719ea">Leeren</string>
+    <string name="filemanager_delete_1_s_137cd">%1$s löschen?</string>
+    <string name="filemanager_delete_f6fdb">Löschen</string>
+    <string name="filemanager_dismiss_70afe">Schliessen</string>
+    <string name="filemanager_empty_directory_950d3">Leeres Verzeichnis</string>
+    <string name="filemanager_file_2c3ca">Datei</string>
+    <string name="filemanager_files_6ce6c">Dateien</string>
+    <string name="filemanager_go_up_25874">Übergeordnetes Verzeichnis</string>
+    <string name="filemanager_no_changes_24a61">Keine Änderungen</string>
+    <string name="filemanager_no_results_for_1_s_70985">Keine Ergebnisse für „%1$s“</string>
+    <string name="filemanager_refresh_56e3b">Aktualisieren</string>
+    <string name="filemanager_reload_cce71">Neu laden</string>
+    <string name="filemanager_retry_9f5cd">Erneut versuchen</string>
+    <string name="filemanager_revert_27260">Verwerfen</string>
+    <string name="filemanager_save_efc00">Speichern</string>
+    <string name="filemanager_saved_c0ae8">Gespeichert</string>
+    <string name="filemanager_saving_56a22">Wird gespeichert…</string>
+    <string name="filemanager_search_files_fe116">Dateien suchen…</string>
+    <string name="filemanager_send_path_to_chat_6d770">Pfad an Chat senden</string>
+    <string name="filemanager_this_action_cannot_be_undone_951f4">Diese Aktion kann nicht rückgängig gemacht werden.</string>
+    <string name="filemanager_unsaved_changes_29267">Ungespeicherte Änderungen</string>
+    <string name="filemanager_upload_file_503a3">Datei hochladen</string>
+    <string name="filemanager_upload_files_using_the_button_below_c7fda">Lade Dateien mit der Schaltfläche unten hoch</string>
+    <string name="filemanager_uploading_070e3">Wird hochgeladen…</string>
+    <string name="filemanager_download_file">Herunterladen</string>
+    <string name="filemanager_download_zip">Als ZIP herunterladen</string>
+    <string name="filemanager_download_zip_hint">node_modules und .git werden übersprungen</string>
+    <string name="filemanager_download_preparing">%1$s wird vorbereitet …</string>
+    <string name="filemanager_download_failed">Download fehlgeschlagen</string>
+    <string name="filemanager_unwritable">Ziel ist nicht beschreibbar</string>
+</resources>

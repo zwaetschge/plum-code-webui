@@ -43,8 +43,18 @@ assert.match(
 );
 assert.match(
   messageRoute,
-  /snapshot: await getMessageHistorySnapshot[^]*?readState: await getSessionReadState/,
+  /snapshot: await getMessageHistorySnapshot[^]*?query: tx[^]*?readState: await getSessionReadState[^]*?activeChatId, tx/,
   'rows include an atomic snapshot and read-state contract'
+);
+assert.match(
+  messageRoute,
+  /isolation: 'repeatable read'/,
+  'all history reads share one database snapshot'
+);
+assert.match(
+  messageRoute,
+  /loadMessageMedia\([^]*?, tx\)/,
+  'media hydration shares the same snapshot'
 );
 assert.match(
   messageRoute,

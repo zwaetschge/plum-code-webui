@@ -12,12 +12,16 @@ import fs from 'fs/promises';
 import { createReadStream } from 'fs';
 import os from 'os';
 import multer from 'multer';
-import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
+import {
+  requireAuth,
+  resolveAuthenticatedUserId,
+  type AuthenticatedRequest,
+} from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { config } from '../config.js';
 import { safeJsonParse } from '../utils/json.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
-import { getProcessManager } from '../websocket/index.js';
+import { emitSessionChats, getProcessManager } from '../websocket/index.js';
 import { isAllowedBasePath } from '../utils/allowedPaths.js';
 import { sanitizeFilename, ALLOWED_UPLOAD_MIME_TYPES } from '../utils/sanitize.js';
 import { resolveConfigHome } from '../utils/configPaths.js';
@@ -45,6 +49,7 @@ import {
   putChatUploadChunk,
 } from '../services/chatUploads.js';
 import {
+  captureSessionSnapshotWatermark,
   getMessageHistorySnapshot,
   getSessionReadState,
   setSessionReadState,
@@ -1483,6 +1488,15 @@ async function chatListPayload(sessionId: string, activeChatId: string | null) {
   };
 }
 
+async function publishChatList(sessionId: string, userId: string) {
+  // Re-read after awaited stop/recovery work; another device may have switched
+  // again while the CLI was closing. Publish the current authoritative state.
+  const session = await requireOwnedSession(sessionId, userId);
+  const data = await chatListPayload(sessionId, session.activeChatId);
+  emitSessionChats(userId, { sessionId, ...data });
+  return data;
+}
+
 /** Move the implicit NULL main thread into a real session_chats row. */
 async function materializeMainChat(session: {
   id: string;
@@ -1498,6 +1512,9 @@ async function materializeMainChat(session: {
     'Chat 1',
     session.claudeSessionId
   );
+  // Bind before rewriting rows so an already in-flight assistant INSERT can
+  // move its own row after committing, too.
+  getProcessManager().materializeMainChat(session.id, mainId);
   await pgRun(
     'UPDATE messages SET chat_id = ? WHERE session_id = ? AND chat_id IS NULL',
     mainId,
@@ -1573,7 +1590,7 @@ router.post('/:id/chats', requireAuth, async (req, res) => {
     /* not running */
   }
 
-  res.json({ success: true, data: await chatListPayload(session.id, chatId) });
+  res.json({ success: true, data: await publishChatList(session.id, userId) });
 });
 
 // Switch to another chat thread
@@ -1584,7 +1601,7 @@ router.post('/:id/chats/:chatId/activate', requireAuth, async (req, res) => {
 
   if (targetId === 'main' && session.activeChatId === null) {
     // Already on the implicit main thread.
-    return res.json({ success: true, data: await chatListPayload(session.id, null) });
+    return res.json({ success: true, data: await publishChatList(session.id, userId) });
   }
 
   const target = (await pgGet(
@@ -1595,7 +1612,7 @@ router.post('/:id/chats/:chatId/activate', requireAuth, async (req, res) => {
   if (!target) throw new AppError('Chat not found', 404, 'NOT_FOUND');
 
   if (session.activeChatId === target.id) {
-    return res.json({ success: true, data: await chatListPayload(session.id, target.id) });
+    return res.json({ success: true, data: await publishChatList(session.id, userId) });
   }
 
   const currentActiveId = await materializeMainChat(session);
@@ -1615,7 +1632,7 @@ router.post('/:id/chats/:chatId/activate', requireAuth, async (req, res) => {
     /* not running */
   }
 
-  res.json({ success: true, data: await chatListPayload(session.id, target.id) });
+  res.json({ success: true, data: await publishChatList(session.id, userId) });
 });
 
 // Rename a chat thread
@@ -1632,7 +1649,7 @@ router.patch('/:id/chats/:chatId', requireAuth, async (req, res) => {
     session.id
   );
   if (result.changes === 0) throw new AppError('Chat not found', 404, 'NOT_FOUND');
-  res.json({ success: true, data: await chatListPayload(session.id, session.activeChatId) });
+  res.json({ success: true, data: await publishChatList(session.id, userId) });
 });
 
 // Delete a chat thread and its messages
@@ -1668,8 +1685,7 @@ router.delete('/:id/chats/:chatId', requireAuth, async (req, res) => {
     }
   }
 
-  const updated = await requireOwnedSession(session.id, userId);
-  res.json({ success: true, data: await chatListPayload(session.id, updated.activeChatId) });
+  res.json({ success: true, data: await publishChatList(session.id, userId) });
 });
 
 // Update the per-session model selection so different WebUI sessions can run
@@ -2430,174 +2446,187 @@ router.get('/:id/messages', requireAuth, async (req, res) => {
     throw new AppError('before, after and around are mutually exclusive', 400, 'VALIDATION_ERROR');
   }
 
-  const payload = await pgTransaction(async (tx) => {
-    // One SQLite read transaction makes the rows, revision and newest id one
-    // coherent snapshot even if another backend process is writing concurrently.
-    const session = (await tx.get(
-      `SELECT id, active_chat_id AS activeChatId
+  const snapshotStartWatermark = captureSessionSnapshotWatermark(req.params.id as string) ?? null;
+  const payload = await pgTransaction(
+    async (tx) => {
+      // Every query uses this Postgres snapshot, including metadata and media.
+      const session = (await tx.get(
+        `SELECT id, active_chat_id AS activeChatId
            FROM sessions WHERE id = ? AND user_id = ?`,
-      req.params.id,
-      userId
-    )) as unknown as { id: string; activeChatId: string | null } | undefined;
-    if (!session) throw new AppError('Session not found', 404, 'NOT_FOUND');
-    const activeChatId =
-      requestedChatId === undefined
-        ? session.activeChatId
-        : requestedChatId === ''
-          ? null
-          : requestedChatId;
-    if (
-      activeChatId !== null &&
-      !(await tx.get(
-        `SELECT 1 FROM session_chats WHERE id = ? AND session_id = ?`,
-        activeChatId,
-        req.params.id
-      ))
-    ) {
-      throw new AppError('Chat not found in this session', 404, 'NOT_FOUND');
-    }
-    const total = (
-      (await tx.get(
-        'SELECT COUNT(*) AS count FROM messages WHERE session_id = ? AND chat_id IS ?',
         req.params.id,
-        activeChatId
-      )) as unknown as { count: number }
-    ).count;
-    const baseSelect = `SELECT id, session_id AS sessionId, chat_id AS chatId, role, content,
+        userId
+      )) as unknown as { id: string; activeChatId: string | null } | undefined;
+      if (!session) throw new AppError('Session not found', 404, 'NOT_FOUND');
+      const activeChatId =
+        requestedChatId === undefined
+          ? session.activeChatId
+          : requestedChatId === ''
+            ? null
+            : requestedChatId;
+      if (
+        activeChatId !== null &&
+        !(await tx.get(
+          `SELECT 1 FROM session_chats WHERE id = ? AND session_id = ?`,
+          activeChatId,
+          req.params.id
+        ))
+      ) {
+        throw new AppError('Chat not found in this session', 404, 'NOT_FOUND');
+      }
+      const total = (
+        (await tx.get(
+          'SELECT COUNT(*) AS count FROM messages WHERE session_id = ? AND chat_id IS ?',
+          req.params.id,
+          activeChatId
+        )) as unknown as { count: number }
+      ).count;
+      const baseSelect = `SELECT id, session_id AS sessionId, chat_id AS chatId, role, content,
                                client_message_id AS clientMessageId,
                                event_sequence AS eventSequence,
                                strftime('%Y-%m-%dT%H:%M:%fZ', created_at) AS createdAt,
                                seq AS rid
                           FROM messages`;
-    type HistoryRow = { rid: number; id: string; [key: string]: unknown };
-    let ordered: HistoryRow[];
-    let anchorIndex: number | null = null;
-    let requestedCursorRowId: number | null = null;
+      type HistoryRow = { rid: number; id: string; [key: string]: unknown };
+      let ordered: HistoryRow[];
+      let anchorIndex: number | null = null;
+      let requestedCursorRowId: number | null = null;
 
-    if (around) {
-      const anchor = (await tx.get(
-        `SELECT seq AS rid FROM messages
-            WHERE id = ? AND session_id = ? AND chat_id IS ?`,
-        around,
-        req.params.id,
-        activeChatId
-      )) as unknown as { rid: number } | undefined;
-      if (!anchor) {
-        throw new AppError('Message not found in the active chat', 404, 'NOT_FOUND');
-      }
-      const ordinal = (
-        (await tx.get(
-          `SELECT COUNT(*) AS count FROM messages
-              WHERE session_id = ? AND chat_id IS ? AND seq <= ?`,
-          req.params.id,
-          activeChatId,
-          anchor.rid
-        )) as unknown as { count: number }
-      ).count;
-      const offset = Math.max(0, Math.min(ordinal - Math.ceil(limit / 2), total - limit));
-      ordered = (await tx.all(
-        `${baseSelect}
-            WHERE session_id = ? AND chat_id IS ?
-            ORDER BY seq ASC LIMIT ? OFFSET ?`,
-        req.params.id,
-        activeChatId,
-        limit,
-        offset
-      )) as unknown as HistoryRow[];
-      anchorIndex = ordered.findIndex((row) => row.id === around);
-    } else {
-      let cursorRowId: number | null = null;
-      if (before || after) {
-        const cursor = (await tx.get(
+      if (around) {
+        const anchor = (await tx.get(
           `SELECT seq AS rid FROM messages
-              WHERE id = ? AND session_id = ? AND chat_id IS ?`,
-          before ?? after,
+            WHERE id = ? AND session_id = ? AND chat_id IS ?`,
+          around,
           req.params.id,
           activeChatId
         )) as unknown as { rid: number } | undefined;
-        if (!cursor) {
-          throw new AppError('Message cursor not found in the active chat', 400, 'INVALID_CURSOR');
+        if (!anchor) {
+          throw new AppError('Message not found in the active chat', 404, 'NOT_FOUND');
         }
-        cursorRowId = cursor.rid;
-        requestedCursorRowId = cursor.rid;
-      }
-      if (after && cursorRowId !== null) {
+        const ordinal = (
+          (await tx.get(
+            `SELECT COUNT(*) AS count FROM messages
+              WHERE session_id = ? AND chat_id IS ? AND seq <= ?`,
+            req.params.id,
+            activeChatId,
+            anchor.rid
+          )) as unknown as { count: number }
+        ).count;
+        const offset = Math.max(0, Math.min(ordinal - Math.ceil(limit / 2), total - limit));
         ordered = (await tx.all(
           `${baseSelect}
-              WHERE session_id = ? AND chat_id IS ? AND seq > ?
-              ORDER BY seq ASC LIMIT ?`,
+            WHERE session_id = ? AND chat_id IS ?
+            ORDER BY seq ASC LIMIT ? OFFSET ?`,
           req.params.id,
           activeChatId,
-          cursorRowId,
-          limit
+          limit,
+          offset
         )) as unknown as HistoryRow[];
+        anchorIndex = ordered.findIndex((row) => row.id === around);
       } else {
-        const newestFirst = (
-          cursorRowId === null
-            ? await tx.all(
-                `${baseSelect}
+        let cursorRowId: number | null = null;
+        if (before || after) {
+          const cursor = (await tx.get(
+            `SELECT seq AS rid FROM messages
+              WHERE id = ? AND session_id = ? AND chat_id IS ?`,
+            before ?? after,
+            req.params.id,
+            activeChatId
+          )) as unknown as { rid: number } | undefined;
+          if (!cursor) {
+            throw new AppError(
+              'Message cursor not found in the active chat',
+              400,
+              'INVALID_CURSOR'
+            );
+          }
+          cursorRowId = cursor.rid;
+          requestedCursorRowId = cursor.rid;
+        }
+        if (after && cursorRowId !== null) {
+          ordered = (await tx.all(
+            `${baseSelect}
+              WHERE session_id = ? AND chat_id IS ? AND seq > ?
+              ORDER BY seq ASC LIMIT ?`,
+            req.params.id,
+            activeChatId,
+            cursorRowId,
+            limit
+          )) as unknown as HistoryRow[];
+        } else {
+          const newestFirst = (
+            cursorRowId === null
+              ? await tx.all(
+                  `${baseSelect}
                     WHERE session_id = ? AND chat_id IS ?
                     ORDER BY seq DESC LIMIT ?`,
-                req.params.id,
-                activeChatId,
-                limit
-              )
-            : await tx.all(
-                `${baseSelect}
+                  req.params.id,
+                  activeChatId,
+                  limit
+                )
+              : await tx.all(
+                  `${baseSelect}
                     WHERE session_id = ? AND chat_id IS ? AND seq < ?
                     ORDER BY seq DESC LIMIT ?`,
-                req.params.id,
-                activeChatId,
-                cursorRowId,
-                limit
-              )
-        ) as HistoryRow[];
-        ordered = newestFirst.reverse();
+                  req.params.id,
+                  activeChatId,
+                  cursorRowId,
+                  limit
+                )
+          ) as HistoryRow[];
+          ordered = newestFirst.reverse();
+        }
       }
-    }
 
-    const oldestRid = ordered[0]?.rid ?? requestedCursorRowId;
-    const newestRid = ordered.at(-1)?.rid ?? requestedCursorRowId;
-    const hasMoreBefore =
-      oldestRid !== null &&
-      (await tx.get(
-        `SELECT 1 FROM messages
+      const oldestRid = ordered[0]?.rid ?? requestedCursorRowId;
+      const newestRid = ordered.at(-1)?.rid ?? requestedCursorRowId;
+      const hasMoreBefore =
+        oldestRid !== null &&
+        (await tx.get(
+          `SELECT 1 FROM messages
             WHERE session_id = ? AND chat_id IS ? AND seq < ? LIMIT 1`,
-        req.params.id,
-        activeChatId,
-        oldestRid
-      )) !== undefined;
-    const hasMoreAfter =
-      newestRid !== null &&
-      (await tx.get(
-        `SELECT 1 FROM messages
+          req.params.id,
+          activeChatId,
+          oldestRid
+        )) !== undefined;
+      const hasMoreAfter =
+        newestRid !== null &&
+        (await tx.get(
+          `SELECT 1 FROM messages
             WHERE session_id = ? AND chat_id IS ? AND seq > ? LIMIT 1`,
-        req.params.id,
-        activeChatId,
-        newestRid
-      )) !== undefined;
-    const mediaByMessage = await loadMessageMedia(ordered.map((row) => row.id));
-    const messages = ordered.map(({ rid: _rid, ...message }) => {
-      const media = mediaByMessage.get(message.id);
-      return media?.length ? { ...message, media } : message;
-    });
-    return {
-      success: true,
-      data: messages,
-      snapshot: await getMessageHistorySnapshot(req.params.id as string, userId, activeChatId),
-      readState: await getSessionReadState(userId, req.params.id as string, activeChatId),
-      pagination: {
-        total,
-        limit,
-        hasMore: hasMoreBefore,
-        hasMoreBefore,
-        hasMoreAfter,
-        oldestId: messages[0]?.id ?? null,
-        newestId: messages.at(-1)?.id ?? null,
-        ...(around ? { aroundId: around, anchorIndex } : {}),
-      },
-    };
-  });
+          req.params.id,
+          activeChatId,
+          newestRid
+        )) !== undefined;
+      const mediaByMessage = await loadMessageMedia(
+        ordered.map((row) => row.id),
+        tx
+      );
+      const messages = ordered.map(({ rid: _rid, ...message }) => {
+        const media = mediaByMessage.get(message.id);
+        return media?.length ? { ...message, media } : message;
+      });
+      return {
+        success: true,
+        data: messages,
+        snapshot: await getMessageHistorySnapshot(req.params.id as string, userId, activeChatId, {
+          query: tx,
+          snapshotStartWatermark,
+        }),
+        readState: await getSessionReadState(userId, req.params.id as string, activeChatId, tx),
+        pagination: {
+          total,
+          limit,
+          hasMore: hasMoreBefore,
+          hasMoreBefore,
+          hasMoreAfter,
+          oldestId: messages[0]?.id ?? null,
+          newestId: messages.at(-1)?.id ?? null,
+          ...(around ? { aroundId: around, anchorIndex } : {}),
+        },
+      };
+    },
+    { isolation: 'repeatable read' }
+  );
 
   res.json(payload);
 });
@@ -2823,13 +2852,20 @@ async function validateToken(
         .json({ success: false, error: { code: 'INVALID_TOKEN', message: 'Invalid token' } });
       return null;
     }
-  } else {
-    res.status(401).json({
-      success: false,
-      error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
-    });
-    return null;
   }
+
+  // No explicit token: fall back to the same resolution every other route uses,
+  // so an Express session or a gateway token works here too. The frontend stopped
+  // putting the JWT in the query string — a URL ends up in history, referrers and
+  // proxy logs — and now sends it as a header like every other request.
+  const userId = await resolveAuthenticatedUserId(req);
+  if (userId) return userId;
+
+  res.status(401).json({
+    success: false,
+    error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+  });
+  return null;
 }
 
 // Serve durable assistant/workspace media. Unlike the legacy filename routes,

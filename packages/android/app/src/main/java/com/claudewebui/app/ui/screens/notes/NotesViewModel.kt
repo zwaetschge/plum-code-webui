@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.notes
 
+import com.claudewebui.app.ui.screens.screenErrorMessage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.claudewebui.app.data.model.Note
@@ -55,7 +56,7 @@ class NotesViewModel(
             repository.getForSession(sessionId)
                 .onSuccess { notes -> _uiState.update { it.copy(notes = notes, isLoading = false) } }
                 .onFailure { error ->
-                    _uiState.update { it.copy(isLoading = false, error = error.message) }
+                    _uiState.update { it.copy(isLoading = false, error = error.screenErrorMessage("notes", "load")) }
                 }
         }
     }
@@ -127,7 +128,7 @@ class NotesViewModel(
                 }
             }
             .onFailure { error ->
-                _uiState.update { it.copy(isSaving = false, error = error.message) }
+                _uiState.update { it.copy(isSaving = false, error = error.screenErrorMessage("notes", "persist")) }
             }
     }
 
@@ -143,7 +144,7 @@ class NotesViewModel(
         viewModelScope.launch {
             repository.update(note.id, pinned = !note.isPinned)
                 .onSuccess { load() }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("notes", "togglePinned")) } }
         }
     }
 
@@ -155,7 +156,7 @@ class NotesViewModel(
                         current.copy(notes = current.notes.filterNot { it.id == note.id })
                     }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("notes", "delete")) } }
         }
     }
 

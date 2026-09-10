@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.screens.analytics
 
+import com.claudewebui.app.R
+import com.claudewebui.app.ui.screens.screenErrorMessage
+import com.claudewebui.app.core.network.apiCall
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.claudewebui.app.core.network.ApiClient
@@ -102,11 +105,15 @@ data class MissingPricingItem(
     val tokenCount: Long,
 )
 
-enum class AnalyticsTimeRange(val label: String, val apiPeriod: String) {
-    TODAY("24h", "24h"),
-    WEEK("Weekly", "7d"),
-    MONTH("Monthly", "30d"),
-    ALL("All", "all"),
+enum class AnalyticsTimeRange(private val labelRes: Int, val apiPeriod: String) {
+    TODAY(R.string.analytics_24h_02779, "24h"),
+    WEEK(R.string.analytics_weekly_158f3, "7d"),
+    MONTH(R.string.analytics_monthly_d31ed, "30d"),
+    ALL(R.string.analytics_all_6a720, "all");
+
+    val label: String
+        @androidx.compose.runtime.Composable get() = androidx.compose.ui.res.stringResource(labelRes)
+
 }
 
 /**
@@ -118,11 +125,15 @@ enum class AnalyticsTimeRange(val label: String, val apiPeriod: String) {
  * out, both scales are legible — and cache reads are billed at a fraction of
  * the rate anyway, so they are a different kind of number.
  */
-enum class AnalyticsChartMetric(val label: String) {
-    TOKENS("Tokens"),
-    CACHE("Cache"),
-    COST("Cost"),
-    REQUESTS("Requests"),
+enum class AnalyticsChartMetric(private val labelRes: Int) {
+    TOKENS(R.string.analytics_tokens_c38c6),
+    CACHE(R.string.analytics_cache_50338),
+    COST(R.string.analytics_cost_64ae4),
+    REQUESTS(R.string.analytics_requests_f7194);
+
+    val label: String
+        @androidx.compose.runtime.Composable get() = androidx.compose.ui.res.stringResource(labelRes)
+
 }
 
 /**
@@ -208,7 +219,7 @@ class AnalyticsViewModel(
                 UsageLimitProvider.entries
                     .map { provider ->
                         async {
-                            val response = runCatching { api.getUsageLimits(provider.id) }.getOrNull()
+                            val response = apiCall { api.getUsageLimits(provider.id) }.getOrNull()
                             toLimitItem(provider, response)
                         }
                     }
@@ -294,7 +305,7 @@ class AnalyticsViewModel(
      */
     private fun loadSpendLimit() {
         viewModelScope.launch {
-            val alerts = runCatching { api.getSettings().data?.usageAlerts }.getOrNull() ?: return@launch
+            val alerts = apiCall { api.getSettings().data?.usageAlerts }.getOrNull() ?: return@launch
             if (!alerts.enabled) return@launch
             _uiState.value = _uiState.value.copy(dailyCostLimitUsd = alerts.dailyCostUsd)
         }
@@ -303,7 +314,7 @@ class AnalyticsViewModel(
     /** Fire one sample alert to prove the whole delivery chain works. */
     fun sendTestAlert(onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
-            val ok = runCatching { api.sendTestNotification() }.isSuccess
+            val ok = apiCall { api.sendTestNotification() }.isSuccess
             onResult(ok)
         }
     }
@@ -361,7 +372,7 @@ class AnalyticsViewModel(
             } catch (error: Throwable) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    error = error.message ?: "Analytics failed to load",
+                    error = error.screenErrorMessage("analytics", "loadAnalytics"),
                 )
             }
         }

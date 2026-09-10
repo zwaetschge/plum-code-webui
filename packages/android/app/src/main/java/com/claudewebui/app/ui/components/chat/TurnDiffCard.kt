@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -41,25 +44,26 @@ fun TurnDiffRow(
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(componentTokens.radius.md))
             .background(PlumSubtleFill)
-            .border(1.dp, PlumBorder, RoundedCornerShape(12.dp))
+            .border(1.dp, PlumBorder, RoundedCornerShape(componentTokens.radius.md))
             .clickable { onOpen(diff.id) }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "Changes",
+            stringResource(R.string.component_changes),
             style = MaterialTheme.typography.labelMedium,
             color = PlumAccent,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(end = 8.dp),
+            modifier = Modifier.padding(end = componentTokens.spacing.sm),
         )
         Text(
-            diff.summary ?: "${diff.filesChanged} files",
+            diff.summary ?: stringResource(R.string.component_files_count, diff.filesChanged),
             style = MaterialTheme.typography.labelSmall,
             color = PlumMuted,
             modifier = Modifier.weight(1f),
@@ -69,7 +73,7 @@ fun TurnDiffRow(
                 "+${diff.insertions}",
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF22C55E),
-                modifier = Modifier.padding(start = 6.dp),
+                modifier = Modifier.padding(start = componentTokens.spacing.inline),
             )
         }
         if (diff.deletions > 0) {
@@ -77,7 +81,7 @@ fun TurnDiffRow(
                 "-${diff.deletions}",
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFFEF4444),
-                modifier = Modifier.padding(start = 6.dp),
+                modifier = Modifier.padding(start = componentTokens.spacing.inline),
             )
         }
     }
@@ -86,16 +90,17 @@ fun TurnDiffRow(
 /** Full patch view with the usual +/- colouring. */
 @Composable
 fun TurnDiffDetailView(detail: TurnDiffDetail, modifier: Modifier = Modifier) {
+    val componentTokens = PlumTheme.tokens
     Column(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(max = 480.dp)
             .verticalScroll(rememberScrollState())
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            .padding(componentTokens.spacing.md),
+        verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.xxs),
     ) {
         Text(
-            detail.summary ?: "${detail.filesChanged} files changed",
+            detail.summary ?: stringResource(R.string.component_files_changed, detail.filesChanged),
             style = MaterialTheme.typography.labelMedium,
             color = PlumText,
             fontWeight = FontWeight.Bold,

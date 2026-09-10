@@ -122,6 +122,7 @@ packages/android/.gradle/
 packages/android/.kotlin/
 packages/android/build/
 packages/android/app/build/
+packages/android/baselineprofile/build/
 packages/android/local.properties
 packages/android/.cxx/
 packages/android/captures/

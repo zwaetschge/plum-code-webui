@@ -51,6 +51,13 @@ const SESSION_ID = RUNTIME_ENV.WEBUI_SESSION_ID || '';
 const SUBAGENT_DEPTH = Number(RUNTIME_ENV.PLUM_SUBAGENT_DEPTH || 0);
 const DEFAULT_TIMEOUT_S = Number(RUNTIME_ENV.SUBAGENT_TIMEOUT_SECONDS || 600);
 const MAX_OUTPUT_CHARS = Number(RUNTIME_ENV.SUBAGENT_MAX_OUTPUT_CHARS || 60_000);
+// MAX_OUTPUT_CHARS only trims what we hand back. The raw capture needs its own
+// ceiling: a subagent that loops on a progress spinner can emit hundreds of
+// megabytes, and every byte of it used to be concatenated onto a string in this
+// process. Keep the head (Claude's single JSON object starts there) and the
+// tail (where the final answer lands for JSONL and plain-text harnesses); drop
+// the middle, which is progress noise in every format we parse.
+const MAX_CAPTURE_CHARS = Number(RUNTIME_ENV.SUBAGENT_MAX_CAPTURE_CHARS || 4_000_000);
 
 const log = (...args) => console.error('[mcp-subagents]', ...args);
 
@@ -212,6 +219,39 @@ function buildChildEnv(provider, providerEnv) {
   };
 }
 
+/**
+ * Bounded stdout/stderr capture: keeps the first and last halves of the budget
+ * and reports how much was dropped in between.
+ */
+function createCapture(limit = MAX_CAPTURE_CHARS) {
+  const half = Math.max(1, Math.floor(limit / 2));
+  let head = '';
+  let tail = '';
+  let dropped = 0;
+
+  return {
+    push(chunk) {
+      const text = chunk.toString();
+      if (head.length < half) {
+        const room = half - head.length;
+        head += text.slice(0, room);
+        if (text.length <= room) return;
+        tail += text.slice(room);
+      } else {
+        tail += text;
+      }
+      if (tail.length > half) {
+        dropped += tail.length - half;
+        tail = tail.slice(tail.length - half);
+      }
+    },
+    value() {
+      if (!dropped) return head + tail;
+      return `${head}\n… [${dropped} chars dropped from the middle of the output]\n${tail}`;
+    },
+  };
+}
+
 function runChild(invocation, { cwd, env, timeoutMs }) {
   return new Promise((resolve) => {
     // stdin must be closed: codex and opencode both detect a piped stdin and
@@ -221,8 +261,8 @@ function runChild(invocation, { cwd, env, timeoutMs }) {
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    let stdout = '';
-    let stderr = '';
+    const stdoutCapture = createCapture();
+    const stderrCapture = createCapture();
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -230,18 +270,28 @@ function runChild(invocation, { cwd, env, timeoutMs }) {
       setTimeout(() => proc.kill('SIGKILL'), 5000).unref();
     }, timeoutMs);
     proc.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
+      stdoutCapture.push(chunk);
     });
     proc.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
+      stderrCapture.push(chunk);
     });
     proc.on('error', (error) => {
       clearTimeout(timer);
-      resolve({ code: -1, stdout, stderr: `${stderr}\n${String(error)}`, timedOut });
+      resolve({
+        code: -1,
+        stdout: stdoutCapture.value(),
+        stderr: `${stderrCapture.value()}\n${String(error)}`,
+        timedOut,
+      });
     });
     proc.on('close', (code) => {
       clearTimeout(timer);
-      resolve({ code: code ?? -1, stdout, stderr, timedOut });
+      resolve({
+        code: code ?? -1,
+        stdout: stdoutCapture.value(),
+        stderr: stderrCapture.value(),
+        timedOut,
+      });
     });
   });
 }
@@ -308,7 +358,20 @@ function parseClaudeJson(stdout) {
   }
 }
 
-async function bookUsage(provider, model, usage) {
+// Identifies one subagent run for the whole life of this MCP process. The
+// backend deduplicates usage rows on (session, provider, turn id), so the id has
+// to survive a retry of the booking call — a fresh one per attempt would charge
+// the same tokens twice. Random prefix so two MCP processes in the same session
+// cannot collide on the counter.
+const RUN_ID_PREFIX = Math.random().toString(36).slice(2, 10);
+let runCounter = 0;
+
+function nextRunId() {
+  runCounter += 1;
+  return `${RUN_ID_PREFIX}-${runCounter}`;
+}
+
+async function bookUsage(provider, model, usage, runId) {
   if (!usage || !HOOK_SECRET || !SESSION_ID) return;
   const total =
     usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
@@ -321,7 +384,7 @@ async function bookUsage(provider, model, usage) {
         'x-webui-hook-secret': HOOK_SECRET,
         'x-webui-session-id': SESSION_ID,
       },
-      body: JSON.stringify({ provider, model: model || provider, ...usage }),
+      body: JSON.stringify({ provider, model: model || provider, runId, ...usage }),
       signal: AbortSignal.timeout(5000),
     });
   } catch (error) {
@@ -438,6 +501,7 @@ async function handleRunSubagent(args) {
   const timeoutMs =
     Math.min(Math.max(Number(args.timeout_seconds) || DEFAULT_TIMEOUT_S, 30), 3600) * 1000;
 
+  const runId = nextRunId();
   log(`spawning ${entry.provider}${model ? ` (${model})` : ''} in ${cwd}`);
   const startedAt = Date.now();
   const result = await runChild(invocation, {
@@ -485,7 +549,7 @@ async function handleRunSubagent(args) {
     );
   }
 
-  void bookUsage(entry.provider, usageModel, usage);
+  void bookUsage(entry.provider, usageModel, usage, runId);
 
   const header = `[subagent ${entry.label} · ${entry.provider}${model ? ` · ${model}` : ''} · ${durationS}s${
     usage ? ` · ${usage.inputTokens} in / ${usage.outputTokens} out tokens` : ''

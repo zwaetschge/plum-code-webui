@@ -58,6 +58,9 @@ if [ "$has_user_data_dir" -eq 0 ]; then
     mkdir -p "$user_data_dir"
   else
     user_data_dir="$(mktemp -d /tmp/plum-chromium.XXXXXX)"
+    # Only the generated profile is ours to delete; a caller-supplied
+    # CHROMIUM_USER_DATA_DIR is expected to persist between runs.
+    trap 'rm -rf "$user_data_dir"' EXIT INT TERM
   fi
   extra_args="$extra_args --user-data-dir=$user_data_dir"
 fi

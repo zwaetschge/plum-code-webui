@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.chat
 
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.ui.graphics.Color
@@ -22,66 +25,68 @@ data class AgentDisplayInfo(
 
 object ToolIconMapper {
 
+    @Composable
+
     fun forTool(toolName: String): ToolDisplayInfo {
         val name = toolName.lowercase().trim()
         return when {
             name == "read" -> ToolDisplayInfo(
-                label = "Read File",
+                label = stringResource(R.string.component_read_file),
                 icon = Icons.Outlined.Description,
                 color = Color(0xFF3B82F6),
             )
             name == "write" -> ToolDisplayInfo(
-                label = "Write File",
+                label = stringResource(R.string.component_write_file),
                 icon = Icons.Outlined.Edit,
                 color = Color(0xFF22C55E),
             )
             name == "edit" -> ToolDisplayInfo(
-                label = "Edit File",
+                label = stringResource(R.string.component_edit_file),
                 icon = Icons.Outlined.DriveFileRenameOutline,
                 color = Color(0xFFF59E0B),
             )
             name == "multiedit" -> ToolDisplayInfo(
-                label = "Multi-Edit",
+                label = stringResource(R.string.component_multi_edit),
                 icon = Icons.Outlined.EditNote,
                 color = Color(0xFFF59E0B),
             )
             name == "bash" -> ToolDisplayInfo(
-                label = "Bash",
+                label = stringResource(R.string.component_bash),
                 icon = Icons.Outlined.Terminal,
                 color = Color(0xFF8B5CF6),
             )
             name == "glob" -> ToolDisplayInfo(
-                label = "Find Files",
+                label = stringResource(R.string.component_find_files),
                 icon = Icons.Outlined.FolderOpen,
                 color = Color(0xFF06B6D4),
             )
             name == "grep" -> ToolDisplayInfo(
-                label = "Search",
+                label = stringResource(R.string.component_search),
                 icon = Icons.Outlined.Search,
                 color = Color(0xFFEC4899),
             )
             name == "todowrite" -> ToolDisplayInfo(
-                label = "Update Todos",
+                label = stringResource(R.string.component_update_todos),
                 icon = Icons.Outlined.Checklist,
                 color = Color(0xFF10B981),
             )
             name == "websearch" -> ToolDisplayInfo(
-                label = "Web Search",
+                label = stringResource(R.string.component_web_search),
                 icon = Icons.Outlined.TravelExplore,
                 color = Color(0xFF3B82F6),
             )
             name == "webfetch" -> ToolDisplayInfo(
-                label = "Fetch URL",
+                label = stringResource(R.string.component_fetch_url),
                 icon = Icons.Outlined.Download,
                 color = Color(0xFF3B82F6),
             )
             name == "notebookedit" || name == "notebookread" -> ToolDisplayInfo(
-                label = if (name == "notebookread") "Read Notebook" else "Edit Notebook",
+                label = if (name == "notebookread") stringResource(R.string.component_read_notebook) else stringResource(R.string.component_edit_notebook),
                 icon = Icons.Outlined.Book,
                 color = Color(0xFFF59E0B),
             )
             name == "agent" || name.contains("agent") -> ToolDisplayInfo(
-                label = "Agent",
+                label = stringResource(R.string.component_agent),
                 icon = Icons.Outlined.Psychology,
                 color = Color(0xFFCC785C),
             )
@@ -93,92 +98,94 @@ object ToolIconMapper {
         }
     }
 
+    @Composable
+
     fun forAgent(agentType: String): AgentDisplayInfo {
         val type = agentType.lowercase().replace("-", " ").replace("_", " ").trim()
         return when {
             type.contains("explore") || type.contains("explorer") -> AgentDisplayInfo(
-                label = "Explorer",
+                label = stringResource(R.string.component_explorer),
                 icon = Icons.Outlined.ManageSearch,
                 color = Color(0xFF06B6D4),
-                description = "Explores codebase and maps structure",
+                description = stringResource(R.string.component_explores_codebase_and_maps_structure),
             )
             type.contains("backend") -> AgentDisplayInfo(
-                label = "Backend Dev",
+                label = stringResource(R.string.component_backend_dev),
                 icon = Icons.Outlined.Storage,
                 color = Color(0xFF3B82F6),
-                description = "Implements server-side logic",
+                description = stringResource(R.string.component_implements_server_side_logic),
             )
             type.contains("frontend") -> AgentDisplayInfo(
-                label = "Frontend Dev",
+                label = stringResource(R.string.component_frontend_dev),
                 icon = Icons.Outlined.Palette,
                 color = Color(0xFFEC4899),
-                description = "Implements UI and components",
+                description = stringResource(R.string.component_implements_ui_and_components),
             )
             type.contains("fullstack") || type.contains("full stack") -> AgentDisplayInfo(
-                label = "Fullstack Dev",
+                label = stringResource(R.string.component_fullstack_dev),
                 icon = Icons.Outlined.Layers,
                 color = Color(0xFF8B5CF6),
-                description = "Delivers end-to-end features",
+                description = stringResource(R.string.component_delivers_end_to_end_features),
             )
             type.contains("test") -> AgentDisplayInfo(
-                label = "Test Engineer",
+                label = stringResource(R.string.component_test_engineer),
                 icon = Icons.Outlined.BugReport,
                 color = Color(0xFF22C55E),
-                description = "Writes and runs tests",
+                description = stringResource(R.string.component_writes_and_runs_tests),
             )
             type.contains("debug") -> AgentDisplayInfo(
-                label = "Debugger",
+                label = stringResource(R.string.component_debugger),
                 icon = Icons.Outlined.PestControl,
                 color = Color(0xFFEF4444),
-                description = "Diagnoses and fixes issues",
+                description = stringResource(R.string.component_diagnoses_and_fixes_issues),
             )
             type.contains("security") || type.contains("audit") -> AgentDisplayInfo(
-                label = "Security Auditor",
+                label = stringResource(R.string.component_security_auditor),
                 icon = Icons.Outlined.Security,
                 color = Color(0xFFF59E0B),
-                description = "Reviews code for security risks",
+                description = stringResource(R.string.component_reviews_code_for_security_risks),
             )
             type.contains("architect") -> AgentDisplayInfo(
-                label = "Architect",
+                label = stringResource(R.string.component_architect),
                 icon = Icons.Outlined.AccountTree,
                 color = Color(0xFF10B981),
-                description = "Designs system architecture",
+                description = stringResource(R.string.component_designs_system_architecture),
             )
             type.contains("devops") || type.contains("deploy") -> AgentDisplayInfo(
-                label = "DevOps",
+                label = stringResource(R.string.component_devops),
                 icon = Icons.Outlined.CloudUpload,
                 color = Color(0xFF6366F1),
-                description = "Handles infrastructure and deployment",
+                description = stringResource(R.string.component_handles_infrastructure_and_deployment),
             )
             type.contains("database") || type.contains("db") -> AgentDisplayInfo(
-                label = "Database",
+                label = stringResource(R.string.component_database),
                 icon = Icons.Outlined.TableChart,
                 color = Color(0xFF14B8A6),
-                description = "Designs schemas and queries",
+                description = stringResource(R.string.component_designs_schemas_and_queries),
             )
             type.contains("doc") || type.contains("writer") -> AgentDisplayInfo(
-                label = "Docs Writer",
+                label = stringResource(R.string.component_docs_writer),
                 icon = Icons.Outlined.Article,
                 color = Color(0xFF64748B),
-                description = "Creates documentation",
+                description = stringResource(R.string.component_creates_documentation),
             )
             type.contains("research") -> AgentDisplayInfo(
-                label = "Researcher",
+                label = stringResource(R.string.component_researcher),
                 icon = Icons.Outlined.Biotech,
                 color = Color(0xFF8B5CF6),
-                description = "Gathers and synthesizes information",
+                description = stringResource(R.string.component_gathers_and_synthesizes_information),
             )
             type.contains("plan") -> AgentDisplayInfo(
-                label = "Planner",
+                label = stringResource(R.string.component_planner),
                 icon = Icons.Outlined.Assignment,
                 color = Color(0xFF0EA5E9),
-                description = "Creates implementation plans",
+                description = stringResource(R.string.component_creates_implementation_plans),
             )
             else -> AgentDisplayInfo(
                 label = agentType.replaceFirstChar { it.uppercase() },
                 icon = Icons.Outlined.SmartToy,
                 color = Color(0xFFCC785C),
-                description = "Specialized agent",
+                description = stringResource(R.string.component_specialized_agent),
             )
         }
     }

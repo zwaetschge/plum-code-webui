@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.devtools
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.WindowInsets
@@ -64,6 +65,11 @@ fun DevToolsScreen(
     viewModel: DevToolsViewModel,
     onNavigateBack: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
     val wide = isTabletWidth()
     val uriHandler = LocalUriHandler.current
@@ -85,17 +91,17 @@ fun DevToolsScreen(
                     horizontal = if (wide) 40.dp else 16.dp,
                     vertical = 4.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             ) {
                 item {
                     PlumScreenHeader(
-                        title = "Dev tools",
+                        title = screenResources.getString(R.string.devtools_dev_tools_d5b7d),
                         subtitle = state.previewConfig?.hostname
-                            ?: "Preview servers and GitHub",
+                            ?: screenResources.getString(R.string.devtools_preview_servers_and_github_c21db),
                         actions = {
                             PlumIconButton(
                                 Icons.Outlined.Refresh,
-                                "Reload",
+                                screenResources.getString(R.string.devtools_reload_cce71),
                                 onClick = {
                                     viewModel.scanPorts()
                                     viewModel.loadGitHub()
@@ -103,7 +109,7 @@ fun DevToolsScreen(
                             )
                             PlumIconButton(
                                 Icons.AutoMirrored.Outlined.ArrowBack,
-                                "Back",
+                                screenResources.getString(R.string.devtools_back_b52b3),
                                 onNavigateBack,
                             )
                         },
@@ -111,17 +117,17 @@ fun DevToolsScreen(
                 }
 
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TabChip("Preview", state.tab == DevToolsTab.PREVIEW) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)) {
+                        TabChip(screenResources.getString(R.string.devtools_preview_f1fbb), state.tab == DevToolsTab.PREVIEW) {
                             viewModel.selectTab(DevToolsTab.PREVIEW)
                         }
-                        TabChip("GitHub", state.tab == DevToolsTab.GITHUB) {
+                        TabChip(screenResources.getString(R.string.devtools_github_5442e), state.tab == DevToolsTab.GITHUB) {
                             viewModel.selectTab(DevToolsTab.GITHUB)
                         }
-                        TabChip("Oracle", state.tab == DevToolsTab.ORACLE) {
+                        TabChip(screenResources.getString(R.string.devtools_oracle_8a168), state.tab == DevToolsTab.ORACLE) {
                             viewModel.selectTab(DevToolsTab.ORACLE)
                         }
-                        TabChip("Devices", state.tab == DevToolsTab.DEVICES) {
+                        TabChip(screenResources.getString(R.string.devtools_devices_df485), state.tab == DevToolsTab.DEVICES) {
                             viewModel.selectTab(DevToolsTab.DEVICES)
                         }
                     }
@@ -132,9 +138,9 @@ fun DevToolsScreen(
                         Row(
                             Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(screenTokens.radius.md))
                                 .background(PlumSubtleFill)
-                                .padding(12.dp),
+                                .padding(screenTokens.spacing.md),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -144,7 +150,7 @@ fun DevToolsScreen(
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
-                                "Dismiss",
+                                screenResources.getString(R.string.devtools_dismiss_70afe),
                                 color = PlumAccent,
                                 fontSize = 12.sp,
                                 modifier = Modifier.clickable(onClick = viewModel::dismissError),
@@ -162,22 +168,22 @@ fun DevToolsScreen(
                             ) {
                                 Text(
                                     if (state.isScanning) {
-                                        "Scanning ports…"
+                                        screenResources.getString(R.string.devtools_scanning_ports_317ec)
                                     } else {
-                                        "Scanned ${state.scannedAt.take(19).replace('T', ' ')}"
+                                        screenResources.getString(R.string.devtools_scanned_1_s_993e7, state.scannedAt.take(19).replace('T', ' '))
                                     },
                                     color = PlumMuted,
                                     fontSize = 11.sp,
                                     modifier = Modifier.weight(1f),
                                 )
-                                Chip("Start dev server", Icons.Outlined.PlayArrow) {
+                                Chip(screenResources.getString(R.string.devtools_start_dev_server_c99d9), Icons.Outlined.PlayArrow) {
                                     viewModel.startPreview()
                                 }
                             }
                         }
 
                         if (state.ports.isEmpty() && !state.isScanning) {
-                            item { EmptyCard("No ports scanned") }
+                            item { EmptyCard(screenResources.getString(R.string.devtools_no_ports_scanned_f5ac2)) }
                         }
 
                         items(state.ports, key = { it.port }) { port ->
@@ -199,7 +205,7 @@ fun DevToolsScreen(
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
-                                            "GitHub token",
+                                            screenResources.getString(R.string.devtools_github_token_bbbc3),
                                             color = PlumText,
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold,
@@ -211,15 +217,15 @@ fun DevToolsScreen(
                                         )
                                     }
                                     status?.user?.login?.takeIf { it.isNotBlank() }?.let {
-                                        Text("Signed in as $it", color = PlumMuted, fontSize = 12.sp)
+                                        Text(screenResources.getString(R.string.devtools_signed_in_as_1_s_aff3e, it), color = PlumMuted, fontSize = 12.sp)
                                     }
                                     status?.error?.let {
                                         Text(it, color = PlumRed, fontSize = 11.sp)
                                     }
                                     if (status?.valid != true) {
                                         Text(
-                                            "Configure the token in the web UI — it is stored " +
-                                                "server-side and never sent to this device.",
+                                            screenResources.getString(R.string.devtools_configure_the_token_in_the_web_ui_it_is_stored_43531) +
+                                                screenResources.getString(R.string.devtools_server_side_and_never_sent_to_this_device_4d4c8),
                                             color = PlumMuted,
                                             fontSize = 11.sp,
                                         )
@@ -232,10 +238,10 @@ fun DevToolsScreen(
                             item {
                                 Row(
                                     Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                                 ) {
-                                    Chip("New repo", Icons.Outlined.Add) { showCreateRepo = true }
-                                    Chip("Push", Icons.Outlined.Upload) { showPush = true }
+                                    Chip(screenResources.getString(R.string.devtools_new_repo_433a5), Icons.Outlined.Add) { showCreateRepo = true }
+                                    Chip(screenResources.getString(R.string.devtools_push_8f7f5), Icons.Outlined.Upload) { showPush = true }
                                     state.gitHubAction?.let {
                                         Text(
                                             it,
@@ -261,7 +267,7 @@ fun DevToolsScreen(
                                 }
                             }
                         } else if (state.repos.isEmpty()) {
-                            item { EmptyCard("No repositories") }
+                            item { EmptyCard(screenResources.getString(R.string.devtools_no_repositories_bf73e)) }
                         }
 
                         items(state.repos, key = { it.fullName }) { repo ->
@@ -323,12 +329,14 @@ fun DevToolsScreen(
 
 @Composable
 private fun PortRow(port: PreviewPort, onOpen: () -> Unit) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     GlassPanel(Modifier.fillMaxWidth(), radius = 16.dp) {
         Row(
             Modifier
                 .fillMaxWidth()
                 .clickable(enabled = port.reachable, onClick = onOpen)
-                .padding(14.dp),
+                .padding(screenTokens.spacing.cozy),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -364,9 +372,14 @@ private fun RepoRow(
     onOpen: () -> Unit,
     onClone: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     GlassPanel(Modifier.fillMaxWidth(), radius = 16.dp) {
         Row(
-            Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(14.dp),
+            Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(screenTokens.spacing.cozy),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
@@ -389,13 +402,13 @@ private fun RepoRow(
                 if (repo.private) StatusPill("private", PlumAccent)
                 if (canClone) {
                     Text(
-                        "Clone",
+                        screenResources.getString(R.string.devtools_clone_d8cdb),
                         color = PlumAccent,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
                             .clickable(onClick = onClone)
-                            .padding(start = 12.dp, top = 8.dp, bottom = 4.dp),
+                            .padding(start = screenTokens.spacing.md, top = screenTokens.spacing.sm, bottom = screenTokens.spacing.xs),
                     )
                 }
             }
@@ -425,14 +438,16 @@ private fun Chip(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Row(
         Modifier
             .clip(RoundedCornerShape(50))
             .background(PlumAccent.copy(alpha = .18f))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = screenTokens.spacing.cozy, vertical = screenTokens.spacing.sm),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline),
     ) {
         androidx.compose.material3.Icon(
             icon,

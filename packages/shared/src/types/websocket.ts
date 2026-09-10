@@ -84,6 +84,7 @@ export interface ClientToServerEvents {
   ) => void;
   'session:input': (data: { sessionId: string; input: string }) => void;
   'session:subscribe': (sessionId: string) => void;
+  'session:subscribe-all': (acknowledge?: (result: { sessionIds: string[] }) => void) => void;
   'session:unsubscribe': (sessionId: string) => void;
   'session:interrupt': (sessionId: string) => void;
   'session:restart': (sessionId: string) => void;
@@ -198,7 +199,36 @@ export interface PermissionRequestData {
 }
 
 // Server to Client Events
+/** Why a lifecycle beat was sent. Advisory: the state fields are the truth. */
+export type SessionLifecycleReason =
+  | 'busy'
+  | 'idle'
+  | 'error'
+  | 'approval'
+  | 'question'
+  | 'turn_complete';
+
+/** The smallest description of a session that is still worth acting on. */
+export interface SessionLifecycleEvent {
+  sessionId: string;
+  reason: SessionLifecycleReason;
+  status: SessionStatus;
+  busy: boolean;
+  queueDepth: number;
+  pendingApprovals: number;
+  /** Questions the agent is blocked on — a different block, same urgency. */
+  pendingQuestions: number;
+  activitySummary: string | null;
+  lastActivityAt: string | null;
+  at: string;
+}
+
 export interface ServerToClientEvents {
+  'session:chats': (data: {
+    sessionId: string;
+    chats: Array<{ id: string; title: string; createdAt: string | null; updatedAt: string | null }>;
+    activeChatId: string | null;
+  }) => void;
   /**
    * Account-wide notification-centre entry. Unlike `session:*` events this is
    * emitted to the `user:<id>` room, so it arrives regardless of which session
@@ -215,6 +245,14 @@ export interface ServerToClientEvents {
   'session:output': (data: StreamingMessage) => void;
   'session:message': (data: Message) => void;
   'session:status': (data: { sessionId: string; status: SessionStatus }) => void;
+  /**
+   * One compact "something changed" beat per session, fanned out to
+   * `user:<userId>` rather than to a session room. A client that supervises
+   * many sessions can follow all of them without joining every room, and a
+   * client that missed events while asleep learns the current state rather
+   * than replaying a stream it cannot catch up on.
+   */
+  'session:lifecycle': (data: SessionLifecycleEvent) => void;
   'session:error': (data: { sessionId: string; error: string }) => void;
   'session:tool_use': (data: {
     sessionId: string;
@@ -257,6 +295,12 @@ export interface ServerToClientEvents {
     sessionId: string;
     bufferedMessages: BufferedMessage[];
     isRunning: boolean;
+    /** A real turn/tool/subagent is active, unlike an idle persistent process. */
+    isBusy?: boolean;
+    /** Authoritative thread after reconnect; null is the implicit main chat. */
+    activeChatId?: string | null;
+    /** Full current response at this packet's position in the socket stream. */
+    streamingSnapshot?: StreamingMessage | null;
     /** True when buffer rolled over since lastTimestamp — client should full-resync from REST. */
     needsFullResync?: boolean;
     /**

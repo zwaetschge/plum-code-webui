@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="auth_authenticate_94a01">Authentifizieren</string>
+    <string name="auth_back_to_login_b5cd3">Zurück zur Anmeldung</string>
+    <string name="auth_cancel_77dfd">Abbrechen</string>
+    <string name="auth_change_64fbd">Ändern</string>
+    <string name="auth_change_server_c30a8">Server ändern</string>
+    <string name="auth_clear_719ea">Leeren</string>
+    <string name="auth_connect_b6546">Verbinden</string>
+    <string name="auth_connect_to_server_ca09a">Mit Server verbinden</string>
+    <string name="auth_connecting_fd3e7">Verbindung wird hergestellt…</string>
+    <string name="auth_connecting_to_server_f54a0">Verbindung zum Server wird hergestellt…</string>
+    <string name="auth_connection_failed_4a7b9">Verbindung fehlgeschlagen</string>
+    <string name="auth_continue_with_authelia_c00fb">Mit Authelia fortfahren</string>
+    <string name="auth_continue_with_github_baf2c">Mit GitHub fortfahren</string>
+    <string name="auth_continue_with_google_ccc5b">Mit Google fortfahren</string>
+    <string name="auth_dev_login_no_auth_12d9f">Entwickleranmeldung (ohne Authentifizierung)</string>
+    <string name="auth_enter_the_url_of_your_plum_code_webui_instance_37deb">Gib die URL deiner Plum Code WebUI ein</string>
+    <string name="auth_hide_password_e4012">Passwort ausblenden</string>
+    <string name="auth_keep_me_signed_in_5955c">Angemeldet bleiben</string>
+    <string name="auth_or_17583">oder</string>
+    <string name="auth_password_8be3c">Passwort</string>
+    <string name="auth_recent_servers_6392d">Letzte Server</string>
+    <string name="auth_remove_e9639">Entfernen</string>
+    <string name="auth_server_url_1d5d1">Server-URL</string>
+    <string name="auth_show_password_044b8">Passwort anzeigen</string>
+    <string name="auth_sign_in_ada2e">Anmelden</string>
+    <string name="auth_sign_in_failed_9c06f">Anmeldung fehlgeschlagen</string>
+    <string name="auth_signing_you_in_10d06">Anmeldung läuft…</string>
+    <string name="auth_try_again_cef2f">Erneut versuchen</string>
+    <string name="auth_unlock_plum_code_690e1">Plum Code entsperren</string>
+    <string name="auth_use_password_28cbb">Passwort verwenden</string>
+    <string name="auth_use_username_password_ab851">Benutzername und Passwort verwenden</string>
+    <string name="auth_use_your_biometric_credential_to_continue_41c3b">Verwende deine biometrische Anmeldung, um fortzufahren</string>
+    <string name="auth_username_84c29">Benutzername</string>
+    <string name="auth_verify_your_identity_to_continue_e15de">Bestätige deine Identität, um fortzufahren</string>
+</resources>

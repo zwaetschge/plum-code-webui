@@ -1,5 +1,6 @@
 package com.claudewebui.app.data.repository
 
+import com.claudewebui.app.core.network.apiCall
 import com.claudewebui.app.core.network.ApiClient
 import com.claudewebui.app.data.model.Category
 import com.claudewebui.app.data.model.CodexPlugin
@@ -56,7 +57,7 @@ class SettingsRepository(
     // ---- User Settings -----------------------------------------------------
 
     /** Fetch the current user's settings. */
-    suspend fun getSettings(): Result<UserSettings> = runCatching {
+    suspend fun getSettings(): Result<UserSettings> = apiCall {
         val response = api.getSettings()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch settings")
@@ -66,14 +67,14 @@ class SettingsRepository(
 
     // ---- Control gateway tokens ---------------------------------------------
 
-    suspend fun getGatewayTokens(): Result<List<GatewayToken>> = runCatching {
+    suspend fun getGatewayTokens(): Result<List<GatewayToken>> = apiCall {
         val response = api.getGatewayTokens()
         if (!response.success) error(response.error?.message ?: "Failed to fetch tokens")
         response.data.orEmpty()
     }
 
     /** The response carries the secret exactly once; it is never retrievable later. */
-    suspend fun createGatewayToken(name: String, scope: String): Result<GatewayToken> = runCatching {
+    suspend fun createGatewayToken(name: String, scope: String): Result<GatewayToken> = apiCall {
         val response = api.createGatewayToken(name, scope)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to create token")
@@ -81,7 +82,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun revokeGatewayToken(id: String): Result<Unit> = runCatching {
+    suspend fun revokeGatewayToken(id: String): Result<Unit> = apiCall {
         val response = api.revokeGatewayToken(id)
         if (!response.success) error(response.error?.message ?: "Failed to revoke token")
         Unit
@@ -89,20 +90,20 @@ class SettingsRepository(
 
     // ---- Codex plugins -------------------------------------------------------
 
-    suspend fun getCodexPlugins(): Result<List<CodexPlugin>> = runCatching {
+    suspend fun getCodexPlugins(): Result<List<CodexPlugin>> = apiCall {
         val response = api.getCodexPlugins()
         if (!response.success) error(response.error?.message ?: "Failed to fetch plugins")
         response.data.orEmpty()
     }
 
     suspend fun installCodexPlugin(pluginName: String, marketplaceId: String): Result<Unit> =
-        runCatching {
+        apiCall {
             val response = api.installCodexPlugin(pluginName, marketplaceId)
             if (!response.success) error(response.error?.message ?: "Failed to install plugin")
             Unit
         }
 
-    suspend fun setCodexPluginEnabled(id: String, enabled: Boolean): Result<Unit> = runCatching {
+    suspend fun setCodexPluginEnabled(id: String, enabled: Boolean): Result<Unit> = apiCall {
         val response = api.setCodexPluginEnabled(id, enabled)
         if (!response.success) error(response.error?.message ?: "Failed to update plugin")
         Unit
@@ -110,7 +111,7 @@ class SettingsRepository(
 
     // ---- Subagent layer ------------------------------------------------------
 
-    suspend fun getSubagentUpstreams(): Result<List<SubagentUpstream>> = runCatching {
+    suspend fun getSubagentUpstreams(): Result<List<SubagentUpstream>> = apiCall {
         val response = api.getSubagentUpstreams()
         if (!response.success) error(response.error?.message ?: "Failed to fetch upstreams")
         response.data.orEmpty()
@@ -119,19 +120,19 @@ class SettingsRepository(
     /** Replaces the whole list; entries without a token keep the stored one. */
     suspend fun saveSubagentUpstreams(
         input: List<SaveSubagentUpstreamInput>,
-    ): Result<List<SubagentUpstream>> = runCatching {
+    ): Result<List<SubagentUpstream>> = apiCall {
         val response = api.saveSubagentUpstreams(input)
         if (!response.success) error(response.error?.message ?: "Failed to save upstreams")
         response.data.orEmpty()
     }
 
-    suspend fun getSubagentModels(): Result<List<SubagentModelGroup>> = runCatching {
+    suspend fun getSubagentModels(): Result<List<SubagentModelGroup>> = apiCall {
         val response = api.getSubagentModels()
         if (!response.success) error(response.error?.message ?: "Failed to fetch models")
         response.data.orEmpty()
     }
 
-    suspend fun getCliSubagents(): Result<List<CliSubagentEntry>> = runCatching {
+    suspend fun getCliSubagents(): Result<List<CliSubagentEntry>> = apiCall {
         val response = api.getCliSubagents()
         if (!response.success) error(response.error?.message ?: "Failed to fetch subagents")
         response.data.orEmpty()
@@ -139,7 +140,7 @@ class SettingsRepository(
 
     suspend fun saveCliSubagents(
         input: List<CliSubagentEntry>,
-    ): Result<List<CliSubagentEntry>> = runCatching {
+    ): Result<List<CliSubagentEntry>> = apiCall {
         val response = api.saveCliSubagents(input)
         if (!response.success) error(response.error?.message ?: "Failed to save subagents")
         response.data.orEmpty()
@@ -158,7 +159,7 @@ class SettingsRepository(
         cliProviderServiceTiers: Map<String, String>? = null,
         codexWebSearch: String? = null,
         usageAlerts: com.claudewebui.app.data.model.UsageAlertSettings? = null,
-    ): Result<UserSettings> = runCatching {
+    ): Result<UserSettings> = apiCall {
         val input = UpdateSettingsInput(
             theme = theme,
             defaultWorkingDir = defaultWorkingDir,
@@ -179,7 +180,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun getZaiApi(): Result<ZaiApiStatus> = runCatching {
+    suspend fun getZaiApi(): Result<ZaiApiStatus> = apiCall {
         val response = api.getZaiApi()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch Z.AI configuration")
@@ -187,7 +188,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun updateZaiApi(input: UpdateZaiApiInput): Result<ZaiApiStatus> = runCatching {
+    suspend fun updateZaiApi(input: UpdateZaiApiInput): Result<ZaiApiStatus> = apiCall {
         val response = api.updateZaiApi(input)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to save Z.AI configuration")
@@ -195,12 +196,12 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun deleteZaiApi(): Result<Unit> = runCatching {
+    suspend fun deleteZaiApi(): Result<Unit> = apiCall {
         val response = api.deleteZaiApi()
         if (!response.success) error(response.error?.message ?: "Failed to reset Z.AI configuration")
     }
 
-    suspend fun getOpenCodeProviders(): Result<List<OpenCodeProvider>> = runCatching {
+    suspend fun getOpenCodeProviders(): Result<List<OpenCodeProvider>> = apiCall {
         val response = api.getOpenCodeProviders()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch OpenCode providers")
@@ -209,7 +210,7 @@ class SettingsRepository(
     }
 
     suspend fun saveOpenCodeProvider(input: SaveOpenCodeProviderInput): Result<OpenCodeProvider> =
-        runCatching {
+        apiCall {
             val response = api.saveOpenCodeProvider(input)
             if (!response.success || response.data == null) {
                 error(response.error?.message ?: "Failed to save OpenCode provider")
@@ -217,12 +218,12 @@ class SettingsRepository(
             response.data
         }
 
-    suspend fun deleteOpenCodeProvider(id: String): Result<Unit> = runCatching {
+    suspend fun deleteOpenCodeProvider(id: String): Result<Unit> = apiCall {
         val response = api.deleteOpenCodeProvider(id)
         if (!response.success) error(response.error?.message ?: "Failed to delete OpenCode provider")
     }
 
-    suspend fun testOpenCodeProvider(id: String): Result<OpenCodeProviderTest> = runCatching {
+    suspend fun testOpenCodeProvider(id: String): Result<OpenCodeProviderTest> = apiCall {
         val response = api.testOpenCodeProvider(id)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to test OpenCode provider")
@@ -233,7 +234,7 @@ class SettingsRepository(
     // ---- CLI Providers -----------------------------------------------------
 
     /** Fetch the canonical CLI provider registry, including enabled/auth status. */
-    suspend fun getCLIProviders(): Result<List<CLIProviderConfig>> = runCatching {
+    suspend fun getCLIProviders(): Result<List<CLIProviderConfig>> = apiCall {
         val response = api.getCLIProviders()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch CLI providers")
@@ -244,7 +245,7 @@ class SettingsRepository(
     // ---- MCP Servers -------------------------------------------------------
 
     /** Fetch all configured MCP servers. */
-    suspend fun getMcpServers(): Result<List<McpServer>> = runCatching {
+    suspend fun getMcpServers(): Result<List<McpServer>> = apiCall {
         val response = api.getMcpServers()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch MCP servers")
@@ -253,7 +254,7 @@ class SettingsRepository(
     }
 
     /** Add a new MCP server. */
-    suspend fun createMcpServer(input: CreateMcpServerInput): Result<McpServer> = runCatching {
+    suspend fun createMcpServer(input: CreateMcpServerInput): Result<McpServer> = apiCall {
         val response = api.createMcpServer(input)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to create MCP server")
@@ -262,7 +263,7 @@ class SettingsRepository(
     }
 
     /** Update an MCP server. */
-    suspend fun updateMcpServer(id: String, input: UpdateMcpServerInput): Result<McpServer> = runCatching {
+    suspend fun updateMcpServer(id: String, input: UpdateMcpServerInput): Result<McpServer> = apiCall {
         val response = api.updateMcpServer(id, input)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to update MCP server")
@@ -271,7 +272,7 @@ class SettingsRepository(
     }
 
     /** Ask the server to actually start the MCP server and report back. */
-    suspend fun testMcpServer(id: String): Result<McpTestResult> = runCatching {
+    suspend fun testMcpServer(id: String): Result<McpTestResult> = apiCall {
         val response = api.testMcpServer(id)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to test MCP server")
@@ -280,7 +281,7 @@ class SettingsRepository(
     }
 
     /** Delete an MCP server. */
-    suspend fun deleteMcpServer(id: String): Result<Unit> = runCatching {
+    suspend fun deleteMcpServer(id: String): Result<Unit> = apiCall {
         val response = api.deleteMcpServer(id)
         if (!response.success) {
             error(response.error?.message ?: "Failed to delete MCP server")
@@ -289,7 +290,7 @@ class SettingsRepository(
 
     // ---- Custom agents ----------------------------------------------------
 
-    suspend fun getAgents(): Result<List<CustomAgent>> = runCatching {
+    suspend fun getAgents(): Result<List<CustomAgent>> = apiCall {
         val response = api.getAgents()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch agents")
@@ -297,7 +298,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun createAgent(input: CreateCustomAgentInput): Result<CustomAgent> = runCatching {
+    suspend fun createAgent(input: CreateCustomAgentInput): Result<CustomAgent> = apiCall {
         val response = api.createAgent(input)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to create agent")
@@ -305,7 +306,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun updateAgent(id: String, input: UpdateCustomAgentInput): Result<CustomAgent> = runCatching {
+    suspend fun updateAgent(id: String, input: UpdateCustomAgentInput): Result<CustomAgent> = apiCall {
         val response = api.updateAgent(id, input)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to update agent")
@@ -313,7 +314,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun deleteAgent(id: String): Result<Unit> = runCatching {
+    suspend fun deleteAgent(id: String): Result<Unit> = apiCall {
         val response = api.deleteAgent(id)
         if (!response.success) {
             error(response.error?.message ?: "Failed to delete agent")
@@ -326,7 +327,7 @@ class SettingsRepository(
     // catalogue that actually ships to the CLI harnesses, which is what the
     // WebUI's Extensions pane shows.
 
-    suspend fun getConfigSkills(): Result<List<ConfigSkill>> = runCatching {
+    suspend fun getConfigSkills(): Result<List<ConfigSkill>> = apiCall {
         val response = api.getConfigSkills()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch skills")
@@ -334,7 +335,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun getConfigAgents(): Result<List<ConfigAgent>> = runCatching {
+    suspend fun getConfigAgents(): Result<List<ConfigAgent>> = apiCall {
         val response = api.getConfigAgents()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch agents")
@@ -342,7 +343,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun getConfigPlugins(): Result<List<ConfigPlugin>> = runCatching {
+    suspend fun getConfigPlugins(): Result<List<ConfigPlugin>> = apiCall {
         val response = api.getConfigPlugins()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch plugins")
@@ -350,7 +351,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun getConfigMarketplaces(): Result<List<ConfigMarketplace>> = runCatching {
+    suspend fun getConfigMarketplaces(): Result<List<ConfigMarketplace>> = apiCall {
         val response = api.getConfigMarketplaces()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch marketplaces")
@@ -359,12 +360,12 @@ class SettingsRepository(
     }
 
     suspend fun installConfigPlugin(pluginName: String, marketplaceId: String): Result<Unit> =
-        runCatching {
+        apiCall {
             val response = api.installConfigPlugin(InstallPluginInput(pluginName, marketplaceId))
             if (!response.success) error(response.error?.message ?: "Failed to install plugin")
         }
 
-    suspend fun getStyleLibrary(): Result<StyleLibrary> = runCatching {
+    suspend fun getStyleLibrary(): Result<StyleLibrary> = apiCall {
         val response = api.getStyleLibrary()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch style library")
@@ -373,7 +374,7 @@ class SettingsRepository(
     }
 
     /** Flip a skill between active and on-demand. Returns the resulting state. */
-    suspend fun toggleConfigSkill(name: String): Result<Boolean> = runCatching {
+    suspend fun toggleConfigSkill(name: String): Result<Boolean> = apiCall {
         val response = api.toggleConfigSkill(name)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to toggle skill")
@@ -381,7 +382,7 @@ class SettingsRepository(
         response.data.enabled
     }
 
-    suspend fun toggleConfigAgent(name: String): Result<Boolean> = runCatching {
+    suspend fun toggleConfigAgent(name: String): Result<Boolean> = apiCall {
         val response = api.toggleConfigAgent(name)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to toggle agent")
@@ -389,7 +390,7 @@ class SettingsRepository(
         response.data.enabled
     }
 
-    suspend fun toggleConfigPlugin(name: String): Result<Boolean> = runCatching {
+    suspend fun toggleConfigPlugin(name: String): Result<Boolean> = apiCall {
         val response = api.toggleConfigPlugin(name)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to toggle plugin")
@@ -398,7 +399,7 @@ class SettingsRepository(
     }
 
     suspend fun getConfigDocument(kind: ConfigItemKind, key: String): Result<ConfigDocument> =
-        runCatching {
+        apiCall {
             when (kind) {
                 ConfigItemKind.AGENT -> {
                     val response = api.getConfigAgent(key)
@@ -452,7 +453,7 @@ class SettingsRepository(
             }
         }
 
-    suspend fun saveConfigDocument(document: ConfigDocument): Result<Unit> = runCatching {
+    suspend fun saveConfigDocument(document: ConfigDocument): Result<Unit> = apiCall {
         when (document.kind) {
             ConfigItemKind.AGENT -> {
                 val response = api.saveConfigAgent(
@@ -497,7 +498,7 @@ class SettingsRepository(
         }
     }
 
-    suspend fun deleteConfigDocument(document: ConfigDocument): Result<Unit> = runCatching {
+    suspend fun deleteConfigDocument(document: ConfigDocument): Result<Unit> = apiCall {
         val key = document.key ?: error("Unsaved entries cannot be deleted")
         val response = when (document.kind) {
             ConfigItemKind.AGENT -> api.deleteConfigAgent(key)
@@ -509,7 +510,7 @@ class SettingsRepository(
     }
 
     /** Custom CLI tools registered on the server. Payloads stay opaque JSON. */
-    suspend fun getCliTools(): Result<List<JsonElement>> = runCatching {
+    suspend fun getCliTools(): Result<List<JsonElement>> = apiCall {
         val response = api.getCliTools()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch CLI tools")
@@ -517,7 +518,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun getCommands(): Result<List<SlashCommand>> = runCatching {
+    suspend fun getCommands(): Result<List<SlashCommand>> = apiCall {
         val response = api.getCommands()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch commands")
@@ -527,7 +528,7 @@ class SettingsRepository(
 
     // ---- CLI harness login -------------------------------------------------
 
-    suspend fun startCliLogin(provider: String): Result<CliLoginSession> = runCatching {
+    suspend fun startCliLogin(provider: String): Result<CliLoginSession> = apiCall {
         val response = api.startCliLogin(provider)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to start login")
@@ -535,7 +536,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun pollCliLogin(id: String): Result<CliLoginSession> = runCatching {
+    suspend fun pollCliLogin(id: String): Result<CliLoginSession> = apiCall {
         val response = api.getCliLogin(id)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Login session not found")
@@ -543,7 +544,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun submitCliLoginCode(id: String, code: String): Result<CliLoginSession> = runCatching {
+    suspend fun submitCliLoginCode(id: String, code: String): Result<CliLoginSession> = apiCall {
         val response = api.submitCliLoginCode(id, code)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to submit code")
@@ -551,7 +552,7 @@ class SettingsRepository(
         response.data
     }
 
-    suspend fun cancelCliLogin(id: String): Result<Unit> = runCatching {
+    suspend fun cancelCliLogin(id: String): Result<Unit> = apiCall {
         api.cancelCliLogin(id)
         Unit
     }
@@ -559,7 +560,7 @@ class SettingsRepository(
     // ---- Categories --------------------------------------------------------
 
     /** Fetch all session categories. */
-    suspend fun getCategories(): Result<List<Category>> = runCatching {
+    suspend fun getCategories(): Result<List<Category>> = apiCall {
         val response = api.getCategories()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch categories")
@@ -568,7 +569,7 @@ class SettingsRepository(
     }
 
     /** Create a new category. */
-    suspend fun createCategory(input: CreateCategoryInput): Result<Category> = runCatching {
+    suspend fun createCategory(input: CreateCategoryInput): Result<Category> = apiCall {
         val response = api.createCategory(input)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to create category")
@@ -577,7 +578,7 @@ class SettingsRepository(
     }
 
     /** Update a category. */
-    suspend fun updateCategory(id: String, input: UpdateCategoryInput): Result<Category> = runCatching {
+    suspend fun updateCategory(id: String, input: UpdateCategoryInput): Result<Category> = apiCall {
         val response = api.updateCategory(id, input)
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to update category")
@@ -586,7 +587,7 @@ class SettingsRepository(
     }
 
     /** Delete a category. */
-    suspend fun deleteCategory(id: String): Result<Unit> = runCatching {
+    suspend fun deleteCategory(id: String): Result<Unit> = apiCall {
         val response = api.deleteCategory(id)
         if (!response.success) {
             error(response.error?.message ?: "Failed to delete category")

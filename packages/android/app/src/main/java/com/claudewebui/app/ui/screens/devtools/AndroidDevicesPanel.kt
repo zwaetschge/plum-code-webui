@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.devtools
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,11 @@ import com.claudewebui.app.ui.components.common.StatusPill
  */
 @Composable
 fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val snapshot = state.deviceSnapshot
     val busy = state.isDeviceActionPending || state.isLoadingDevices
 
@@ -44,7 +50,7 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
     var pairCode by remember { mutableStateOf("") }
     var connectPort by remember { mutableStateOf("5555") }
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact)) {
 
         // ── Emulator ────────────────────────────────────────────────────────
         GlassPanel(Modifier.fillMaxWidth(), radius = 17.dp) {
@@ -54,7 +60,7 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Emulator",
+                        screenResources.getString(R.string.devtools_emulator_50b5d),
                         color = PlumText,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
@@ -67,12 +73,12 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                     )
                 }
                 state.emulatorStatus?.avd?.let {
-                    Text("AVD $it", color = PlumMuted, fontSize = 12.sp)
+                    Text(screenResources.getString(R.string.devtools_avd_1_s_543e0, it), color = PlumMuted, fontSize = 12.sp)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionText("Start", busy) { viewModel.startEmulator() }
-                    ActionText("Stop", busy) { viewModel.stopEmulator() }
-                    ActionText("Refresh", busy) { viewModel.loadDevices() }
+                Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)) {
+                    ActionText(screenResources.getString(R.string.devtools_start_952f3), busy) { viewModel.startEmulator() }
+                    ActionText(screenResources.getString(R.string.devtools_stop_9e253), busy) { viewModel.stopEmulator() }
+                    ActionText(screenResources.getString(R.string.devtools_refresh_56e3b), busy) { viewModel.loadDevices() }
                 }
             }
         }
@@ -85,18 +91,18 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Connected",
+                        screenResources.getString(R.string.devtools_connected_c2f9b),
                         color = PlumText,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f),
                     )
-                    ActionText("Reconnect all", busy) { viewModel.reconnectDevices() }
+                    ActionText(screenResources.getString(R.string.devtools_reconnect_all_c27d3), busy) { viewModel.reconnectDevices() }
                 }
                 val live = snapshot?.live.orEmpty()
                 if (live.isEmpty()) {
                     Text(
-                        if (state.isLoadingDevices) "Loading…" else "No device connected",
+                        if (state.isLoadingDevices) screenResources.getString(R.string.devtools_loading_33ce4) else screenResources.getString(R.string.devtools_no_device_connected_0a90a),
                         color = PlumMuted,
                         fontSize = 12.sp,
                     )
@@ -122,7 +128,7 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                         if (device.serial == snapshot?.selectedSerial) {
                             StatusPill("session", PlumAccent)
                         }
-                        ActionText("Disconnect", busy) { viewModel.disconnectDevice(device.serial) }
+                        ActionText(screenResources.getString(R.string.devtools_disconnect_ed28e), busy) { viewModel.disconnectDevice(device.serial) }
                     }
                 }
             }
@@ -137,7 +143,7 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                     Modifier.fillMaxWidth().padding(15.dp),
                     verticalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
-                    Text("Remembered", color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(screenResources.getString(R.string.devtools_remembered_4d3eb), color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     known.forEach { device ->
                         val host = device.host ?: device.serial.substringBefore(':')
                         val knownPort =
@@ -173,11 +179,11 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                             OutlinedTextField(
                                 value = portInput,
                                 onValueChange = { portInput = it.filter(Char::isDigit) },
-                                label = { Text("Port") },
+                                label = { Text(screenResources.getString(R.string.devtools_port_fe035)) },
                                 singleLine = true,
                                 modifier = Modifier.width(96.dp),
                             )
-                            ActionText("Connect", busy || portInput.isBlank()) {
+                            ActionText(screenResources.getString(R.string.devtools_connect_b6546), busy || portInput.isBlank()) {
                                 viewModel.connectDevice(
                                     host,
                                     portInput.toIntOrNull() ?: knownPort,
@@ -185,7 +191,7 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
                                     device.serial,
                                 )
                             }
-                            ActionText("Forget", busy) { viewModel.forgetDevice(device.serial) }
+                            ActionText(screenResources.getString(R.string.devtools_forget_03d5d), busy) { viewModel.forgetDevice(device.serial) }
                         }
                     }
                 }
@@ -196,54 +202,54 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
         GlassPanel(Modifier.fillMaxWidth(), radius = 17.dp) {
             Column(
                 Modifier.fillMaxWidth().padding(15.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
             ) {
-                Text("Add a device", color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(screenResources.getString(R.string.devtools_add_a_device_f9086), color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "Wireless debugging → Pair device with pairing code shows host, " +
-                        "pairing port and code. Connect uses the other port (usually 5555).",
+                    screenResources.getString(R.string.devtools_wireless_debugging_pair_device_with_pairing_code_shows_host_53034) +
+                        screenResources.getString(R.string.devtools_pairing_port_and_code_connect_uses_the_other_port_usually_5555_5c9dd),
                     color = PlumMuted,
                     fontSize = 11.sp,
                 )
                 OutlinedTextField(
                     value = host,
                     onValueChange = { host = it },
-                    label = { Text("Host / IP") },
+                    label = { Text(screenResources.getString(R.string.devtools_host_ip_4c833)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)) {
                     OutlinedTextField(
                         value = pairPort,
                         onValueChange = { pairPort = it.filter(Char::isDigit) },
-                        label = { Text("Pair port") },
+                        label = { Text(screenResources.getString(R.string.devtools_pair_port_890ed)) },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
                     OutlinedTextField(
                         value = pairCode,
                         onValueChange = { pairCode = it.filter(Char::isDigit) },
-                        label = { Text("Code") },
+                        label = { Text(screenResources.getString(R.string.devtools_code_adac6)) },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
                 }
-                ActionText("Pair", busy || host.isBlank() || pairPort.isBlank() || pairCode.isBlank()) {
+                ActionText(screenResources.getString(R.string.devtools_pair_2537f), busy || host.isBlank() || pairPort.isBlank() || pairCode.isBlank()) {
                     viewModel.pairDevice(host.trim(), pairPort.toIntOrNull() ?: 0, pairCode.trim())
                 }
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     OutlinedTextField(
                         value = connectPort,
                         onValueChange = { connectPort = it.filter(Char::isDigit) },
-                        label = { Text("Connect port") },
+                        label = { Text(screenResources.getString(R.string.devtools_connect_port_6a01a)) },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
-                    ActionText("Connect", busy || host.isBlank()) {
+                    ActionText(screenResources.getString(R.string.devtools_connect_b6546), busy || host.isBlank()) {
                         viewModel.connectDevice(host.trim(), connectPort.toIntOrNull() ?: 5555)
                     }
                 }
@@ -254,6 +260,8 @@ fun AndroidDevicesPanel(state: DevToolsUiState, viewModel: DevToolsViewModel) {
 
 @Composable
 private fun ActionText(label: String, disabled: Boolean, onClick: () -> Unit) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Text(
         label,
         color = if (disabled) PlumMuted else PlumAccent,
@@ -261,6 +269,6 @@ private fun ActionText(label: String, disabled: Boolean, onClick: () -> Unit) {
         fontWeight = FontWeight.Bold,
         modifier = Modifier
             .clickable(enabled = !disabled, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = screenTokens.spacing.sm, vertical = screenTokens.spacing.inline),
     )
 }

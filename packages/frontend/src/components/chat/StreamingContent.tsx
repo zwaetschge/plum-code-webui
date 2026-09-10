@@ -34,8 +34,16 @@ const WORD_REVEAL_FAST_LAG_CHARS = 420;
 const WORD_REVEAL_MAX_LAG_CHARS = 1100;
 const WORD_REVEAL_DISABLE_CHAR_LIMIT = 24000;
 
-// Strip ANSI escape codes for clean text
+// Strip ANSI escape codes for clean text.
+//
+// This runs over the entire accumulated answer on every flush — dozens of times
+// a second on a long stream. Everything except the legacy Claude CLI arrives as
+// clean assistant deltas from the backend and contains no escapes at all, so a
+// single scan for the escape byte skips the alternating regex and the copy of
+// the whole string that comes with it. Cheaper than caching a stripped head,
+// and without the risk of splitting an escape sequence across the boundary.
 function stripAnsi(text: string): string {
+  if (!text.includes('\x1b')) return text;
   return text.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\[\?[0-9;]*[a-zA-Z]/g, '');
 }
 
@@ -633,6 +641,23 @@ function splitSettledMarkdown(text: string): { settled: string; tail: string } {
   return { settled, tail: text.slice(boundary + 2) };
 }
 
+// The word-fade wraps every token in its own `<span>`, and those spans stay in
+// the DOM — with `will-change` on each — for as long as the message is on screen.
+// Over a long answer that is thousands of composited nodes inside a container
+// Virtuoso re-measures, and a screen reader reading hundreds of inline fragments
+// instead of a paragraph. Only the block that is actually appearing needs the
+// treatment, so the settled text is cut once more: everything before the final
+// paragraph renders as ordinary markdown.
+function splitTrailingBlock(settled: string): { head: string; trailing: string } {
+  const withoutTrailingBreak = settled.endsWith('\n\n') ? settled.slice(0, -2) : settled;
+  const boundary = withoutTrailingBreak.lastIndexOf('\n\n');
+  if (boundary <= 0) return { head: '', trailing: settled };
+  const head = settled.slice(0, boundary + 2);
+  // A block that opens a code fence has to stay with its closing fence.
+  if ((head.match(/```/g)?.length ?? 0) % 2 === 1) return { head: '', trailing: settled };
+  return { head, trailing: settled.slice(boundary + 2) };
+}
+
 // Live response with markdown and LaTeX support for normal-sized partial text.
 // Very long partial streams render as plain text until the final persisted
 // message arrives; that avoids reparsing a large markdown document every flush.
@@ -651,6 +676,7 @@ function ClaudeResponse({ message, provider }: { message: string; provider: UiPr
     () => (shouldUsePlainText ? { settled: '', tail: '' } : splitSettledMarkdown(visibleMessage)),
     [shouldUsePlainText, visibleMessage]
   );
+  const { head, trailing } = useMemo(() => splitTrailingBlock(settled), [settled]);
 
   return (
     <div className="flex gap-3">
@@ -669,10 +695,16 @@ function ClaudeResponse({ message, provider }: { message: string; provider: UiPr
             <LiveStreamingText message={visibleMessage} />
           ) : (
             <>
-              {settled && (
+              {head && (
                 <MemoizedMarkdown
-                  content={settled}
-                  animateWords
+                  content={head}
+                  className="prose prose-sm dark:prose-invert max-w-none"
+                />
+              )}
+              {trailing && (
+                <MemoizedMarkdown
+                  content={trailing}
+                  animateWords={isRevealing}
                   className="prose prose-sm dark:prose-invert max-w-none"
                 />
               )}

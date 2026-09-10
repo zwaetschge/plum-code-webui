@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.library
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -86,17 +87,24 @@ import org.koin.compose.viewmodel.koinViewModel
  * and "Commands" wrapped mid-word on the chip.
  */
 private enum class LibraryTab(
-    val label: String,
-    val short: String,
+    private val labelRes: Int,
+    private val shortRes: Int,
     val icon: ImageVector,
 ) {
-    AGENTS("Agents", "Agents", Icons.Outlined.SmartToy),
-    SKILLS("Skills", "Skills", Icons.Outlined.Bolt),
-    PLUGINS("Plugins", "Plugins", Icons.Outlined.Extension),
-    MARKETPLACE("Marketplace", "Market", Icons.Outlined.Download),
-    MCP("MCP Servers", "MCP", Icons.Outlined.SettingsEthernet),
-    COMMANDS("Commands", "Cmds", Icons.Outlined.Terminal),
-    STYLES("Styles", "Styles", Icons.Outlined.Palette),
+    AGENTS(R.string.library_agents_64acf, R.string.library_agents_64acf, Icons.Outlined.SmartToy),
+    SKILLS(R.string.library_skills_e0921, R.string.library_skills_e0921, Icons.Outlined.Bolt),
+    PLUGINS(R.string.library_plugins_ab2e2, R.string.library_plugins_ab2e2, Icons.Outlined.Extension),
+    MARKETPLACE(R.string.library_marketplace_98309, R.string.library_market_569bb, Icons.Outlined.Download),
+    MCP(R.string.library_mcp_servers_3c23b, R.string.library_mcp_21593, Icons.Outlined.SettingsEthernet),
+    COMMANDS(R.string.library_commands_45e5f, R.string.library_cmds_43f37, Icons.Outlined.Terminal),
+    STYLES(R.string.library_styles_52db5, R.string.library_styles_52db5, Icons.Outlined.Palette);
+
+    val label: String
+        @androidx.compose.runtime.Composable get() = androidx.compose.ui.res.stringResource(labelRes)
+
+    val short: String
+        @androidx.compose.runtime.Composable get() = androidx.compose.ui.res.stringResource(shortRes)
+
 }
 
 /**
@@ -125,6 +133,11 @@ fun LibraryScreen(
     onNavigateMain: (MainDestination) -> Unit,
     viewModel: SettingsViewModel = koinViewModel(),
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
     var tab by remember { mutableStateOf(LibraryTab.AGENTS) }
     var query by remember { mutableStateOf("") }
@@ -147,30 +160,30 @@ fun LibraryScreen(
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
                 contentPadding = PaddingValues(bottom = 18.dp + padding.calculateBottomPadding()),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.cozy),
             ) {
                 item {
                     PlumScreenHeader(
-                        title = "Library",
-                        subtitle = "Agents, skills, plugins and more — as Plum ships them",
+                        title = screenResources.getString(R.string.library_library_b8100),
+                        subtitle = screenResources.getString(R.string.library_agents_skills_plugins_and_more_as_plum_ships_them_829eb),
                         actions = {
                             tab.configKind()?.let { kind ->
                                 PlumIconButton(
                                     icon = Icons.Outlined.Add,
-                                    contentDescription = "Create ${kind.name.lowercase()}",
+                                    contentDescription = screenResources.getString(R.string.library_create_1_s_8db05, kind.name.lowercase()),
                                     onClick = { viewModel.createConfigDocument(kind) },
                                 )
                             }
                             // Refresh everything: MCP servers come from loadSettings, not the
                             // config-library call.
-                            PlumIconButton(Icons.Outlined.Refresh, "Refresh", viewModel::loadSettings)
+                            PlumIconButton(Icons.Outlined.Refresh, screenResources.getString(R.string.library_refresh_56e3b), viewModel::loadSettings)
                         },
                     )
                 }
                 item {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.xs),
                     ) {
                         items(LibraryTab.entries) { item ->
                             LibraryTabCard(
@@ -186,7 +199,7 @@ fun LibraryScreen(
                         value = query,
                         onValueChange = { query = it },
                         leadingIcon = { Icon(Icons.Outlined.Search, null, tint = PlumMuted) },
-                        placeholder = { Text("Search ${tab.label.lowercase()}…", color = PlumMuted) },
+                        placeholder = { Text(screenResources.getString(R.string.library_search_1_s_c89dd, tab.label.lowercase()), color = PlumMuted) },
                         singleLine = true,
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = PlumSurfaceStrong,
@@ -196,21 +209,21 @@ fun LibraryScreen(
                             focusedTextColor = PlumText,
                             unfocusedTextColor = PlumText,
                         ),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(screenTokens.radius.lg),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp)
-                            .border(1.dp, PlumBorder, RoundedCornerShape(16.dp)),
+                            .padding(horizontal = screenTokens.spacing.cozy)
+                            .border(1.dp, PlumBorder, RoundedCornerShape(screenTokens.radius.lg)),
                     )
                 }
                 item {
                     SectionHeading(
                         title = tab.label,
-                        modifier = Modifier.padding(horizontal = 14.dp),
+                        modifier = Modifier.padding(horizontal = screenTokens.spacing.cozy),
                         caption = when {
-                            state.libraryLoading && entries.isEmpty() -> "loading…"
-                            entries.isEmpty() -> "0 items"
-                            else -> "${filtered.size} of ${entries.size} · $activeCount active"
+                            state.libraryLoading && entries.isEmpty() -> screenResources.getString(R.string.library_loading_fd3e3)
+                            entries.isEmpty() -> screenResources.getString(R.string.library_0_items_a4d51)
+                            else -> screenResources.getString(R.string.library_1_s_of_2_s_3_s_active_c6c65, filtered.size, entries.size, activeCount)
                         },
                     )
                 }
@@ -222,16 +235,16 @@ fun LibraryScreen(
                     filtered.isEmpty() -> item {
                         LibraryEmpty(
                             title = if (entries.isEmpty()) {
-                                "No ${tab.label.lowercase()} available"
+                                screenResources.getString(R.string.library_no_1_s_available_00ace, tab.label.lowercase())
                             } else {
-                                "Nothing matches \"$query\""
+                                screenResources.getString(R.string.library_nothing_matches_1_s_970c5, query)
                             },
                             subtitle = emptyHintFor(tab, entries.isEmpty()),
                         )
                     }
 
                     columns == 1 -> items(filtered, key = { it.id }) { entry ->
-                        LibraryRow(entry, Modifier.fillMaxWidth().padding(horizontal = 14.dp))
+                        LibraryRow(entry, Modifier.fillMaxWidth().padding(horizontal = screenTokens.spacing.cozy))
                     }
 
                     // Wide screens get columns rather than one very long line
@@ -242,8 +255,8 @@ fun LibraryScreen(
                         key = { row -> row.first().id },
                     ) { row ->
                         Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            Modifier.fillMaxWidth().padding(horizontal = screenTokens.spacing.cozy),
+                            horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
                         ) {
                             row.forEach { entry ->
                                 LibraryRow(entry, Modifier.weight(1f))
@@ -293,16 +306,20 @@ private fun entriesFor(
     tab: LibraryTab,
     state: SettingsUiState,
     viewModel: SettingsViewModel,
-): List<LibraryEntry> = when (tab) {
+): List<LibraryEntry> {
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    return when (tab) {
     LibraryTab.AGENTS -> {
         val onDisk = state.configAgents.map { agent ->
             LibraryEntry(
                 id = agent.id,
                 title = agent.name,
-                subtitle = agent.description.ifBlank { "Agent definition" },
+                subtitle = agent.description.ifBlank { screenResources.getString(R.string.library_agent_definition_d017e) },
                 meta = listOfNotNull(
                     agent.model?.takeIf { it.isNotBlank() },
-                    agent.tools.size.takeIf { it > 0 }?.let { "$it tools" },
+                    agent.tools.size.takeIf { it > 0 }?.let { screenResources.getString(R.string.library_1_s_tools_9d483, it) },
                     agent.source,
                 ).joinToString(" · "),
                 enabled = agent.enabled,
@@ -321,8 +338,8 @@ private fun entriesFor(
             LibraryEntry(
                 id = "db-${agent.id}",
                 title = agent.name,
-                subtitle = agent.description ?: "Custom agent",
-                meta = "${agent.model} · custom",
+                subtitle = agent.description ?: screenResources.getString(R.string.library_custom_agent_500be),
+                meta = screenResources.getString(R.string.library_1_s_custom_4a1ae, agent.model),
                 enabled = agent.enabled,
                 accent = PlumBlue,
                 icon = Icons.Outlined.SmartToy,
@@ -336,10 +353,10 @@ private fun entriesFor(
         LibraryEntry(
             id = skill.id,
             title = skill.name,
-            subtitle = skill.description.ifBlank { "Skill pack" },
+            subtitle = skill.description.ifBlank { screenResources.getString(R.string.library_skill_pack_45ee2) },
             // A disabled skill isn't broken — it's searchable on demand rather
             // than loaded into every prompt. Say that instead of "off".
-            meta = if (skill.enabled) "active · ${skill.source}" else "on-demand · ${skill.source}",
+            meta = if (skill.enabled) screenResources.getString(R.string.library_active_1_s_84528, skill.source) else screenResources.getString(R.string.library_on_demand_1_s_f8596, skill.source),
             enabled = skill.enabled,
             accent = PlumAmber,
             icon = Icons.Outlined.Bolt,
@@ -361,7 +378,7 @@ private fun entriesFor(
         LibraryEntry(
             id = plugin.id,
             title = plugin.name,
-            subtitle = plugin.description.ifBlank { "Plugin" },
+            subtitle = plugin.description.ifBlank { screenResources.getString(R.string.library_plugin_8dc20) },
             meta = listOfNotNull(
                 plugin.version?.let { "v$it" },
                 plugin.marketplace ?: plugin.source,
@@ -388,15 +405,15 @@ private fun entriesFor(
             LibraryEntry(
                 id = "market-$id",
                 title = plugin.name,
-                subtitle = plugin.description.ifBlank { "Marketplace plugin" },
+                subtitle = plugin.description.ifBlank { screenResources.getString(R.string.library_marketplace_plugin_67456) },
                 meta = "${marketplace.name} · v${plugin.version}",
                 enabled = installed,
                 accent = PlumGreen,
                 icon = Icons.Outlined.Extension,
                 actionLabel = when {
-                    installed -> "Installed"
-                    busy -> "Installing…"
-                    else -> "Install"
+                    installed -> screenResources.getString(R.string.library_installed_7bb44)
+                    busy -> screenResources.getString(R.string.library_installing_8d278)
+                    else -> screenResources.getString(R.string.library_install_fd6c3)
                 },
                 onAction = if (!installed && !busy) {
                     { viewModel.installMarketplacePlugin(plugin.name, marketplace.id) }
@@ -409,7 +426,7 @@ private fun entriesFor(
         LibraryEntry(
             id = server.id,
             title = server.name,
-            subtitle = server.command ?: server.url ?: "MCP server",
+            subtitle = server.command ?: server.url ?: screenResources.getString(R.string.library_mcp_server_94cbf),
             meta = server.type.name.lowercase(),
             enabled = server.enabled,
             accent = PlumBlue,
@@ -421,7 +438,7 @@ private fun entriesFor(
         LibraryEntry(
             id = "${command.scope}-${command.name}",
             title = "/${command.name}",
-            subtitle = command.description.ifBlank { "Slash command" },
+            subtitle = command.description.ifBlank { screenResources.getString(R.string.library_slash_command_f2662) },
             meta = command.scope,
             enabled = true,
             accent = PlumMuted,
@@ -436,7 +453,7 @@ private fun entriesFor(
             LibraryEntry(
                 id = style.id,
                 title = style.name,
-                subtitle = style.description.ifBlank { "Style preset" },
+                subtitle = style.description.ifBlank { screenResources.getString(R.string.library_style_preset_0db1b) },
                 meta = kind,
                 enabled = style.enabled,
                 accent = Color(0xFFFF59B4),
@@ -446,21 +463,29 @@ private fun entriesFor(
     }
 }
 
+}
+
+@Composable
 private fun emptyHintFor(tab: LibraryTab, catalogueEmpty: Boolean): String {
-    if (!catalogueEmpty) return "Try a different search term."
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    if (!catalogueEmpty) return screenResources.getString(R.string.library_try_a_different_search_term_0ba62)
     return when (tab) {
-        LibraryTab.AGENTS -> "Agents live in ~/.claude/agents on the server."
-        LibraryTab.SKILLS -> "Skill packs sync from the configured skills directories."
-        LibraryTab.PLUGINS -> "Install plugins from a marketplace in the WebUI."
-        LibraryTab.MARKETPLACE -> "Add a marketplace in the WebUI, then refresh this page."
-        LibraryTab.MCP -> "Add servers in Settings → MCP Servers."
-        LibraryTab.COMMANDS -> "Slash commands are provided by the active harness."
-        LibraryTab.STYLES -> "Style presets live in ~/.claude/style-library."
+        LibraryTab.AGENTS -> screenResources.getString(R.string.library_agents_live_in_claude_agents_on_the_server_f78a1)
+        LibraryTab.SKILLS -> screenResources.getString(R.string.library_skill_packs_sync_from_the_configured_skills_directories_b37ae)
+        LibraryTab.PLUGINS -> screenResources.getString(R.string.library_install_plugins_from_a_marketplace_in_the_webui_bbe1e)
+        LibraryTab.MARKETPLACE -> screenResources.getString(R.string.library_add_a_marketplace_in_the_webui_then_refresh_this_page_515d4)
+        LibraryTab.MCP -> screenResources.getString(R.string.library_add_servers_in_settings_mcp_servers_24526)
+        LibraryTab.COMMANDS -> screenResources.getString(R.string.library_slash_commands_are_provided_by_the_active_harness_a6206)
+        LibraryTab.STYLES -> screenResources.getString(R.string.library_style_presets_live_in_claude_style_library_7219e)
     }
 }
 
 @Composable
 private fun LibraryTabCard(tab: LibraryTab, count: Int, selected: Boolean, onClick: () -> Unit) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Column(
         modifier = Modifier
             .width(chipWidth())
@@ -473,7 +498,7 @@ private fun LibraryTabCard(tab: LibraryTab, count: Int, selected: Boolean, onCli
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(tab.icon, null, tint = if (selected) PlumAccent else PlumMuted, modifier = Modifier.size(18.dp))
+            Icon(tab.icon, null, tint = if (selected) PlumAccent else PlumMuted, modifier = Modifier.size(screenTokens.sizing.iconInline))
             Spacer(Modifier.weight(1f))
             Text(count.toString(), color = if (selected) PlumAccent else PlumMuted, fontSize = 9.sp)
         }
@@ -490,6 +515,11 @@ private fun LibraryTabCard(tab: LibraryTab, count: Int, selected: Boolean, onCli
 
 @Composable
 private fun LibraryRow(entry: LibraryEntry, modifier: Modifier = Modifier.fillMaxWidth()) {
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     // Single-column callers take the default and add their own inset; grid
     // callers pass a weighted modifier and the parent Row supplies the padding.
     GlassPanel(
@@ -503,10 +533,10 @@ private fun LibraryRow(entry: LibraryEntry, modifier: Modifier = Modifier.fillMa
             ) {
                 Icon(entry.icon, null, tint = entry.accent)
             }
-            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Column(Modifier.weight(1f).padding(horizontal = screenTokens.spacing.md)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(entry.title, color = PlumText, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Box(Modifier.padding(start = 6.dp).size(6.dp).background(if (entry.enabled) PlumGreen else PlumMuted, CircleShape))
+                    Box(Modifier.padding(start = screenTokens.spacing.inline).size(6.dp).background(if (entry.enabled) PlumGreen else PlumMuted, CircleShape))
                 }
                 Text(entry.subtitle, color = PlumMuted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 entry.meta?.takeIf { it.isNotBlank() }?.let {
@@ -527,19 +557,19 @@ private fun LibraryRow(entry: LibraryEntry, modifier: Modifier = Modifier.fillMa
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
-                        .padding(start = 8.dp)
+                        .padding(start = screenTokens.spacing.sm)
                         .clip(RoundedCornerShape(50))
                         .background(if (entry.onAction != null) PlumAccent.copy(alpha = .14f) else Color.Transparent)
                         .clickable(enabled = entry.onAction != null) { entry.onAction?.invoke() }
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                        .padding(horizontal = screenTokens.spacing.compact, vertical = 7.dp),
                 )
             }
             if (entry.onOpen != null) {
                 Icon(
                     Icons.Outlined.Edit,
-                    contentDescription = "Edit ${entry.title}",
+                    contentDescription = screenResources.getString(R.string.library_edit_1_s_5fa4d, entry.title),
                     tint = PlumMuted,
-                    modifier = Modifier.padding(start = 8.dp).size(18.dp),
+                    modifier = Modifier.padding(start = screenTokens.spacing.sm).size(screenTokens.sizing.iconInline),
                 )
             }
         }
@@ -548,7 +578,9 @@ private fun LibraryRow(entry: LibraryEntry, modifier: Modifier = Modifier.fillMa
 
 @Composable
 private fun LibraryLoading() {
-    GlassPanel(Modifier.fillMaxWidth().padding(horizontal = 14.dp), radius = 17.dp) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    GlassPanel(Modifier.fillMaxWidth().padding(horizontal = screenTokens.spacing.cozy), radius = 17.dp) {
         Box(
             Modifier.fillMaxWidth().height(140.dp),
             contentAlignment = Alignment.Center,
@@ -560,10 +592,12 @@ private fun LibraryLoading() {
 
 @Composable
 private fun LibraryEmpty(title: String, subtitle: String) {
-    GlassPanel(Modifier.fillMaxWidth().padding(horizontal = 14.dp), radius = 17.dp) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    GlassPanel(Modifier.fillMaxWidth().padding(horizontal = screenTokens.spacing.cozy), radius = 17.dp) {
         Column(Modifier.fillMaxWidth().padding(30.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Outlined.Extension, null, tint = PlumMuted, modifier = Modifier.size(31.dp))
-            Text(title, color = PlumText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            Text(title, color = PlumText, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = screenTokens.spacing.sm))
             Text(subtitle, color = PlumMuted, fontSize = 12.sp)
         }
     }

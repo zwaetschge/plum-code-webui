@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.settings
 
+import com.claudewebui.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +47,11 @@ private val CLI_SUBAGENT_PROVIDERS = listOf("codex", "claude", "zai", "opencode"
 
 @Composable
 fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     // `zai` first: it is the entry most people want and the one whose meaning
     // is least obvious from its name.
     var provider by remember { mutableStateOf("zai") }
@@ -55,30 +61,30 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
 
     GlassPanel(Modifier.fillMaxWidth(), radius = 18.dp) {
         Column(
-            Modifier.fillMaxWidth().padding(16.dp),
+            Modifier.fillMaxWidth().padding(screenTokens.spacing.lg),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Text("CLI subagents", color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(screenResources.getString(R.string.settings_cli_subagents_c1a3d), color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Text(
-                "Whole provider CLIs any harness may spawn as one-shot workers through the " +
-                    "subagents MCP tool. They use their own shared logins, so no secrets live here.",
+                screenResources.getString(R.string.settings_whole_provider_clis_any_harness_may_spawn_as_one_shot_workers_thr_a12e8) +
+                    screenResources.getString(R.string.settings_subagents_mcp_tool_they_use_their_own_shared_logins_so_no_secrets_c3014),
                 color = PlumMuted,
                 fontSize = 12.sp,
             )
             Text(
-                "\"Z.AI\" is the exception: it runs the Claude CLI against your Z.AI endpoint — " +
-                    "the same second Claude transport a Z.AI session uses, not OpenCode. It " +
-                    "disappears server-side while no Z.AI endpoint is configured.",
+                screenResources.getString(R.string.settings_z_ai_is_the_exception_it_runs_the_claude_cli_against_your_z_ai_en_3e163) +
+                    screenResources.getString(R.string.settings_the_same_second_claude_transport_a_z_ai_session_uses_not_opencode_c25b9) +
+                    screenResources.getString(R.string.settings_disappears_server_side_while_no_z_ai_endpoint_is_configured_f649f),
                 color = PlumMuted,
                 fontSize = 12.sp,
             )
 
             if (state.cliSubagents.isEmpty()) {
-                Text("No subagents configured", color = PlumMuted, fontSize = 12.sp)
+                Text(screenResources.getString(R.string.settings_no_subagents_configured_e075f), color = PlumMuted, fontSize = 12.sp)
             } else {
                 state.cliSubagents.forEach { entry ->
                     var draftModel by remember(entry.id, entry.model) { mutableStateOf(entry.model) }
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.xs)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(
@@ -91,7 +97,7 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                                 Text(
                                     listOfNotNull(
                                         entry.provider,
-                                        entry.model.takeIf { it.isNotBlank() } ?: "default model",
+                                        entry.model.takeIf { it.isNotBlank() } ?: screenResources.getString(R.string.settings_default_model_f13dd),
                                     ).joinToString(" · "),
                                     color = PlumMuted,
                                     fontSize = 11.sp,
@@ -104,7 +110,7 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                                 enabled = !state.subagentBusy,
                                 onCheckedChange = { viewModel.setCliSubagentEnabled(entry.id, it) },
                             )
-                            SubagentAction("Remove", state.subagentBusy, destructive = true) {
+                            SubagentAction(screenResources.getString(R.string.settings_remove_e9639), state.subagentBusy, destructive = true) {
                                 viewModel.removeCliSubagent(entry.id)
                             }
                         }
@@ -112,11 +118,11 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                             OutlinedTextField(
                                 value = draftModel,
                                 onValueChange = { draftModel = it },
-                                label = { Text("Model override (optional)") },
+                                label = { Text(screenResources.getString(R.string.settings_model_override_optional_d1e28)) },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
                             )
-                            SubagentAction("Save", state.subagentBusy || draftModel == entry.model) {
+                            SubagentAction(screenResources.getString(R.string.settings_save_efc00), state.subagentBusy || draftModel == entry.model) {
                                 viewModel.setCliSubagentModel(entry.id, draftModel)
                             }
                         }
@@ -124,8 +130,8 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                 }
             }
 
-            Text("Add", color = PlumText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(screenResources.getString(R.string.settings_add_61cc5), color = PlumText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline)) {
                 CLI_SUBAGENT_PROVIDERS.forEach { candidate ->
                     ProviderChip(candidate, candidate == provider) { provider = candidate }
                 }
@@ -134,7 +140,7 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
-                    label = { Text("Label") },
+                    label = { Text(screenResources.getString(R.string.settings_label_74341)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
@@ -143,11 +149,11 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                 OutlinedTextField(
                     value = model,
                     onValueChange = { model = it },
-                    label = { Text("Model (optional)") },
+                    label = { Text(screenResources.getString(R.string.settings_model_optional_1cde0)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
-                SubagentAction("Add", state.subagentBusy) {
+                SubagentAction(screenResources.getString(R.string.settings_add_61cc5), state.subagentBusy) {
                     viewModel.addCliSubagent(provider, label, model)
                     label = ""
                     model = ""
@@ -159,6 +165,11 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
 
 @Composable
 fun SubagentUpstreamsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     var label by remember { mutableStateOf("") }
     var baseUrl by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
@@ -166,25 +177,25 @@ fun SubagentUpstreamsPanel(state: SettingsUiState, viewModel: SettingsViewModel)
 
     GlassPanel(Modifier.fillMaxWidth(), radius = 18.dp) {
         Column(
-            Modifier.fillMaxWidth().padding(16.dp),
+            Modifier.fillMaxWidth().padding(screenTokens.spacing.lg),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Text(
-                "Subagent upstreams",
+                screenResources.getString(R.string.settings_subagent_upstreams_bd40a),
                 color = PlumText,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                "Any Anthropic-compatible endpoint, matched per request by model. An agent whose " +
-                    "frontmatter names one of these models runs there while the session's main " +
-                    "agent stays on the subscription.",
+                screenResources.getString(R.string.settings_any_anthropic_compatible_endpoint_matched_per_request_by_model_an_d8ed1) +
+                    screenResources.getString(R.string.settings_frontmatter_names_one_of_these_models_runs_there_while_the_sessio_d77a2) +
+                    screenResources.getString(R.string.settings_agent_stays_on_the_subscription_bdd74),
                 color = PlumMuted,
                 fontSize = 12.sp,
             )
 
             if (state.subagentUpstreams.isEmpty()) {
-                Text("No custom upstreams", color = PlumMuted, fontSize = 12.sp)
+                Text(screenResources.getString(R.string.settings_no_custom_upstreams_7bd9f), color = PlumMuted, fontSize = 12.sp)
             } else {
                 state.subagentUpstreams.forEach { upstream ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -208,7 +219,7 @@ fun SubagentUpstreamsPanel(state: SettingsUiState, viewModel: SettingsViewModel)
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        SubagentAction("Remove", state.subagentBusy, destructive = true) {
+                        SubagentAction(screenResources.getString(R.string.settings_remove_e9639), state.subagentBusy, destructive = true) {
                             viewModel.removeSubagentUpstream(upstream.id)
                         }
                     }
@@ -219,7 +230,7 @@ fun SubagentUpstreamsPanel(state: SettingsUiState, viewModel: SettingsViewModel)
             // whether an upstream actually contributes anything routable.
             if (state.subagentModelGroups.isNotEmpty()) {
                 Text(
-                    "Routable: " + state.subagentModelGroups.joinToString(" · ") {
+                    screenResources.getString(R.string.settings_routable_05933) + state.subagentModelGroups.joinToString(" · ") {
                         "${it.group} (${it.models.size})"
                     },
                     color = PlumMuted,
@@ -227,25 +238,25 @@ fun SubagentUpstreamsPanel(state: SettingsUiState, viewModel: SettingsViewModel)
                 )
             }
 
-            Text("Add", color = PlumText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(screenResources.getString(R.string.settings_add_61cc5), color = PlumText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             OutlinedTextField(
                 value = label,
                 onValueChange = { label = it },
-                label = { Text("Label") },
+                label = { Text(screenResources.getString(R.string.settings_label_74341)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = baseUrl,
                 onValueChange = { baseUrl = it },
-                label = { Text("Base URL") },
+                label = { Text(screenResources.getString(R.string.settings_base_url_1dbd6)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = token,
                 onValueChange = { token = it },
-                label = { Text("API token") },
+                label = { Text(screenResources.getString(R.string.settings_api_token_bc020)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -253,11 +264,11 @@ fun SubagentUpstreamsPanel(state: SettingsUiState, viewModel: SettingsViewModel)
                 OutlinedTextField(
                     value = models,
                     onValueChange = { models = it },
-                    label = { Text("Models (comma separated, kimi-* allowed)") },
+                    label = { Text(screenResources.getString(R.string.settings_models_comma_separated_kimi_allowed_2d043)) },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
-                SubagentAction("Add", state.subagentBusy) {
+                SubagentAction(screenResources.getString(R.string.settings_add_61cc5), state.subagentBusy) {
                     viewModel.addSubagentUpstream(label, baseUrl, token, models)
                     label = ""
                     baseUrl = ""
@@ -271,6 +282,8 @@ fun SubagentUpstreamsPanel(state: SettingsUiState, viewModel: SettingsViewModel)
 
 @Composable
 private fun ProviderChip(name: String, selected: Boolean, onClick: () -> Unit) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Text(
         name,
         color = if (selected) PlumAccent else PlumMuted,
@@ -279,10 +292,10 @@ private fun ProviderChip(name: String, selected: Boolean, onClick: () -> Unit) {
         modifier = Modifier
             .background(
                 if (selected) PlumSubtleFill else PlumBorder.copy(alpha = .18f),
-                RoundedCornerShape(10.dp),
+                RoundedCornerShape(screenTokens.radius.chip),
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = screenTokens.spacing.compact, vertical = screenTokens.spacing.inline),
     )
 }
 
@@ -293,6 +306,8 @@ private fun SubagentAction(
     destructive: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Text(
         label,
         color = when {
@@ -303,7 +318,7 @@ private fun SubagentAction(
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier
-            .padding(start = 12.dp)
+            .padding(start = screenTokens.spacing.md)
             .clickable(enabled = !disabled, onClick = onClick),
     )
 }

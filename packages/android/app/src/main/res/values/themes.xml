@@ -7,6 +7,27 @@
     </style>
 
     <!--
+        Cold-start window shown by the system before MainActivity draws its
+        first Compose frame (androidx.core:core-splashscreen). The launcher
+        foreground is reused as the animated icon so the splash matches the
+        adaptive icon on Android 12+ and is masked into a circle on older
+        releases. There is no values-night variant on purpose: the app's
+        palette is chosen in Settings and is usually dark regardless of the
+        system setting, so the brand base behind the launcher icon is the one
+        colour that never contradicts the screen that follows.
+        postSplashScreenTheme swaps to the normal theme once
+        installSplashScreen() runs.
+    -->
+    <style name="Theme.Plum.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.ClaudeCode</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+
+    <!--
         Used by ShareReceiver: fully transparent activity window so only the
         AlertDialog is visible when the share sheet appears on top of the
         originating app.

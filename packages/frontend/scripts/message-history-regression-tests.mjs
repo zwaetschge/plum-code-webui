@@ -87,8 +87,8 @@ assert.match(
 );
 assert.match(
   socketSource,
-  /case 'permission_request':[\s\S]*?setPermissionRequest[\s\S]*?setPendingPermission[\s\S]*?if \(typeof msg\.sequence === 'number'\) this\.updateLastSequence/,
-  'permission requests must be restored before their replay cursor is committed'
+  /replayBufferedMessages\(data\.sessionId, data\.bufferedMessages\)[\s\S]*?updateLastSequence\(data\.sessionId, data\.highWatermark\)/,
+  'the complete replay must apply before committing the contiguous server watermark'
 );
 assert.match(
   source,

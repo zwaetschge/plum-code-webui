@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.settings
 
+import com.claudewebui.app.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -80,6 +81,11 @@ fun AgentsScreen(
     viewModel: SettingsViewModel,
     onNavigateBack: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val state by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -97,10 +103,10 @@ fun AgentsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Custom Agents", fontWeight = FontWeight.SemiBold) },
+                title = { Text(screenResources.getString(R.string.settings_custom_agents_be5ee), fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = screenResources.getString(R.string.settings_back_b52b3))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -114,7 +120,7 @@ fun AgentsScreen(
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = Color.White,
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Agent")
+                Icon(Icons.Default.Add, contentDescription = screenResources.getString(R.string.settings_add_agent_73287))
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -129,21 +135,21 @@ fun AgentsScreen(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
                 ) {
                     Icon(
                         Icons.Default.SmartToy,
                         contentDescription = null,
-                        modifier = Modifier.size(48.dp),
+                        modifier = Modifier.size(screenTokens.sizing.touchTarget),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        "No custom agents yet",
+                        screenResources.getString(R.string.settings_no_custom_agents_yet_b3b3a),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        "Tap + to create your first agent",
+                        screenResources.getString(R.string.settings_tap_to_create_your_first_agent_7b44d),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -154,8 +160,8 @@ fun AgentsScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(horizontal = screenTokens.spacing.lg),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             ) {
                 item { Spacer(Modifier.height(4.dp)) }
                 items(state.agents, key = { it.id }) { agent ->
@@ -208,8 +214,8 @@ fun AgentsScreen(
     deletingAgent?.let { agent ->
         AlertDialog(
             onDismissRequest = { deletingAgent = null },
-            title = { Text("Delete Agent") },
-            text = { Text("Delete \"${agent.name}\"? This cannot be undone.") },
+            title = { Text(screenResources.getString(R.string.settings_delete_agent_09b37)) },
+            text = { Text(screenResources.getString(R.string.settings_delete_1_s_this_cannot_be_undone_ef247, agent.name)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -219,11 +225,11 @@ fun AgentsScreen(
                         }
                     },
                 ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                    Text(screenResources.getString(R.string.settings_delete_f6fdb), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deletingAgent = null }) { Text("Cancel") }
+                TextButton(onClick = { deletingAgent = null }) { Text(screenResources.getString(R.string.settings_cancel_77dfd)) }
             },
         )
     }
@@ -239,15 +245,20 @@ private fun AgentCard(
     onDelete: () -> Unit,
     onToggle: (Boolean) -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val accentColor = agentColor(agent.color)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(screenTokens.radius.lg),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(screenTokens.spacing.lg)) {
             // Header row
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -256,7 +267,7 @@ private fun AgentCard(
                 // Avatar
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(screenTokens.sizing.touchTarget)
                         .clip(CircleShape)
                         .background(accentColor.copy(alpha = if (agent.enabled) 0.2f else 0.08f)),
                     contentAlignment = Alignment.Center,
@@ -271,7 +282,7 @@ private fun AgentCard(
                             Icons.Default.Person,
                             contentDescription = null,
                             tint = if (agent.enabled) accentColor else accentColor.copy(alpha = 0.4f),
-                            modifier = Modifier.size(24.dp),
+                            modifier = Modifier.size(screenTokens.sizing.iconLg),
                         )
                     }
                 }
@@ -313,7 +324,7 @@ private fun AgentCard(
                 Spacer(Modifier.height(10.dp))
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     if (agent.model != null) {
@@ -324,7 +335,7 @@ private fun AgentCard(
                     }
                     if (agent.allowedTools.isNotEmpty()) {
                         AgentChip(
-                            label = "${agent.allowedTools.size} tool${if (agent.allowedTools.size != 1) "s" else ""}",
+                            label = screenResources.getQuantityString(R.plurals.settings_tool_count, agent.allowedTools.size, agent.allowedTools.size),
                             color = PlumGreen,
                         )
                     }
@@ -347,25 +358,25 @@ private fun AgentCard(
                 IconButton(onClick = onDuplicate) {
                     Icon(
                         Icons.Default.ContentCopy,
-                        contentDescription = "Duplicate",
+                        contentDescription = screenResources.getString(R.string.settings_duplicate_972d5),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(screenTokens.sizing.iconMd),
                     )
                 }
                 IconButton(onClick = onEdit) {
                     Icon(
                         Icons.Default.Edit,
-                        contentDescription = "Edit",
+                        contentDescription = screenResources.getString(R.string.settings_edit_53016),
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(screenTokens.sizing.iconMd),
                     )
                 }
                 IconButton(onClick = onDelete) {
                     Icon(
                         Icons.Default.Delete,
-                        contentDescription = "Delete",
+                        contentDescription = screenResources.getString(R.string.settings_delete_f6fdb),
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(screenTokens.sizing.iconMd),
                     )
                 }
             }
@@ -375,11 +386,13 @@ private fun AgentCard(
 
 @Composable
 private fun AgentChip(label: String, color: Color) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
     Box(
         modifier = androidx.compose.ui.Modifier
             .clip(RoundedCornerShape(6.dp))
             .background(color.copy(alpha = 0.12f))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = screenTokens.spacing.sm, vertical = screenTokens.spacing.xs),
     ) {
         Text(
             label,
@@ -411,6 +424,11 @@ private fun AgentEditSheet(
     onDismiss: () -> Unit,
     onSave: (AgentFormInput) -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var name by remember { mutableStateOf(agent?.name ?: "") }
@@ -434,13 +452,13 @@ private fun AgentEditSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(horizontal = screenTokens.spacing.section)
+                .padding(bottom = screenTokens.spacing.xxl),
+            verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.lg),
         ) {
             // Title
             Text(
-                if (agent == null) "New Agent" else "Edit Agent",
+                if (agent == null) screenResources.getString(R.string.settings_new_agent_94c53) else screenResources.getString(R.string.settings_edit_agent_07c50),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -449,7 +467,7 @@ private fun AgentEditSheet(
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("Name *") },
+                label = { Text(screenResources.getString(R.string.settings_name_d145b)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -462,7 +480,7 @@ private fun AgentEditSheet(
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
-                label = { Text("Description") },
+                label = { Text(screenResources.getString(R.string.settings_description_55f8e)) },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 2,
                 maxLines = 4,
@@ -476,8 +494,8 @@ private fun AgentEditSheet(
             OutlinedTextField(
                 value = systemPrompt,
                 onValueChange = { systemPrompt = it },
-                label = { Text("System Prompt") },
-                placeholder = { Text("Instructions for the agent's behavior…") },
+                label = { Text(screenResources.getString(R.string.settings_system_prompt_7bb6c)) },
+                placeholder = { Text(screenResources.getString(R.string.settings_instructions_for_the_agent_s_behavior_9e679)) },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 4,
                 maxLines = 10,
@@ -491,8 +509,8 @@ private fun AgentEditSheet(
             OutlinedTextField(
                 value = model,
                 onValueChange = { model = it },
-                label = { Text("Model Override") },
-                placeholder = { Text("e.g. glm-5.3 (Z.AI) or sonnet — empty for default") },
+                label = { Text(screenResources.getString(R.string.settings_model_override_9fbf6)) },
+                placeholder = { Text(screenResources.getString(R.string.settings_e_g_glm_5_3_z_ai_or_sonnet_empty_for_default_5758d)) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -505,10 +523,10 @@ private fun AgentEditSheet(
             OutlinedTextField(
                 value = allowedTools,
                 onValueChange = { allowedTools = it },
-                label = { Text("Allowed Tools") },
-                placeholder = { Text("Bash, Read, Write, Edit (comma-separated)") },
+                label = { Text(screenResources.getString(R.string.settings_allowed_tools_54788)) },
+                placeholder = { Text(screenResources.getString(R.string.settings_bash_read_write_edit_comma_separated_428c4)) },
                 modifier = Modifier.fillMaxWidth(),
-                supportingText = { Text("Leave empty to inherit default tools") },
+                supportingText = { Text(screenResources.getString(R.string.settings_leave_empty_to_inherit_default_tools_a28ef)) },
                 minLines = 2,
                 maxLines = 4,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -518,15 +536,15 @@ private fun AgentEditSheet(
             )
 
             // Permission Mode
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)) {
                 Text(
-                    "Permission Mode",
+                    screenResources.getString(R.string.settings_permission_mode_de70c),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 val modes = listOf("default", "auto", "manual")
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     modes.forEach { mode ->
@@ -541,13 +559,13 @@ private fun AgentEditSheet(
 
             // Icon + Color row
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 OutlinedTextField(
                     value = icon,
                     onValueChange = { icon = it },
-                    label = { Text("Icon (emoji)") },
+                    label = { Text(screenResources.getString(R.string.settings_icon_emoji_2b894)) },
                     placeholder = { Text("🤖") },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
@@ -559,7 +577,7 @@ private fun AgentEditSheet(
                 OutlinedTextField(
                     value = agentColor,
                     onValueChange = { agentColor = it },
-                    label = { Text("Color (hex)") },
+                    label = { Text(screenResources.getString(R.string.settings_color_hex_7c261)) },
                     placeholder = { Text("#B87333") },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
@@ -574,14 +592,14 @@ private fun AgentEditSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = screenTokens.spacing.xs),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column {
-                    Text("Enable Agent", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Text(screenResources.getString(R.string.settings_enable_agent_cc689), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                     Text(
-                        "Make this agent available in sessions",
+                        screenResources.getString(R.string.settings_make_this_agent_available_in_sessions_0447d),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -599,13 +617,13 @@ private fun AgentEditSheet(
             // Save / Cancel
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
             ) {
                 TextButton(
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Cancel")
+                    Text(screenResources.getString(R.string.settings_cancel_77dfd))
                 }
                 androidx.compose.material3.Button(
                     onClick = {
@@ -629,7 +647,7 @@ private fun AgentEditSheet(
                         containerColor = MaterialTheme.colorScheme.primary,
                     ),
                 ) {
-                    Text(if (agent == null) "Create" else "Save")
+                    Text(if (agent == null) screenResources.getString(R.string.settings_create_6e157) else screenResources.getString(R.string.settings_save_efc00))
                 }
             }
 

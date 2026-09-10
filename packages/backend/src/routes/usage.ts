@@ -1,6 +1,8 @@
 import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
+import { rateLimiters } from '../middleware/rateLimiter.js';
+import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -560,6 +562,15 @@ function providerSqlPredicate(provider: CLIProvider): string {
       return "lower(provider) = 'pi'";
     case 'kimi':
       return "lower(provider) = 'kimi'";
+    default: {
+      // The predicate is interpolated straight into SQL, so a provider this
+      // switch does not know about used to become the literal `undefined` in a
+      // WHERE clause. `never` makes adding a seventh CLIProvider a compile
+      // error; the throw is what happens if the value arrives from outside the
+      // type system anyway.
+      const unreachable: never = provider;
+      throw new Error(`No usage predicate for provider ${String(unreachable)}`);
+    }
   }
 }
 
@@ -1327,7 +1338,16 @@ export async function fetchOpenCodeGoUsage(userId: string): Promise<UsageLimitRe
   };
 }
 
-export async function fetchLocalBudgetUsage(userId: string, provider: CLIProvider) {
+/**
+ * Spend against a self-declared budget, for providers that have no account API
+ * to ask.
+ *
+ * This is the only usage signal available for the execution harnesses, and the
+ * only one left for an account provider whose credentials have gone stale. It
+ * is an estimate derived from our own priced `usage_history`, never an upstream
+ * quota, which is why the payload is marked as such.
+ */
+async function fetchLocalBudgetUsage(userId: string, provider: CLIProvider) {
   const budget = await getLocalUsageBudget(userId, provider);
   if (!budget.dailyUsd && !budget.weeklyUsd) {
     return null;
@@ -1337,8 +1357,12 @@ export async function fetchLocalBudgetUsage(userId: string, provider: CLIProvide
   const daily = (await pgGet(
     `SELECT COALESCE(SUM(cost_usd), 0) as cost, COALESCE(SUM(total_tokens), 0) as tokens, COUNT(*) as requests
        FROM usage_history
-       WHERE user_id = ? AND created_at >= datetime('now', '-1 day') AND ${predicate}`,
-    userId
+       WHERE user_id = ? AND created_at >= ? AND ${predicate}`,
+    userId,
+    // Bound as a parameter rather than in SQL: this used to read
+    // `datetime('now', '-1 day')`, which is SQLite and would have thrown on
+    // the first call had there ever been one.
+    toSqlTimestamp(new Date(Date.now() - 24 * 60 * 60 * 1000))
   )) as unknown as { cost: number; tokens: number; requests: number };
   const weekly = (await pgGet(
     `SELECT COALESCE(SUM(cost_usd), 0) as cost, COALESCE(SUM(total_tokens), 0) as tokens, COUNT(*) as requests
@@ -1376,7 +1400,47 @@ export async function fetchLocalBudgetUsage(userId: string, provider: CLIProvide
       dailyRequests: daily.requests,
       weeklyRequests: weekly.requests,
     },
+    source: 'local-budget' as const,
   };
+}
+
+/**
+ * The `/limits` envelope around a local budget, or null when the user has not
+ * declared one. `z-ai` and `opencode-go` are request-level aliases; the spend
+ * behind them is booked under the CLI provider they belong to.
+ *
+ * Deliberately not run through `persistUsageLimitResult`: the snapshot table
+ * records what the upstream account reported, and an estimate derived from our
+ * own priced history is not that.
+ */
+/**
+ * What `/limits` answers when the account cannot be reached. A declared budget
+ * beats an empty card, so it wins over the bare error when one exists.
+ */
+async function noCredentialsOrLocalBudget(
+  userId: string,
+  provider: UsageProviderId,
+  message: string
+): Promise<UsageLimitResult> {
+  return (
+    (await localBudgetLimitResult(userId, provider)) ?? {
+      success: false,
+      supported: false,
+      provider,
+      data: null,
+      error: { code: 'NO_CREDENTIALS', message },
+    }
+  );
+}
+
+async function localBudgetLimitResult(
+  userId: string,
+  provider: UsageProviderId
+): Promise<UsageLimitResult | null> {
+  const cliProvider: CLIProvider =
+    provider === 'z-ai' ? 'zai' : provider === 'opencode-go' ? 'opencode' : provider;
+  const data = await fetchLocalBudgetUsage(userId, cliProvider);
+  return data ? { success: true, supported: true, provider, data } : null;
 }
 
 // Refresh Claude OAuth token
@@ -1409,32 +1473,78 @@ async function refreshClaudeToken(refreshToken: string): Promise<ClaudeCredentia
   }
 }
 
+type FetchUsageResult = {
+  ok: boolean;
+  status: number;
+  data?: UsageLimitResponse;
+  error?: string;
+};
+
+// The Codex branch has had a TTL cache and a single-flight map since it was
+// written; the Claude branch went straight out to api.anthropic.com on every
+// request. Two browser tabs plus the widget poll meant three concurrent
+// upstream calls for one number that only changes every few minutes.
+const claudeUsageCache = new Map<string, { expiresAt: number; value: FetchUsageResult }>();
+const claudeUsageRequests = new Map<string, Promise<FetchUsageResult>>();
+const CLAUDE_USAGE_CACHE_TTL_MS = 60_000;
+
+function claudeUsageCacheKey(accessToken: string): string {
+  return crypto.createHash('sha256').update(accessToken).digest('hex').slice(0, 24);
+}
+
 // Helper to fetch usage with a given access token
-async function fetchUsage(
-  accessToken: string
-): Promise<{ ok: boolean; status: number; data?: UsageLimitResponse; error?: string }> {
-  try {
-    const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-        'anthropic-beta': 'oauth-2025-04-20',
-        'User-Agent': 'plum-code-webui/1.0',
-      },
-    });
+async function fetchUsage(accessToken: string): Promise<FetchUsageResult> {
+  const cacheKey = claudeUsageCacheKey(accessToken);
+  const cached = claudeUsageCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      return { ok: false, status: response.status, error: errorText };
+  const inFlight = claudeUsageRequests.get(cacheKey);
+  if (inFlight) return inFlight;
+
+  const request = (async (): Promise<FetchUsageResult> => {
+    // Without a deadline a hung upstream connection holds the Express handler
+    // open indefinitely, and every retry stacks another one behind it.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    timeout.unref();
+
+    try {
+      const response = await fetch('https://api.anthropic.com/api/oauth/usage', {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+          'anthropic-beta': 'oauth-2025-04-20',
+          'User-Agent': 'plum-code-webui/1.0',
+        },
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        return { ok: false, status: response.status, error: errorText };
+      }
+
+      const data = (await response.json()) as UsageLimitResponse;
+      const value: FetchUsageResult = { ok: true, status: 200, data };
+      // Only successful reads are cached. A 401 has to reach the caller so the
+      // token refresh path still runs on the very next request.
+      claudeUsageCache.set(cacheKey, { expiresAt: Date.now() + CLAUDE_USAGE_CACHE_TTL_MS, value });
+      return value;
+    } catch (err) {
+      console.error('Fetch usage error:', err);
+      return { ok: false, status: 500, error: String(err) };
+    } finally {
+      clearTimeout(timeout);
     }
+  })();
 
-    const data = (await response.json()) as UsageLimitResponse;
-    return { ok: true, status: 200, data };
-  } catch (err) {
-    console.error('Fetch usage error:', err);
-    return { ok: false, status: 500, error: String(err) };
+  claudeUsageRequests.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    claudeUsageRequests.delete(cacheKey);
   }
 }
 
@@ -1522,11 +1632,18 @@ router.put('/token-plan', requireAuth, async (req, res) => {
 });
 
 // Fetch usage limits for the selected provider.
-router.get('/limits', requireAuth, async (req, res) => {
+router.get('/limits', requireAuth, rateLimiters.usageLimits, async (req, res) => {
   try {
     const providerParam = String(req.query.provider || 'codex').toLowerCase();
     const harnessProviders: UsageProviderId[] = ['opencode', 'pi', 'opencode-go'];
     if (harnessProviders.includes(providerParam as UsageProviderId)) {
+      // A harness has no account to query, but the user may have declared a
+      // spend budget in settings — that is the only usage signal there is here.
+      const local = await localBudgetLimitResult(
+        (req as AuthenticatedRequest).userId,
+        providerParam as UsageProviderId
+      );
+      if (local) return res.json(local);
       return res.json({
         success: true,
         supported: false,
@@ -1575,13 +1692,9 @@ router.get('/limits', requireAuth, async (req, res) => {
     if (provider === 'codex') {
       const codexAuth = await getCodexAuth();
       if (!codexAuth?.tokens?.access_token) {
-        return res.json({
-          success: false,
-          supported: false,
-          provider: 'codex',
-          data: null,
-          error: { code: 'NO_CREDENTIALS', message: 'Codex credentials not found' },
-        });
+        return res.json(
+          await noCredentialsOrLocalBudget(userId, 'codex', 'Codex credentials not found')
+        );
       }
 
       const buildCodexResponse = (mapped: ReturnType<typeof mapCodexUsage>) => ({
@@ -1626,13 +1739,13 @@ router.get('/limits', requireAuth, async (req, res) => {
               console.error('Codex usage retry error:', retryErr);
             }
           }
-          return res.json({
-            success: false,
-            supported: false,
-            provider: 'codex',
-            data: null,
-            error: { code: 'NO_CREDENTIALS', message: 'Codex credentials not found or expired' },
-          });
+          return res.json(
+            await noCredentialsOrLocalBudget(
+              userId,
+              'codex',
+              'Codex credentials not found or expired'
+            )
+          );
         }
 
         console.error('Codex usage fetch error:', err);
@@ -1670,13 +1783,9 @@ router.get('/limits', requireAuth, async (req, res) => {
     let credentials = await getClaudeCredentials();
 
     if (!credentials?.claudeAiOauth?.accessToken) {
-      return res.json({
-        success: false,
-        supported: false,
-        provider: 'claude',
-        data: null,
-        error: { code: 'NO_CREDENTIALS', message: 'Claude credentials not found' },
-      });
+      return res.json(
+        await noCredentialsOrLocalBudget(userId, 'claude', 'Claude credentials not found')
+      );
     }
 
     let { accessToken, subscriptionType, rateLimitTier } = credentials.claudeAiOauth;
@@ -1701,13 +1810,13 @@ router.get('/limits', requireAuth, async (req, res) => {
 
     if (!result.ok) {
       if (result.status === 401 || result.status === 403) {
-        return res.json({
-          success: false,
-          supported: false,
-          provider: 'claude',
-          data: null,
-          error: { code: 'NO_CREDENTIALS', message: 'Claude credentials not found or expired' },
-        });
+        return res.json(
+          await noCredentialsOrLocalBudget(
+            userId,
+            'claude',
+            'Claude credentials not found or expired'
+          )
+        );
       }
       console.error('Claude API error:', result.status, result.error);
       return res.status(result.status).json({

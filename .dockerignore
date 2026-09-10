@@ -18,7 +18,9 @@ postgres
 /*.list*
 /tmp-*.png
 *.log
-.env.local
+.env
+.env.*
+!.env.example
 .DS_Store
 .tmp
 packages/android
@@ -26,3 +28,9 @@ test-*.mjs
 ANDROID_CLIENT_SPEC.md
 AGENTS.md
 *.spec.md
+.claude
+.claude-webui-attachments
+.claude-webui-images
+.screenshots
+reviews
+logos

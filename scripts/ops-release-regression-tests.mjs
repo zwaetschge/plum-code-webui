@@ -149,6 +149,7 @@ async function testHubProductionGuards(tempDir) {
     JWT_SECRET: 'j'.repeat(48),
     ENCRYPTION_KEY: 'e'.repeat(48),
     AUTH_ALLOWED_EMAILS: 'admin@example.com',
+    POSTGRES_PASSWORD: 'p'.repeat(24),
   };
 
   const valid = run(
@@ -178,6 +179,7 @@ async function testHubProductionGuards(tempDir) {
     'JWT_SECRET',
     'ENCRYPTION_KEY',
     'AUTH_ALLOWED_EMAILS',
+    'POSTGRES_PASSWORD',
   ]) {
     const env = { ...baseEnv, [required]: '' };
     const rejected = run(

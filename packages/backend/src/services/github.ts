@@ -1,7 +1,49 @@
 import { Octokit } from '@octokit/rest';
 import { simpleGit, SimpleGit } from 'simple-git';
+import path from 'path';
 import type { GitHubUser, GitHubRepo, CreateRepoRequest } from '@plum-code-webui/shared';
 import { getGitHubTokenForUser } from '../routes/settings.js';
+import { AppError } from '../middleware/errorHandler.js';
+import { isAllowedBasePath } from '../utils/allowedPaths.js';
+
+/**
+ * The `gh`-backed sibling service resolves every working directory through
+ * `isAllowedBasePath` before it runs anything; this older Octokit path did not,
+ * so `POST /api/github/clone` could drop a repository anywhere the process can
+ * write, and push/remote ran git against arbitrary directories. Same boundary,
+ * same place, so the two paths cannot drift apart again.
+ */
+function resolveWorkspacePath(workingDirectory: string, label: string): string {
+  const resolved = path.resolve(workingDirectory);
+  if (!isAllowedBasePath(resolved)) {
+    throw new AppError(`${label} is not an allowed path`, 403, 'FORBIDDEN_PATH');
+  }
+  return resolved;
+}
+
+/**
+ * `z.string().url()` also accepts `file://`, `ssh://` and `git://`, which for a
+ * clone means reading local directories or reaching internal git hosts, and for
+ * a remote means a place to push commits to. This service talks to github.com
+ * and nothing else — the Octokit client is not host-configurable either — so
+ * that is the whole allowlist.
+ */
+function assertGitHubUrl(url: string, label: string): string {
+  const scpLike = /^git@github\.com:[\w.-]+\/[\w.-]+(\.git)?$/;
+  if (scpLike.test(url)) return url;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new AppError(`${label} is not a valid URL`, 400, 'INVALID_REPO_URL');
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (parsed.protocol !== 'https:' || (host !== 'github.com' && host !== 'www.github.com')) {
+    throw new AppError(`${label} must be an https://github.com/... URL`, 400, 'INVALID_REPO_URL');
+  }
+  return url;
+}
 
 export class GitHubService {
   private async getOctokit(userId: string): Promise<Octokit | null> {
@@ -158,6 +200,8 @@ export class GitHubService {
     branch?: string
   ): Promise<{ success: boolean; path?: string; error?: string }> {
     const token = await getGitHubTokenForUser(userId);
+    assertGitHubUrl(url, 'Repository URL');
+    const cloneTarget = resolveWorkspacePath(targetDir, 'Target directory');
 
     try {
       // Inject token into URL for private repos
@@ -173,11 +217,11 @@ export class GitHubService {
         cloneOptions.push('--branch', branch);
       }
 
-      await git.clone(cloneUrl, targetDir, cloneOptions);
+      await git.clone(cloneUrl, cloneTarget, cloneOptions);
 
       return {
         success: true,
-        path: targetDir,
+        path: cloneTarget,
       };
     } catch (error) {
       return {
@@ -195,9 +239,10 @@ export class GitHubService {
     force = false
   ): Promise<{ success: boolean; error?: string }> {
     const token = await getGitHubTokenForUser(userId);
+    const repoPath = resolveWorkspacePath(workingDirectory, 'Working directory');
 
     try {
-      const git: SimpleGit = simpleGit(workingDirectory);
+      const git: SimpleGit = simpleGit(repoPath);
 
       // Get current branch if not specified
       const currentBranch = branch || (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
@@ -246,8 +291,11 @@ export class GitHubService {
     remoteName: string,
     repoUrl: string
   ): Promise<{ success: boolean; error?: string }> {
+    assertGitHubUrl(repoUrl, 'Remote URL');
+    const repoPath = resolveWorkspacePath(workingDirectory, 'Working directory');
+
     try {
-      const git: SimpleGit = simpleGit(workingDirectory);
+      const git: SimpleGit = simpleGit(repoPath);
 
       // Check if remote already exists
       const remotes = await git.getRemotes();

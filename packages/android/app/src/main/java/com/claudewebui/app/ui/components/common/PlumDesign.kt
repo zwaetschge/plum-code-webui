@@ -1,32 +1,30 @@
 package com.claudewebui.app.ui.components.common
 
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,23 +32,18 @@ import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ShowChart
-import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.ViewList
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeTint
-import dev.chrisbanes.haze.haze
-import dev.chrisbanes.haze.hazeChild
-import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,20 +56,18 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -84,11 +75,39 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.claudewebui.app.data.model.CLIProvider
 import com.claudewebui.app.data.model.Session
+import com.claudewebui.app.ui.theme.GlassRole
+import com.claudewebui.app.ui.theme.plumGlass
+import com.claudewebui.app.ui.theme.LocalPlumHazeReady
 import com.claudewebui.app.ui.theme.LocalPlumPalette
+import com.claudewebui.app.ui.theme.PlumTheme
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.haze
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Plum shared components
+//
+// Sections:
+//   1. Palette accessors
+//   2. Navigation model and app-wide locals
+//   3. Backdrop and glass surfaces
+//   4. Scroll-edge fades
+//   5. Buttons and controls
+//   6. Headers
+//   7. Chips
+//   8. Navigation chrome (rail, scaffold, bottom bar)
+//   9. Provider helpers
+//  10. Data visualisation
+//
+// Dp values come from PlumTheme.tokens (ui/theme/PlumTokens.kt) wherever a
+// token with the identical value exists; the few odd literals left are
+// deliberate and commented. See ui/theme/README.md.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── 1. Palette accessors ─────────────────────────────────────────────────────
 // Resolved through the active palette rather than hardcoded, so the whole app
 // re-themes without touching the ~340 call sites that read these names.
 // See ui/theme/PlumPalette.kt for the palettes themselves.
+
 val PlumBackground: Color @Composable @ReadOnlyComposable get() = LocalPlumPalette.current.background
 val PlumSurface: Color @Composable @ReadOnlyComposable get() = LocalPlumPalette.current.surface
 val PlumSurfaceStrong: Color @Composable @ReadOnlyComposable get() = LocalPlumPalette.current.surfaceStrong
@@ -105,20 +124,27 @@ val PlumRed: Color @Composable @ReadOnlyComposable get() = LocalPlumPalette.curr
 val PlumSubtleFill: Color @Composable @ReadOnlyComposable get() = LocalPlumPalette.current.subtleFill
 val PlumTrackFill: Color @Composable @ReadOnlyComposable get() = LocalPlumPalette.current.trackFill
 
+// ── 2. Navigation model and app-wide locals ──────────────────────────────────
+
 enum class MainDestination(
-    val label: String,
+    private val labelRes: Int,
     val icon: ImageVector,
 ) {
-    SESSIONS("Sessions", Icons.Outlined.ViewList),
-    ACTIVITY("Activity", Icons.Outlined.ShowChart),
-    ANALYTICS("Analytics", Icons.Outlined.Analytics),
-    LIBRARY("Library", Icons.Outlined.FolderOpen),
-    SETTINGS("Settings", Icons.Outlined.Settings),
+    SESSIONS(R.string.component_sessions, Icons.Outlined.ViewList),
+    ACTIVITY(R.string.component_activity, Icons.Outlined.ShowChart),
+    ANALYTICS(R.string.component_analytics, Icons.Outlined.Analytics),
+    LIBRARY(R.string.component_library, Icons.Outlined.FolderOpen),
+    SETTINGS(R.string.component_settings, Icons.Outlined.Settings);
+
+    val label: String @Composable get() = stringResource(labelRes)
 }
 
 /**
  * Backdrop sampled by the floating nav bar. Screens draw into it; the bar reads
  * it back blurred, which is what gives the frosted look instead of a flat tint.
+ *
+ * Only meaningful where [com.claudewebui.app.ui.theme.LocalPlumHazeReady] is
+ * also true; the default instance here has no source feeding it.
  */
 val LocalPlumHaze = staticCompositionLocalOf { HazeState() }
 
@@ -129,6 +155,8 @@ val LocalPlumHaze = staticCompositionLocalOf { HazeState() }
  * Every screen inside [PlumNavScaffold] gets this host.
  */
 val LocalPlumSnackbar = staticCompositionLocalOf { SnackbarHostState() }
+
+// ── 3. Backdrop and glass surfaces ───────────────────────────────────────────
 
 @Composable
 fun PlumBackdrop(
@@ -165,6 +193,7 @@ fun PlumBackdrop(
                 )
             }
             if (palette.grid != Color.Transparent) {
+                // Grid pitch is a backdrop texture, not a layout value.
                 val step = 36.dp.toPx()
                 var x = 0f
                 while (x <= size.width) {
@@ -191,6 +220,10 @@ fun PlumBackdrop(
  * and a bright hairline along the top edge standing in for the CSS
  * `inset 0 1px 0` highlight. The backdrop itself is procedural and
  * low-frequency, so it needs no blur to look diffused behind the glass.
+ *
+ * Token equivalent: `Modifier.plumGlass(GlassRole.Default, panelShape)` plus
+ * `elevation.level4`; new code should prefer
+ * [com.claudewebui.app.ui.theme.PlumGlassCard].
  */
 @Composable
 fun GlassPanel(
@@ -200,11 +233,16 @@ fun GlassPanel(
     content: @Composable () -> Unit,
 ) {
     val palette = LocalPlumPalette.current
+    val tokens = PlumTheme.tokens
     val shape = RoundedCornerShape(radius)
     Box(
         modifier = modifier
             .shadow(
-                elevation = if (palette.glassShadow == Color.Transparent) 0.dp else 10.dp,
+                elevation = if (palette.glassShadow == Color.Transparent) {
+                    tokens.elevation.level0
+                } else {
+                    tokens.elevation.level4
+                },
                 shape = shape,
                 ambientColor = palette.glassShadow,
                 spotColor = palette.glassShadow,
@@ -215,7 +253,7 @@ fun GlassPanel(
                     listOf(palette.glassFillTop, palette.glassFill),
                 ),
             )
-            .border(1.dp, borderColor, shape),
+            .border(tokens.border.hairline, borderColor, shape),
     ) {
         if (palette.glassHighlight != Color.Transparent) {
             // The lit top edge. Inset horizontally so it fades out before the
@@ -230,7 +268,7 @@ fun GlassPanel(
                     ),
                     start = Offset(inset, 1f),
                     end = Offset(size.width - inset, 1f),
-                    strokeWidth = 1.dp.toPx(),
+                    strokeWidth = tokens.border.hairline.toPx(),
                 )
             }
         }
@@ -243,6 +281,8 @@ fun GlassPanel(
  * fields. Same recipe as [GlassPanel] minus the drop shadow and top highlight,
  * which don't read at small scale: a translucent gradient over the atmospheric
  * backdrop plus a hairline border.
+ *
+ * Token equivalent: `Modifier.plumGlass(shape = shape, highlight = false)`.
  */
 @Composable
 fun Modifier.glassSurface(
@@ -250,11 +290,14 @@ fun Modifier.glassSurface(
     borderColor: Color? = null,
 ): Modifier {
     val palette = LocalPlumPalette.current
+    val hairline = PlumTheme.tokens.border.hairline
     return this
         .clip(shape)
         .background(Brush.verticalGradient(listOf(palette.glassFillTop, palette.glassFill)))
-        .border(1.dp, borderColor ?: palette.border, shape)
+        .border(hairline, borderColor ?: palette.border, shape)
 }
+
+// ── 4. Scroll-edge fades ─────────────────────────────────────────────────────
 
 /**
  * Dissolves a scroll container's edges instead of clipping them. A list that
@@ -357,7 +400,7 @@ private fun ContentDrawScope.fadeStrip(rect: Rect, brush: Brush) {
     drawIntoCanvas { canvas -> canvas.restore() }
 }
 
-/** Legacy single-layer mask, used only when both axes fade at once. */
+/** Single-layer mask, used only when both axes fade at once. */
 private fun ContentDrawScope.fadeMask(top: Dp, bottom: Dp, start: Dp, end: Dp) {
     if (top > 0.dp) {
         drawRect(
@@ -399,6 +442,9 @@ private fun ContentDrawScope.fadeMask(top: Dp, bottom: Dp, start: Dp, end: Dp) {
     }
 }
 
+// ── 5. Buttons and controls ──────────────────────────────────────────────────
+
+/** Round raised icon button at the minimum touch target; the header action. */
 @Composable
 fun PlumIconButton(
     icon: ImageVector,
@@ -407,18 +453,21 @@ fun PlumIconButton(
     modifier: Modifier = Modifier,
     tint: Color = PlumText,
 ) {
+    val tokens = PlumTheme.tokens
     Box(
         modifier = modifier
-            .size(48.dp)
+            .size(tokens.sizing.touchTarget)
             .clip(CircleShape)
             .background(LocalPlumPalette.current.controlSurface)
-            .border(1.dp, PlumBorderSoft, CircleShape)
+            .border(tokens.border.hairline, PlumBorderSoft, CircleShape)
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(24.dp))
+        Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(tokens.sizing.iconLg))
     }
 }
+
+// ── 6. Headers ───────────────────────────────────────────────────────────────
 
 @Composable
 fun PlumScreenHeader(
@@ -428,10 +477,14 @@ fun PlumScreenHeader(
     live: Boolean = false,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
+    val tokens = PlumTheme.tokens
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 14.dp),
+            .padding(
+                horizontal = tokens.spacing.headerHorizontal,
+                vertical = tokens.spacing.headerVertical,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -446,11 +499,13 @@ fun PlumScreenHeader(
                 if (live) {
                     Box(
                         Modifier
-                            .padding(start = 10.dp, end = 7.dp)
-                            .size(8.dp)
+                            // 7dp trailing gap is optical: the dot sits closer
+                            // to its stringResource(R.string.component_live) label than to the title.
+                            .padding(start = tokens.spacing.compact, end = 7.dp)
+                            .size(tokens.sizing.statusDot)
                             .background(PlumGreen, CircleShape),
                     )
-                    Text("Live", color = PlumMuted, fontSize = 14.sp)
+                    Text(stringResource(R.string.component_live), color = PlumMuted, fontSize = 14.sp)
                 }
             }
             Text(
@@ -461,9 +516,53 @@ fun PlumScreenHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), content = actions)
+        Row(horizontalArrangement = Arrangement.spacedBy(tokens.spacing.compact), content = actions)
     }
 }
+
+@Composable
+fun SectionHeading(
+    title: String,
+    modifier: Modifier = Modifier,
+    caption: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, color = PlumText, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+        if (caption != null) {
+            Text("  $caption", color = PlumMuted, fontSize = 14.sp)
+        }
+        Box(Modifier.weight(1f))
+        trailing?.invoke()
+    }
+}
+
+// ── 7. Chips ─────────────────────────────────────────────────────────────────
+
+/** Tinted status tag: 14% of [color] behind a label in the same colour. */
+@Composable
+fun StatusPill(
+    label: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = PlumTheme.tokens
+    Box(
+        modifier = modifier
+            // 9dp sits between radius.sm and radius.chip; kept so the pill
+            // does not visibly change. Candidate for radius.chip on migration.
+            .clip(RoundedCornerShape(9.dp))
+            .background(color.copy(alpha = .14f))
+            .padding(horizontal = tokens.spacing.compact, vertical = tokens.spacing.inline),
+    ) {
+        Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+// ── 8. Navigation chrome ─────────────────────────────────────────────────────
 
 /**
  * A vertical navigation rail for wide windows.
@@ -480,17 +579,20 @@ fun PlumNavRail(
     badgeDestination: MainDestination? = MainDestination.ACTIVITY,
     badgeCount: Int = 0,
 ) {
+    val tokens = PlumTheme.tokens
     // Five labelled items need roughly 350dp; below that the labels go and the
     // rail narrows to icons so every destination still fits without scrolling.
     val short = isShortWindow() || LocalDensity.current.fontScale >= 1.5f
+    val itemShape = RoundedCornerShape(tokens.radius.panel)
     // Sized to its items and parked in the bottom-left corner: on a tablet held
     // in two hands that is where the thumb actually reaches. A full-height pill
     // put the destinations in the middle of the screen, out of reach.
     GlassPanel(
         modifier = modifier
             .wrapContentHeight()
-            .width(if (short) 68.dp else 96.dp)
-            .padding(start = 10.dp, bottom = 10.dp),
+            .width(if (short) tokens.sizing.navRailWidthShort else tokens.sizing.navRailWidth)
+            .padding(start = tokens.spacing.compact, bottom = tokens.spacing.compact),
+        // Between radius.xl and radius.bar; matches the rail's narrower width.
         radius = 26.dp,
     ) {
         Column(
@@ -498,8 +600,13 @@ fun PlumNavRail(
                 .fillMaxWidth()
                 .wrapContentHeight()
                 .navigationBarsPadding()
-                .padding(vertical = if (short) 6.dp else 12.dp, horizontal = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(if (short) 2.dp else 6.dp),
+                .padding(
+                    vertical = if (short) tokens.spacing.inline else tokens.spacing.md,
+                    horizontal = tokens.spacing.inline,
+                ),
+            verticalArrangement = Arrangement.spacedBy(
+                if (short) tokens.spacing.xxs else tokens.spacing.inline,
+            ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             MainDestination.entries.forEach { destination ->
@@ -507,43 +614,24 @@ fun PlumNavRail(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(itemShape)
                         .then(
                             if (active) {
                                 Modifier
                                     .background(LocalPlumPalette.current.selectionTint)
-                                    .border(1.dp, PlumAccent, RoundedCornerShape(20.dp))
+                                    .border(tokens.border.hairline, PlumAccent, itemShape)
                             } else Modifier
                         )
                         .semantics { this.selected = active }
                         .clickable(role = Role.Button) { onNavigate(destination) }
-                        .padding(vertical = if (short) 7.dp else 10.dp),
+                        .padding(vertical = if (short) 7.dp else tokens.spacing.compact),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Box {
-                        Icon(
-                            destination.icon,
-                            contentDescription = destination.label,
-                            tint = if (active) PlumAccent else PlumMuted,
-                            modifier = Modifier.size(23.dp),
-                        )
-                        if (destination == badgeDestination && badgeCount > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(15.dp)
-                                    .background(PlumAmber, CircleShape),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    badgeCount.coerceAtMost(9).toString(),
-                                    color = Color.Black,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                            }
-                        }
-                    }
+                    NavDestinationIcon(
+                        destination = destination,
+                        active = active,
+                        badgeCount = if (destination == badgeDestination) badgeCount else 0,
+                    )
                     if (!short) {
                         Text(
                             destination.label,
@@ -552,10 +640,48 @@ fun PlumNavRail(
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 4.dp),
+                            modifier = Modifier.padding(top = tokens.spacing.xs),
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Destination icon with the amber count badge. Shared by the rail and the
+ * bottom bar, which used to carry two identical copies.
+ */
+@Composable
+private fun NavDestinationIcon(
+    destination: MainDestination,
+    active: Boolean,
+    badgeCount: Int,
+) {
+    val tokens = PlumTheme.tokens
+    Box {
+        Icon(
+            destination.icon,
+            contentDescription = destination.label,
+            // 23dp: one step under iconLg so five items fit the short bar.
+            tint = if (active) PlumAccent else PlumMuted,
+            modifier = Modifier.size(23.dp),
+        )
+        if (badgeCount > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(tokens.sizing.badge)
+                    .background(PlumAmber, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    badgeCount.coerceAtMost(9).toString(),
+                    color = Color.Black,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
     }
@@ -581,10 +707,13 @@ fun PlumNavScaffold(
     header: (@Composable () -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
+    val tokens = PlumTheme.tokens
     // Provided once at the app root, not here: screens collect their error
     // events above this scaffold, and a host state created here would be a
     // different instance from the one they post into.
     val snackbarHostState = LocalPlumSnackbar.current
+    // Floating action button inset from the content corner.
+    val fabInset = 22.dp
     if (isTabletWidth()) {
         // The header floats over the top-left corner instead of sitting in a row
         // above everything: a real row also pushes the right-hand pane down, which
@@ -593,58 +722,58 @@ fun PlumNavScaffold(
         // apply it to just the columns that sit underneath.
         Box(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxSize()) {
-            PlumNavRail(
-                selected,
-                onNavigate,
-                badgeCount = badgeCount,
-                // Bottom-left corner. The title floats over the space this leaves
-                // free at the top of the rail column, so neither has to move.
-                modifier = Modifier.align(Alignment.Bottom),
-            )
-            // Without a Scaffold there is nothing applying window insets, so
-            // the content would slide under the status bar.
-            // No status bar inset here on purpose. The bar is transparent and
-            // floats over the content: backdrops, gradients and glass panels run
-            // all the way to the top edge, and the inset is handed to the screen
-            // so it can offset the parts that must stay readable. Consuming it
-            // here instead cut a hard horizontal edge across the top of every
-            // pane that paints its own background.
-            Box(Modifier.weight(1f)) {
-                // Rail layouts have no bottom bar consuming the nav-bar inset,
-                // so hand it to the screen instead of a zero padding.
-                content(
-                    PaddingValues(
-                        top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
-                        bottom = WindowInsets.navigationBars
-                            .asPaddingValues()
-                            .calculateBottomPadding(),
+                PlumNavRail(
+                    selected,
+                    onNavigate,
+                    badgeCount = badgeCount,
+                    // Bottom-left corner. The title floats over the space this leaves
+                    // free at the top of the rail column, so neither has to move.
+                    modifier = Modifier.align(Alignment.Bottom),
+                )
+                // Without a Scaffold there is nothing applying window insets, so
+                // the content would slide under the status bar.
+                // No status bar inset here on purpose. The bar is transparent and
+                // floats over the content: backdrops, gradients and glass panels run
+                // all the way to the top edge, and the inset is handed to the screen
+                // so it can offset the parts that must stay readable. Consuming it
+                // here instead cut a hard horizontal edge across the top of every
+                // pane that paints its own background.
+                Box(Modifier.weight(1f)) {
+                    // Rail layouts have no bottom bar consuming the nav-bar inset,
+                    // so hand it to the screen instead of a zero padding.
+                    content(
+                        PaddingValues(
+                            top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                            bottom = WindowInsets.navigationBars
+                                .asPaddingValues()
+                                .calculateBottomPadding(),
+                        )
                     )
-                )
-                SnackbarHost(
-                    snackbarHostState,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                        .padding(bottom = 16.dp),
-                )
-                // No bottom bar to sit above, so the action floats in the
-                // content corner itself.
-                floatingActionButton?.let { fab ->
-                    Box(
-                        Modifier
-                            .align(Alignment.BottomEnd)
+                    SnackbarHost(
+                        snackbarHostState,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
                             .navigationBarsPadding()
-                            .padding(end = 22.dp, bottom = 22.dp),
-                    ) { fab() }
+                            .padding(bottom = tokens.spacing.lg),
+                    )
+                    // No bottom bar to sit above, so the action floats in the
+                    // content corner itself.
+                    floatingActionButton?.let { fab ->
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .navigationBarsPadding()
+                                .padding(end = fabInset, bottom = fabInset),
+                        ) { fab() }
+                    }
                 }
-            }
             }
             header?.let { headerContent ->
                 Box(
                     Modifier
                         .align(Alignment.TopStart)
                         .statusBarsPadding()
-                        .padding(start = 16.dp, top = 4.dp),
+                        .padding(start = tokens.spacing.lg, top = tokens.spacing.xs),
                 ) { headerContent() }
             }
         }
@@ -654,41 +783,46 @@ fun PlumNavScaffold(
         // session card off with a hard black edge. Content now scrolls beneath
         // the glass bar and simply gets enough bottom padding to clear it.
         val short = isShortWindow() || LocalDensity.current.fontScale >= 1.5f
-        val barHeight = if (short) 54.dp else 78.dp
-        val barInset = barHeight + if (short) 8.dp else 16.dp
+        val barHeight = if (short) tokens.sizing.navBarHeightShort else tokens.sizing.navBarHeight
+        val barInset = barHeight + if (short) tokens.spacing.sm else tokens.spacing.lg
 
         val hazeState = remember { HazeState() }
 
         Scaffold(
             containerColor = Color.Transparent,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        ) { padding ->
+        ) { _ ->
             Box(Modifier.fillMaxSize()) {
-              // Everything drawn here is what the bar blurs.
-              Box(Modifier.fillMaxSize().haze(hazeState)) {
-                // Same rule as the rail layout: the bar floats, and the screen
-                // gets the inset. Scaffold's own value is zero here because
-                // contentWindowInsets is cleared, so read the inset directly.
-                content(
-                    PaddingValues(
-                        top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
-                        bottom = barInset + WindowInsets.navigationBars
-                            .asPaddingValues()
-                            .calculateBottomPadding(),
+                // Everything drawn here is what the bar blurs.
+                Box(Modifier.fillMaxSize().haze(hazeState)) {
+                    // Same rule as the rail layout: the bar floats, and the screen
+                    // gets the inset. Scaffold's own value is zero here because
+                    // contentWindowInsets is cleared, so read the inset directly.
+                    content(
+                        PaddingValues(
+                            top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                            bottom = barInset + WindowInsets.navigationBars
+                                .asPaddingValues()
+                                .calculateBottomPadding(),
+                        )
                     )
+                }
+
+                // Above the floating bar, or the bar covers the message.
+                SnackbarHost(
+                    snackbarHostState,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(bottom = barInset),
                 )
-              }
 
-              // Above the floating bar, or the bar covers the message.
-              SnackbarHost(
-                  snackbarHostState,
-                  modifier = Modifier
-                      .align(Alignment.BottomCenter)
-                      .navigationBarsPadding()
-                      .padding(bottom = barInset),
-              )
-
-                CompositionLocalProvider(LocalPlumHaze provides hazeState) {
+                // The bar is laid out above the haze source, so it may blur it;
+                // LocalPlumHazeReady tells plumGlass(...) the state is live.
+                CompositionLocalProvider(
+                    LocalPlumHaze provides hazeState,
+                    LocalPlumHazeReady provides true,
+                ) {
                     PlumBottomBar(
                         selected,
                         onNavigate,
@@ -702,7 +836,7 @@ fun PlumNavScaffold(
                         Modifier
                             .align(Alignment.BottomEnd)
                             .navigationBarsPadding()
-                            .padding(end = 22.dp, bottom = barInset),
+                            .padding(end = fabInset, bottom = barInset),
                     ) { fab() }
                 }
             }
@@ -718,34 +852,27 @@ fun PlumBottomBar(
     badgeDestination: MainDestination? = MainDestination.ACTIVITY,
     badgeCount: Int = 0,
 ) {
+    val tokens = PlumTheme.tokens
     val short = isShortWindow() || LocalDensity.current.fontScale >= 1.5f
-    val palette = LocalPlumPalette.current
-    val hazeState = LocalPlumHaze.current
-    GlassPanel(
+    val barShape = tokens.radius.barShape
+    // 22dp: the item pill is inset from the 30dp bar so both curves stay concentric.
+    val itemShape = RoundedCornerShape(22.dp)
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = if (short) 4.dp else 8.dp)
-            .height(if (short) 54.dp else 78.dp)
-            // Frosted: sample the content behind, blur it, tint it. On devices
-            // without RenderEffect support Haze falls back to the tint alone.
-            .clip(RoundedCornerShape(30.dp))
-            .hazeChild(
-                state = hazeState,
-                shape = RoundedCornerShape(30.dp),
-                style = HazeStyle(
-                    backgroundColor = palette.background,
-                    tint = HazeTint(palette.background.copy(alpha = .55f)),
-                    blurRadius = 28.dp,
-                    noiseFactor = .04f,
-                ),
-            ),
-        radius = 30.dp,
+            .padding(
+                horizontal = tokens.spacing.cozy,
+                vertical = if (short) tokens.spacing.xs else tokens.spacing.sm,
+            )
+            .height(if (short) tokens.sizing.navBarHeightShort else tokens.sizing.navBarHeight)
+            .shadow(tokens.elevation.level4, barShape)
+            .plumGlass(role = GlassRole.Overlay, shape = barShape),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 4.dp, vertical = 5.dp),
+                .padding(horizontal = tokens.spacing.xs, vertical = 5.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -754,44 +881,25 @@ fun PlumBottomBar(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(22.dp))
+                        .clip(itemShape)
                         .then(
                             if (active) {
                                 Modifier
                                     .background(LocalPlumPalette.current.selectionTint)
-                                    .border(1.dp, PlumAccent, RoundedCornerShape(22.dp))
+                                    .border(tokens.border.hairline, PlumAccent, itemShape)
                             } else Modifier
                         )
                         .semantics { this.selected = active }
                         .clickable(role = Role.Button) { onNavigate(destination) }
-                        .padding(vertical = 8.dp),
+                        .padding(vertical = tokens.spacing.sm),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Box {
-                        Icon(
-                            destination.icon,
-                            contentDescription = destination.label,
-                            tint = if (active) PlumAccent else PlumMuted,
-                            modifier = Modifier.size(23.dp),
-                        )
-                        if (destination == badgeDestination && badgeCount > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(15.dp)
-                                    .background(PlumAmber, CircleShape),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    badgeCount.coerceAtMost(9).toString(),
-                                    color = Color.Black,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                            }
-                        }
-                    }
+                    NavDestinationIcon(
+                        destination = destination,
+                        active = active,
+                        badgeCount = if (destination == badgeDestination) badgeCount else 0,
+                    )
                     if (!short) Text(
                         destination.label,
                         color = if (active) PlumAccent else PlumMuted,
@@ -804,41 +912,7 @@ fun PlumBottomBar(
     }
 }
 
-@Composable
-fun StatusPill(
-    label: String,
-    color: Color,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(color.copy(alpha = .14f))
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-    ) {
-        Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-fun SectionHeading(
-    title: String,
-    modifier: Modifier = Modifier,
-    caption: String? = null,
-    trailing: (@Composable () -> Unit)? = null,
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, color = PlumText, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-        if (caption != null) {
-            Text("  $caption", color = PlumMuted, fontSize = 14.sp)
-        }
-        Box(Modifier.weight(1f))
-        trailing?.invoke()
-    }
-}
+// ── 9. Provider helpers ──────────────────────────────────────────────────────
 
 // Composable because the brand tints now resolve through the active palette.
 @Composable
@@ -873,6 +947,8 @@ fun providerModel(provider: CLIProvider): String = when (provider) {
 /** The model a session actually runs: explicit choice first, provider default as fallback. */
 fun sessionModel(session: Session): String =
     session.cliModel?.takeIf { it.isNotBlank() } ?: providerModel(session.cliProvider)
+
+// ── 10. Data visualisation ───────────────────────────────────────────────────
 
 @Composable
 fun Sparkline(

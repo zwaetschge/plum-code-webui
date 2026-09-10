@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="workflow_heading">Mit einer Vorlage starten</string>
+    <string name="workflow_quick_brief_title">Klare Zusammenfassung</string>
+    <string name="workflow_quick_brief_description">Text, Dateien, Links und Notizen auf das Wesentliche reduzieren.</string>
+    <string name="workflow_quick_brief_prompt">Fasse das Material, das ich bereitstelle, klar zusammen. Lies zuerst Texte, Dateien, Links und Notizen. Trenne Fakten von Annahmen, benenne Entscheidungen, Risiken, offene Fragen und nächste Schritte. Halte das Ergebnis knapp und verständlich.</string>
+    <string name="workflow_research_brief_title">Thema recherchieren</string>
+    <string name="workflow_research_brief_description">Quellen vergleichen und eine praktisch nutzbare Antwort finden.</string>
+    <string name="workflow_research_brief_prompt">Recherchiere mein Thema oder meine Frage und erstelle einen praktischen Überblick. Kläre die genaue Frage nur bei Bedarf. Nutze aktuelle externe Quellen, wenn sich die Antwort geändert haben könnte. Vergleiche relevante Standpunkte oder Optionen, verlinke Quellen und schliesse mit einer direkten Antwort, Einschränkungen und nächsten Schritten.</string>
+    <string name="workflow_draft_message_title">Nachricht entwerfen</string>
+    <string name="workflow_draft_message_description">E-Mails, Antworten, Ankündigungen und Beiträge formulieren.</string>
+    <string name="workflow_draft_message_prompt">Hilf mir, die gewünschte Nachricht zu entwerfen. Frage nur nach Zielgruppe, Ziel, Ton oder Einschränkungen, wenn diese Angaben notwendig sind. Erstelle ansonsten eine natürliche, konkrete Fassung und bei Bedarf zwei kürzere Alternativen: eine wärmere und eine direktere.</string>
+    <string name="workflow_plan_project_title">Projekt planen</string>
+    <string name="workflow_plan_project_description">Ein Ziel in Meilensteine und erste Schritte übersetzen.</string>
+    <string name="workflow_plan_project_prompt">Erstelle einen realistischen Plan für mein Ziel. Definiere das Ergebnis, gliedere es in Meilensteine, benenne Abhängigkeiten, Risiken und Entscheidungen und schlage einen praktischen Zeitplan vor. Schliesse mit den ersten konkreten Schritten ab.</string>
+    <string name="workflow_creative_direction_title">Kreative Idee entwickeln</string>
+    <string name="workflow_creative_direction_description">Konzepte, Namen, Kampagnen und Szenen ausarbeiten.</string>
+    <string name="workflow_creative_direction_prompt">Hilf mir, meine kreative Idee auszuarbeiten. Erkunde mehrere starke Richtungen und erkläre ihre Stärken. Entwickle die beste Option zu einem konkreten Entwurf, Text, einer Struktur, Szene, Kampagne, Namensauswahl oder visuellen Richtung passend zu meinem Anliegen.</string>
+    <string name="workflow_decision_support_title">Optionen vergleichen</string>
+    <string name="workflow_decision_support_description">Kriterien, Vor- und Nachteile und eine klare Empfehlung.</string>
+    <string name="workflow_decision_support_prompt">Hilf mir, zwischen den von mir genannten Optionen zu entscheiden. Definiere Entscheidungskriterien, vergleiche die Optionen, benenne Zielkonflikte, Kosten, Risiken und Umkehrbarkeit. Gib eine klare Empfehlung und nenne die Annahmen, die sie ändern würden.</string>
+</resources>

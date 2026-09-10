@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.screens.settings
 
+import com.claudewebui.app.R
+import com.claudewebui.app.ui.screens.screenErrorMessage
+import com.claudewebui.app.core.network.apiCall
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.lifecycle.ViewModel
@@ -169,11 +172,15 @@ data class SettingsUiState(
 // Theme options live in AppThemeStore so the activity can read them without
 // depending on this ViewModel.
 
-enum class FontSize(val label: String, val scale: Float) {
-    SMALL("Small", 0.85f),
-    MEDIUM("Medium", 1.0f),
-    LARGE("Large", 1.15f),
-    EXTRA_LARGE("Extra large", 1.3f),
+enum class FontSize(private val labelRes: Int, val scale: Float) {
+    SMALL(R.string.settings_small_c74fd, 0.85f),
+    MEDIUM(R.string.settings_medium_d4049, 1.0f),
+    LARGE(R.string.settings_large_738fd, 1.15f),
+    EXTRA_LARGE(R.string.settings_extra_large_05128, 1.3f);
+
+    val label: String
+        @androidx.compose.runtime.Composable get() = androidx.compose.ui.res.stringResource(labelRes)
+
 }
 
 // ── ViewModel ─────────────────────────────────────────────────────────────────
@@ -248,7 +255,7 @@ class SettingsViewModel(
                                 settings.appearanceSync,
                             )
                         }
-                        .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                        .onFailure { e -> _uiState.update { it.copy(error = e.screenErrorMessage("settings", "loadSettings", context)) } }
                     // Depends on the allowedTools allowlist from the call above.
                     loadCliToolsInternal()
                 }
@@ -409,7 +416,7 @@ class SettingsViewModel(
             _uiState.update { it.copy(isLoading = true) }
             settingsRepository.getAgents()
                 .onSuccess { agents -> _uiState.update { it.copy(agents = agents) } }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "loadAgents", context)) } }
             loadConfigLibrary()
             _uiState.update { it.copy(isLoading = false) }
         }
@@ -434,7 +441,7 @@ class SettingsViewModel(
                         )
                     }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "toggleConfigSkill", context)) } }
         }
     }
 
@@ -450,7 +457,7 @@ class SettingsViewModel(
                         )
                     }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "toggleConfigAgent", context)) } }
         }
     }
 
@@ -466,7 +473,7 @@ class SettingsViewModel(
                         )
                     }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "toggleConfigPlugin", context)) } }
         }
     }
 
@@ -501,7 +508,7 @@ class SettingsViewModel(
                         it.copy(
                             libraryEditorKind = null,
                             libraryEditorLoading = false,
-                            error = error.message,
+                            error = error.screenErrorMessage("settings", "openConfigDocument", context),
                         )
                     }
                 }
@@ -529,7 +536,7 @@ class SettingsViewModel(
                     loadConfigLibraryInternal()
                 }
                 .onFailure { error ->
-                    _uiState.update { it.copy(librarySaving = false, error = error.message) }
+                    _uiState.update { it.copy(librarySaving = false, error = error.screenErrorMessage("settings", "saveConfigDocument", context)) }
                 }
         }
     }
@@ -544,7 +551,7 @@ class SettingsViewModel(
                     loadConfigLibraryInternal()
                 }
                 .onFailure { error ->
-                    _uiState.update { it.copy(librarySaving = false, error = error.message) }
+                    _uiState.update { it.copy(librarySaving = false, error = error.screenErrorMessage("settings", "deleteConfigDocument", context)) }
                 }
         }
     }
@@ -558,7 +565,7 @@ class SettingsViewModel(
                     _uiState.update { it.copy(toastMessage = "$pluginName installed") }
                     loadConfigLibraryInternal()
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "installMarketplacePlugin", context)) } }
             _uiState.update { it.copy(marketplaceBusyIds = it.marketplaceBusyIds - id) }
         }
     }
@@ -603,7 +610,7 @@ class SettingsViewModel(
                 quotaPercent = quotaPercent ?: current.quotaPercent,
                 dailyCostUsd = dailyCostUsd ?: current.dailyCostUsd,
             )
-            runCatching {
+            apiCall {
                 settingsRepository.updateSettings(usageAlerts = next)
             }
         }
@@ -660,7 +667,7 @@ class SettingsViewModel(
                 it.copy(
                     // Shown once and never again; the server only stores a hash.
                     newGatewayTokenSecret = result.getOrNull()?.token,
-                    error = result.exceptionOrNull()?.message ?: it.error,
+                    error = result.exceptionOrNull()?.screenErrorMessage("settings", "createGatewayToken", context) ?: it.error,
                     parityBusy = false,
                 )
             }
@@ -678,7 +685,7 @@ class SettingsViewModel(
             val result = settingsRepository.revokeGatewayToken(id)
             _uiState.update {
                 it.copy(
-                    error = result.exceptionOrNull()?.message ?: it.error,
+                    error = result.exceptionOrNull()?.screenErrorMessage("settings", "revokeGatewayToken", context) ?: it.error,
                     toastMessage = if (result.isSuccess) "Token revoked" else it.toastMessage,
                     parityBusy = false,
                 )
@@ -704,7 +711,7 @@ class SettingsViewModel(
             val result = settingsRepository.installCodexPlugin(pluginName, marketplaceId)
             _uiState.update {
                 it.copy(
-                    error = result.exceptionOrNull()?.message ?: it.error,
+                    error = result.exceptionOrNull()?.screenErrorMessage("settings", "installCodexPlugin", context) ?: it.error,
                     toastMessage = if (result.isSuccess) "Plugin installed" else it.toastMessage,
                     parityBusy = false,
                 )
@@ -778,7 +785,7 @@ class SettingsViewModel(
             _uiState.update {
                 it.copy(
                     subagentUpstreams = result.getOrNull() ?: it.subagentUpstreams,
-                    error = result.exceptionOrNull()?.message ?: it.error,
+                    error = result.exceptionOrNull()?.screenErrorMessage("settings", "persistSubagentUpstreams", context) ?: it.error,
                     toastMessage = if (result.isSuccess) toast else it.toastMessage,
                     subagentBusy = false,
                 )
@@ -828,7 +835,7 @@ class SettingsViewModel(
             _uiState.update {
                 it.copy(
                     cliSubagents = result.getOrNull() ?: it.cliSubagents,
-                    error = result.exceptionOrNull()?.message ?: it.error,
+                    error = result.exceptionOrNull()?.screenErrorMessage("settings", "persistCliSubagents", context) ?: it.error,
                     toastMessage = if (result.isSuccess && toast != null) toast else it.toastMessage,
                     subagentBusy = false,
                 )
@@ -843,7 +850,7 @@ class SettingsViewModel(
             val result = settingsRepository.setCodexPluginEnabled(id, enabled)
             _uiState.update {
                 it.copy(
-                    error = result.exceptionOrNull()?.message ?: it.error,
+                    error = result.exceptionOrNull()?.screenErrorMessage("settings", "setCodexPluginEnabled", context) ?: it.error,
                     parityBusy = false,
                 )
             }
@@ -888,7 +895,7 @@ class SettingsViewModel(
                         it.copy(userSettings = settings, toastMessage = "Model set to $model")
                     }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "setProviderModel", context)) } }
         }
     }
 
@@ -902,7 +909,7 @@ class SettingsViewModel(
                         it.copy(userSettings = settings, toastMessage = "Reasoning set to $reasoning")
                     }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "setProviderReasoning", context)) } }
         }
     }
 
@@ -914,7 +921,7 @@ class SettingsViewModel(
                         it.copy(userSettings = settings, toastMessage = "Web search set to $mode")
                     }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "setCodexWebSearch", context)) } }
         }
     }
 
@@ -931,7 +938,7 @@ class SettingsViewModel(
                         )
                     }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "setCodexFastTier", context)) } }
         }
     }
 
@@ -957,7 +964,7 @@ class SettingsViewModel(
                     it.copy(zaiApi = status, zaiApiSaving = false, toastMessage = "Z.AI configuration saved")
                 }
             }.onFailure { error ->
-                _uiState.update { it.copy(zaiApiSaving = false, error = error.message) }
+                _uiState.update { it.copy(zaiApiSaving = false, error = error.screenErrorMessage("settings", "saveZaiApi", context)) }
             }
         }
     }
@@ -972,7 +979,7 @@ class SettingsViewModel(
                     }
                 }
                 .onFailure { error ->
-                    _uiState.update { it.copy(zaiApiSaving = false, error = error.message) }
+                    _uiState.update { it.copy(zaiApiSaving = false, error = error.screenErrorMessage("settings", "resetZaiApi", context)) }
                 }
         }
     }
@@ -1004,7 +1011,7 @@ class SettingsViewModel(
                     )
                 }
             }.onFailure { error ->
-                _uiState.update { it.copy(openCodeSaving = false, error = error.message) }
+                _uiState.update { it.copy(openCodeSaving = false, error = error.screenErrorMessage("settings", "saveOpenCodeProvider", context)) }
             }
         }
     }
@@ -1023,7 +1030,7 @@ class SettingsViewModel(
                     }
                 }
                 .onFailure { error ->
-                    _uiState.update { it.copy(openCodeSaving = false, error = error.message) }
+                    _uiState.update { it.copy(openCodeSaving = false, error = error.screenErrorMessage("settings", "deleteOpenCodeProvider", context)) }
                 }
         }
     }
@@ -1045,7 +1052,7 @@ class SettingsViewModel(
                     }
                 }
                 .onFailure { error ->
-                    val message = error.message ?: "Test failed"
+                    val message = error.screenErrorMessage("settings", "testOpenCodeProvider", context)
                     _uiState.update {
                         it.copy(
                             openCodeTestResults = it.openCodeTestResults + (id to TestResult.Failure(message)),
@@ -1085,7 +1092,7 @@ class SettingsViewModel(
                         )
                     }
                 }
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onFailure { e -> _uiState.update { it.copy(error = e.screenErrorMessage("settings", "addMcpServer", context)) } }
         }
     }
 
@@ -1112,7 +1119,7 @@ class SettingsViewModel(
                         )
                     }
                 }
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onFailure { e -> _uiState.update { it.copy(error = e.screenErrorMessage("settings", "updateMcpServer", context)) } }
         }
     }
 
@@ -1127,7 +1134,7 @@ class SettingsViewModel(
                         )
                     }
                 }
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onFailure { e -> _uiState.update { it.copy(error = e.screenErrorMessage("settings", "deleteMcpServer", context)) } }
         }
     }
 
@@ -1146,7 +1153,7 @@ class SettingsViewModel(
                     if (test.connected) TestResult.Success
                     else TestResult.Failure(test.error ?: "Server did not start")
                 },
-                onFailure = { error -> TestResult.Failure(error.message ?: "Test failed") },
+                onFailure = { error -> TestResult.Failure(error.screenErrorMessage("settings", "testMcpConnection", context)) },
             )
             _uiState.update { state ->
                 state.copy(mcpTestResults = state.mcpTestResults + (id to result))
@@ -1193,7 +1200,7 @@ class SettingsViewModel(
                 .onSuccess { agent ->
                     _uiState.update { it.copy(agents = it.agents + agent, toastMessage = "Agent created") }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "addAgent", context)) } }
         }
     }
 
@@ -1208,7 +1215,7 @@ class SettingsViewModel(
                         )
                     }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "updateAgent", context)) } }
         }
     }
 
@@ -1223,7 +1230,7 @@ class SettingsViewModel(
                         )
                     }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "deleteAgent", context)) } }
         }
     }
 
@@ -1235,7 +1242,7 @@ class SettingsViewModel(
                         state.copy(agents = state.agents.map { if (it.id == id) updated else it })
                     }
                 }
-                .onFailure { error -> _uiState.update { it.copy(error = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(error = error.screenErrorMessage("settings", "toggleAgent", context)) } }
         }
     }
 
@@ -1268,7 +1275,7 @@ class SettingsViewModel(
                     pollCliLogin(session.id)
                 }
                 .onFailure { error ->
-                    _uiState.update { it.copy(cliLoginError = error.message ?: "Login could not be started") }
+                    _uiState.update { it.copy(cliLoginError = error.screenErrorMessage("settings", "startCliLogin", context)) }
                 }
         }
     }
@@ -1291,7 +1298,7 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsRepository.submitCliLoginCode(id, code)
                 .onSuccess { session -> _uiState.update { it.copy(cliLogin = session) } }
-                .onFailure { error -> _uiState.update { it.copy(cliLoginError = error.message) } }
+                .onFailure { error -> _uiState.update { it.copy(cliLoginError = error.screenErrorMessage("settings", "submitCliLoginCode", context)) } }
         }
     }
 
@@ -1317,8 +1324,10 @@ class SettingsViewModel(
             try {
                 context.cacheDir.deleteRecursively()
                 _uiState.update { it.copy(cacheSize = "0 MB", toastMessage = "Cache cleared") }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = "Failed to clear cache: ${e.message}") }
+                _uiState.update { it.copy(error = e.screenErrorMessage("settings", "clearCache", context)) }
             }
             onDone()
         }

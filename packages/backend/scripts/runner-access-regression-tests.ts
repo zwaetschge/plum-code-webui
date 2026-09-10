@@ -31,7 +31,6 @@ for (const [id, email, role, status] of [
 }
 
 try {
-
   assert.equal((await getRunnerAccessDecision('admin')).allowed, true);
   assert.equal((await getRunnerAccessDecision('user')).allowed, false);
   assert.match((await getRunnerAccessDecision('user')).reason || '', /admin-only/);

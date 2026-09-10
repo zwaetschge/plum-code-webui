@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.baselineprofile)
 }
 
 android {
@@ -49,8 +50,8 @@ android {
         applicationId = "com.claudewebui.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3.0"
+        versionCode = 9
+        versionName = "1.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -99,6 +100,7 @@ android {
 }
 
 dependencies {
+    baselineProfile(project(":baselineprofile"))
     // Compose BOM
     val composeBom = platform(libs.compose.bom)
     implementation(composeBom)
@@ -123,10 +125,19 @@ dependencies {
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.activity.compose)
+    // Splash screen API — themed cold-start window that hands off to the
+    // Compose content on the first draw (Theme.Plum.Starting).
+    implementation(libs.core.splashscreen)
+    // Installs src/main/baseline-prof.txt on devices so the cold-start path is
+    // AOT-compiled instead of interpreted for the first runs after install.
+    implementation(libs.profileinstaller)
 
     // Room
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
+    implementation(libs.room.paging)
+    implementation(libs.paging.runtime)
+    implementation(libs.paging.compose)
     ksp(libs.room.compiler)
 
     // Security
@@ -179,6 +190,7 @@ dependencies {
 
     // Testing
     testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
     androidTestImplementation(libs.junit.ext)
     androidTestImplementation(libs.espresso.core)
     androidTestImplementation(libs.compose.ui.test.junit4)
@@ -192,4 +204,18 @@ if (project.projectDir.absolutePath.startsWith("/app/projects/")) {
     tasks.named<org.gradle.api.tasks.Delete>("clean") {
         setDelete(emptyList<Any>())
     }
+}
+
+// The MCP builder's assembleDebug must verify draft/send race regressions too.
+tasks.matching { it.name == "assembleDebug" }.configureEach {
+    dependsOn("testDebugUnitTest")
+    finalizedBy("assembleDebugAndroidTest")
+}
+
+baselineProfile {
+    // Device runs are explicit; ordinary debug builds never start profiling.
+    automaticGenerationDuringBuild = false
+    saveInSrc = true
+    mergeIntoMain = true
+    filter { include("com.claudewebui.app.**") }
 }

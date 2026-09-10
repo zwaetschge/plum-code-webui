@@ -4,6 +4,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { createReadStream, type Stats } from 'fs';
 import fs from 'fs/promises';
 import httpProxy from 'http-proxy';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { config } from '../config.js';
 import {
   STATIC_INIT_PATH,
@@ -46,12 +47,72 @@ function isPreviewHost(host: string | undefined): boolean {
   return host.toLowerCase() === config.previewHostname;
 }
 
+/**
+ * Ports the preview vhost may proxy to. The old rule was "anything above 1023",
+ * which turns the preview host into a request forwarder for every service
+ * listening on the container's loopback. The default now covers the ranges dev
+ * servers actually use; PREVIEW_ALLOWED_PORTS ("3000-3999,8080") overrides it.
+ */
+const previewPortRanges: Array<[number, number]> = (() => {
+  const raw = process.env.PREVIEW_ALLOWED_PORTS?.trim();
+  if (!raw) {
+    return [
+      [3000, 3999],
+      [4000, 4999],
+      [5000, 5999],
+      [8000, 8999],
+      [9000, 9999],
+    ];
+  }
+  const ranges: Array<[number, number]> = [];
+  for (const part of raw.split(',')) {
+    const entry = part.trim();
+    if (!entry) continue;
+    const match = entry.match(/^(\d+)(?:-(\d+))?$/);
+    if (!match) {
+      console.warn(`[preview] Ignoring unparseable PREVIEW_ALLOWED_PORTS entry: ${entry}`);
+      continue;
+    }
+    const from = Number(match[1]);
+    const to = match[2] ? Number(match[2]) : from;
+    if (from < 1 || to > 65535 || to < from) {
+      console.warn(`[preview] Ignoring out-of-range PREVIEW_ALLOWED_PORTS entry: ${entry}`);
+      continue;
+    }
+    ranges.push([from, to]);
+  }
+  return ranges;
+})();
+
 function isPortAllowed(port: number): boolean {
   if (!Number.isInteger(port)) return false;
-  if (port < 1024 || port > 65535) return false;
   // Never proxy to our own backend — would create loops / bypass auth
   if (port === config.port) return false;
-  return true;
+  return previewPortRanges.some(([from, to]) => port >= from && port <= to);
+}
+
+/**
+ * The cookie is scoped to the preview subdomain, but a cookie set on the parent
+ * domain by any other host under it is still sent here — so an unsigned value
+ * means a neighbouring subdomain picks the proxy target. Sign it with the
+ * session secret; only /__preview-init can mint one.
+ */
+function signPort(port: number): string {
+  return createHmac('sha256', config.sessionSecret)
+    .update(`preview-port:${port}`)
+    .digest('base64url')
+    .slice(0, 27);
+}
+
+function verifyPortCookie(raw: string): number | null {
+  const separator = raw.lastIndexOf('.');
+  if (separator <= 0) return null;
+  const port = parseInt(raw.slice(0, separator), 10);
+  if (!isPortAllowed(port)) return null;
+  const provided = Buffer.from(raw.slice(separator + 1));
+  const expected = Buffer.from(signPort(port));
+  if (provided.length !== expected.length) return null;
+  return timingSafeEqual(provided, expected) ? port : null;
 }
 
 function parseCookie(cookieHeader: string | undefined, name: string): string | null {
@@ -65,8 +126,7 @@ function parseCookie(cookieHeader: string | undefined, name: string): string | n
 function parsePortCookie(cookieHeader: string | undefined): number | null {
   const raw = parseCookie(cookieHeader, PORT_COOKIE);
   if (!raw) return null;
-  const port = parseInt(raw, 10);
-  return isPortAllowed(port) ? port : null;
+  return verifyPortCookie(decodeURIComponent(raw));
 }
 
 function parseStaticRootCookie(cookieHeader: string | undefined): string | null {
@@ -138,16 +198,19 @@ function handleInit(req: IncomingMessage, res: ServerResponse): void {
     res.end(
       errorPage(
         'Invalid port',
-        `Port must be an integer between 1024 and 65535, not equal to ${config.port}.`
+        `Port ${Number.isInteger(port) ? port : '?'} is not in the allowed preview range. ` +
+          `Set PREVIEW_ALLOWED_PORTS to widen it (current: ${previewPortRanges
+            .map(([from, to]) => (from === to ? `${from}` : `${from}-${to}`))
+            .join(', ')}), and note that ${config.port} is always excluded.`
       )
     );
     return;
   }
 
-  // HttpOnly signed by nothing — we rely on Authelia (Traefik ForwardAuth) for AuthZ.
-  // Cookies are scoped to the preview subdomain only.
+  // HMAC-signed and HttpOnly; AuthZ itself still comes from Authelia (Traefik
+  // ForwardAuth). Cookies are scoped to the preview subdomain only.
   const cookies = [
-    cookieString(PORT_COOKIE, String(port), 60 * 60 * 8),
+    cookieString(PORT_COOKIE, `${port}.${signPort(port)}`, 60 * 60 * 8),
     clearCookieString(STATIC_ROOT_COOKIE),
   ];
 

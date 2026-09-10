@@ -2,10 +2,10 @@ import { memo, useCallback, useState } from 'react';
 import { FileText, FileCode, File as FileIcon, Copy, Check, Quote } from 'lucide-react';
 import { MemoizedMarkdown } from './MemoizedMarkdown';
 import { buildChatMediaUrl, ChatMediaImage } from './ChatMediaImage';
+import { LegacyMediaFile, LegacyMediaImage } from './LegacyMedia';
 import { InteractiveOptions, detectOptions, isChoicePrompt } from './InteractiveOptions';
 import { DirectoryAccessPrompt } from '@/components/session/AllowedDirectoriesDialog';
 import { ProviderLogo } from '@/components/branding/ProviderLogo';
-import { useAuthStore } from '@/stores/authStore';
 import { socketService } from '@/services/socket';
 import { api } from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -47,7 +47,24 @@ function formatMessageTime(iso: string): string {
       });
 }
 
+// One signature per message object, kept for as long as that object is alive.
+//
+// The comparator runs for every rendered bubble on every parent render, and it
+// built three joined strings for each side each time — for messages whose media
+// almost never changes. Keyed on the object identity the work happens once; a
+// replaced message object is a cache miss by construction, which is exactly when
+// the signature has to be recomputed anyway.
+const mediaSignatureCache = new WeakMap<Message, string>();
+
 function mediaSignature(message: Message): string {
+  const cached = mediaSignatureCache.get(message);
+  if (cached !== undefined) return cached;
+  const signature = computeMediaSignature(message);
+  mediaSignatureCache.set(message, signature);
+  return signature;
+}
+
+function computeMediaSignature(message: Message): string {
   const durable = (message.media ?? [])
     .map(
       (media) =>
@@ -132,7 +149,6 @@ export const MessageBubble = memo(
       [sessionId]
     );
 
-    const token = useAuthStore.getState().token || '';
     const timestamp = formatMessageTime(message.createdAt);
     const displayContent =
       message.role === 'assistant' && (provider === 'claude' || provider === 'zai')
@@ -186,51 +202,40 @@ export const MessageBubble = memo(
             );
           })}
           {(!legacyAttachments || legacyAttachments.length === 0) &&
-            legacyImages?.map((img: MessageImage, imgIndex: number) => {
-              const imageUrl = `/api/sessions/${sessionId}/images/${img.filename}?token=${encodeURIComponent(token)}`;
-              return (
-                <img
-                  key={`img-${imgIndex}`}
-                  src={imageUrl}
-                  alt={`Attachment ${imgIndex + 1}`}
-                  className="max-h-32 max-w-48 rounded-lg border border-foreground/15 object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                  onClick={() => window.open(imageUrl, '_blank')}
-                />
-              );
-            })}
+            legacyImages?.map((img: MessageImage, imgIndex: number) => (
+              <LegacyMediaImage
+                key={`img-${imgIndex}`}
+                url={`/api/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(img.filename)}`}
+                alt={`Attachment ${imgIndex + 1}`}
+              />
+            ))}
           {legacyAttachments?.map((att: MessageAttachment, attIndex: number) => {
             const attachmentUrl =
               att.filename && att.path
-                ? `/api/sessions/${sessionId}/attachments/${att.filename}?token=${encodeURIComponent(token)}`
+                ? `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(att.filename)}`
                 : null;
 
             if (att.type === 'image' && attachmentUrl) {
               return (
-                <img
-                  key={`att-${attIndex}`}
-                  src={attachmentUrl}
-                  alt={att.filename}
-                  className="max-h-32 max-w-48 rounded-lg border border-foreground/15 object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                  onClick={() => window.open(attachmentUrl, '_blank')}
-                />
+                <LegacyMediaImage key={`att-${attIndex}`} url={attachmentUrl} alt={att.filename} />
               );
             }
 
             const AttachmentIcon =
               att.type === 'text' ? FileCode : att.type === 'pdf' ? FileText : FileIcon;
             return (
-              <div
+              <LegacyMediaFile
                 key={`att-${attIndex}`}
+                url={attachmentUrl}
+                filename={att.filename}
                 className={cn(
-                  'flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer hover:opacity-90 transition-opacity',
+                  'flex items-center gap-2 px-3 py-2 rounded-lg border',
                   message.role === 'user' ? 'border-white/20 bg-white/10' : 'border-border bg-muted'
                 )}
-                onClick={() => attachmentUrl && window.open(attachmentUrl, '_blank')}
-                title={att.filename}
               >
                 <AttachmentIcon className={cn('h-5 w-5', att.type === 'pdf' && 'text-red-500')} />
                 <span className="text-xs truncate max-w-32">{att.filename}</span>
-              </div>
+              </LegacyMediaFile>
             );
           })}
         </div>
@@ -250,7 +255,12 @@ export const MessageBubble = memo(
               >
                 <Quote className="h-3 w-3" />
               </button>
-              <button onClick={handleCopy} className="message-copy-button" title="Copy message">
+              <button
+                onClick={handleCopy}
+                className="message-copy-button"
+                title="Copy message"
+                aria-label={copied ? 'Message copied' : 'Copy message'}
+              >
                 {copied ? (
                   <Check className="h-3 w-3 text-emerald-500" />
                 ) : (
@@ -291,7 +301,12 @@ export const MessageBubble = memo(
         >
           <Quote className="h-3 w-3" />
         </button>
-        <button onClick={handleCopy} className="message-copy-button" title="Copy message">
+        <button
+          onClick={handleCopy}
+          className="message-copy-button"
+          title="Copy message"
+          aria-label={copied ? 'Message copied' : 'Copy message'}
+        >
           {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
         </button>
       </>

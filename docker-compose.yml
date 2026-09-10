@@ -61,13 +61,17 @@ services:
       # Optional reverse-proxy SSO (Authelia / ForwardAuth). Only enable when
       # this service is reachable exclusively through a trusted proxy.
       - PROXY_AUTH_ENABLED=${PROXY_AUTH_ENABLED:-false}
+      - PROXY_AUTH_TRUSTED_IPS=${PROXY_AUTH_TRUSTED_IPS:-}
       - PROXY_AUTH_EMAIL_HEADERS=${PROXY_AUTH_EMAIL_HEADERS:-}
       - PROXY_AUTH_USER_HEADERS=${PROXY_AUTH_USER_HEADERS:-}
       - PROXY_AUTH_NAME_HEADERS=${PROXY_AUTH_NAME_HEADERS:-}
       - SEED_ADMIN_EMAIL=${SEED_ADMIN_EMAIL:-}
-      # Existing self-hosted installs already require a strong SESSION_SECRET.
-      # Use it as a stable encryption fallback unless a separate key is supplied.
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-${SESSION_SECRET}}
+      # No SESSION_SECRET fallback: rotating SESSION_SECRET is a routine way to
+      # invalidate sessions, and with the old fallback that silently made every
+      # stored provider credential undecryptable. Upgrading an install that
+      # relied on the fallback? Set ENCRYPTION_KEY to your current
+      # SESSION_SECRET value once, then rotate the two independently.
+      - 'ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set in .env. New install: openssl rand -base64 48. Existing install that relied on the old fallback: use your current SESSION_SECRET value.}'
       # Optional CLI provider model overrides
       - CLI_PROVIDER_CLAUDE_MODELS=${CLI_PROVIDER_CLAUDE_MODELS:-}
       - CLI_PROVIDER_CLAUDE_DEFAULT_MODEL=${CLI_PROVIDER_CLAUDE_DEFAULT_MODEL:-sonnet}

@@ -57,10 +57,13 @@ class PlumTileService : TileService() {
         }
 
     private fun layout(snapshot: WearSnapshot): LayoutElementBuilders.LayoutElement {
-        val approvalsLine = if (snapshot.approvals.isEmpty()) {
-            "no approvals"
+        // Approvals and questions are both "someone has to answer this", and a
+        // tile has one line for it.
+        val waiting = snapshot.approvals.size + snapshot.questions.size
+        val approvalsLine = if (waiting == 0) {
+            "nothing waiting"
         } else {
-            "${snapshot.approvals.size} approval${if (snapshot.approvals.size == 1) "" else "s"}!"
+            "$waiting waiting!"
         }
         val openApp = ModifiersBuilders.Modifiers.Builder()
             .setClickable(
@@ -93,7 +96,7 @@ class PlumTileService : TileService() {
                         text(
                             approvalsLine,
                             14f,
-                            if (snapshot.approvals.isEmpty()) 0xFF8A8494.toInt() else 0xFFF59E0B.toInt(),
+                            if (waiting == 0) 0xFF8A8494.toInt() else 0xFFF59E0B.toInt(),
                         )
                     )
                     .addContent(

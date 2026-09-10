@@ -72,20 +72,20 @@ object NotificationService {
             listOf(
                 NotificationChannel(
                     SESSION_UPDATES_CHANNEL,
-                    "Session Updates",
+                    context.getString(R.string.native_channel_sessions),
                     NotificationManager.IMPORTANCE_DEFAULT
                 ).apply {
-                    description = "Notifies when a session completes or changes status"
+                    description = context.getString(R.string.native_channel_sessions_description)
                     setShowBadge(true)
                     enableLights(true)
                     lightColor = 0xFFCC785C.toInt() // AntiqueBrass brand color
                 },
                 NotificationChannel(
                     PERMISSION_REQUESTS_CHANNEL,
-                    "Permission Requests",
+                    context.getString(R.string.native_channel_permissions),
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
-                    description = "Requires your approval before an agent can run a command"
+                    description = context.getString(R.string.native_channel_permissions_description)
                     setShowBadge(true)
                     enableLights(true)
                     lightColor = 0xFFF59E0B.toInt() // WarningAmber
@@ -95,20 +95,20 @@ object NotificationService {
                 },
                 NotificationChannel(
                     ERRORS_CHANNEL,
-                    "Errors & Warnings",
+                    context.getString(R.string.native_channel_errors),
                     NotificationManager.IMPORTANCE_DEFAULT
                 ).apply {
-                    description = "Errors and warnings from active sessions"
+                    description = context.getString(R.string.native_channel_errors_description)
                     setShowBadge(false)
                     enableLights(true)
                     lightColor = 0xFFEF4444.toInt() // ErrorRed
                 },
                 NotificationChannel(
                     USAGE_ALERTS_CHANNEL,
-                    "Usage & Budget Alerts",
+                    context.getString(R.string.native_channel_usage),
                     NotificationManager.IMPORTANCE_DEFAULT
                 ).apply {
-                    description = "Provider quota and daily cost thresholds"
+                    description = context.getString(R.string.native_channel_usage_description)
                     setShowBadge(false)
                 }
             )
@@ -130,7 +130,7 @@ object NotificationService {
         sessionId: String,
         sessionName: String,
         summary: String? = null,
-        title: String = "Session completed"
+        title: String = context.getString(R.string.native_session_completed)
     ) {
         if (!NotificationPreferences.canPostNotifications(context)) return
         val notificationId = sessionIdToNotificationId(sessionId, ID_SESSION_BASE)
@@ -222,10 +222,10 @@ object NotificationService {
             NotificationCompat.Action(0, option.take(24), answerIntent(option, 400 + i))
         }
         val replyAction = if (allowCustom || options.isEmpty()) {
-            NotificationCompat.Action.Builder(0, "Reply", answerIntent(null, 450))
+            NotificationCompat.Action.Builder(0, context.getString(R.string.native_reply), answerIntent(null, 450))
                 .addRemoteInput(
                     androidx.core.app.RemoteInput.Builder(KEY_TEXT_REPLY)
-                        .setLabel("Answer")
+                        .setLabel(context.getString(R.string.native_answer))
                         .build()
                 )
                 .build()
@@ -233,7 +233,7 @@ object NotificationService {
 
         val builder = NotificationCompat.Builder(context, PERMISSION_REQUESTS_CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Agent question — $sessionName")
+            .setContentTitle(context.getString(R.string.native_agent_question, sessionName))
             .setContentText(questionText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(questionText))
             .setContentIntent(tapIntent)
@@ -300,7 +300,7 @@ object NotificationService {
     ): Notification {
         val tapIntent = deepLinkPendingIntent(context, sessionId, notificationId)
         val openAction = NotificationCompat.Action(
-            0, "Open", tapIntent
+            0, context.getString(R.string.native_open), tapIntent
         )
         return NotificationCompat.Builder(context, SESSION_UPDATES_CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
@@ -363,21 +363,21 @@ object NotificationService {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val approveAction = NotificationCompat.Action(0, "Approve", approveIntent)
-        val denyAction = NotificationCompat.Action(0, "Deny", denyIntent)
+        val approveAction = NotificationCompat.Action(0, context.getString(R.string.native_approve), approveIntent)
+        val denyAction = NotificationCompat.Action(0, context.getString(R.string.native_deny), denyIntent)
 
         return NotificationCompat.Builder(context, PERMISSION_REQUESTS_CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Permission required — $sessionName")
-            .setContentText("Agent wants to run: $toolName")
+            .setContentTitle(context.getString(R.string.native_permission_session, sessionName))
+            .setContentText(context.getString(R.string.native_agent_tool, toolName))
             .setStyle(
                 NotificationCompat.BigTextStyle()
-                    .bigText("Agent wants to run: $toolName\nTap \"Approve\" to allow this action.")
+                    .bigText(context.getString(R.string.native_permission_body, toolName))
             )
             .setContentIntent(tapIntent)
             .addAction(approveAction)
             .addAction(denyAction)
-            .addAction(NotificationCompat.Action(0, "Dismiss", dismissIntent))
+            .addAction(NotificationCompat.Action(0, context.getString(R.string.native_dismiss), dismissIntent))
             // Bridged to a paired Wear OS watch: the extender puts Approve/Deny
             // front and center so the request can be answered from the wrist.
             // The PendingIntents execute on the phone, which holds the session.
@@ -403,14 +403,14 @@ object NotificationService {
         notificationId: Int
     ): Notification {
         val tapIntent = deepLinkPendingIntent(context, sessionId, notificationId)
-        val title = if (isWarning) "Warning — $sessionName" else "Error — $sessionName"
+        val title = if (isWarning) context.getString(R.string.native_warning_session, sessionName) else context.getString(R.string.native_error_session, sessionName)
         return NotificationCompat.Builder(context, ERRORS_CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setContentIntent(tapIntent)
-            .addAction(NotificationCompat.Action(0, "Open", tapIntent))
+            .addAction(NotificationCompat.Action(0, context.getString(R.string.native_open), tapIntent))
             .setAutoCancel(true)
             .setGroup(sessionId)
             .setCategory(NotificationCompat.CATEGORY_ERROR)

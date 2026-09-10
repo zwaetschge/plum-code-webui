@@ -1,5 +1,8 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -44,6 +47,7 @@ fun UsageBanner(
     usage: TokenUsage?,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     if (usage == null) return
 
     val totalUsed = usage.inputTokens + usage.cacheReadTokens
@@ -57,19 +61,19 @@ fun UsageBanner(
 
     val chevronAngle by animateFloatAsState(
         targetValue = if (detailsExpanded) 180f else 0f,
-        animationSpec = tween(200),
+        animationSpec = tween(componentTokens.motion.medium),
         label = "chevron",
     )
 
     // Animate token counts with spring (visually satisfying counter)
     val animatedInput by animateIntAsState(
         targetValue = usage.inputTokens,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = if (componentTokens.motion.reduceMotion) androidx.compose.animation.core.snap() else spring(stiffness = Spring.StiffnessMediumLow),
         label = "inputTokens",
     )
     val animatedOutput by animateIntAsState(
         targetValue = usage.outputTokens,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = if (componentTokens.motion.reduceMotion) androidx.compose.animation.core.snap() else spring(stiffness = Spring.StiffnessMediumLow),
         label = "outputTokens",
     )
 
@@ -97,9 +101,9 @@ fun UsageBanner(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                        .padding(horizontal = componentTokens.spacing.cozy, vertical = componentTokens.spacing.sm),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.compact),
                 ) {
                     // Context icon
                     Icon(
@@ -118,7 +122,7 @@ fun UsageBanner(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
-                                text = "Context window",
+                                text = stringResource(R.string.component_context_window),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp,
@@ -136,7 +140,7 @@ fun UsageBanner(
                             progress = contextFraction,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(4.dp),
+                                .height(componentTokens.spacing.xs),
                         )
                     }
 
@@ -149,10 +153,10 @@ fun UsageBanner(
                     // Expand chevron
                     Icon(
                         imageVector = Icons.Outlined.KeyboardArrowDown,
-                        contentDescription = if (detailsExpanded) "Collapse" else "Expand",
+                        contentDescription = if (detailsExpanded) stringResource(R.string.component_collapse) else stringResource(R.string.component_expand),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                         modifier = Modifier
-                            .size(16.dp)
+                            .size(componentTokens.sizing.iconSm)
                             .rotate(chevronAngle),
                     )
                 }
@@ -160,36 +164,36 @@ fun UsageBanner(
                 // ── Expanded details ──────────────────────────────────────────
                 AnimatedVisibility(
                     visible = detailsExpanded,
-                    enter = expandVertically(animationSpec = tween(200)) + fadeIn(),
+                    enter = expandVertically(animationSpec = tween(componentTokens.motion.medium)) + fadeIn(),
                     exit = shrinkVertically(animationSpec = tween(160)) + fadeOut(),
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                            .padding(horizontal = componentTokens.spacing.cozy, vertical = componentTokens.spacing.md),
+                        verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.compact),
                     ) {
                         HorizontalDivider(
                             color = MaterialTheme.colorScheme.outlineVariant,
                             thickness = 0.5.dp,
-                            modifier = Modifier.padding(bottom = 4.dp),
+                            modifier = Modifier.padding(bottom = componentTokens.spacing.xs),
                         )
 
                         // Token breakdown grid
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.md),
                         ) {
                             TokenStatItem(
-                                label = "Input",
+                                label = stringResource(R.string.component_input),
                                 value = formatTokenCount(animatedInput),
                                 icon = Icons.Outlined.ArrowUpward,
                                 color = Color(0xFF3B82F6),
                                 modifier = Modifier.weight(1f),
                             )
                             TokenStatItem(
-                                label = "Output",
+                                label = stringResource(R.string.component_output),
                                 value = formatTokenCount(animatedOutput),
                                 icon = Icons.Outlined.ArrowDownward,
                                 color = Color(0xFF22C55E),
@@ -197,7 +201,7 @@ fun UsageBanner(
                             )
                             if (usage.cacheReadTokens > 0) {
                                 TokenStatItem(
-                                    label = "Cache Hit",
+                                    label = stringResource(R.string.component_cache_hit),
                                     value = formatTokenCount(usage.cacheReadTokens),
                                     icon = Icons.Outlined.FlashOn,
                                     color = Color(0xFFF59E0B),
@@ -206,7 +210,7 @@ fun UsageBanner(
                             }
                             if (usage.cacheWriteTokens > 0) {
                                 TokenStatItem(
-                                    label = "Cache Write",
+                                    label = stringResource(R.string.component_cache_write),
                                     value = formatTokenCount(usage.cacheWriteTokens),
                                     icon = Icons.Outlined.SaveAlt,
                                     color = Color(0xFF8B5CF6),
@@ -231,13 +235,13 @@ fun UsageBanner(
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
                             ) {
                                 Icon(
                                     imageVector = Icons.Outlined.SmartToy,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(12.dp),
+                                    modifier = Modifier.size(componentTokens.spacing.md),
                                 )
                                 Text(
                                     text = usage.model,
@@ -250,13 +254,13 @@ fun UsageBanner(
                             usage.estimatedCostUsd?.let { cost ->
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
                                 ) {
                                     Icon(
                                         imageVector = Icons.Outlined.AttachMoney,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(12.dp),
+                                        modifier = Modifier.size(componentTokens.spacing.md),
                                     )
                                     Text(
                                         text = "~$${"%.4f".format(cost)}",
@@ -273,10 +277,10 @@ fun UsageBanner(
                             TextButton(
                                 onClick = { userExpanded = false },
                                 modifier = Modifier.align(Alignment.End),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                contentPadding = PaddingValues(horizontal = componentTokens.spacing.sm, vertical = componentTokens.spacing.xxs),
                             ) {
                                 Text(
-                                    text = "Dismiss",
+                                    text = stringResource(R.string.component_dismiss),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -296,13 +300,14 @@ private fun GradientProgressBar(
     progress: Float,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     val colorLow = Color(0xFF22C55E)
     val colorMid = Color(0xFFF59E0B)
     val colorHigh = Color(0xFFEF4444)
     val indicatorColor = contextProgressColor(progress)
 
     Box(
-        modifier = modifier.clip(RoundedCornerShape(2.dp)),
+        modifier = modifier.clip(RoundedCornerShape(componentTokens.radius.xxs)),
     ) {
         // Track
         Box(
@@ -330,12 +335,13 @@ private fun GradientProgressBar(
 
 @Composable
 private fun TokenSummaryPill(inputTokens: Int, outputTokens: Int) {
+    val componentTokens = PlumTheme.tokens
     Surface(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(componentTokens.radius.panel),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            modifier = Modifier.padding(horizontal = componentTokens.spacing.sm, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
@@ -371,18 +377,19 @@ private fun TokenStatItem(
     color: Color,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     Column(
         modifier = modifier
             .background(
                 color = color.copy(alpha = 0.07f),
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(componentTokens.radius.sm),
             )
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = componentTokens.spacing.compact, vertical = componentTokens.spacing.sm),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
         ) {
             Icon(
                 imageVector = icon,
@@ -414,7 +421,8 @@ private fun ContextWindowDetail(
     fraction: Float,
     contextColor: Color,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    val componentTokens = PlumTheme.tokens
+    Column(verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -422,23 +430,23 @@ private fun ContextWindowDetail(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
             ) {
                 Icon(
                     imageVector = Icons.Outlined.DataUsage,
                     contentDescription = null,
                     tint = contextColor,
-                    modifier = Modifier.size(12.dp),
+                    modifier = Modifier.size(componentTokens.spacing.md),
                 )
                 Text(
-                    text = "Context window",
+                    text = stringResource(R.string.component_context_window),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                 )
             }
             Text(
-                text = "${formatTokenCount(usedTokens)} / ${formatTokenCount(totalTokens)} tokens",
+                text = stringResource(R.string.component_tokens_used, formatTokenCount(usedTokens), formatTokenCount(totalTokens)),
                 style = MaterialTheme.typography.labelSmall,
                 color = contextColor,
                 fontWeight = FontWeight.Medium,
@@ -449,25 +457,25 @@ private fun ContextWindowDetail(
             progress = fraction,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(6.dp),
+                .height(componentTokens.spacing.inline),
         )
         if (fraction >= CONTEXT_WARN_THRESHOLD) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
+                modifier = Modifier.padding(top = componentTokens.spacing.xxs),
             ) {
                 Icon(
                     imageVector = Icons.Outlined.Info,
                     contentDescription = null,
                     tint = contextColor,
-                    modifier = Modifier.size(12.dp),
+                    modifier = Modifier.size(componentTokens.spacing.md),
                 )
                 Text(
                     text = if (fraction >= CONTEXT_CRITICAL_THRESHOLD)
-                        "Context almost full — start a new session soon"
+                        stringResource(R.string.component_context_almost_full_start_a_new_session_soon)
                     else
-                        "Context filling up — consider starting a new session",
+                        stringResource(R.string.component_context_filling_up_consider_starting_a_new_session),
                     style = MaterialTheme.typography.labelSmall,
                     color = contextColor,
                     fontSize = 10.sp,

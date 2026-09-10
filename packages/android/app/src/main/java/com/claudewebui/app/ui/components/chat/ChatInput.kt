@@ -1,5 +1,9 @@
 package com.claudewebui.app.ui.components.chat
 
+import com.claudewebui.app.ui.theme.PlumTheme
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import com.claudewebui.app.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -77,6 +81,7 @@ fun ChatInput(
     onToggleRecording: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val componentTokens = PlumTheme.tokens
     val haptic = LocalHapticFeedback.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val reduceMotion = LocalReduceMotion.current
@@ -115,10 +120,10 @@ fun ChatInput(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.inline)
+                        .clip(RoundedCornerShape(componentTokens.radius.lg))
                         .background(PlumSurfaceStrong)
-                        .border(1.dp, PlumBorder, RoundedCornerShape(16.dp)),
+                        .border(1.dp, PlumBorder, RoundedCornerShape(componentTokens.radius.lg)),
                 ) {
                     commandMatches.forEach { command ->
                         Row(
@@ -129,7 +134,7 @@ fun ChatInput(
                                     // Trailing space so arguments can follow straight away.
                                     onTextChange("/${command.name} ")
                                 }
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                .padding(horizontal = componentTokens.spacing.cozy, vertical = componentTokens.spacing.compact),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
@@ -161,17 +166,17 @@ fun ChatInput(
             AnimatedVisibility(visible = isPreparingAttachments) {
                 Column(
                     Modifier
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .padding(horizontal = componentTokens.spacing.lg, vertical = componentTokens.spacing.inline)
                         .semantics { liveRegion = LiveRegionMode.Polite },
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(componentTokens.spacing.xs),
                 ) {
                     Row(
                         Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "Uploading attachments…",
+                            stringResource(R.string.component_uploading_attachments),
                             style = MaterialTheme.typography.labelSmall,
                             color = PlumMuted,
                             modifier = Modifier.weight(1f),
@@ -184,9 +189,9 @@ fun ChatInput(
                         if (onCancelDelivery != null) {
                             TextButton(
                                 onClick = onCancelDelivery,
-                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                contentPadding = PaddingValues(horizontal = componentTokens.spacing.sm),
                             ) {
-                                Text("Cancel")
+                                Text(stringResource(R.string.component_cancel))
                             }
                         }
                     }
@@ -207,8 +212,8 @@ fun ChatInput(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(horizontal = componentTokens.spacing.md, vertical = componentTokens.spacing.sm),
+                    horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
                 ) {
                     attachments.forEachIndexed { index, attachment ->
                         AttachmentChip(
@@ -226,13 +231,13 @@ fun ChatInput(
                 exit = shrinkVertically() + fadeOut(),
             ) {
                 Text(
-                    text = "$charCount characters",
+                    text = stringResource(R.string.component_character_count, charCount),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (charCount > 2000)
                         MaterialTheme.colorScheme.error
                     else
                         MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 16.dp, top = 6.dp),
+                    modifier = Modifier.padding(start = componentTokens.spacing.lg, top = componentTokens.spacing.inline),
                     fontSize = 11.sp,
                 )
             }
@@ -240,33 +245,33 @@ fun ChatInput(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                    .padding(horizontal = componentTokens.spacing.compact, vertical = componentTokens.spacing.compact),
                 verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
             ) {
                 // Dictation — same glass circle as the attachment button.
                 // Hidden entirely when the server cannot transcribe.
                 if (voiceAvailable && onToggleRecording != null) {
                     Box(
                         modifier = Modifier
-                            .padding(bottom = 2.dp)
-                            .size(48.dp)
+                            .padding(bottom = componentTokens.spacing.xxs)
+                            .size(componentTokens.sizing.touchTarget)
                             .glassSurface(CircleShape)
                             .clickable(enabled = !isTranscribing, onClick = onToggleRecording),
                         contentAlignment = Alignment.Center,
                     ) {
                         if (isTranscribing) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(componentTokens.sizing.iconInline),
+                                strokeWidth = componentTokens.spacing.xxs,
                                 color = PlumAccent,
                             )
                         } else {
                             Icon(
                                 imageVector = if (isRecording) Icons.Outlined.Stop else Icons.Outlined.Mic,
-                                contentDescription = if (isRecording) "Stop dictation" else "Dictate",
+                                contentDescription = if (isRecording) stringResource(R.string.component_stop_dictation) else stringResource(R.string.component_dictate),
                                 tint = if (isRecording) Color(0xFFEF4444) else PlumMuted,
-                                modifier = Modifier.size(20.dp),
+                                modifier = Modifier.size(componentTokens.sizing.iconMd),
                             )
                         }
                     }
@@ -277,17 +282,17 @@ fun ChatInput(
                 if (onAttachFile != null) {
                     Box(
                         modifier = Modifier
-                            .padding(bottom = 2.dp)
-                            .size(48.dp)
+                            .padding(bottom = componentTokens.spacing.xxs)
+                            .size(componentTokens.sizing.touchTarget)
                             .glassSurface(CircleShape)
                             .clickable(onClick = onAttachFile),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.AttachFile,
-                            contentDescription = "Attach file",
+                            contentDescription = stringResource(R.string.component_attach_file),
                             tint = PlumMuted,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(componentTokens.sizing.iconMd),
                         )
                     }
                 }
@@ -299,18 +304,19 @@ fun ChatInput(
                     placeholder = {
                         Text(
                             text = when {
-                                !isWorking -> "Message agent…"
-                                activeFollowupMode == ActiveFollowupMode.STEER -> "Steer the active turn…"
-                                else -> "Queue after the active turn…"
+                                !isWorking -> stringResource(R.string.component_message_agent)
+                                activeFollowupMode == ActiveFollowupMode.STEER -> stringResource(R.string.component_steer_the_active_turn)
+                                else -> stringResource(R.string.component_queue_after_the_active_turn)
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = PlumMuted,
                         )
                     },
                     modifier = Modifier
+                        .testTag("chat-composer")
                         .weight(1f)
-                        .heightIn(min = 48.dp, max = 160.dp), // ~6 lines
-                    shape = RoundedCornerShape(24.dp),
+                        .heightIn(min = componentTokens.sizing.touchTarget, max = 160.dp), // ~6 lines
+                    shape = RoundedCornerShape(componentTokens.radius.xl),
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Sentences,
                         keyboardType = KeyboardType.Text,
@@ -338,8 +344,8 @@ fun ChatInput(
 
                 Box(
                     modifier = Modifier
-                        .padding(bottom = 2.dp)
-                        .size(48.dp)
+                        .padding(bottom = componentTokens.spacing.xxs)
+                        .size(componentTokens.sizing.touchTarget)
                         .graphicsLayer { scaleX = buttonScale; scaleY = buttonScale }
                         .clip(CircleShape)
                         .background(
@@ -362,7 +368,7 @@ fun ChatInput(
                                 onInterrupt?.invoke()
                             }
                         },
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().testTag("chat-send"),
                         enabled = canSend || isWorking,
                     ) {
                         AnimatedContent(
@@ -371,8 +377,8 @@ fun ChatInput(
                                 if (reduceMotion) {
                                     fadeIn(animationSpec = snap()) togetherWith fadeOut(animationSpec = snap())
                                 } else {
-                                    scaleIn(animationSpec = tween(150)) togetherWith
-                                        scaleOut(animationSpec = tween(150))
+                                    scaleIn(animationSpec = tween(componentTokens.motion.fast)) togetherWith
+                                        scaleOut(animationSpec = tween(componentTokens.motion.fast))
                                 }
                             },
                             label = "send_icon",
@@ -380,17 +386,17 @@ fun ChatInput(
                             Icon(
                                 imageVector = if (working) Icons.Outlined.Stop else Icons.Filled.Send,
                                 contentDescription = when {
-                                    working -> "Stop active turn"
-                                    isWorking && activeFollowupMode == ActiveFollowupMode.STEER -> "Steer agent now"
-                                    isWorking -> "Queue message"
-                                    else -> "Send message"
+                                    working -> stringResource(R.string.component_stop_active_turn)
+                                    isWorking && activeFollowupMode == ActiveFollowupMode.STEER -> stringResource(R.string.component_steer_agent_now)
+                                    isWorking -> stringResource(R.string.component_queue_message)
+                                    else -> stringResource(R.string.component_send_message)
                                 },
                                 tint = when {
                                     working -> MaterialTheme.colorScheme.onError
                                     canSend -> Color.White
                                     else -> PlumMuted.copy(alpha = 0.38f)
                                 },
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier.size(componentTokens.sizing.iconInline),
                             )
                         }
                     }
@@ -405,6 +411,7 @@ private fun AttachmentChip(
     attachment: PendingFileAttachment,
     onRemove: () -> Unit,
 ) {
+    val componentTokens = PlumTheme.tokens
     val isImage = attachment.mimeType.startsWith("image/")
     val fallbackIcon = when {
         attachment.mimeType == "application/pdf" -> Icons.Outlined.PictureAsPdf
@@ -414,19 +421,19 @@ private fun AttachmentChip(
     }
 
     Surface(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(componentTokens.radius.chip),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         tonalElevation = 1.dp,
     ) {
         Row(
-            modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            modifier = Modifier.padding(start = componentTokens.spacing.xs, end = componentTokens.spacing.xs, top = componentTokens.spacing.xs, bottom = componentTokens.spacing.xs),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
         ) {
             Box(
                 modifier = Modifier
                     .size(28.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(componentTokens.spacing.inline))
                     .background(MaterialTheme.colorScheme.surfaceContainerLow),
                 contentAlignment = Alignment.Center,
             ) {
@@ -442,7 +449,7 @@ private fun AttachmentChip(
                         imageVector = if (isImage) Icons.Outlined.Image else fallbackIcon,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(componentTokens.sizing.iconSm),
                     )
                 }
             }
@@ -456,13 +463,13 @@ private fun AttachmentChip(
             )
             IconButton(
                 onClick = onRemove,
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier.size(componentTokens.sizing.touchTarget),
             ) {
                 Icon(
                     imageVector = Icons.Filled.Close,
-                    contentDescription = "Remove attachment",
+                    contentDescription = stringResource(R.string.component_remove_attachment),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(componentTokens.sizing.iconXs),
                 )
             }
         }

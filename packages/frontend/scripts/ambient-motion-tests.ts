@@ -86,10 +86,17 @@ const geckoGuard = css
   .join('}\n');
 assert.ok(geckoGuard.length > 0, 'the Gecko performance path must still exist');
 assert.match(geckoGuard, /backdrop-filter:\s*none\s*!important/);
-assert.doesNotMatch(
-  geckoGuard,
-  /backdrop-filter:\s*blur\(/,
-  'the Gecko performance path must not restore a live backdrop blur'
+// One live blur is affordable; a full-screen one is not. The composer bar is
+// the single documented exception — every other Gecko rule must stay filterless,
+// or Firefox repaints the moving background for that surface on every frame.
+const geckoLiveBlurSelectors = css
+  .split('}')
+  .filter((block) => block.includes('plum-engine-gecko') && /backdrop-filter:\s*blur\(/.test(block))
+  .map((block) => block.slice(block.lastIndexOf('*/') + 2, block.indexOf('{')).trim());
+assert.deepEqual(
+  geckoLiveBlurSelectors,
+  ['html.plum-engine-gecko body .chat-composer-form'],
+  'only the composer bar may keep a live backdrop blur in Gecko'
 );
 assert.match(
   geckoGuard,

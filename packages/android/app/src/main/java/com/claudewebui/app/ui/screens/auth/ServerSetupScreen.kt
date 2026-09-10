@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.auth
 
+import com.claudewebui.app.R
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
@@ -79,6 +80,11 @@ fun ServerSetupScreen(
     viewModel: LoginViewModel,
     onServerConnected: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     val authState by viewModel.authState.collectAsState()
     val recentServers by viewModel.recentServers.collectAsState()
 
@@ -104,16 +110,16 @@ fun ServerSetupScreen(
                 .systemBarsPadding()
                 .imePadding(),
             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp),
+            verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.xl),
         ) {
             // ── Header ────────────────────────────────────────────────────────
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)) {
                     // Gradient globe icon
                     Box(
                         modifier = Modifier
                             .size(56.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(screenTokens.radius.lg))
                             .background(
                                 Brush.linearGradient(listOf(PlumAccent, PlumBlue))
                             ),
@@ -130,12 +136,12 @@ fun ServerSetupScreen(
                     Spacer(Modifier.height(8.dp))
 
                     Text(
-                        text = "Connect to Server",
+                        text = screenResources.getString(R.string.auth_connect_to_server_ca09a),
                         style = MaterialTheme.typography.headlineMedium,
                         color = MaterialTheme.colorScheme.onBackground,
                     )
                     Text(
-                        text = "Enter the URL of your Plum Code WebUI instance",
+                        text = screenResources.getString(R.string.auth_enter_the_url_of_your_plum_code_webui_instance_37deb),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -144,7 +150,7 @@ fun ServerSetupScreen(
 
             // ── URL Input ─────────────────────────────────────────────────────
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md)) {
                     OutlinedTextField(
                         value = serverUrl,
                         onValueChange = {
@@ -154,14 +160,14 @@ fun ServerSetupScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusRequester(focusRequester),
-                        label = { Text("Server URL") },
+                        label = { Text(screenResources.getString(R.string.auth_server_url_1d5d1)) },
                         placeholder = { Text("https://your-server.example.com") },
                         leadingIcon = {
                             Text(
                                 text = if (serverUrl.startsWith("http")) "" else "https://",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 12.dp),
+                                modifier = Modifier.padding(start = screenTokens.spacing.md),
                             )
                         },
                         trailingIcon = {
@@ -172,8 +178,8 @@ fun ServerSetupScreen(
                                 }) {
                                     Icon(
                                         Icons.Default.Close,
-                                        contentDescription = "Clear",
-                                        modifier = Modifier.size(18.dp),
+                                        contentDescription = screenResources.getString(R.string.auth_clear_719ea),
+                                        modifier = Modifier.size(screenTokens.sizing.iconInline),
                                     )
                                 }
                             }
@@ -188,7 +194,7 @@ fun ServerSetupScreen(
                             onGo = { viewModel.testConnection(serverUrl) }
                         ),
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(screenTokens.radius.md),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.primary,
                             focusedLabelColor = MaterialTheme.colorScheme.primary,
@@ -203,14 +209,14 @@ fun ServerSetupScreen(
                     ) {
                         if (errorMessage != null) {
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Icon(
                                     Icons.Default.Close,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(16.dp),
+                                    modifier = Modifier.size(screenTokens.sizing.iconSm),
                                 )
                                 Text(
                                     text = errorMessage,
@@ -228,7 +234,7 @@ fun ServerSetupScreen(
                             .fillMaxWidth()
                             .height(52.dp),
                         enabled = serverUrl.isNotBlank() && !isLoading,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(screenTokens.radius.md),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
                             contentColor = Color.White,
@@ -241,18 +247,18 @@ fun ServerSetupScreen(
                         ) { loading ->
                             if (loading) {
                                 Row(
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
+                                        modifier = Modifier.size(screenTokens.sizing.iconInline),
                                         color = Color.White,
                                         strokeWidth = 2.dp,
                                     )
-                                    Text("Connecting…", style = MaterialTheme.typography.labelLarge)
+                                    Text(screenResources.getString(R.string.auth_connecting_fd3e7), style = MaterialTheme.typography.labelLarge)
                                 }
                             } else {
-                                Text("Connect", style = MaterialTheme.typography.labelLarge)
+                                Text(screenResources.getString(R.string.auth_connect_b6546), style = MaterialTheme.typography.labelLarge)
                             }
                         }
                     }
@@ -263,7 +269,7 @@ fun ServerSetupScreen(
             if (recentServers.isNotEmpty()) {
                 item {
                     Text(
-                        text = "Recent servers",
+                        text = screenResources.getString(R.string.auth_recent_servers_6392d),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -290,11 +296,16 @@ private fun RecentServerRow(
     onSelect: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onSelect),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(screenTokens.radius.md),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
@@ -306,20 +317,20 @@ private fun RecentServerRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.md),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
                     Icons.Default.History,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(screenTokens.sizing.iconInline),
                 )
                 Text(
                     text = url,
@@ -331,13 +342,13 @@ private fun RecentServerRow(
             }
             IconButton(
                 onClick = onDelete,
-                modifier = Modifier.size(32.dp),
+                modifier = Modifier.size(com.claudewebui.app.ui.theme.PlumTheme.tokens.sizing.touchTarget),
             ) {
                 Icon(
                     Icons.Default.Delete,
-                    contentDescription = "Remove",
+                    contentDescription = screenResources.getString(R.string.auth_remove_e9639),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(screenTokens.sizing.iconSm),
                 )
             }
         }

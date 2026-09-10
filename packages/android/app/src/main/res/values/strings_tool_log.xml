@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_log_title">Tool log</string>
+    <string name="tool_log_all">All</string>
+    <string name="tool_log_read">Read</string>
+    <string name="tool_log_write">Write</string>
+    <string name="tool_log_bash">Bash</string>
+    <string name="tool_log_web">Web</string>
+    <string name="tool_log_agent">Agent</string>
+    <string name="tool_log_empty">No tool calls in this category yet</string>
+    <string name="tool_log_running">Running</string>
+    <string name="tool_log_completed">Completed</string>
+    <string name="tool_log_error">Error</string>
+    <string name="tool_log_expand">Show tool details</string>
+    <string name="tool_log_collapse">Hide tool details</string>
+    <string name="tool_log_seconds">%1$.1f s</string>
+    <string name="tool_log_input">Input</string>
+    <string name="tool_log_output">Output</string>
+</resources>

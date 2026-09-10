@@ -86,3 +86,22 @@ test('the bookkeeping shares the migration transaction', options, async () => {
   });
   assert.equal(value, 'yes');
 });
+
+test('a code step runs inside the migration transaction', options, async () => {
+  // The reprice step is code rather than fixed SQL because it needs the price
+  // table. It has to inherit the same all-or-nothing guarantee as `statements`.
+  await assert.rejects(() =>
+    runMigration({
+      id: 'm6',
+      statements: [`INSERT INTO app_config (key, value) VALUES ('m6-probe', 'yes')`],
+      run: async (tx) => {
+        await tx.run(`UPDATE app_config SET value = 'touched' WHERE key = 'm6-probe'`);
+        throw new Error('code step failed');
+      },
+    })
+  );
+
+  assert.equal(await hasMigrationRun('m6'), false);
+  // The rows written before the failing code step are gone with it.
+  assert.equal(await pgGet(`SELECT 1 FROM app_config WHERE key = 'm6-probe'`), undefined);
+});

@@ -1,3 +1,4 @@
+import { DEFAULT_CODEX_MODEL } from '@plum-code-webui/shared';
 import { get as pgGet, all as pgAll, run as pgRun } from '../db/pg.js';
 import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
@@ -97,7 +98,7 @@ router.post('/', async (req: Request, res: Response) => {
     name,
     description,
     systemPrompt,
-    model = 'gpt-5.5',
+    model = DEFAULT_CODEX_MODEL,
     allowedTools = [],
     permissionMode = 'auto-accept',
     icon = 'bot',

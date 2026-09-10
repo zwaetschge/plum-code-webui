@@ -58,9 +58,10 @@ export function AgentSkillEditor({
   const { data: routedModelGroups = [] } = useQuery({
     queryKey: ['subagent-models'],
     queryFn: async () => {
-      const response = await api.get<{ success: boolean; data: Array<{ group: string; models: string[] }> }>(
-        '/api/settings/subagent-models'
-      );
+      const response = await api.get<{
+        success: boolean;
+        data: Array<{ group: string; models: string[] }>;
+      }>('/api/settings/subagent-models');
       return response.data.data;
     },
   });

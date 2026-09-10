@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notes_back_b52b3">Back</string>
+    <string name="notes_delete_f6fdb">Delete</string>
+    <string name="notes_dismiss_70afe">Dismiss</string>
+    <string name="notes_done_e9b45">Done</string>
+    <string name="notes_empty_3159f">Empty</string>
+    <string name="notes_new_note_2b7b0">New note</string>
+    <string name="notes_no_notes_yet_d2a1e">No notes yet</string>
+    <string name="notes_note_2c924">Note</string>
+    <string name="notes_notes_70440">Notes</string>
+    <string name="notes_pin_9c918">Pin</string>
+    <string name="notes_saved_automatically_5bee9">Saved automatically</string>
+    <string name="notes_saving_56a22">Saving…</string>
+    <string name="notes_scratch_space_for_this_session_2aad1">Scratch space for this session</string>
+    <string name="notes_tap_to_jot_something_down_for_this_session_22b60">Tap + to jot something down for this session.</string>
+    <string name="notes_title_768e0">Title</string>
+    <string name="notes_unpin_2eba6">Unpin</string>
+    <string name="notes_untitled_62152">Untitled</string>
+</resources>

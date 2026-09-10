@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tool_log_title">Werkzeugprotokoll</string>
+    <string name="tool_log_all">Alle</string>
+    <string name="tool_log_read">Lesen</string>
+    <string name="tool_log_write">Schreiben</string>
+    <string name="tool_log_bash">Bash</string>
+    <string name="tool_log_web">Web</string>
+    <string name="tool_log_agent">Agent</string>
+    <string name="tool_log_empty">Noch keine Werkzeugaufrufe in dieser Kategorie</string>
+    <string name="tool_log_running">Läuft</string>
+    <string name="tool_log_completed">Abgeschlossen</string>
+    <string name="tool_log_error">Fehler</string>
+    <string name="tool_log_expand">Werkzeugdetails anzeigen</string>
+    <string name="tool_log_collapse">Werkzeugdetails ausblenden</string>
+    <string name="tool_log_seconds">%1$.1f s</string>
+    <string name="tool_log_input">Eingabe</string>
+    <string name="tool_log_output">Ausgabe</string>
+</resources>

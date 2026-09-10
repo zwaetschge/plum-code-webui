@@ -8,7 +8,10 @@ const AUTH_TAG_LENGTH = 16;
 /**
  * Get or derive a 32-byte encryption key from the config
  */
+let cachedKey: Buffer | null = null;
+
 function getKey(): Buffer {
+  if (cachedKey) return cachedKey;
   const key = config.encryptionKey;
   if (!key) {
     throw new Error('ENCRYPTION_KEY environment variable is not set');
@@ -16,11 +19,28 @@ function getKey(): Buffer {
 
   // If key is already 32 bytes hex (64 chars), use it directly
   if (key.length === 64 && /^[0-9a-fA-F]+$/.test(key)) {
-    return Buffer.from(key, 'hex');
+    cachedKey = Buffer.from(key, 'hex');
+    return cachedKey;
   }
 
-  // Otherwise, derive a key using PBKDF2
-  return crypto.pbkdf2Sync(key, 'claude-code-webui-salt', 100000, 32, 'sha256');
+  // Otherwise, derive a key using PBKDF2. The salt defaults to the historical
+  // constant so existing ciphertext stays readable; ENCRYPTION_SALT lets an
+  // operator make the derivation install-specific, which is what stops one
+  // precomputed table from covering every deployment of this project.
+  const salt = process.env.ENCRYPTION_SALT?.trim() || 'claude-code-webui-salt';
+  const derived = crypto.pbkdf2Sync(key, salt, 100000, 32, 'sha256');
+  cachedKey = derived;
+  return derived;
+}
+
+/** Does this look like output of encrypt(): base64 that round-trips and is long
+ *  enough to carry an IV and an auth tag? Used to tell "wrong key" apart from
+ *  "legacy plaintext" when decryption fails. */
+function looksLikeCiphertext(value: string): boolean {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
+  const buf = Buffer.from(value, 'base64');
+  if (buf.length <= IV_LENGTH + AUTH_TAG_LENGTH) return false;
+  return buf.toString('base64') === value;
 }
 
 /**
@@ -75,8 +95,14 @@ function isEncryptionAvailable(): boolean {
 export function safeEncrypt(plaintext: string | null | undefined): string | null {
   if (!plaintext) return null;
   if (!isEncryptionAvailable()) {
-    console.warn('ENCRYPTION_KEY not set - storing API key without encryption');
-    return plaintext;
+    // Previously this warned and returned the plaintext, so a missing key wrote
+    // provider tokens into the database in the clear while every caller and the
+    // UI reported the credential as encrypted. Refuse instead: the compose files
+    // make ENCRYPTION_KEY mandatory, so reaching this is a misconfiguration.
+    throw new Error(
+      'ENCRYPTION_KEY is not set — refusing to store a credential unencrypted. ' +
+        'Generate one with: openssl rand -base64 48'
+    );
   }
   return encrypt(plaintext);
 }
@@ -87,13 +113,30 @@ export function safeEncrypt(plaintext: string | null | undefined): string | null
 export function safeDecrypt(ciphertext: string | null | undefined): string | null {
   if (!ciphertext) return null;
   if (!isEncryptionAvailable()) {
+    if (looksLikeCiphertext(ciphertext)) {
+      console.error(
+        '[encryption] Stored value looks encrypted but ENCRYPTION_KEY is not set. ' +
+          'Set the key this data was written with.'
+      );
+      return null;
+    }
     return ciphertext;
   }
 
   try {
     return decrypt(ciphertext);
   } catch {
-    // Value might not be encrypted (legacy data)
+    // Decryption failed. Either this predates encryption (legacy plaintext, keep
+    // working) or the key changed (wrong key). Handing ciphertext back as if it
+    // were the credential is the one thing that must not happen: callers pass it
+    // straight to provider APIs and into Authorization headers.
+    if (looksLikeCiphertext(ciphertext)) {
+      console.error(
+        '[encryption] Failed to decrypt a stored credential — ENCRYPTION_KEY (or ENCRYPTION_SALT) ' +
+          'does not match the one it was written with. Re-enter the credential, or restore the key.'
+      );
+      return null;
+    }
     return ciphertext;
   }
 }

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notes_back_b52b3">Zurück</string>
+    <string name="notes_delete_f6fdb">Löschen</string>
+    <string name="notes_dismiss_70afe">Schliessen</string>
+    <string name="notes_done_e9b45">Fertig</string>
+    <string name="notes_empty_3159f">Leer</string>
+    <string name="notes_new_note_2b7b0">Neue Notiz</string>
+    <string name="notes_no_notes_yet_d2a1e">Noch keine Notizen</string>
+    <string name="notes_note_2c924">Notiz</string>
+    <string name="notes_notes_70440">Notizen</string>
+    <string name="notes_pin_9c918">Anheften</string>
+    <string name="notes_saved_automatically_5bee9">Automatisch gespeichert</string>
+    <string name="notes_saving_56a22">Wird gespeichert…</string>
+    <string name="notes_scratch_space_for_this_session_2aad1">Notizbereich für diese Sitzung</string>
+    <string name="notes_tap_to_jot_something_down_for_this_session_22b60">Tippe auf +, um etwas für diese Sitzung zu notieren.</string>
+    <string name="notes_title_768e0">Titel</string>
+    <string name="notes_unpin_2eba6">Lösen</string>
+    <string name="notes_untitled_62152">Ohne Titel</string>
+</resources>

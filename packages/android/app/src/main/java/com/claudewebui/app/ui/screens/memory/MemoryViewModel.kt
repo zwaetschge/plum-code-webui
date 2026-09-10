@@ -1,5 +1,7 @@
 package com.claudewebui.app.ui.screens.memory
 
+import com.claudewebui.app.ui.screens.screenErrorMessage
+import com.claudewebui.app.core.network.apiCall
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.claudewebui.app.core.network.ApiClient
@@ -48,7 +50,7 @@ class MemoryViewModel(
     fun load() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            runCatching {
+            apiCall {
                 val response = api.getMemories(workingDirectory)
                 if (!response.success || response.data == null) {
                     error(response.error?.message ?: "Could not load memories")
@@ -65,7 +67,7 @@ class MemoryViewModel(
                     }
                 }
                 .onFailure { failure ->
-                    _uiState.update { it.copy(isLoading = false, error = failure.message) }
+                    _uiState.update { it.copy(isLoading = false, error = failure.screenErrorMessage("memory", "load")) }
                 }
         }
     }
@@ -75,7 +77,7 @@ class MemoryViewModel(
             _uiState.update {
                 it.copy(openPath = file.path, openName = file.name, draft = "", original = "")
             }
-            runCatching {
+            apiCall {
                 val response = api.getMemoryContent(file.path, workingDirectory)
                 if (!response.success || response.data == null) {
                     error(response.error?.message ?: "Could not read memory")
@@ -87,7 +89,7 @@ class MemoryViewModel(
                         it.copy(original = memory.content, draft = memory.content)
                     }
                 }
-                .onFailure { failure -> _uiState.update { it.copy(error = failure.message) } }
+                .onFailure { failure -> _uiState.update { it.copy(error = failure.screenErrorMessage("memory", "open")) } }
         }
     }
 
@@ -108,7 +110,7 @@ class MemoryViewModel(
             // The write itself must survive the screen closing mid-flight;
             // otherwise a half-applied edit is indistinguishable from success.
             val result = withContext(NonCancellable) {
-                runCatching {
+                apiCall {
                     val response = api.saveMemoryContent(path, state.draft, workingDirectory)
                     if (!response.success) {
                         error(response.error?.message ?: "Could not save memory")
@@ -121,7 +123,7 @@ class MemoryViewModel(
                     load()
                 }
                 .onFailure { failure ->
-                    _uiState.update { it.copy(isSaving = false, error = failure.message) }
+                    _uiState.update { it.copy(isSaving = false, error = failure.screenErrorMessage("memory", "save")) }
                 }
         }
     }
@@ -130,20 +132,20 @@ class MemoryViewModel(
         val name = rawName.trim().ifBlank { return }
         val fileName = if (name.endsWith(".md")) name else "$name.md"
         viewModelScope.launch {
-            runCatching {
+            apiCall {
                 val response = api.createMemory(fileName, "", workingDirectory)
                 if (!response.success) {
                     error(response.error?.message ?: "Could not create memory")
                 }
             }
                 .onSuccess { load() }
-                .onFailure { failure -> _uiState.update { it.copy(error = failure.message) } }
+                .onFailure { failure -> _uiState.update { it.copy(error = failure.screenErrorMessage("memory", "create")) } }
         }
     }
 
     fun delete(file: MemoryFile) {
         viewModelScope.launch {
-            runCatching {
+            apiCall {
                 val response = api.deleteMemory(file.path, workingDirectory)
                 if (!response.success) {
                     error(response.error?.message ?: "Could not delete memory")
@@ -153,7 +155,7 @@ class MemoryViewModel(
                     if (_uiState.value.openPath == file.path) closeEditor()
                     load()
                 }
-                .onFailure { failure -> _uiState.update { it.copy(error = failure.message) } }
+                .onFailure { failure -> _uiState.update { it.copy(error = failure.screenErrorMessage("memory", "delete")) } }
         }
     }
 

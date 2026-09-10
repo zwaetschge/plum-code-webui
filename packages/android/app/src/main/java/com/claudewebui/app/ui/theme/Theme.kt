@@ -11,6 +11,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -173,6 +174,12 @@ fun ClaudeWebUITheme(
     val extendedColors = if (darkTheme) DarkExtendedColors else LightExtendedColors
     val reduceMotion = rememberReduceMotion()
 
+    // Design tokens follow the Plum palette, not the Material scheme: even with
+    // dynamic colour on, surfaces, borders and glass derive from the palette so
+    // the frosted look stays consistent with the backdrop it sits on.
+    val palette = LocalPlumPalette.current
+    val tokens = remember(palette, reduceMotion) { plumTokensFor(palette, reduceMotion) }
+
     // System bars are handled exclusively by enableEdgeToEdge in MainActivity.
     // Painting window.statusBarColor/navigationBarColor here made the bars
     // opaque again and fought the transparent edge-to-edge setup.
@@ -180,6 +187,7 @@ fun ClaudeWebUITheme(
     CompositionLocalProvider(
         LocalExtendedColors provides extendedColors,
         LocalReduceMotion provides reduceMotion,
+        LocalPlumTokens provides tokens,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
@@ -207,4 +215,8 @@ private val ExpressiveShapes = Shapes(
 object ClaudeWebUITheme {
     val extendedColors: ExtendedColors
         @Composable get() = LocalExtendedColors.current
+
+    /** Same tokens as [PlumTheme.tokens]; kept here so either accessor works. */
+    val tokens: PlumTokens
+        @Composable get() = LocalPlumTokens.current
 }

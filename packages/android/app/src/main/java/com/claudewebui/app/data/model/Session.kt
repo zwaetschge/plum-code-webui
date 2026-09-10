@@ -35,6 +35,26 @@ enum class SessionMode(val label: String, val description: String) {
     @SerialName("danger") DANGER("Danger", "Skip all permission checks")
 }
 
+/**
+ * The server's live view of a session, attached to every `GET /api/sessions`
+ * row by `attachRuntime` and produced by `ClaudeProcessManager.getSessionRuntimeSnapshot`.
+ *
+ * `status` on the session row only says whether a process exists. This says
+ * whether it is actually working, what it is working on, and how much the user
+ * has queued behind it — which is what the dashboard needs to show.
+ */
+@Serializable
+data class SessionRuntime(
+    val running: Boolean = false,
+    val busy: Boolean = false,
+    val streaming: Boolean = false,
+    val activitySummary: String? = null,
+    val currentToolName: String? = null,
+    val currentAgentType: String? = null,
+    val queueDepth: Int = 0,
+    val lastActivityAt: String? = null,
+)
+
 @Serializable
 data class Session(
     val id: String,
@@ -63,7 +83,33 @@ data class Session(
     val updatedAt: String,
     /** Local/server read marker merged into the Room-backed dashboard model. */
     val unreadCount: Int = 0,
+    /** Live snapshot from the API response; not persisted as a nested object. */
+    val runtime: SessionRuntime? = null,
+    // Flattened from [runtime] before the row is cached, so the dashboard reads
+    // the same fields whether it came from the network or from Room.
+    val busy: Boolean = false,
+    val activitySummary: String? = null,
+    val queueDepth: Int = 0,
+    /** Filled from the gateway overview; the per-session endpoint does not carry it. */
+    val pendingApprovals: Int = 0,
+    val lastActivityAt: String? = null,
 )
+
+/**
+ * Copy the nested runtime snapshot onto the flat fields Room stores.
+ *
+ * Call this on anything that arrives from the API before caching it, otherwise
+ * the cached row claims every session is idle.
+ */
+fun Session.withFlattenedRuntime(): Session {
+    val snapshot = runtime ?: return this
+    return copy(
+        busy = snapshot.busy,
+        activitySummary = snapshot.activitySummary,
+        queueDepth = snapshot.queueDepth,
+        lastActivityAt = snapshot.lastActivityAt,
+    )
+}
 
 /** `PATCH /api/sessions/:id/star` returns only the flag, not the session. */
 @Serializable

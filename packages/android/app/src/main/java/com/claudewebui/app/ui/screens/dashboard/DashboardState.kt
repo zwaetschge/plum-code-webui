@@ -4,20 +4,12 @@ import com.claudewebui.app.data.model.Category
 import com.claudewebui.app.data.model.CLIProvider
 import com.claudewebui.app.data.model.Session
 import com.claudewebui.app.data.model.MessageSearchResult
+import com.claudewebui.app.data.model.PendingPermissionItem
 import com.claudewebui.app.data.repository.SessionLaunchSetup
 import com.claudewebui.app.data.repository.SessionPreset
 import com.claudewebui.app.data.repository.DEFAULT_SESSION_PRESETS
 
 enum class DashboardSearchScope { SESSIONS, MESSAGES }
-
-// ── Sort Order ────────────────────────────────────────────────────────────────
-
-enum class SortOrder(val label: String) {
-    RECENT("Recent"),
-    NAME("Name"),
-    STATUS("Status"),
-    PROVIDER("Provider"),
-}
 
 // ── UI State ──────────────────────────────────────────────────────────────────
 
@@ -40,9 +32,10 @@ data class DashboardUiState(
     val availableProviders: List<CLIProvider> = CLIProvider.active,
     val selectedCategoryId: String? = null,   // null = "All"
     val searchQuery: String = "",
-    val sortOrder: SortOrder = SortOrder.RECENT,
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
+    /** Wall-clock millis of the last successful session load; null until one lands. */
+    val lastRefreshedAt: Long? = null,
     val error: String? = null,
     val isOffline: Boolean = false,
     val isSearchExpanded: Boolean = false,
@@ -54,10 +47,26 @@ data class DashboardUiState(
     val creationError: String? = null,
     val sessionPresets: List<SessionPreset> = DEFAULT_SESSION_PRESETS,
     val lastSessionSetup: SessionLaunchSetup = SessionLaunchSetup(),
+    /** Every approval waiting on this user, across all sessions. */
+    val pendingApprovals: List<PendingPermissionItem> = emptyList(),
+    /**
+     * Ids the server flags as blocked on a human or errored. Comes from the
+     * gateway overview rather than being derived here, so the phone and the
+     * WebUI agree on what "needs attention" means.
+     */
+    val needsAttention: Set<String> = emptySet(),
+    /** The approvals sheet is open. */
+    val showApprovals: Boolean = false,
+    /** Request ids currently being answered, so their buttons can disable. */
+    val respondingApprovals: Set<String> = emptySet(),
 ) {
     /** True when initial load is in progress (no data yet). */
     val isInitialLoading: Boolean
         get() = isLoading && sessions.isEmpty()
+
+    /** Sessions the supervisor should look at first. */
+    val attentionCount: Int
+        get() = needsAttention.size
 }
 
 // ── One-shot Events ───────────────────────────────────────────────────────────
