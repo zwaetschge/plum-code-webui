@@ -125,7 +125,7 @@ try {
       /\bmax-age=31536000\b.*\bimmutable\b/,
       `${assetPath} must use long-lived immutable caching`
     );
-    const expectedType = assetPath.endsWith('.js') ? /^application\/javascript\b/ : /^text\/css\b/;
+    const expectedType = assetPath.endsWith('.js') ? /^text\/javascript\b/ : /^text\/css\b/;
     assert.match(
       assetResponse.headers.get('content-type') || '',
       expectedType,
