@@ -11,10 +11,10 @@ Notes on the multi-provider integration in Plum Code WebUI.
 ## Goals implemented
 
 - **Codex is the default provider**; Claude is legacy.
-- Sessions support Codex, OpenCode, Pi, Kimi Code, and Claude Code; switching restarts the CLI with fresh context.
+- Sessions support Codex, OpenCode, Pi, Kimi Code, Mistral Vibe, and Claude Code; switching restarts the CLI with fresh context.
 - Codex supports chunk-delta streaming and transcript-prefix resume.
 - Admin/helper calls use `utils/adminLLM.ts` with Codex-first preference.
-- Per-CLI auth/state persists across rebuilds. Login routes: `/auth/codex`, `/auth/opencode`, `/auth/pi`, `/auth/claude`.
+- Per-CLI auth/state persists across rebuilds. Login routes: `/auth/codex`, `/auth/opencode`, `/auth/pi`, `/auth/kimi`, `/auth/vibe`, `/auth/claude`.
 - Plum branding puts Codex first and Claude under “Legacy”.
 - Built-ins include ComfyUI inline images, Android-builder workflows, and optional per-session Home Assistant `light.*` status.
 
@@ -26,6 +26,7 @@ Notes on the multi-provider integration in Plum Code WebUI.
 | OpenCode | `opencode` | per-user HTTP/SSE server; native streaming/resume; routes GLM `z-ai/glm-*`, Kimi, others | `~/.local/share/opencode` | no |
 | Pi | `pi` | persistent JSONL RPC; OpenCode connections/models; shared skills, agents, MCP bridge | `~/.pi` | no |
 | Kimi Code | `kimi` | persistent ACP stdio; streaming, cancel, queued follow-ups, native resume | `~/.kimi-code` | no |
+| Mistral Vibe | `vibe-acp` | persistent ACP stdio; streaming, cancel, queued follow-ups, native resume, browser sign-in | `~/.vibe` | no |
 | Claude Code | `claude` | persistent stream-json | `~/.claude` | no (legacy) |
 
 Harnesses ship in the container. `${CONFIG_DIR}` (default `./config`) bind-mounts config homes across `docker compose up --build`.
@@ -64,12 +65,25 @@ Harnesses ship in the container. `${CONFIG_DIR}` (default `./config`) bind-mount
 - Skills come from `~/.agents/skills`; Claude agent definitions become official Pi subagent-extension files per user.
 - Pi has no native MCP client; image pins `pi-mcp-adapter`, and backend mirrors the Claude-backed MCP registry into each user config.
 - Pi requires Node 22.19+; both Docker stages use Node 22.
+- Ultracode for Pi: `scripts/pi-ultracode-extension.ts` adds the `workflow` tool (JS workflow script, each `agent()` a separate `pi` child, schema outputs, resumable runs under `<agent dir>/ultracode/runs/`). Active for effort `ultracode` (`PI_ULTRACODE=1`, thinking `xhigh`) or a prompt containing "ultracode"; agents show as subagent cards.
 
 ## Kimi Code notes
 
 - Run one persistent `kimi acp` per active session. **Do not regress to `kimi -p`**: prompt mode buffers whole model steps and breaks interactive streaming.
 - `session/prompt` maps `agent_message_chunk` and tool lifecycle updates to existing socket events. Follow-ups queue during active turns; ACP `session/cancel` interrupts without killing the process.
 - Native IDs remain in `sessions.claude_session_id` for restart resume. ACP `model` and `mode` apply selected model and Plum permission mode.
+
+## Mistral Vibe notes
+
+- Vibe is Mistral's Python coding CLI (`mistral-vibe` on PyPI, entry points `vibe`, `vibe-acp`, `vibe-app-server`), installed with pipx as `node` into `~/.local` plus symlinks in `/opt/plum-cli/bin` so `findCliBinary()` resolves it. In-app updates run `pipx upgrade mistral-vibe`.
+- Run one persistent `vibe-acp` per active session; it shares the whole ACP path with Kimi (`isAcpProvider()`), so streaming, tool lifecycle, approvals, `session/cancel`, queued follow-ups and interrupted-turn recovery are common code. Provider-specific bits are the spawn args (`kimi acp` vs no args), the mode map and the `thinking` config option.
+- Plum session modes map to Vibe ACP modes: planning→`plan`, danger→`auto-approve`, manual→`ask`, auto-accept→`accept-edits`. Thinking levels are `off|low|medium|high|max` (`normalizeReasoningLevel`), applied through ACP `setSessionConfigOption`.
+- Vibe refuses tools in an untrusted workspace (any repo with `AGENTS.md` or `.vibe`/`.agents`). Session start therefore calls the ACP extension `_trust/decision` with `trust_repo`, falling back to `trust_cwd`; failures are logged, never fatal.
+- A resumed Vibe session answers without `configOptions`, so `configureKimiAcpSession` probes unadvertised values instead of skipping them.
+- Models come from `$VIBE_HOME/config.toml` (`discoverVibe`/`parseVibeModelCatalog`): `[[models]]` entries whose provider is `mistral`. The built-in fallback is `mistral-medium-3.5` only — the alias of `mistral-vibe-cli-latest`, which is what the plan's Vibe Code allowance pays for. Vibe's `local` entry (llamacpp on 127.0.0.1:8080) is never offered. `CLI_PROVIDER_VIBE_MODELS` overrides discovery.
+- Sign-in: `services/vibe/vibeAuth.ts` uses ACP `authenticate` with `browser-auth-delegated` (client capability `_meta`), relays `signInUrl` through the generic `/api/cli-login/vibe/start` device dialog, and polls `action: complete` until Vibe persists the key itself. `GET /api/cli-login/vibe/status`, `POST /api/cli-login/vibe/key` (paste a Code › Vibe CLI key) and `DELETE /api/cli-login/vibe/key` cover the rest. Keys are validated against `^[A-Za-z0-9_-]{16,256}$` before they touch `.env`.
+- `buildVibeEnv()` sets `VIBE_HOME` and `VIBE_TEST_DISABLE_KEYRING=1` (no desktop keyring in a container) and blanks an inherited `MISTRAL_API_KEY` **only** when `$VIBE_HOME/.env` carries one: Vibe prefers a non-empty process value, so the container's regular API key would otherwise silently shadow the signed-in Vibe key and bill the wrong allowance.
+- Usage: Vibe attaches the optional ACP `PromptResponse.usage`, so a turn books exact input/output tokens (no native ledger reader like Kimi's). `usage_update` carries context `used`/`size` and session cost; Plum uses it for the context bar and prices tokens from its own rate card.
 
 ## Claude Code and Z.AI
 
@@ -86,10 +100,19 @@ Harnesses ship in the container. `${CONFIG_DIR}` (default `./config`) bind-mount
 Two mechanisms let one session combine subscriptions:
 
 1. **Model router** (`services/modelRouter.ts`, mounted at `/model-router`): Claude-transport sessions get `ANTHROPIC_BASE_URL` pointing at a per-session token URL. Anthropic models pass through byte-transparently with the user's OAuth; non-Anthropic agent-frontmatter models resolve against user upstreams (Settings → General → Subagents → Upstreams; `GET/PUT /api/settings/subagent-upstreams`), then built-in Z.AI fallback for `glm-*`. Usage books per request and subtracts from the surrounding Claude turn. Kill switch: `MODEL_ROUTER_DISABLED=1`.
-2. **CLI subagents** (`scripts/mcp-servers/subagents.mjs`, MCP server `subagents`): any session can call `run_subagent` to spawn a headless one-shot worker (`codex exec --json`, `claude -p --output-format json`, `opencode run`). Entries are per user in Settings → General → Subagents → CLI-Subagenten (`GET/PUT /api/settings/cli-subagents`). Bridge fetches config from `GET /api/settings/internal/cli-subagents` and books usage via `POST /api/settings/internal/cli-subagents/usage`.
+2. **CLI subagents** (`scripts/mcp-servers/subagents.mjs`, MCP server `subagents`): any session can call `run_subagent` to spawn a headless one-shot worker (`codex exec --json`, `claude -p --output-format json`, `opencode run`, `vibe --prompt --output json --auto-approve --trust`). Entries are per user in Settings → General → Subagents → CLI-Subagenten (`GET/PUT /api/settings/cli-subagents`). Bridge fetches config from `GET /api/settings/internal/cli-subagents` and books usage via `POST /api/settings/internal/cli-subagents/usage`.
+   - Vibe workers spend the plan's Vibe Code allowance; the internal route hands them `buildVibeEnv()` and drops the entry while Vibe has no key. Vibe's programmatic mode reports no token counters, so those runs book no usage — the € ledger for swarm work stays empty by design rather than guessing.
    - OpenCode children need tenant provisioning: internal endpoint runs `ensureOpenCodeTenantDirectories` + `syncProviderLinks` and returns `OPENCODE_CONFIG_DIR`/`OPENCODE_DATA_DIR` plus credential env; z-ai model ids follow coding endpoint catalog (`z-ai/glm-5.2` today, no 5.3 there).
    - `zai` is not its own binary: it spawns `claude` with `buildClaudeApiEnv(zaiConfig)`, books usage as provider `zai`, and refuses without a configured Z.AI endpoint.
    - Spawned children get stdin `ignore`; `PLUM_SUBAGENT_DEPTH` limits delegation to one level; codex/opencode children strip `ANTHROPIC_*` router overrides; claude children keep them; `zai` children replace inherited Anthropic/router upstreams.
+
+### Subagent visibility
+
+- `session_agent_runs` (migration 007) persists run lifecycle and bounded activity; `GET /api/sessions/:id/agents?chatId=&offset=0` checks ownership and returns live runs, paginated history, capture time and whole-chat totals. Missing process ownership yields `interrupted`, never implicit success.
+- Run IDs identify invocations; external worker IDs can be reused for follow-ups. Explicit ID misses never target another active run. Wait tool completion does not imply worker completion. Keep all active runs; bound only completed in-memory history.
+- Web `SubagentPanel` and Android `SubagentPanel` are reachable from session tools and a composer summary. Agent state is independent from parent streaming. Reducers reject older events and terminal-to-active resurrection; empty scoped snapshots reconcile missing active runs.
+- CLI bridge activity uses the authenticated `/api/settings/internal/cli-subagents/activity` endpoint. Provider/model describe the actual worker when supplied; missing child telemetry stays labelled unknown. Native Kimi ACP background completion is not available in the installed adapter.
+- Regression: `pnpm --filter @plum-code-webui/backend test:subagents`; Android `SubagentRunTest`, `SubagentStreamingTest`, and `ChatSurfaceTest.agentPanelShowsAllParallelWorkersAndTheirTasks`.
 
 ## Admin / helper LLM
 
@@ -111,6 +134,9 @@ Two mechanisms let one session combine subscriptions:
 - `codex exec resume` usage may be cumulative. Track `proc.codexLastReportedTokens`: use raw values without snapshot or after counters decrease, otherwise deltas. Cap each field at 1M tokens per turn. Since Codex `input_tokens` includes cache, calculate deltas first, then split disjoint input/cache values; analytics adds `turnInputTokens + turnCacheReadTokens`.
 - **OpenCode:** consume HTTP/SSE `usage_summary`.
 - **Pi:** store RPC usage with `provider='pi'`, even when its model ID exists in OpenCode; never infer Pi from model strings.
+- **Vibe:** take the ACP `PromptResponse.usage` of the finished turn; rows carry `provider='vibe'` and the alias model (`mistral-medium-3.5`).
+- **Mistral plan allowances:** one plan has two monthly ledgers. `api` counts routed `mistral/*` traffic (OpenCode, Pi) against €25.50; `vibe` counts `provider='vibe'` rows against €255 (default when unset). Config lives in `user_settings.settings_json.usagePlans.mistral` / `.vibe`; endpoints `GET/PUT /api/usage/plan/mistral`, `GET/PUT /api/usage/plan/vibe`, `GET /api/usage/limits?provider=mistral|vibe` (`services/mistralPlanUsage.ts`). A legacy record with `allowance:'vibe'` is read as the Vibe budget.
+- `/api/analytics/summary` returns `comparison` (previous window, same elapsed time) and `bySession[].provider`/`last_active`; `90d` is a rolling period. Dashboard components: `packages/frontend/src/components/analytics/`.
 
 ### Per-model pricing (`llm-pricing`)
 
@@ -140,7 +166,7 @@ Rates are USD per 1M tokens in `packages/shared/src/types/llm-pricing.ts`; `Clau
 | z-ai/glm-5 | 1 | 3.2 | 0.2 | 0 |
 | z-ai/glm-4.7/4.6/4.5 | 0.6 | 2.2 | 0.11 | 0 |
 | Gemini 3.1 Pro Preview | 2 | 12 | 0.2 | 0 |
-| Mistral Medium 3.5 | 1.5 | 7.5 | 1.5 | 1.5 |
+| Mistral Medium 3.5 | 1.5 | 7.5 | 0.15 | 0 |
 | Devstral Small 2 | 0.1 | 0.3 | 0.1 | 0.1 |
 
 ### Provider grouping in the chart
@@ -253,17 +279,18 @@ WebUI talks directly to ComfyUI without a LoRA Tester sidecar. Workflows/setting
 ### Android app: home-screen widgets & Wear OS
 
 - Android 1.5.0 uses `ApiHttp` + feature interfaces in `core/network/api`; `ApiClient` remains the compatibility facade. `AppError`/`apiCall` preserve coroutine cancellation and provide localized UI errors.
-- Chat controllers live in `ui/screens/chat/Chat*Controller.kt` plus `ChatHistoryLoader`/`ChatSocketBinder`. Room Paging 3 renders history; keep streaming/outbox outside its source. Replacement responses must pass their generation/thread acceptance check inside the Room transaction, before cache writes and before commit.
-- Chat sync broadcasts thread mutations through `session:chats`. Reconnect restores `activeChatId`, `isBusy` and a thread-bound full `streamingSnapshot` after replay. Android applies transcript events serially; `isRunning` alone does not mean the provider is busy.
-- Replay cursors acknowledge only the server's contiguous published boundary. PostgreSQL history rows and metadata share one `REPEATABLE READ` transaction. Legacy client cursors require a full latest snapshot before protocol-2 verification; Android writes its marker after the Room commit and read/scroll writes must not restore an old cursor.
-- Chat's Git/Checkpoints/Notes sidepanel uses its actual available width, not global screen width. UI copy lives in paired `values`/`values-de` resources; use `PlumTheme.tokens` and localized enum labels for new controls.
-- Android build/test/profile instructions: `packages/android/TESTING.md`. `assembleDebug` runs JVM tests and builds the instrumentation APK; device tests and baseline-profile generation still require explicit device runs.
+- Chat controllers live in `ui/screens/chat/Chat*Controller.kt` plus `ChatHistoryLoader`/`ChatSocketBinder`. Room Paging 3 renders history; keep streaming/outbox outside its source. Replacement responses must pass their generation/thread acceptance check inside the Room transaction.
+- Chat sync broadcasts thread mutations through `session:chats`. Reconnect restores `activeChatId`, `isBusy` and thread-bound `streamingSnapshot` after replay. Android applies transcript events serially; `isRunning` alone does not mean the provider is busy.
+- Replay cursors acknowledge only the server's contiguous published boundary. PostgreSQL history rows and metadata share one `REPEATABLE READ` transaction. Legacy cursors require a full latest snapshot before protocol-2 verification; Android writes its marker after the Room commit.
+- Chat's Git/Checkpoints/Notes sidepanel uses actual available width. UI copy lives in paired `values`/`values-de` resources; use `PlumTheme.tokens` and localized enum labels for new controls.
+- Build/test/profile instructions: `packages/android/TESTING.md`. `assembleDebug` runs JVM tests and builds the instrumentation APK; device tests and baseline-profile generation require explicit device runs.
 - `packages/android/.../widget/` hosts ten RemoteViews widgets using one REST snapshot (`WidgetDataFetcher` → `WidgetStore` SharedPreferences cache → `WidgetRenderer`): sessions/agents, approvals, quick glance, tokens today, cost, provider usage, model usage, provider limits, 7-day bitmap chart, top sessions.
 - `WidgetRefreshWorker` refreshes every 15 min while widgets exist, on demand (widget ↻, app start), and in realtime through `LocalNotificationManager`; sections fail independently and use cache.
 - `SessionWidgetReceiver` retains historical class name for existing widgets.
 - Approvals answer inline (✓/✕ → `WidgetActionReceiver` → `POST /api/permissions/respond`). `WidgetConfigActivity` configures per-instance 24h/7d, provider filter, translucent background; Android 12+ gets compact SizeF variants and system-accent titles.
 - `UsageAlerts` notifies at provider quota 80% or daily cost over default $5, deduped daily; Limits colors hot quotas amber/red.
 - Analytics deep-links via `claudewebui://analytics?range=…`; `AppNavigation` handles warm starts through `LaunchedEffect(deepLinkUri)`.
+- Android session notifications use system notifications in foreground and background, including the open chat. Never restore in-app notification banners; preserve Android channel settings, permission checks and inline approval/question actions. The manually opened notification history remains available.
 - Wear OS has bridged notifications and `packages/android/wear`. Permission prompts include Approve/Deny/Dismiss + `WearableExtender`; agent questions expose up to 3 options plus RemoteInput. Phone mirrors via `WearSync` DataItem `/plum/snapshot` and runs responses in `WearBridgeService` messages `/plum/approval-response` and `/plum/question-response`; watch never calls server. APKs must share applicationId, including `.debug`, and signing cert.
 - Agent questions are answerable from widget and watch. Snapshot carries `questions` alongside `approvals`; one-tap buttons require a single question with fixed options (no multi-select, no free text). Answers go to `POST /api/opencode/questions/respond` (one label list **per question**) or `/reject`.
 - In-app updates: `GET /api/app/version` and `GET /api/app/download` (`routes/app.ts`) serve `<data>/android/claude-webui.apk` with `version.json` (`{version, versionCode, releaseNotes}`). URL has 15-min HMAC token because DownloadManager sends no auth header; publish by dropping both files into data dir.
@@ -285,15 +312,29 @@ New Android env: none; app degrades gracefully when server features are unconfig
 
 ### WebUI ↔ Android feature parity
 
-**New features ship in both clients in the same pass.** A feature is incomplete until reachable in `packages/frontend` and `packages/android`.
-
-**WebUI side-menu split:** left menu is main navigation (sessions, analytics, settings, operations); right menu is chat/session functions (chat threads, Git, Checkpoints, Notes, Preview, Tool Log, Styles, Runtime, Android devices). Session controls belong right, not in chat header. Right dock is `hidden md:flex`; additions need a mobile session-sheet slot.
-
+- New features ship in both clients in the same pass. A feature is incomplete until reachable in `packages/frontend` and `packages/android`.
+- Use one normal chat surface for coding and other tasks. Legacy `surface=task` data remains readable but must not hide Files, Editor or session tools. Keep task progress beside the composer and the full task list in session tools/details; prompt starters are optional draft helpers, not a separate mode.
+- **WebUI unified navigation:** the left `Sidebar` contains global links and session-scoped tabs for Sessions / Session tools. `SessionPage` portals existing controls into the single `SessionMenuContext` slot; do not mirror state or restore a second right navigation. Opened tool content sits beside the left navigation; reserve width so it never covers the composer. Runtime choices use `RuntimeSelect`; navigation dropdowns use `DropdownMenuContent navigation` with viewport collision handling, shared popup motion and reduced-motion support. Popup surfaces use frosted glass with readable opaque fallbacks for unsupported browsers, Gecko performance mode and e-ink; keep the sidebar itself unfrosted. Session configuration dialogs anchor beside the left sidebar; mobile tool sheets enter from the left. Desktop and mobile use the same left navigation; selecting a mobile tool closes the drawer before opening its panel. Session controls stay out of the chat header.
+- Session menu prioritizes Tasks, live Agents, Files, Git and Preview. Keep worker configuration separate from actual active/waiting counts; place rare session actions in the overflow menu and runtime/appearance behind summaries. Android exposes the same ordering through `SessionToolsMenu`.
+- Web left navigation (`Sidebar`) uses a left-edge shadow gradient and no frosted sidebar backdrop. Primary links sit above the searchable session list; usage/operations/settings and explicit collapse control sit in the footer. Preserve session groups, attention states, unread counts and overflow actions; the same component renders the mobile drawer with a short-height scroll fallback.
 - **Dockable panels:** add key to `DockablePanel` in `stores/panelDockStore.ts` and both default maps, then `panelMeta` entry and `renderDockedPanel` branch in `SessionPage.tsx`. Git, Checkpoints, Notes, Preview, Tool Log are there; Categories and Discovered Projects are a dashboard secondary row. Verify mounting with `grep -rl "<ComponentName"`.
 - **Android equivalents:** `ChatInput` slash commands from `/api/commands`, `TaskWorkbenchStrip`, `CompactBoundaryCard` for `compact-` messages, per-session presets via `PATCH /api/sessions/:id/styles`, and DevTools Devices (`/api/android/*` pair/connect/emulator). Tool Log is behind chat Tools; control-gateway tokens and Codex plugin catalogue are in `ParityPanels.kt` mounted by `SettingsScreen`; discovered projects are a dashboard collapsible row.
 - **Wireless reconnect:** remembered Android devices retain prior port. `POST /api/android/devices/connect` accepts `replaceSerial` and removes stale entry only after new port answers.
-- Reasoning levels must match `reasoningOptions` in `SessionPage.tsx`: Codex none/minimal/low/medium/high/xhigh/max/ultra; Claude and Z.AI low/medium/high/max; OpenCode and Pi minimal/low/medium/high/max. Codex `fast` is a service tier: backend moves it to `cli_service_tier` and clears `cli_reasoning`.
+- Reasoning levels must match `reasoningOptions` in `SessionPage.tsx`: Codex none/minimal/low/medium/high/xhigh/max/ultra; Claude and Z.AI low/medium/high/xhigh/max; OpenCode minimal/low/medium/high/max; Pi the same plus ultracode; Vibe off/low/medium/high/max. Codex `fast` is a service tier: backend moves it to `cli_service_tier` and clears `cli_reasoning`. `ultracode` is Pi-only and must stay out of `CLAUDE_CODE_EFFORT_OPTIONS`.
 - Integration secrets are write-only in both clients: server returns `*Configured` flags, empty means keep, removal requires explicit `clear*`.
+
+### `firefox` (Plum Browser extension, Firefox & Chrome)
+
+- Claude-in-Chrome equivalent for Firefox **and Chrome/Edge**. Extension source: `packages/firefox-extension/`. `src/` is shared; `src/targets/firefox` is MV2 with a background page and sidebar_action, and `src/targets/chrome` is MV3 with a service worker, a status side panel, the session chat as a popup window docked on the right (a side-panel iframe loses SameSite=Lax logins), MAIN-world `evaluate_js`/console, a DevTools screenshot fallback and a fixed ID `oaacdgkogibamjhjppjlhncjknlcigof`. Chrome downloads: `/api/browser-bridge/extension-chrome.zip` (generic). The Docker builder runs `node packages/firefox-extension/scripts/build.mjs`; `GET /api/browser-bridge/extension.xpi` serves `data/firefox/plum-browser-firefox.xpi` (signed, if present) before the unsigned image copy.
+- Script: `scripts/mcp-servers/firefox.mjs`, registered by default in `WEBUI_DEFAULT_MCP_SERVERS`. It calls `POST /api/browser-bridge/internal/call` with the hook secret and `X-Webui-Session-Id`.
+- Transport: the extension dials out to `wss://<plum>/api/browser-bridge/ws` and falls back to `/mobile/api/browser-bridge/ws` behind Authelia. It authenticates in its first frame (`hello`) with a `plum_ff_` token from the `browser_tokens` table (migration `009`). The token is never in the URL, and `resolveAuthenticatedUserId` ignores the prefix, so it grants no REST access. Revocation closes the socket on the next heartbeat (≤ 60 s).
+- Several paired browsers: a session keeps its browser, but moves to the one the user focused last once its own has been idle for 10 min (the extension reports user focus as `state {active:true}`; agent actions in session windows do not count). MCP tools `browsers` and `select_browser` (`"chrome"`, `"auto"`) list and pin.
+- Panel (`src/panel.html` = Chrome side panel and Firefox sidebar; session windows open it with `?session=`): a chat for one session (`chat.js`) plus a sessions view (`picker.js`: pick, switch provider/model, hand over the current tab, start a new session). The token has no REST access, so the panel sends `rpc` frames over the bridge socket; `services/browserBridge/rpc.ts` allowlists session, provider, chat, permission and question methods and calls the matching routes with a 2-minute owner JWT. Chat goes through `chatRelay.ts`: one loopback Socket.IO client per bridge connection, signed in as the owner, so `session:send`/`session:interrupt` hit the WebUI's own handlers; events of watched sessions come back as `event` frames. The Plum web chat is only opened on request ("In Plum öffnen").
+- Multiple browsers: a session sticks to the browser it first used; new sessions take the most recently connected one.
+- Isolation: each WebUI session gets its own unfocused browser window with a native tab group `Plum · <session name>`; its sidebar shows `<plum>/session/<id>` (one click on the toolbar icon or `Alt+Shift+P` opens it), and a visible virtual Plum cursor animates every pointer action (hidden during screenshots). Screenshots wider than 1568 px are scaled, and click/hover/scroll x/y are screenshot pixels. It is recovered by title after a browser restart. An agent can only address tabs in its group; before Firefox 139 the extension falls back to an internal tab list.
+- Tools: `status`, `tabs_list`, `tab_open`, `tab_close`, `tab_activate`, `navigate`, `screenshot`, `read_page`, `find`, `get_page_text`, `click`, `hover`, `type`, `press_key`, `scroll`, `form_input`, `evaluate_js`, `read_console`, `wait_for`, `resize_window`. Input is synthesised DOM events plus default actions (no debugger protocol in Firefox), so events are `isTrusted: false`.
+- UI: WebUI Settings → Firefox browser (`FirefoxBrowserPanel`) and Android Settings (`FirefoxBrowserPanel` in `ParityPanels.kt`). Both pair/unpair tokens and show live connections from `GET /api/browser-bridge/status`.
+- Release Firefox needs a signed build: `packages/firefox-extension/scripts/sign-firefox.sh` signs unlisted on AMO (account `zwaetschge`) with `data/firefox/amo.env` and drops the result in `data/firefox/` (served first). Bump both manifest versions first. E2E: `packages/backend/scripts/browser-bridge-e2e.ts` against `selenium/standalone-firefox`.
 
 ### `godot`
 
@@ -328,6 +369,7 @@ New Android env: none; app degrades gracefully when server features are unconfig
   - OpenCode: `/home/node/.opencode`, symlinked to `~/.config/opencode` and `~/.local/share/opencode`
   - Pi: `/home/node/.pi`
   - Kimi Code: `/home/node/.kimi-code`
+  - Mistral Vibe: `/home/node/.vibe` (`VIBE_HOME`: `.env` plan key, `config.toml` models/MCP, `trusted_folders.toml`, logs)
   - Claude Code: `/home/node/.claude`
   - npm-global: `/home/node/.npm-global`
   - GitHub CLI: `/home/node/.config/gh` (token + config; otherwise ephemeral)
@@ -337,7 +379,7 @@ New Android env: none; app degrades gracefully when server features are unconfig
 
 - `WEBUI_CONFIG_HOME` or legacy `CLAUDE_CONFIG_HOME`: shared Claude config home.
 - `WEBUI_SKILLS_DIRS` or legacy `CLAUDE_SKILLS_DIRS`: additional skill packs.
-- `CLI_PROVIDER_CODEX_MODELS`, `CLI_PROVIDER_OPENCODE_MODELS`, `CLI_PROVIDER_PI_MODELS`, `CLI_PROVIDER_CLAUDE_MODELS`: model-menu overrides. Empty selects Codex cache, OpenCode CLI, OpenCode-backed Pi, or Claude CLI discovery.
+- `CLI_PROVIDER_CODEX_MODELS`, `CLI_PROVIDER_OPENCODE_MODELS`, `CLI_PROVIDER_PI_MODELS`, `CLI_PROVIDER_CLAUDE_MODELS`, `CLI_PROVIDER_VIBE_MODELS`: model-menu overrides. Empty selects Codex cache, OpenCode CLI, OpenCode-backed Pi, Claude CLI, or `$VIBE_HOME/config.toml` discovery.
 - Defaults: `CLI_PROVIDER_CODEX_DEFAULT_MODEL=gpt-5.5`; `CLI_PROVIDER_OPENCODE_DEFAULT_MODEL=z-ai/glm-5.1`; `CLI_PROVIDER_PI_DEFAULT_MODEL=z-ai/glm-5.1`; `CLI_PROVIDER_CLAUDE_DEFAULT_MODEL=sonnet`.
 - `CLI_PROVIDER_OPENCODE_DEFAULT_AGENT=build`; empty `CLI_PROVIDER_OPENCODE_STYLE_PROMPT` uses Codex-like default; `0`/`false` disables it.
 - `ADMIN_LLM_PROVIDER`: pin helper calls; default `codex` → `opencode` → `claude`.
@@ -349,6 +391,7 @@ New Android env: none; app degrades gracefully when server features are unconfig
 - `CLI_RUNNER_ALLOWED_EMAILS`: permit selected non-admins without enabling all active users.
 - `PLUM_BACKUP_RETENTION_DAYS`, `PLUM_LOG_RETENTION_DAYS`, `PLUM_SESSION_RETENTION_DAYS`: retention for `node scripts/plum-maintenance.mjs`; preview with `--dry-run`.
 - `USAGE_HISTORY_RETENTION_DAYS`: default `365`; prunes `usage_history` on startup. `0` disables pruning.
+- Control-gateway tokens (`plum_gw_…`) also authenticate Socket.IO (`auth.token`); read scope may only subscribe, unsubscribe and reconnect.
 - `GATEWAY_SSE_MAX_PER_USER`: default `4`; concurrent `GET /api/gateway/events` streams per user. Further connections get `429`.
 - `PROXY_AUTH_ENABLED` + `PROXY_AUTH_TRUSTED_IPS`: `/auth/proxy` accepts identity headers only from listed addresses/CIDRs or literal `private`. **Enabling proxy auth without a trusted-IP list rejects every login**.
 
@@ -482,7 +525,4 @@ Docker, Docker Compose
 
 ## Key Directories
 packages/, scripts/
-
-Active Core Skills: api-design, capability-catalog, debugging-playbook, devops-deploy, documentation-writer, frontend-design, performance-tuning, refactor-guide, security-review, testing-playbook
-On-demand capabilities (86 agents plus the full skill catalog): node /app/scripts/capability-catalog.mjs search "<task>"
 <!-- webui-managed: project-context:end -->

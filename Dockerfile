@@ -28,11 +28,13 @@ RUN pnpm install --frozen-lockfile
 COPY packages/shared ./packages/shared
 COPY packages/backend ./packages/backend
 COPY packages/frontend ./packages/frontend
+COPY packages/firefox-extension ./packages/firefox-extension
 
 # Shared types compile before backend/frontend (both import from shared).
 RUN pnpm --filter @plum-code-webui/shared build && \
     pnpm --filter @plum-code-webui/backend build && \
     pnpm --filter @plum-code-webui/frontend build && \
+    node packages/firefox-extension/scripts/build.mjs && \
     pnpm --filter @plum-code-webui/backend deploy --prod /opt/backend-runtime && \
     find /opt/backend-runtime/node_modules -type d \
       \( -path '*/prebuilds/win32-*' -o -path '*/prebuilds/darwin-*' \) \
@@ -99,6 +101,9 @@ ARG PI_MCP_ADAPTER_VERSION=2.11.0
 # own OAuth flow. Ships TypeScript source with no install scripts.
 ARG PI_ANTIGRAVITY_VERSION=0.3.0
 ARG KIMI_CODE_VERSION=0.31.1
+# Mistral Vibe ships on PyPI (package `mistral-vibe`), not npm, so it gets its
+# own pipx layer below instead of joining the npm prefix.
+ARG VIBE_VERSION=2.25.0
 ARG NPM_VERSION=12.0.2
 ARG NPM_BRACE_EXPANSION_VERSION=5.0.9
 # Vendored inside npm itself and inside the Pi CLI; neither is reachable
@@ -185,6 +190,23 @@ RUN mkdir -p /home/node/.npm-global /opt/plum-cli && \
       | grep -Fx "${PI_UNDICI_VERSION}" && \
     /usr/local/bin/npm cache clean --force && rm -rf /root/.npm
 
+# Mistral Vibe (`vibe` / `vibe-acp`, persistent ACP harness like Kimi Code) is a
+# Python package, so pipx installs it as the `node` user into ~/.local: /opt is
+# root-owned and not writable at runtime, while ~/.local/bin already sits first
+# on PATH. The backend resolves harnesses through findCliBinary(), which probes
+# fixed prefixes instead of PATH, hence the two symlinks into /opt/plum-cli/bin.
+# BusyBox `su` resets HOME to the target user's home, which is where pipx keeps
+# its venvs and logs.
+# The `--version` check smoke-tests the wheel through the symlink, so a package
+# that installs but cannot start (missing musl wheel, broken entry point) fails
+# the build instead of the first session. Only the CLI itself is version-pinned;
+# pip resolves its transitive dependencies at build time.
+RUN set -eux; \
+    su -s /bin/sh node -c "PIPX_HOME=/home/node/.local/pipx PIPX_BIN_DIR=/home/node/.local/bin pipx install --pip-args=--no-cache-dir mistral-vibe==${VIBE_VERSION}"; \
+    ln -sfn /home/node/.local/bin/vibe /opt/plum-cli/bin/vibe; \
+    ln -sfn /home/node/.local/bin/vibe-acp /opt/plum-cli/bin/vibe-acp; \
+    su -s /bin/sh node -c "/opt/plum-cli/bin/vibe-acp --version" | grep -F "${VIBE_VERSION}"
+
 WORKDIR /app
 
 # Hoist only the backend's production dependency graph. Frontend build tools,
@@ -201,6 +223,8 @@ COPY --from=builder --chown=node:node /app/packages/backend/dist ./packages/back
 COPY --from=builder --chown=node:node /app/packages/backend/src/cli/permission-prompt-wrapper.sh ./packages/backend/src/cli/permission-prompt-wrapper.sh
 COPY --from=builder --chown=node:node /app/packages/frontend/package.json ./packages/frontend/package.json
 COPY --from=builder --chown=node:node /app/packages/frontend/dist ./packages/frontend/dist
+# Firefox browser-control extension, served at /api/browser-bridge/extension.xpi.
+COPY --from=builder --chown=node:node /app/packages/firefox-extension/dist ./packages/firefox-extension/dist
 
 # Helper scripts (mcp-comfyui, etc.) — no build step, copied as-is.
 COPY --chown=node:node scripts ./scripts
@@ -219,7 +243,11 @@ RUN install -m 0755 ./scripts/chromium-webui.sh /usr/local/bin/plum-chromium && 
 # Codex CLI's skills system looks under ~/.agents/skills/<name>/SKILL.md (not
 # ~/.claude/skills/). Symlink so the same skill packs work for both providers
 # without duplication. Same idea for AGENTS.md / CLAUDE.md (Codex reads AGENTS.md).
+#
+# Vibe reads VIBE_HOME (~/.vibe) for its .env plan key, trusted folders and
+# logs, so it gets the same pre-created, node-owned directory as the others.
 RUN mkdir -p /home/node/.claude /home/node/.codex /home/node/.pi /home/node/.kimi-code \
+             /home/node/.vibe \
              /home/node/.opencode/config /home/node/.opencode/share \
              /home/node/.config /home/node/.local/share /home/node/.agents \
              /tmp/runtime-node && \

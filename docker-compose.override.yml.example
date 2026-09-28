@@ -42,6 +42,7 @@ services:
     #   - /opt/claude-webui/config/opencode:/home/node/.opencode
     #   - /opt/claude-webui/config/pi:/home/node/.pi
     #   - /opt/claude-webui/config/kimi:/home/node/.kimi-code
+    #   - /opt/claude-webui/config/vibe:/home/node/.vibe
     #   - /opt/projects:/workspace
     #   # Optional: mount a host Godot binary directory for the Godot MCP.
     #   - /opt/godot:/opt/godot:ro

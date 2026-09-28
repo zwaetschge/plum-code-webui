@@ -4,7 +4,7 @@ This file guides coding agents working in this repository.
 
 ## Repository
 
-Plum Code WebUI is a pnpm monorepo for Codex, OpenCode, Pi, Kimi Code, and legacy Claude Code harnesses, deployed as one Docker container on Unraid. **Codex is the default provider.**
+Plum Code WebUI is a pnpm monorepo for Codex, OpenCode, Pi, Kimi Code, Mistral Vibe, and legacy Claude Code harnesses, deployed as one Docker container on Unraid. **Codex is the default provider.**
 
 ## Commands
 
@@ -42,25 +42,28 @@ Node `>=20`, pnpm `>=9`; the package manager is pinned to `pnpm@9.15.0`.
 
 ### Backend
 
-Entry: `packages/backend/src/index.ts`. Routes are in `src/routes/`; services are in `src/services/`. `src/services/claude/ClaudeProcessManager.ts` manages provider lifecycles and streams Socket.IO events.
+Entry: `packages/backend/src/index.ts`. Routes are in `src/routes/`; services are in `src/services/`. `src/services/claude/ClaudeProcessManager.ts` manages provider lifecycles, streaming, interrupts, queued input, analytics writes, and Socket.IO events.
 
 - **Codex:** one `codex exec --json` per turn. `translateCodexMessage` streams `item.delta`, `agent_message.delta`, `text.delta`, and `response.output_text.delta`, with `item.completed` fallback. `buildCodexContextPrefix()` prepends up to 40 stored turns, limited to 24k characters, as `[Prior conversation context]`; Codex has no native `--resume`.
 - **OpenCode:** per-user HTTP/SSE server with native streaming/resume. Config, data, OAuth, and account state live under `~/.opencode/users/<sha256-user-key>`; never assign legacy global OAuth state. It routes models including `z-ai/glm-*` and Kimi.
-- **Pi:** persistent JSONL RPC using OpenCode connections/models, shared skills, converted agents, and the MCP bridge. `pi-antigravity` supplies Google Antigravity because Pi dropped built-in support in `0.71.0`; `resolvePiExtensionPaths()` provisions it and `PI_ANTIGRAVITY_MODELS` mirrors its catalog. It needs one `/login antigravity` per user and may violate Google's ToS according to the package README. `syncPiConfig()` writes `contextWindow` per model into `models.json` (models.dev limit, else `lookupContextWindow()`). `refreshOpenCodeModelsCache()` fetches `https://models.dev/api.json` into `~/.cache/opencode/models.json` at startup and before each Pi sync (daily, 20 s timeout) because OpenCode never writes that cache in a Pi-only container. Pi's `turn_end` fires per LLM round and threshold compaction runs only after `agent_end`, so `handlePiCompactionEnd()` nudges every automatic compaction; a `compaction_end` without `result` is a failed compaction and only surfaces the error. `syncPiConfig()` sets `compaction.reserveTokens` to 40k unless the user set one.
+- **Pi:** persistent JSONL RPC using OpenCode connections/models, shared skills, converted agents, and the MCP bridge. `pi-antigravity` supplies Google Antigravity because Pi dropped built-in support in `0.71.0`; `resolvePiExtensionPaths()` provisions it and `PI_ANTIGRAVITY_MODELS` mirrors its catalog. It needs one `/login antigravity` per user (Settings → Provider logins drives Pi's TUI; Google redirects to `localhost:51121`, so the user pastes that URL and `routes/cli-login.ts` replays it against Pi's callback server in the container; success is read from `auth.json`) and may violate Google's ToS according to the package README. `syncPiConfig()` writes `contextWindow` per model into `models.json` and sets `compaction.reserveTokens` to 40k unless user-set. `refreshOpenCodeModelsCache()` fetches `https://models.dev/api.json` into `~/.cache/opencode/models.json` at startup and before each Pi sync (daily, 20 s timeout). **Ultracode for Pi:** `scripts/pi-ultracode-extension.ts` (loaded by `resolvePiExtensionPaths()`) adds the `workflow` tool: the model writes a JS script (`export const meta`, `agent()`, `parallel()`, `pipeline()`, `phase()`, `log()`, `args`) and every `agent()` runs as its own `pi --mode json -p` child (4 concurrent, 40 per run; `PI_ULTRACODE_CONCURRENCY`, `PI_ULTRACODE_MAX_AGENTS`), with JSON-schema outputs, runs under `<agent dir>/ultracode/runs/<wf_id>/` and `resumeFromRunId`. It is active when the session effort is `ultracode` (spawn sets `PI_ULTRACODE=1`, thinking `xhigh`) or the prompt contains "ultracode"; `applyPiWorkflowAgents()` turns its progress into subagent cards. Pi's `turn_end` fires per LLM round; threshold compaction runs only after `agent_end`; `handlePiCompactionEnd()` nudges automatic compaction, while `compaction_end` without `result` is failed compaction.
 - **Kimi Code:** persistent `kimi acp` stdio with native resume, cancellation, streaming, and queued follow-ups. **Do not regress to `kimi -p`.**
+- **Mistral Vibe:** persistent `vibe-acp` stdio on the same ACP path as Kimi (`isAcpProvider()`), so streaming, approvals, cancellation, queueing and recovery are shared. Python CLI installed with pipx (`mistral-vibe`); models come from `$VIBE_HOME/config.toml` (`discoverVibe`), thinking levels are off/low/medium/high/max, modes map planning→plan, danger→auto-approve, manual→ask, auto-accept→accept-edits, and session start sends the `_trust/decision` ACP extension so tools run in repos with `AGENTS.md`. `buildVibeEnv()` pins `VIBE_HOME`, disables the desktop keyring, and blanks an inherited `MISTRAL_API_KEY` only when Vibe's own `.env` has one, so a browser sign-in (Vibe Code allowance, €255/month) is never shadowed by the container's API key (€25.50). Turn usage comes from the ACP `PromptResponse.usage`; sign-in lives in `services/vibe/vibeAuth.ts` behind `/api/cli-login/vibe/*`.
 - **Claude Code:** legacy persistent stream-json transport.
 
-Input may queue while a provider is active; interrupts cancel the current turn. Key events: `session:output`, `session:message`, `session:thinking`, `session:tool_use`, `session:agent`, and `session:status`.
+Key events: `session:output`, `session:message`, `session:thinking`, `session:tool_use`, `session:agent`, and `session:status`. `session:subscribe-all` joins an account-wide room; its `session:lifecycle` beat carries `status`, `busy`, `queueDepth`, `activitySummary`, `pendingApprovals`, and `pendingQuestions`.
 
-`session:subscribe-all` joins an account-wide room. Its `session:lifecycle` beat carries `status`, `busy`, `queueDepth`, `activitySummary`, `pendingApprovals`, and `pendingQuestions`.
-
-**Auth:** Express sessions, JWT, Passport GitHub/Google OAuth, and Basic Auth guard backed by `app_config`. Harness login routes are `/auth/codex`, `/auth/opencode`, `/auth/pi`, and `/auth/claude`; `/auth/providers` uses `isProviderAvailable()`. `POST /api/auth/refresh` trades a valid JWT for a fresh one. `GET /api/permissions/pending` returns every approval blocking the caller's sessions.
+**Auth:** Express sessions, JWT, Passport GitHub/Google OAuth, and Basic Auth guard backed by `app_config`. Harness login routes are `/auth/codex`, `/auth/opencode`, `/auth/pi`, `/auth/kimi`, `/auth/vibe`, and `/auth/claude`; `/auth/providers` uses `isProviderAvailable()`. `POST /api/auth/refresh` trades a valid JWT for a fresh one. `GET /api/permissions/pending` returns every approval blocking the caller's sessions.
 
 **Admin/helper LLM:** `packages/backend/src/utils/adminLLM.ts` provides one-shot completions, preferring Codex → OpenCode → Claude unless `ADMIN_LLM_PROVIDER` overrides it. `routes/git.ts` uses it at `/generate-commit-message`. Codex helper calls must retain `--ephemeral`.
 
 **Z.AI API:** Settings → General → Z.AI stores a per-user Anthropic-compatible endpoint, encrypted token, and optional Opus/Sonnet/Haiku mappings through `GET/PUT/DELETE /api/settings/zai-api`. Only Z.AI sessions receive the related `ANTHROPIC_*` variables. Default endpoint: `https://api.z.ai/api/anthropic`.
 
 **Usage/analytics:** `ClaudeProcessManager.saveUsageToDatabase` is the sole analytics write path. It writes `usage_history` idempotently by session, explicit provider, and stable turn ID; keep Pi and OpenCode distinct. Codex usage comes from `turn.completed.usage` fields `input_tokens`, `cached_input_tokens`, `output_tokens`, and `reasoning_output_tokens`. Pricing is in `packages/shared/src/types/llm-pricing.ts`; migrations reprice `usage_history.cost_usd` when `LLM_PRICING_RATE_CARD_VERSION` changes. Unknown models remain unpriced. Always use `getProviderLabelForUsage(provider, model)` from `packages/shared/src/types/cli-providers.ts`.
+
+`GET /api/analytics/summary` (periods `24h`, `7d` calendar week, `30d` calendar month, `90d` rolling, `all`) also returns `comparison` — the previous window cut to the same elapsed time, with totals and `byProvider` — and `bySession[].provider`/`last_active`. The WebUI dashboard lives in `packages/frontend/src/components/analytics/` (KPI deltas, provider filter, opt-in quota overlay); the Android screen mirrors its order and deltas.
+
+`/api/usage/limits?provider=mistral` is a local estimate (`services/mistralPlanUsage.ts`): Mistral has no quota API for Pro plans (the Admin API is Enterprise-only, rate-limit headers are per minute), so it sums `usage_history` rows with `model LIKE 'mistral/%'` in the billing month (priced from tokens) against the budget and billing day from `GET/PUT /api/usage/plan/mistral`. Pi does not list the Mistral connection (`PI_SKIPPED_PROVIDERS` in `utils/piConfig.ts`); Mistral models run in the Vibe harness, and OpenCode keeps its own Mistral routing.
 
 `/api/usage/limits?provider=codex` calls ChatGPT’s `backend-api/codex/usage` endpoint and requires `Authorization: Bearer <tokens.access_token>` plus `chatgpt-account-id`; see `routes/usage.ts`.
 
@@ -111,6 +114,7 @@ The override pins:
 - `/mnt/cache/appdata/plum-code-webui/config/opencode` → `/home/node/.opencode`
 - `/mnt/cache/appdata/plum-code-webui/config/pi` → `/home/node/.pi`
 - `/mnt/cache/appdata/plum-code-webui/config/kimi-code` → `/home/node/.kimi-code`
+- `/mnt/cache/appdata/plum-code-webui/config/vibe` → `/home/node/.vibe` (`VIBE_HOME`)
 - `/mnt/cache/appdata/plum-code-webui/config/claude` → `/home/node/.claude`
 - `/mnt/cache/appdata/plum-code-webui/config/npm-global` → `/home/node/.npm-global`
 - `/mnt/cache/appdata/plum-code-webui/config/gh` → `/home/node/.config/gh` (GitHub CLI token; see AGENTS.md)
@@ -137,7 +141,7 @@ Set `basic_auth_enabled` to `false` to disable it.
 
 - Active skills: `~/.claude/skills/<name>/SKILL.md`; on-demand workflows: `~/.claude/skill-catalog/<name>/SKILL.md`; presentation presets: `~/.claude/style-library/{design,writing}`.
 - Agents: `~/.claude/agents/<name>.md`; aliases and retired names: `~/.claude/skill-aliases.json`.
-- The catalog is available through Settings → Extensions → Skills, `GET /api/claude-config/skills?library=all`, and `node /app/scripts/capability-catalog.mjs search "<task>"`.
+- Catalog access: Settings → Extensions → Skills, `GET /api/claude-config/skills?library=all`, and `node /app/scripts/capability-catalog.mjs search "<task>"`.
 - External packs sync from `/mnt/user/AI/Skills`, `/mnt/unraid/AI/Skills`, then comma-separated `WEBUI_SKILLS_DIRS`. `.skill.zip` imports respect catalog state, aliases, and tombstones.
 - Managed blocks in `AGENTS.md` and `CLAUDE.md` update per session; preserve custom text outside them.
 - The 37 design and 32 writing profiles are session presentation layers, not executable skills; legacy names remain searchable aliases.
@@ -205,12 +209,24 @@ The **android-builder** MCP builds, installs, launches, and tests Android applic
 
 **Always use this MCP; never call `adb` or `gradle` from Bash.** Start a new session after MCP registration changes.
 
+## Browser Control (MCP, Firefox & Chrome)
+
+The **firefox** MCP (`scripts/mcp-servers/firefox.mjs`, a default registration) lets agents drive the user's Firefox or Chrome/Edge through the Plum Browser extension, much like Claude in Chrome. `packages/firefox-extension/` builds the Firefox MV2 `.xpi` and the Chrome MV3 `.zip` from one source tree.
+
+- The extension connects out to `/api/browser-bridge/ws`, or to `/mobile/api/browser-bridge/ws` behind Authelia. It authenticates with a `plum_ff_` pairing token (`browser_tokens`); the token grants no REST access.
+- Pairing is under WebUI Settings → Firefox browser and in the Android settings. The `.xpi` is served at `/api/browser-bridge/extension.xpi`; a signed copy in `data/firefox/` wins.
+- Each session works in its own Firefox tab group `Plum · <session name>` and can only address tabs in it.
+- Several paired browsers: a session keeps its browser, but moves to the one the user focused last once its own has been idle for 10 min (the extension reports user focus as `state {active:true}`; agent actions in session windows do not count). MCP tools `browsers` and `select_browser` (`"chrome"`, `"auto"`) list and pin.
+- Panel (`src/panel.html` = Chrome side panel and Firefox sidebar; session windows open it with `?session=`): a chat for one session (`chat.js`) plus a sessions view (`picker.js`: pick, switch provider/model, hand over the current tab, start a new session). The token has no REST access, so the panel sends `rpc` frames over the bridge socket; `services/browserBridge/rpc.ts` allowlists session, provider, chat, permission and question methods and calls the matching routes with a 2-minute owner JWT. Chat goes through `chatRelay.ts`: one loopback Socket.IO client per bridge connection, signed in as the owner, so `session:send`/`session:interrupt` hit the WebUI's own handlers; events of watched sessions come back as `event` frames. The Plum web chat is only opened on request ("In Plum öffnen").
+- The MCP calls `POST /api/browser-bridge/internal/call` (hook secret and session id), and `services/browserBridge/bridge.ts` relays it to the extension.
+- Release Firefox needs a signed build: `packages/firefox-extension/scripts/sign-firefox.sh` signs unlisted on AMO with `data/firefox/amo.env` and drops the result in `data/firefox/` (served first). Bump both manifest versions first.
+
 ## Godot + Blender MCP
 
 Zero-dependency bridges are registered in `~/.claude/settings.json` and mirrored to other providers for new sessions:
 
 - **godot** (`scripts/mcp-servers/godot.mjs`): `godot_info`, `godot_create_project`, `godot_list_project`, `godot_validate_project`, `godot_run_gdscript`, `godot_export_project`, `godot_import_assets`, `godot_add_android_preset`, `godot_export_android`.
-- **blender** (`scripts/mcp-servers/blender.mjs`): `blender_info`, `blender_run_python`, `blender_create_asset`, `blender_inspect_file`, `blender_render_preview`. The image installs `blender-headless` and defaults `BLENDER_BIN=blender-headless`; supported outputs include `.blend`, `.glb`, `.gltf`, `.obj`, `.stl`, and `.fbx`.
+- **blender** (`scripts/mcp-servers/blender.mjs`): `blender_info`, `blender_run_python`, `blender_create_asset`, `blender_inspect_file`, `blender_render_preview`. The image installs `blender-headless` and defaults `BLENDER_BIN=blender-headless`; outputs include `.blend`, `.glb`, `.gltf`, `.obj`, `.stl`, and `.fbx`.
 
 ### The Godot engine container
 
@@ -220,7 +236,7 @@ The WebUI image is Alpine/musl and the official Godot build is glibc-linked, so 
 docker build -t plum-godot:latest docker/godot     # no --progress flag: legacy builder, no buildx
 ```
 
-`godot.mjs` runs engine commands as one-shot `docker run` through `docker-socket-proxy`; `docker exec` is blocked by design. The bridge reads its mount table with `docker inspect $(hostname)` and re-mounts each host source at the same destination path.
+`godot.mjs` runs engine commands as one-shot `docker run` through `docker-socket-proxy`; `docker exec` is blocked by design. It reads its mount table with `docker inspect $(hostname)` and re-mounts each host source at the same destination path.
 
 - **Project paths must live under a shared bind mount** (`/mnt/user`, `/mnt/cache`, `/workspace`). `/tmp` is invisible to the engine, so `godot_run_gdscript` puts its scratch script inside the project in docker mode.
 - `GODOT_BIN` is intentionally empty; a local binary would be preferred if one existed. `GODOT_DOCKER_IMAGE` and `GODOT_DOCKER_DISABLED` override the fallback.
@@ -243,6 +259,7 @@ An external supervisor uses the same API as the user.
 - Send `Authorization: Bearer plum_gw_…`. `resolveAuthenticatedUserId()` resolves it to the owner, so every `requireAuth` route works: sessions, messages, approvals, git, analytics, and settings.
 - `GET /api/gateway/overview` returns sessions with `busy`, `queueDepth`, `activitySummary`, `pendingApprovals`, `pendingQuestions`, and `needsAttention`. A session blocked on an agent question counts as needing attention.
 - `GET /api/gateway/events` is an SSE stream: `assistant_message`, `user_message`, `turn_complete`. `GATEWAY_SSE_MAX_PER_USER` (default `4`) caps concurrent streams per user; beyond it the request gets `429`.
+- Socket.IO accepts the same token as `auth.token`, so `session:send`, `session:input`, `session:interrupt` and the approval events work headless. Read-scope tokens may only emit `session:subscribe`, `session:subscribe-all`, `session:unsubscribe` and `session:reconnect`; other events get `session:error` (and a rejected ack for `session:send`). A revoked token closes its open sockets at the next event after at most 5 s.
 - Gateway tokens cannot manage gateway tokens (`403 GATEWAY_FORBIDDEN`); revocation is immediate and the next request returns 401.
 - Admin-only routes still require an admin owner; the token inherits, but does not exceed, that role.
 
@@ -250,7 +267,7 @@ An external supervisor uses the same API as the user.
 
 ## Multi-Provider Notes
 
-`CLI_PROVIDERS` insertion order controls the UI. Persistent homes are `~/.codex`, `~/.local/share/opencode`, `~/.pi`, `~/.kimi-code`, and `~/.claude`.
+`CLI_PROVIDERS` insertion order controls the UI. Persistent homes are `~/.codex`, `~/.local/share/opencode`, `~/.pi`, `~/.kimi-code`, `~/.vibe`, and `~/.claude`.
 
 Default-provider selection is encoded in:
 

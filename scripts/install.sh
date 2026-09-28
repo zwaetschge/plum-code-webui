@@ -186,7 +186,7 @@ prompt DATA_DIR "Host path for SQLite DB and generated files" "$DATA_DIR_DEFAULT
 
 CONFIG_DIR_DEFAULT="$(get_existing CONFIG_DIR)"
 CONFIG_DIR_DEFAULT="${CONFIG_DIR_DEFAULT:-./config}"
-prompt CONFIG_DIR "Host path for per-harness config (claude, codex, opencode, pi, kimi)" "$CONFIG_DIR_DEFAULT"
+prompt CONFIG_DIR "Host path for per-harness config (claude, codex, opencode, pi, kimi, vibe)" "$CONFIG_DIR_DEFAULT"
 
 SESSION_SECRET="$(get_existing SESSION_SECRET)"
 if [[ -z "$SESSION_SECRET" ]]; then
@@ -328,6 +328,7 @@ mkdir -p \
   "${CONFIG_DIR}/opencode" \
   "${CONFIG_DIR}/pi" \
   "${CONFIG_DIR}/kimi" \
+  "${CONFIG_DIR}/vibe" \
   "${CONFIG_DIR}/npm-global" \
   "${WORKSPACE_DIR}"
 # In-container node user is uid 1000 — ensure it can write to the config dirs.

@@ -123,6 +123,7 @@ services:
       - ${CONFIG_DIR:-./config}/opencode:/home/node/.opencode
       - ${CONFIG_DIR:-./config}/pi:/home/node/.pi
       - ${CONFIG_DIR:-./config}/kimi:/home/node/.kimi-code
+      - ${CONFIG_DIR:-./config}/vibe:/home/node/.vibe
       - ${CONFIG_DIR:-./config}/npm-global:/home/node/.npm-global
       # Workspace path the running CLI can read/write. Defaults to ./workspace; mount your project here.
       - ${WORKSPACE_DIR:-./workspace}:/workspace
