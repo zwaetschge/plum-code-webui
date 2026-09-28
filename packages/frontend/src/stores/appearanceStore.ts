@@ -23,7 +23,7 @@ export const BACKGROUND_ANIMATION_OPTIONS: Array<{
   {
     value: 'ribbons',
     label: 'Neon Glow',
-    description: 'Glowing orbs with soft neon light',
+    description: 'Animated 3D neon tubes and travelling light',
   },
   {
     value: 'still',
@@ -59,16 +59,42 @@ export function setStoredTheme(theme: unknown): void {
   window.localStorage.setItem(THEME_STORAGE_KEY, normalizeTheme(theme));
 }
 
+let themeChangeSequence = 0;
+
 export function applyTheme(theme: Theme): void {
   if (typeof document === 'undefined') return;
   const next = normalizeTheme(theme);
   const resolved = next === 'system' ? resolveSystemTheme() : next;
   const root = document.documentElement;
+  const themeChanged = root.dataset.resolvedTheme !== resolved;
+  const changeSequence = themeChanged ? ++themeChangeSequence : themeChangeSequence;
+
+  // Colour transitions on hundreds of controls can lag behind the new theme
+  // while a WebGL or rain background is rendering, leaving white-on-white
+  // text and half-dark buttons. Commit the new palette in a single paint.
+  if (themeChanged) root.classList.add('theme-switching');
 
   root.classList.remove('light', 'dark', 'eink');
   root.classList.add(resolved);
   root.dataset.theme = next;
   root.dataset.resolvedTheme = resolved;
+
+  const chromeColor = resolved === 'dark' ? '#172637' : resolved === 'eink' ? '#fafafa' : '#eff8f6';
+  document
+    .querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+    ?.setAttribute('content', chromeColor);
+  document
+    .querySelector<HTMLMetaElement>('meta[name="msapplication-TileColor"]')
+    ?.setAttribute('content', chromeColor);
+
+  if (themeChanged) {
+    // A WebGL backdrop can throttle animation frames. Release the temporary
+    // transition guard on wall time so it cannot linger after the palette is
+    // already correct, even when the background is busy or the tab is hidden.
+    window.setTimeout(() => {
+      if (changeSequence === themeChangeSequence) root.classList.remove('theme-switching');
+    }, 180);
+  }
 }
 
 export function getStoredBackgroundAnimation(): BackgroundAnimation {

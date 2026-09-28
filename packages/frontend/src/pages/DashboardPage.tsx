@@ -1,3 +1,4 @@
+import { CLAUDE_CODE_EFFORT_OPTIONS } from '@plum-code-webui/shared';
 import {
   useEffect,
   useDeferredValue,
@@ -28,7 +29,6 @@ import {
   RotateCcw,
   Loader2,
   Send,
-  Code2,
   ClipboardList,
   Brain,
   Zap,
@@ -138,17 +138,23 @@ interface DashboardSessionGroup {
 
 function getDashboardReasoningOptions(provider: CLIProvider) {
   if (provider === 'claude' || provider === 'zai') {
-    return [
-      { value: 'low', label: 'Low' },
-      { value: 'medium', label: 'Medium' },
-      { value: 'high', label: 'High' },
-      { value: 'xhigh', label: 'X-High (ultrathink)' },
-      { value: 'max', label: 'Max' },
-    ];
+    return CLAUDE_CODE_EFFORT_OPTIONS;
   }
   if (provider === 'opencode' || provider === 'pi') {
     return [
       { value: 'minimal', label: 'Minimal' },
+      { value: 'low', label: 'Low' },
+      { value: 'medium', label: 'Medium' },
+      { value: 'high', label: 'High' },
+      { value: 'max', label: 'Max' },
+      // Pi runs Ultracode workflows through scripts/pi-ultracode-extension.ts.
+      ...(provider === 'pi' ? [{ value: 'ultracode', label: 'Ultracode (workflows)' }] : []),
+    ];
+  }
+  if (provider === 'vibe') {
+    // Vibe calls this "Thinking"; the backend accepts only these five levels.
+    return [
+      { value: 'off', label: 'Off' },
       { value: 'low', label: 'Low' },
       { value: 'medium', label: 'Medium' },
       { value: 'high', label: 'High' },
@@ -175,7 +181,7 @@ function normalizeDashboardReasoning(provider: CLIProvider, value: unknown) {
     : '';
 }
 
-function deriveSessionName(prompt: string, surface: SessionSurface): string {
+function deriveSessionName(prompt: string): string {
   const compact = prompt
     .trim()
     .replace(/\s+/g, ' ')
@@ -184,7 +190,7 @@ function deriveSessionName(prompt: string, surface: SessionSurface): string {
     .replace(/[.:,;!?]+$/g, '')
     .trim();
   if (compact) return compact;
-  return surface === 'task' ? 'New Task' : 'New Code Session';
+  return 'New session';
 }
 
 function formatDashboardFileSize(bytes: number): string {
@@ -228,10 +234,7 @@ function toDashboardSentence(value: string | null | undefined): string | null {
 }
 
 function getDashboardProjectDescription(session: Session): string {
-  return (
-    toDashboardSentence(session.projectDescription) ||
-    `${session.surface === 'task' ? 'Task workspace' : 'Project workspace'} for ${session.name}.`
-  );
+  return toDashboardSentence(session.projectDescription) || `Workspace for ${session.name}.`;
 }
 
 function formatDashboardLastActivity(session: Session): string {
@@ -290,7 +293,6 @@ export function DashboardPage() {
   const [newSessionPrompt, setNewSessionPrompt] = useState('');
   const [newSessionName, setNewSessionName] = useState('');
   const [sessionMode, setSessionMode] = useState<'new' | 'existing'>('new');
-  const [newSessionSurface, setNewSessionSurface] = useState<SessionSurface>('code');
   const [newSessionPermissionMode, setNewSessionPermissionMode] =
     useState<SessionMode>('auto-accept');
   const [selectedModel, setSelectedModel] = useState('');
@@ -483,7 +485,6 @@ export function DashboardPage() {
         setNewSessionName('');
         sessionNameEditedRef.current = false;
         setSessionMode('new');
-        setNewSessionSurface('code');
         setNewSessionPermissionMode('auto-accept');
         setSelectedModel('');
         setSelectedReasoning('');
@@ -1011,24 +1012,16 @@ export function DashboardPage() {
   const handlePromptChange = (value: string) => {
     setNewSessionPrompt(value);
     if (!sessionNameEditedRef.current) {
-      setNewSessionName(deriveSessionName(value, newSessionSurface));
+      setNewSessionName(deriveSessionName(value));
     }
   };
 
   const handleTaskWorkflowSelect = (workflow: TaskWorkflow) => {
-    setNewSessionSurface('task');
     handlePromptChange(workflow.prompt);
     if (!sessionNameEditedRef.current || !newSessionName.trim()) {
       setNewSessionName(workflow.shortTitle);
     }
     window.setTimeout(() => promptInputRef.current?.focus({ preventScroll: true }), 0);
-  };
-
-  const handleSurfaceChange = (surface: SessionSurface) => {
-    setNewSessionSurface(surface);
-    if (!sessionNameEditedRef.current) {
-      setNewSessionName(deriveSessionName(newSessionPrompt, surface));
-    }
   };
 
   const handleNewSessionFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -1098,12 +1091,12 @@ export function DashboardPage() {
       initialMessage?: string;
       files?: File[];
     } = {
-      name: (newSessionName.trim() || deriveSessionName(prompt, newSessionSurface)).slice(0, 100),
+      name: (newSessionName.trim() || deriveSessionName(prompt)).slice(0, 100),
       cliProvider: selectedCliProvider,
       cliModel: selectedModel.trim() || null,
       cliReasoning: normalizeDashboardReasoning(selectedCliProvider, reasoning) || null,
       mode: newSessionPermissionMode,
-      surface: newSessionSurface,
+      surface: 'code',
       initialMessage: prompt,
       files: newSessionFiles,
     };
@@ -1173,7 +1166,7 @@ export function DashboardPage() {
                 <span className="dashboard-count">{sessions.length}</span>
               </div>
               <p className="dashboard-subtitle ui-text">
-                Start a code workspace or a quieter task chat directly from here.
+                Start a conversation for coding, writing, research, or planning.
               </p>
             </div>
             <label className="dashboard-search" aria-label="Search sessions">
@@ -1242,7 +1235,7 @@ export function DashboardPage() {
                 <small>
                   {newSessionPrompt.trim()
                     ? `${newSessionPrompt.trim().slice(0, 72)}${newSessionPrompt.trim().length > 72 ? '…' : ''}`
-                    : 'Code or task · choose provider after opening'}
+                    : 'Describe your request · choose provider after opening'}
                 </small>
               </span>
               {(newSessionFiles.length > 0 || newSessionPrompt.trim()) && !isComposerExpanded && (
@@ -1255,28 +1248,6 @@ export function DashboardPage() {
             </button>
 
             <div className="dashboard-chatbar-topline">
-              <div
-                className="dashboard-surface-switch dashboard-chatbar-segment"
-                aria-label="New session surface"
-              >
-                <button
-                  type="button"
-                  className={cn(newSessionSurface === 'code' && 'is-active')}
-                  onClick={() => handleSurfaceChange('code')}
-                >
-                  <Code2 className="h-4 w-4" />
-                  <span>Code</span>
-                </button>
-                <button
-                  type="button"
-                  className={cn(newSessionSurface === 'task' && 'is-active')}
-                  onClick={() => handleSurfaceChange('task')}
-                >
-                  <ClipboardList className="h-4 w-4" />
-                  <span>Task</span>
-                </button>
-              </div>
-
               <label className="dashboard-chatbar-name" title="Session name">
                 <Pencil className="h-3.5 w-3.5" />
                 <input
@@ -1285,9 +1256,7 @@ export function DashboardPage() {
                     sessionNameEditedRef.current = true;
                     setNewSessionName(event.target.value);
                   }}
-                  placeholder={
-                    newSessionSurface === 'task' ? 'Vanessa editing task' : 'Feature work'
-                  }
+                  placeholder="Session name"
                   aria-label="Session name"
                 />
               </label>
@@ -1310,11 +1279,7 @@ export function DashboardPage() {
                     target.style.height = 'auto';
                     target.style.height = `${Math.min(target.scrollHeight, 176)}px`;
                   }}
-                  placeholder={
-                    newSessionSurface === 'task'
-                      ? 'Ask for editing, writing, summarizing, research, file changes...'
-                      : 'Describe what should be built, fixed, debugged, or changed...'
-                  }
+                  placeholder="What would you like to build, write, research, or change?"
                   className="dashboard-prompt-input dashboard-chatbar-textarea"
                   rows={1}
                   style={{ height: 'auto', overflow: 'hidden' }}
@@ -1343,13 +1308,17 @@ export function DashboardPage() {
               </Button>
             </div>
 
-            {newSessionSurface === 'task' && (
-              <div className="dashboard-task-workflows" aria-label="Task workflows">
+            <details className="session-starters">
+              <summary>Starting points</summary>
+              <div className="dashboard-task-workflows" aria-label="Starting points">
                 {TASK_WORKFLOWS.map((workflow) => (
                   <button
                     key={workflow.id}
                     type="button"
-                    onClick={() => handleTaskWorkflowSelect(workflow)}
+                    onClick={(event) => {
+                      handleTaskWorkflowSelect(workflow);
+                      event.currentTarget.closest('details')?.removeAttribute('open');
+                    }}
                     className="dashboard-task-workflow"
                   >
                     <span className="dashboard-task-workflow-icon">
@@ -1377,7 +1346,7 @@ export function DashboardPage() {
                   </button>
                 ))}
               </div>
-            )}
+            </details>
 
             <div className="dashboard-composer-controls dashboard-chatbar-tools">
               <label className="dashboard-control dashboard-chatbar-chip dashboard-chatbar-provider">

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
+import { useIsDesktopLayout } from '@/hooks/useMediaQuery';
 import { cn } from '@/lib/utils';
 
 const DropdownMenu = DropdownMenuPrimitive.Root;
@@ -33,10 +34,11 @@ const DropdownMenuSubContent = React.forwardRef<
 >(({ className, sideOffset = 6, ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
     <DropdownMenuPrimitive.SubContent
+      collisionPadding={12}
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        'glass-panel z-50 min-w-[8rem] overflow-hidden rounded-xl border-foreground/10 p-1 text-popover-foreground',
+        'plum-popup z-50 min-w-[8rem] rounded-xl p-1 text-popover-foreground',
         className
       )}
       {...props}
@@ -47,20 +49,27 @@ DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayNam
 
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal>
-    <DropdownMenuPrimitive.Content
-      ref={ref}
-      sideOffset={sideOffset}
-      className={cn(
-        'glass-panel z-50 min-w-[8rem] overflow-hidden rounded-xl border-foreground/10 p-1 text-popover-foreground',
-        className
-      )}
-      {...props}
-    />
-  </DropdownMenuPrimitive.Portal>
-));
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & { navigation?: boolean }
+>(({ className, navigation = false, sideOffset = 8, side, align, ...props }, ref) => {
+  const desktop = useIsDesktopLayout();
+  return (
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.Content
+        ref={ref}
+        side={navigation ? (desktop ? 'right' : 'bottom') : side}
+        align={navigation ? 'start' : align}
+        sideOffset={sideOffset}
+        collisionPadding={12}
+        className={cn(
+          'plum-popup z-50 min-w-[8rem] rounded-xl p-1 text-popover-foreground',
+          navigation && 'navigation-popup',
+          className
+        )}
+        {...props}
+      />
+    </DropdownMenuPrimitive.Portal>
+  );
+});
 DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName;
 
 const DropdownMenuItem = React.forwardRef<

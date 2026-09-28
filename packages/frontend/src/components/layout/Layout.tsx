@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Menu, PanelRightOpen } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import { Sidebar } from './Sidebar';
+import { SessionMenuContext, type NavigationView } from './SessionMenuContext';
+import { useIsDesktopLayout } from '@/hooks/useMediaQuery';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { applyTheme, normalizeTheme, useAppearanceStore } from '@/stores/appearanceStore';
@@ -51,12 +53,43 @@ function selectFreshestUsage(
 
 export function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const isDesktopLayout = useIsDesktopLayout();
+  const [desktopMenuTarget, setDesktopMenuTarget] = useState<HTMLDivElement | null>(null);
+  const [mobileMenuTarget, setMobileMenuTarget] = useState<HTMLDivElement | null>(null);
+  const [navigationView, setNavigationView] = useState<NavigationView>('tools');
+  const closeNavigation = useCallback(() => setMobileMenuOpen(false), []);
+  const menuContext = useMemo(
+    () => ({
+      target: isDesktopLayout ? desktopMenuTarget : mobileMenuTarget,
+      setDesktopTarget: setDesktopMenuTarget,
+      setMobileTarget: setMobileMenuTarget,
+      view: navigationView,
+      setView: setNavigationView,
+      closeNavigation,
+    }),
+    [isDesktopLayout, desktopMenuTarget, mobileMenuTarget, navigationView, closeNavigation]
+  );
   const { backgroundAnimation, setBackgroundAnimation } = useAppearanceStore();
   const location = useLocation();
   // Session page manages its own scroll + floating chat bars, so it renders
   // edge-to-edge inside <main>. Every other page uses the default padded scroll.
   const isFullBleed = location.pathname.startsWith('/session/');
   const routeSessionId = location.pathname.match(/^\/session\/([^/]+)/)?.[1] ?? null;
+  useEffect(() => {
+    setNavigationView('tools');
+  }, [routeSessionId]);
+  useEffect(() => {
+    if (isDesktopLayout) setMobileMenuOpen(false);
+  }, [isDesktopLayout]);
+  useEffect(() => {
+    const openTools = () => {
+      setNavigationView('tools');
+      if (!isDesktopLayout) setMobileMenuOpen(true);
+      window.dispatchEvent(new Event('plum:expand-navigation'));
+    };
+    window.addEventListener('session:open-mobile-right-menu', openTools);
+    return () => window.removeEventListener('session:open-mobile-right-menu', openTools);
+  }, [isDesktopLayout]);
   const sessions = useSessionStore((state) => state.sessions);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const setSessions = useSessionStore((state) => state.setSessions);
@@ -213,119 +246,110 @@ export function Layout() {
   }, [activeMeta.productName, activeSession]);
 
   return (
-    <div
-      className={cn(
-        'relative flex h-screen bg-background',
-        isFullBleed && 'session-shell-has-edge-fades'
-      )}
-    >
-      {/* Background effects */}
-      <AppBackground animation={backgroundAnimation} />
-      <div className="absolute inset-0 pattern-bg pointer-events-none" />
-      {isFullBleed && (
-        <>
-          <div
-            className="session-global-edge-fade session-global-edge-fade-top"
-            aria-hidden="true"
-          />
-          <div
-            className="session-global-edge-fade session-global-edge-fade-bottom"
-            aria-hidden="true"
-          />
-        </>
-      )}
+    <SessionMenuContext.Provider value={menuContext}>
+      <div
+        className={cn(
+          'relative flex h-screen bg-background',
+          isFullBleed && 'session-shell-has-edge-fades'
+        )}
+      >
+        {/* Background effects */}
+        <AppBackground animation={backgroundAnimation} />
+        <div className="absolute inset-0 pattern-bg pointer-events-none" />
+        {isFullBleed && (
+          <>
+            <div
+              className="session-global-edge-fade session-global-edge-fade-top"
+              aria-hidden="true"
+            />
+            <div
+              className="session-global-edge-fade session-global-edge-fade-bottom"
+              aria-hidden="true"
+            />
+          </>
+        )}
 
-      {/* Desktop Sidebar */}
-      <div className="hidden md:block relative z-10">
-        <Sidebar
-          navigationOnly={location.pathname === '/'}
-          contextUsage={isFullBleed ? headerUsage : undefined}
-          contextStats={headerContextStats}
-          contextSession={activeSession}
-        />
-      </div>
+        {/* Desktop Sidebar */}
+        {isDesktopLayout && (
+          <div className="hidden md:block relative z-10">
+            <Sidebar
+              navigationOnly={location.pathname === '/'}
+              contextUsage={isFullBleed ? headerUsage : undefined}
+              contextStats={headerContextStats}
+              contextSession={activeSession}
+            />
+          </div>
+        )}
 
-      {/* Mobile Sheet */}
-      <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-        <SheetContent side="left" className="p-0 w-72">
-          <Sidebar
-            onNavigate={handleNavigation}
-            mobile
-            contextUsage={isFullBleed ? headerUsage : undefined}
-            contextStats={headerContextStats}
-            contextSession={activeSession}
-          />
-        </SheetContent>
-      </Sheet>
+        {/* Mobile Sheet */}
+        <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+          <SheetContent side="left" className="mobile-navigation-sheet p-0 w-72">
+            <Sidebar
+              onNavigate={handleNavigation}
+              mobile
+              contextUsage={isFullBleed ? headerUsage : undefined}
+              contextStats={headerContextStats}
+              contextSession={activeSession}
+            />
+          </SheetContent>
+        </Sheet>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden relative z-10">
-        {/* Usage Limits Bar - shown on session pages */}
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col overflow-hidden relative z-10">
+          {/* Usage Limits Bar - shown on session pages */}
 
-        {/* Mobile Header */}
-        <header className="md:hidden flex h-14 items-center gap-2 border-b border-border/70 bg-background/95 px-2 backdrop-blur-md">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setMobileMenuOpen(true)}
-            className="h-9 w-9"
-            title="Open navigation"
-          >
-            <Menu className="h-5 w-5" />
-          </Button>
-
-          <Link
-            to={activeSession ? `/session/${activeSession.id}` : '/'}
-            className="flex min-w-0 flex-1 items-center gap-2 px-1"
-            title={headerTitle}
-          >
-            <ProviderLogo provider={headerProvider} className="h-6 w-6 shrink-0 object-contain" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold leading-tight text-foreground">
-                {headerTitle}
-              </span>
-              {headerRunState && (
-                <span
-                  className={cn('mobile-header-run-state', `is-${headerRunState.tone}`)}
-                  title={headerRunState.detail}
-                >
-                  <span className={cn('mobile-header-run-dot', `is-${headerRunState.tone}`)} />
-                  <span className="truncate">
-                    {headerRunState.isWorking ? headerRunState.detail : headerRunState.label}
-                  </span>
-                </span>
-              )}
-            </span>
-          </Link>
-
-          {isFullBleed && (
+          {/* Mobile Header */}
+          <header className="mobile-app-header md:hidden flex h-14 items-center gap-2 px-2">
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => window.dispatchEvent(new Event('session:open-mobile-right-menu'))}
+              onClick={() => setMobileMenuOpen(true)}
               className="h-9 w-9"
-              title="Open session menu"
-              aria-label="Open session menu"
+              title="Open navigation"
             >
-              <PanelRightOpen className="h-5 w-5" />
+              <Menu className="h-5 w-5" />
             </Button>
-          )}
-        </header>
 
-        {/* Page Content */}
-        <main
-          className={
-            isFullBleed ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 overflow-auto p-4 md:p-6'
-          }
-        >
-          <Outlet />
-        </main>
+            <Link
+              to={activeSession ? `/session/${activeSession.id}` : '/'}
+              className="flex min-w-0 flex-1 items-center gap-2 px-1"
+              title={headerTitle}
+            >
+              <ProviderLogo provider={headerProvider} className="h-6 w-6 shrink-0 object-contain" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold leading-tight text-foreground">
+                  {headerTitle}
+                </span>
+                {headerRunState && (
+                  <span
+                    className={cn('mobile-header-run-state', `is-${headerRunState.tone}`)}
+                    title={headerRunState.detail}
+                  >
+                    <span className={cn('mobile-header-run-dot', `is-${headerRunState.tone}`)} />
+                    <span className="truncate">
+                      {headerRunState.isWorking ? headerRunState.detail : headerRunState.label}
+                    </span>
+                  </span>
+                )}
+              </span>
+            </Link>
+          </header>
+
+          {/* Page Content */}
+          <main
+            className={
+              isFullBleed ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 overflow-auto p-4 md:p-6'
+            }
+          >
+            <Outlet />
+          </main>
+        </div>
+
+        {/* Global command palette (Cmd/Ctrl+K) */}
+        <CommandPalette />
+        <GlobalMessageSearchDialog />
+        <OutboxPanel />
       </div>
-
-      {/* Global command palette (Cmd/Ctrl+K) */}
-      <CommandPalette />
-      <GlobalMessageSearchDialog />
-      <OutboxPanel />
-    </div>
+    </SessionMenuContext.Provider>
   );
 }

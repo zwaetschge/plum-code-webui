@@ -39,6 +39,9 @@ const errorMessages: Record<string, string> = {
   opencode_not_logged_in: 'OpenCode CLI not logged in. Run "opencode auth login" first.',
   pi: 'Pi authentication failed. Please try again.',
   pi_not_available: 'Pi is not available. Configure an OpenCode API connection first.',
+  vibe: 'Mistral Vibe authentication failed. Please try again.',
+  vibe_not_logged_in:
+    'Mistral Vibe is not signed in. Connect it under Settings → Providers → Provider logins.',
   unauthorized: 'You are not authorized. Please sign in.',
   expired: 'Your session has expired. Please sign in again.',
 };
@@ -50,6 +53,7 @@ interface AuthProviders {
   codex?: boolean;
   opencode?: boolean;
   pi?: boolean;
+  vibe?: boolean;
 }
 
 type CliLoginStatus = 'starting' | 'awaiting_code' | 'completed' | 'error';

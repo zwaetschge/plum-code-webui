@@ -68,7 +68,7 @@ export function RenameSessionDialog({ session, open, onOpenChange }: RenameSessi
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="navigation-dialog sm:max-w-md">
         <form onSubmit={handleSubmit} className="space-y-4">
           <DialogHeader>
             <DialogTitle>Rename Session</DialogTitle>

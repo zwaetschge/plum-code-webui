@@ -48,7 +48,7 @@ export function OutboxPanel() {
         {entries.map((entry) => (
           <article
             key={entry.clientMessageId}
-            className="min-w-0 space-y-3 rounded-xl border bg-background p-4"
+            className="glass-card min-w-0 space-y-3 rounded-xl border p-4"
           >
             <div>
               <Link

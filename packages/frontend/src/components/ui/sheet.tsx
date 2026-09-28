@@ -22,17 +22,17 @@ export function SheetContent({
 }: SheetContentProps) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 duration-200" />
       <DialogPrimitive.Content
         aria-describedby={undefined}
         className={cn(
-          'fixed z-50 overflow-y-auto overscroll-contain bg-background shadow-xl duration-200',
+          'glass-sheet fixed z-50 overflow-y-auto overscroll-contain shadow-xl duration-200 data-[state=closed]:animate-out',
           side === 'left' &&
-            'inset-y-0 left-0 h-dvh w-3/4 max-w-xs border-r data-[state=open]:animate-in data-[state=open]:slide-in-from-left',
+            'inset-y-0 left-0 h-dvh w-3/4 max-w-xs border-r data-[state=open]:animate-in data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left',
           side === 'right' &&
-            'inset-y-0 right-0 h-dvh w-3/4 max-w-xs border-l data-[state=open]:animate-in data-[state=open]:slide-in-from-right',
+            'inset-y-0 right-0 h-dvh w-3/4 max-w-xs border-l data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right',
           side === 'bottom' &&
-            'inset-x-0 bottom-0 max-h-[88dvh] rounded-t-2xl border-t data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom',
+            'inset-x-0 bottom-0 max-h-[88dvh] rounded-t-2xl border-t data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom',
           className
         )}
       >

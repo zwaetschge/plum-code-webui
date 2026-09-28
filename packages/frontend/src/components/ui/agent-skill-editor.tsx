@@ -249,7 +249,7 @@ export function AgentSkillEditor({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-background/80 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-2xl max-h-[90vh] bg-card rounded-2xl border shadow-2xl overflow-hidden animate-scale-in flex flex-col">
+      <div className="glass-dialog relative w-full max-w-2xl max-h-[90vh] rounded-2xl border shadow-2xl overflow-hidden animate-scale-in flex flex-col">
         {/* Header */}
         <div className="flex items-center gap-3 p-5 border-b bg-muted/30">
           <div className={cn('p-2.5 rounded-xl', bgColorClass)}>

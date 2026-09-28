@@ -66,7 +66,7 @@ export function CommandMenu({
   return (
     <div
       ref={containerRef}
-      className="absolute bottom-full mb-2 left-0 right-0 bg-popover border rounded-lg shadow-lg overflow-hidden z-50"
+      className="plum-popup absolute bottom-full mb-2 left-0 right-0 border rounded-lg shadow-lg overflow-hidden z-50"
     >
       <div className="px-3 py-2 border-b bg-muted/50">
         <span className="text-xs text-muted-foreground">Commands</span>

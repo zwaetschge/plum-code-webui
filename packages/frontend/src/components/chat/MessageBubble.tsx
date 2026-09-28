@@ -244,7 +244,7 @@ export const MessageBubble = memo(
 
     if (message.role === 'user') {
       return (
-        <div className="turn-user animate-fade-in">
+        <div className="turn-user">
           <div>
             <div className="message-copy-shell">
               <button
@@ -314,7 +314,7 @@ export const MessageBubble = memo(
 
     // Assistant turn
     return (
-      <div className="turn-asst animate-fade-in">
+      <div className="turn-asst">
         <div className="ai-body">
           {copyButton}
           {showAssistantIdentity && (

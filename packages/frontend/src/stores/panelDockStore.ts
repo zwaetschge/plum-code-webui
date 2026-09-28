@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 
 export type DockablePanel =
   | 'files'
+  | 'agents'
   | 'tasks'
   | 'config'
   | 'mesh'
@@ -31,6 +32,7 @@ export const usePanelDockStore = create<PanelDockState>()(
       pinned: {
         files: false,
         tasks: false,
+        agents: false,
         config: false,
         mesh: false,
         designStyle: false,
@@ -58,6 +60,7 @@ export const usePanelDockStore = create<PanelDockState>()(
           pinned: {
             files: false,
             tasks: false,
+            agents: false,
             config: false,
             mesh: false,
             designStyle: false,

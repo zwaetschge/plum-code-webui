@@ -2,8 +2,18 @@ import type { CLIProvider as CLIProviderType } from '@plum-code-webui/shared';
 export type { CLIProvider } from '@plum-code-webui/shared';
 type CLIProvider = CLIProviderType;
 
-export type UiProvider = 'plum' | 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi';
-export const ACCOUNT_USAGE_LIMIT_PROVIDERS = ['codex', 'claude', 'zai', 'kimi', 'alibaba'] as const;
+export type UiProvider = 'plum' | 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi' | 'vibe';
+export const ACCOUNT_USAGE_LIMIT_PROVIDERS = [
+  'codex',
+  'claude',
+  'zai',
+  'kimi',
+  'alibaba',
+  'mistral',
+  // Vibe is the second allowance of the same Mistral plan, tracked on its own
+  // so harness turns and routed API traffic never share one budget.
+  'vibe',
+] as const;
 export type AccountUsageLimitProvider = (typeof ACCOUNT_USAGE_LIMIT_PROVIDERS)[number];
 export type UsageLimitProvider = AccountUsageLimitProvider | 'z-ai' | 'opencode-go';
 
@@ -77,6 +87,15 @@ export const UI_PROVIDER_META: Record<
     loginCta: 'Continue with Kimi',
     description: 'Kimi Code CLI with native persistent ACP chat sessions.',
   },
+  vibe: {
+    id: 'vibe',
+    label: 'Mistral Vibe',
+    productName: 'Mistral Vibe',
+    tagline: 'Vibe Code Plan',
+    loginCta: 'Continue with Vibe',
+    description:
+      'Mistral Vibe CLI with native persistent ACP chat sessions. Its turns draw on the separate Vibe-Code-Kontingent (Vibe Code allowance) of the Mistral plan.',
+  },
 };
 
 export const CLI_PROVIDER_LABEL: Record<CLIProvider, string> = {
@@ -86,6 +105,7 @@ export const CLI_PROVIDER_LABEL: Record<CLIProvider, string> = {
   opencode: 'OpenCode',
   pi: 'Pi',
   kimi: 'Kimi Code',
+  vibe: 'Mistral Vibe',
 };
 
 export const CLI_PROVIDER_ICON: Record<CLIProvider, string> = {
@@ -95,6 +115,7 @@ export const CLI_PROVIDER_ICON: Record<CLIProvider, string> = {
   opencode: '⚡',
   pi: 'π',
   kimi: '🌙',
+  vibe: '🧡',
 };
 
 export const CLI_PROVIDER_DEFAULT_MODEL: Record<CLIProvider, string> = {
@@ -104,6 +125,9 @@ export const CLI_PROVIDER_DEFAULT_MODEL: Record<CLIProvider, string> = {
   opencode: 'z-ai/glm-5.1',
   pi: 'z-ai/glm-5.1',
   kimi: 'kimi-code/kimi-for-coding',
+  // `mistral-medium-3.5` is the alias of mistral-vibe-cli-latest, the model the
+  // plan's Vibe Code allowance pays for.
+  vibe: 'mistral-medium-3.5',
 };
 
 export const UI_PROVIDER_THEME_COLOR: Record<UiProvider, string> = {
@@ -114,6 +138,7 @@ export const UI_PROVIDER_THEME_COLOR: Record<UiProvider, string> = {
   opencode: '#160d2b',
   pi: '#0e1716',
   kimi: '#2582ed',
+  vibe: '#ff7000',
 };
 
 export const USAGE_PROVIDER_LABEL: Record<UsageLimitProvider, string> = {
@@ -122,6 +147,8 @@ export const USAGE_PROVIDER_LABEL: Record<UsageLimitProvider, string> = {
   codex: CLI_PROVIDER_LABEL.codex,
   kimi: CLI_PROVIDER_LABEL.kimi,
   alibaba: 'Alibaba Token Plan',
+  mistral: 'Mistral',
+  vibe: CLI_PROVIDER_LABEL.vibe,
   'z-ai': 'Z.ai Coding Plan',
   'opencode-go': 'OpenCode Go',
 };
@@ -132,6 +159,8 @@ export const USAGE_PROVIDER_SHORT_LABEL: Record<UsageLimitProvider, string> = {
   codex: 'Codex',
   kimi: 'Kimi',
   alibaba: 'Token Plan',
+  mistral: 'Mistral',
+  vibe: 'Vibe',
   'z-ai': 'Z.ai',
   'opencode-go': 'OpenCode Go',
 };
@@ -172,6 +201,18 @@ export const CLI_PROVIDER_LIMIT_LABELS: Record<
     session: { title: 'Plan', subtitle: 'Tokens' },
     weeklyAll: { title: 'Plan period', subtitle: 'Tokens' },
   },
+  mistral: {
+    // Mistral exposes no quota API for Pro plans; the month is measured
+    // against a budget the user declares (see /api/usage/plan/mistral).
+    session: { title: 'Today' },
+    weeklyAll: { title: 'Month', subtitle: 'Budget' },
+  },
+  vibe: {
+    // Same missing quota API, but the Vibe harness spends the plan's separate
+    // Vibe Code allowance, declared through /api/usage/plan/vibe.
+    session: { title: 'Today' },
+    weeklyAll: { title: 'Month', subtitle: 'Vibe Code' },
+  },
 };
 
 const CLI_TO_UI: Record<CLIProvider, UiProvider> = {
@@ -181,6 +222,7 @@ const CLI_TO_UI: Record<CLIProvider, UiProvider> = {
   opencode: 'opencode',
   pi: 'pi',
   kimi: 'kimi',
+  vibe: 'vibe',
 };
 
 const UI_TO_CLI: Record<UiProvider, CLIProvider> = {
@@ -191,6 +233,7 @@ const UI_TO_CLI: Record<UiProvider, CLIProvider> = {
   opencode: 'opencode',
   pi: 'pi',
   kimi: 'kimi',
+  vibe: 'vibe',
 };
 
 export function normalizeUiProvider(value?: string | null): UiProvider {
@@ -201,6 +244,7 @@ export function normalizeUiProvider(value?: string | null): UiProvider {
   if (key === 'opencode') return 'opencode';
   if (key === 'pi') return 'pi';
   if (key === 'kimi') return 'kimi';
+  if (key === 'vibe') return 'vibe';
   return 'plum';
 }
 
@@ -220,6 +264,9 @@ export function getUsageLimitProviderForModel(
 ): AccountUsageLimitProvider | null {
   const value = (model || '').trim().toLowerCase();
   if (cliProvider === 'kimi') return 'kimi';
+  // Vibe turns carry a bare `mistral-*` model id, so attribution must come from
+  // the harness: they spend the plan's Vibe allowance, not the API allowance.
+  if (cliProvider === 'vibe') return 'vibe';
   if (cliProvider !== 'opencode' && cliProvider !== 'pi') {
     return cliProvider;
   }
@@ -227,6 +274,9 @@ export function getUsageLimitProviderForModel(
   // through it, so the plan — not the model — is the limit that matters.
   if (value.startsWith('alibaba-token-plan/')) {
     return 'alibaba';
+  }
+  if (value.startsWith('mistral/')) {
+    return 'mistral';
   }
   if (value.startsWith('z-ai/') || value.startsWith('zai/') || value.startsWith('glm-')) {
     return 'zai';
@@ -265,18 +315,9 @@ export function applyProviderClass(_provider: UiProvider): void {
     'provider-codex',
     'provider-opencode',
     'provider-pi',
-    'provider-kimi'
+    'provider-kimi',
+    'provider-vibe'
   );
   root.classList.add(`provider-${visualProvider}`);
   root.setAttribute('data-provider', visualProvider);
-
-  const themeMeta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-  if (themeMeta) {
-    themeMeta.content = UI_PROVIDER_THEME_COLOR[visualProvider];
-  }
-
-  const tileMeta = document.querySelector<HTMLMetaElement>('meta[name="msapplication-TileColor"]');
-  if (tileMeta) {
-    tileMeta.content = UI_PROVIDER_THEME_COLOR[visualProvider];
-  }
 }

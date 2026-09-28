@@ -1,3 +1,8 @@
+import {
+  isActiveAgent,
+  mergeSubagentRuns,
+  reconcileSubagentSnapshot,
+} from '@plum-code-webui/shared';
 import { create } from 'zustand';
 import type {
   Session,
@@ -185,40 +190,10 @@ function findToolIndex(list: ToolExecution[], toolId: string): number {
   return -1;
 }
 
-function sortAgentRuns(runs: SubagentRun[]): SubagentRun[] {
-  return [...runs].sort((a, b) => {
-    if (a.status === 'started' && b.status !== 'started') return -1;
-    if (a.status !== 'started' && b.status === 'started') return 1;
-    return (b.completedAt ?? b.startedAt) - (a.completedAt ?? a.startedAt);
-  });
-}
-
-function mergeAgentRuns(existing: SubagentRun[], incoming: SubagentRun[]): SubagentRun[] {
-  const byId = new Map<string, SubagentRun>();
-  for (const run of existing) {
-    byId.set(run.id, run);
-  }
-  for (const run of incoming) {
-    const prior = byId.get(run.id);
-    byId.set(run.id, {
-      ...prior,
-      ...run,
-      startedAt: prior?.startedAt ?? run.startedAt,
-      description: run.description || prior?.description,
-      result: run.result || prior?.result,
-      error: run.error || prior?.error,
-      toolId: run.toolId || prior?.toolId,
-      externalAgentId: run.externalAgentId || prior?.externalAgentId,
-    });
-  }
-  const sorted = sortAgentRuns(Array.from(byId.values()));
-  const active = sorted.filter((run) => run.status === 'started');
-  const recent = sorted.filter((run) => run.status !== 'started').slice(0, 30);
-  return [...active, ...recent];
-}
+const mergeAgentRuns = mergeSubagentRuns;
 
 function getActiveAgentFromRuns(runs: SubagentRun[]): AgentState | null {
-  const active = sortAgentRuns(runs).find((run) => run.status === 'started');
+  const active = mergeAgentRuns([], runs).find(isActiveAgent);
   return active
     ? {
         agentType: active.agentType,
@@ -249,19 +224,11 @@ export interface AgentState {
 
 export type { SubagentRun };
 
-export interface AgentEvent {
+export type AgentEvent = Omit<SubagentRun, 'id' | 'startedAt'> & {
   agentId?: string;
-  agentType: string;
-  description?: string;
-  status: SubagentRunStatus;
   startedAt?: number;
-  completedAt?: number;
-  result?: string;
-  error?: string;
-  toolId?: string;
-  externalAgentId?: string;
   timestamp?: number;
-}
+};
 
 // Todo item from Claude's TodoWrite tool
 export interface TodoItem {
@@ -366,7 +333,11 @@ interface SessionState {
   setPendingApprovalCounts: (counts: Record<string, number>) => void;
   setActiveAgent: (sessionId: string, agent: AgentState | null) => void;
   recordAgentEvent: (sessionId: string, event: AgentEvent) => void;
-  setAgentRuns: (sessionId: string, runs: SubagentRun[]) => void;
+  setAgentRuns: (
+    sessionId: string,
+    runs: SubagentRun[],
+    snapshot?: { capturedAt: number; chatId: string | null }
+  ) => void;
   setTodos: (sessionId: string, todos: TodoItem[]) => void;
   setUsage: (sessionId: string, usage: UsageData) => void;
   addGeneratedImage: (sessionId: string, image: Omit<GeneratedImage, 'timestamp'>) => void;
@@ -686,23 +657,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((state) => {
       const now = event.timestamp ?? Date.now();
       const existing = state.agentRuns[sessionId] || [];
-      const matching =
-        event.agentId || event.toolId || event.externalAgentId
-          ? existing.find(
-              (run) =>
-                run.id === event.agentId ||
-                (!!event.toolId && run.toolId === event.toolId) ||
-                (!!event.externalAgentId && run.externalAgentId === event.externalAgentId)
-            )
-          : event.status === 'started'
-            ? undefined
-            : [...existing]
+      if (event.status !== 'started' && !event.agentId && !event.toolId && !event.externalAgentId)
+        return state;
+      const matching = event.agentId
+        ? existing.find((run) => run.id === event.agentId)
+        : event.toolId
+          ? [...existing].reverse().find((run) => run.toolId === event.toolId)
+          : event.externalAgentId
+            ? [...existing]
                 .reverse()
                 .find(
-                  (run) =>
-                    run.status === 'started' &&
-                    (!event.agentType || run.agentType === event.agentType)
-                );
+                  (run) => run.externalAgentId === event.externalAgentId && run.status === 'started'
+                )
+            : undefined;
       const id =
         matching?.id ||
         event.agentId ||
@@ -711,6 +678,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         `${event.agentType}-${now}-${Math.random().toString(36).slice(2, 8)}`;
       const run: SubagentRun = {
         ...matching,
+        ...event,
         id,
         agentType: event.agentType || matching?.agentType || 'subagent',
         description: event.description || matching?.description,
@@ -724,12 +692,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         error: event.error || matching?.error,
         toolId: event.toolId || matching?.toolId,
         externalAgentId: event.externalAgentId || matching?.externalAgentId,
-        provider: matching?.provider,
+        provider: event.provider ?? matching?.provider,
       };
-      const merged = mergeAgentRuns(
-        existing.filter((item) => item.id !== run.id),
-        [run]
-      );
+      const merged = mergeAgentRuns(existing, [run]);
       return {
         agentRuns: { ...state.agentRuns, [sessionId]: merged },
         activeAgent: {
@@ -739,9 +704,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       };
     }),
 
-  setAgentRuns: (sessionId, runs) =>
+  setAgentRuns: (sessionId, runs, snapshot) =>
     set((state) => {
-      const merged = mergeAgentRuns(state.agentRuns[sessionId] || [], runs);
+      const merged = snapshot
+        ? reconcileSubagentSnapshot(
+            state.agentRuns[sessionId] || [],
+            runs,
+            snapshot.capturedAt,
+            snapshot.chatId
+          )
+        : mergeAgentRuns(state.agentRuns[sessionId] || [], runs);
       return {
         agentRuns: { ...state.agentRuns, [sessionId]: merged },
         activeAgent: {

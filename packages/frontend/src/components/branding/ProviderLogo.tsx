@@ -70,6 +70,25 @@ export function ProviderLogo({ provider, className, alt }: ProviderLogoProps) {
     );
   }
 
+  if (provider === 'vibe') {
+    // No shipped asset for Mistral Vibe, so the badge is drawn inline like the
+    // Pi mark: an SVG keeps scaling with the h-*/w-* classes callers pass in.
+    const resolvedAlt = alt === undefined ? 'Mistral Vibe' : alt;
+    return (
+      <svg
+        viewBox="0 0 64 64"
+        role={resolvedAlt ? 'img' : 'presentation'}
+        aria-label={resolvedAlt || undefined}
+        aria-hidden={resolvedAlt ? undefined : true}
+        className={className}
+      >
+        {resolvedAlt ? <title>{resolvedAlt}</title> : null}
+        <rect x="4" y="4" width="56" height="56" rx="16" fill="#ff7000" />
+        <path d="M18 22h6l8 18 8-18h6L34 46h-4z" fill="#fff8f2" />
+      </svg>
+    );
+  }
+
   return (
     <svg
       viewBox="0 0 64 64"

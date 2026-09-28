@@ -1,5 +1,10 @@
-import { useState, useRef, useEffect, type CSSProperties } from 'react';
-import { createPortal } from 'react-dom';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
+import { useState, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Brain, CheckCircle, Hand, Zap, ChevronDown, Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -90,76 +95,42 @@ function ModeDropdown({
   onModeChange: (mode: SessionMode) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, left: 0 });
   const currentMode = modeConfig[mode];
   const Icon = currentMode.icon;
-
-  useEffect(() => {
-    if (isOpen && buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      setDropdownPosition({
-        top: rect.bottom + 4,
-        left: rect.left,
-      });
-    }
-  }, [isOpen]);
-
-  const dropdown = isOpen
-    ? createPortal(
-        <>
-          <div className="fixed inset-0 z-[100]" onClick={() => setIsOpen(false)} />
-          <div
-            className="glass-panel fixed z-[101] w-56 rounded-xl border-foreground/10 overflow-hidden animate-scale-in"
-            style={{ top: dropdownPosition.top, left: dropdownPosition.left }}
-          >
-            {(Object.entries(modeConfig) as [SessionMode, (typeof modeConfig)[SessionMode]][]).map(
-              ([key, config]) => {
-                const ModeIcon = config.icon;
-                return (
-                  <button
-                    key={key}
-                    onClick={() => {
-                      onModeChange(key);
-                      setIsOpen(false);
-                    }}
-                    className={cn(
-                      'flex items-start gap-3 w-full p-3 text-left transition-colors hover:bg-muted/50',
-                      mode === key && 'bg-muted'
-                    )}
-                  >
-                    <ModeIcon className={cn('h-4 w-4 mt-0.5 shrink-0', config.color)} />
-                    <div>
-                      <div className={cn('text-sm font-medium', mode === key && config.color)}>
-                        {config.label}
-                      </div>
-                      <div className="text-xs text-muted-foreground">{config.description}</div>
-                    </div>
-                  </button>
-                );
-              }
-            )}
-          </div>
-        </>,
-        document.body
-      )
-    : null;
-
   return (
-    <div className="relative">
-      <Button
-        ref={buttonRef}
-        variant="ghost"
-        size="sm"
-        onClick={() => setIsOpen(!isOpen)}
-        className={cn('gap-2 h-8 px-3', currentMode.bgColor, currentMode.color)}
-      >
-        <Icon className="h-3.5 w-3.5" />
-        <span className="text-xs font-medium">{currentMode.label}</span>
-        <ChevronDown className={cn('h-3 w-3 transition-transform', isOpen && 'rotate-180')} />
-      </Button>
-      {dropdown}
-    </div>
+    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn('gap-2 h-8 px-3', currentMode.bgColor, currentMode.color)}
+        >
+          <Icon className="h-3.5 w-3.5" />
+          <span className="text-xs font-medium">{currentMode.label}</span>
+          <ChevronDown className={cn('h-3 w-3 transition-transform', isOpen && 'rotate-180')} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        {(Object.entries(modeConfig) as [SessionMode, (typeof modeConfig)[SessionMode]][]).map(
+          ([key, config]) => {
+            const ModeIcon = config.icon;
+            return (
+              <DropdownMenuItem
+                key={key}
+                onSelect={() => onModeChange(key)}
+                className={cn('items-start gap-3', mode === key && 'bg-muted')}
+              >
+                <ModeIcon className={cn('h-4 w-4 mt-0.5 shrink-0', config.color)} />
+                <div>
+                  <div className="text-sm font-medium">{config.label}</div>
+                  <div className="text-xs text-muted-foreground">{config.description}</div>
+                </div>
+              </DropdownMenuItem>
+            );
+          }
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -248,8 +219,6 @@ export function ContextPopover({
   sessionRuntimeModel?: string | null;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const [position, setPosition] = useState({ top: 0, left: 0 });
 
   // Two narrow selectors instead of the whole store: this popover is mounted for
   // the entire session view, and subscribing to the store object woke it for
@@ -335,24 +304,34 @@ export function ContextPopover({
     }
   }
 
+  // Plan-period providers (a prepaid allotment, a monthly budget) have no
+  // short rolling window, and their long window is not a week.
+  const hasShortWindow =
+    resolvedUsageProvider !== 'alibaba' &&
+    resolvedUsageProvider !== 'mistral' &&
+    resolvedUsageProvider !== 'vibe';
   const sidebarMeters = [
     ...(labels && providerShortLabel
       ? [
-          {
-            key: 'five-hour',
-            label: labels.session.title,
-            value: usageLimits?.fiveHour?.utilization ?? null,
-            title: `${providerShortLabel} ${labels.session.title} limit`,
-            tone: 'session',
-          },
+          ...(hasShortWindow
+            ? [
+                {
+                  key: 'five-hour',
+                  label: labels.session.title,
+                  value: usageLimits?.fiveHour?.utilization ?? null,
+                  title: `${providerShortLabel} ${labels.session.title} limit`,
+                  tone: 'session',
+                },
+              ]
+            : []),
           {
             key: 'weekly',
-            label: 'Weekly',
+            label: hasShortWindow ? 'Weekly' : (labels.weeklyAll?.title ?? 'Weekly'),
             value:
               usageLimits?.sevenDay?.utilization ??
               usageLimits?.sevenDaySonnet?.utilization ??
               null,
-            title: `${providerShortLabel} weekly limit`,
+            title: `${providerShortLabel} ${hasShortWindow ? 'weekly' : (labels.weeklyAll?.title ?? 'weekly').toLowerCase()} limit`,
             tone: 'weekly',
           },
         ]
@@ -371,196 +350,202 @@ export function ContextPopover({
     .map((meter) => `${meter.label}: ${formatSidebarMeterValue(meter.value)}`)
     .join(' · ');
 
-  useEffect(() => {
-    if (isOpen && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      const popoverWidth = 280;
-      const estimatedHeight = 360;
-      if (placement === 'right') {
-        let left = rect.right + 8;
-        if (left + popoverWidth > window.innerWidth - 8) {
-          left = rect.left - popoverWidth - 8;
-        }
-        setPosition({
-          top: Math.max(8, Math.min(rect.top - 8, window.innerHeight - estimatedHeight - 8)),
-          left: Math.max(8, left),
-        });
-        return;
-      }
-      let left = rect.left - popoverWidth / 2 + rect.width / 2;
-      left = Math.max(8, Math.min(left, window.innerWidth - popoverWidth - 8));
-      setPosition({ top: rect.bottom + 4, left });
-    }
-  }, [isOpen, placement]);
-
-  const popover = isOpen
-    ? createPortal(
-        <>
-          <div className="fixed inset-0 z-[100]" onClick={() => setIsOpen(false)} />
-          <div
-            className="glass-panel fixed z-[101] w-[280px] rounded-xl border-foreground/10 p-3 animate-scale-in"
-            style={{ top: position.top, left: position.left }}
-          >
-            <div className="space-y-3">
-              {/* Usage Limits */}
-              {limitBars.length > 0 && (
-                <div className="space-y-2">
-                  <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                    Rate limits
-                  </div>
-                  {limitBars.map((bar) => (
-                    <div key={bar.key}>
-                      <div className="flex justify-between text-xs mb-0.5">
-                        <span className="text-muted-foreground">
-                          {bar.label}
-                          {bar.sublabel ? ` ${bar.sublabel}` : ''}
-                        </span>
-                        <span
-                          className="font-mono font-medium"
-                          style={{ color: getGradientColor(bar.value) }}
-                        >
-                          {bar.value}%
-                        </span>
-                      </div>
-                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{
-                            width: `${Math.min(bar.value, 100)}%`,
-                            backgroundColor: getGradientColor(bar.value),
-                          }}
-                        />
-                      </div>
-                      {bar.resetsAt && (
-                        <div
-                          className="text-[10px] text-muted-foreground mt-0.5"
-                          title={`Resets ${formatResetAbsolute(bar.resetsAt)}`}
-                        >
-                          Resets {formatResetDelta(bar.resetsAt)}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  <div className="border-t border-border/50" />
+  const popover = (
+    <DropdownMenuContent
+      navigation={placement === 'right'}
+      align="start"
+      className="usage-popup w-[280px] p-3"
+      aria-label="Usage details"
+    >
+      <div className="space-y-3">
+        {/* Usage Limits */}
+        {limitBars.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+              Rate limits
+            </div>
+            {limitBars.map((bar) => (
+              <div key={bar.key}>
+                <div className="flex justify-between text-xs mb-0.5">
+                  <span className="text-muted-foreground">
+                    {bar.label}
+                    {bar.sublabel ? ` ${bar.sublabel}` : ''}
+                  </span>
+                  <span
+                    className="font-mono font-medium"
+                    style={{ color: getGradientColor(bar.value) }}
+                  >
+                    {bar.value}%
+                  </span>
                 </div>
-              )}
-
-              {/* Context Bar */}
-              {hasContextWindow && (
-                <div>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-muted-foreground">Context Window</span>
-                    <span className="font-mono font-medium" style={{ color }}>
-                      {rawPercent.toFixed(0)}%
-                    </span>
-                  </div>
-                  <div className="h-2 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${Math.min(percent, 100)}%`, backgroundColor: color }}
-                    />
-                  </div>
-                  <div className="text-[10px] text-muted-foreground mt-0.5">
-                    {formatTokens(usage.totalTokens)} / {formatTokens(usage.contextWindow)}
-                    {usage.contextExceeded && ' (over reported window)'}
-                  </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${Math.min(bar.value, 100)}%`,
+                      backgroundColor: getGradientColor(bar.value),
+                    }}
+                  />
                 </div>
-              )}
-
-              {/* Token Breakdown */}
-              <div className="space-y-1.5 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Input</span>
-                  <span className="font-mono">{formatTokens(usage.inputTokens)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Output</span>
-                  <span className="font-mono">{formatTokens(usage.outputTokens)}</span>
-                </div>
-                {usage.cacheReadTokens > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Cache Read</span>
-                    <span className="font-mono">{formatTokens(usage.cacheReadTokens)}</span>
-                  </div>
-                )}
-                {usage.cacheCreationTokens > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Cache Write</span>
-                    <span className="font-mono">{formatTokens(usage.cacheCreationTokens)}</span>
+                {bar.resetsAt && (
+                  <div
+                    className="text-[10px] text-muted-foreground mt-0.5"
+                    title={`Resets ${formatResetAbsolute(bar.resetsAt)}`}
+                  >
+                    Resets {formatResetDelta(bar.resetsAt)}
                   </div>
                 )}
               </div>
+            ))}
+            <div className="border-t border-border/50" />
+          </div>
+        )}
 
-              {/* Cost + Model */}
-              <div className="pt-2 border-t border-border/50 space-y-1 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Cost</span>
-                  <span className="font-mono">{formatCost(usage.totalCostUsd)}</span>
-                </div>
-                {contextStats && (
-                  <>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Snapshots</span>
-                      <span className="font-mono">
-                        {contextStats.contextSnapshots.toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Compacts</span>
-                      <span className="font-mono">
-                        {contextStats.compactEvents.toLocaleString()}
-                      </span>
-                    </div>
-                  </>
-                )}
-                {usage.model && usage.model !== 'unknown' && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Model</span>
-                    <span className="font-mono truncate ml-2">{usage.model}</span>
-                  </div>
-                )}
-              </div>
+        {/* Context Bar */}
+        {hasContextWindow && (
+          <div>
+            <div className="flex justify-between text-xs mb-1">
+              <span className="text-muted-foreground">Context Window</span>
+              <span className="font-mono font-medium" style={{ color }}>
+                {rawPercent.toFixed(0)}%
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(percent, 100)}%`, backgroundColor: color }}
+              />
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">
+              {formatTokens(usage.totalTokens)} / {formatTokens(usage.contextWindow)}
+              {usage.contextExceeded && ' (over reported window)'}
             </div>
           </div>
-        </>,
-        document.body
-      )
-    : null;
+        )}
+
+        {/* Token Breakdown */}
+        <div className="space-y-1.5 text-xs">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Input</span>
+            <span className="font-mono">{formatTokens(usage.inputTokens)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Output</span>
+            <span className="font-mono">{formatTokens(usage.outputTokens)}</span>
+          </div>
+          {usage.cacheReadTokens > 0 && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Cache Read</span>
+              <span className="font-mono">{formatTokens(usage.cacheReadTokens)}</span>
+            </div>
+          )}
+          {usage.cacheCreationTokens > 0 && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Cache Write</span>
+              <span className="font-mono">{formatTokens(usage.cacheCreationTokens)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Cost + Model */}
+        <div className="pt-2 border-t border-border/50 space-y-1 text-xs">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Cost</span>
+            <span className="font-mono">{formatCost(usage.totalCostUsd)}</span>
+          </div>
+          {contextStats && (
+            <>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Snapshots</span>
+                <span className="font-mono">{contextStats.contextSnapshots.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Compacts</span>
+                <span className="font-mono">{contextStats.compactEvents.toLocaleString()}</span>
+              </div>
+            </>
+          )}
+          {usage.model && usage.model !== 'unknown' && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Model</span>
+              <span className="font-mono truncate ml-2">{usage.model}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </DropdownMenuContent>
+  );
 
   return (
-    <>
-      <button
-        ref={triggerRef}
-        onClick={() => setIsOpen(!isOpen)}
-        className={cn(
-          'context-popover-trigger flex items-center gap-1.5 hover:opacity-80 transition-opacity cursor-pointer',
-          triggerVariant === 'sidebarUsageBar' && 'context-popover-trigger-sidebar',
-          collapsed && 'is-collapsed',
-          className
-        )}
-        title={
-          triggerVariant === 'sidebarUsageBar'
-            ? sidebarMeterTitle
-            : hasContextWindow
-              ? `Context: ${rawPercent.toFixed(0)}%${
-                  contextStats ? ` · ${contextStats.compactEvents} compacts` : ''
-                }`
-              : limitsSupported
-                ? 'Usage limits'
-                : 'Context usage'
-        }
-      >
-        {triggerVariant === 'sidebarUsageBar' ? (
-          <>
-            {!collapsed && (
-              <span className="context-sidebar-copy">
-                <span className="context-sidebar-meter-grid">
+    <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          aria-label="Usage details"
+          className={cn(
+            'context-popover-trigger flex items-center gap-1.5 hover:opacity-80 transition-opacity cursor-pointer',
+            triggerVariant === 'sidebarUsageBar' && 'context-popover-trigger-sidebar',
+            collapsed && 'is-collapsed',
+            className
+          )}
+          title={
+            triggerVariant === 'sidebarUsageBar'
+              ? sidebarMeterTitle
+              : hasContextWindow
+                ? `Context: ${rawPercent.toFixed(0)}%${
+                    contextStats ? ` · ${contextStats.compactEvents} compacts` : ''
+                  }`
+                : limitsSupported
+                  ? 'Usage limits'
+                  : 'Context usage'
+          }
+        >
+          {triggerVariant === 'sidebarUsageBar' ? (
+            <>
+              {!collapsed && (
+                <span className="context-sidebar-copy">
+                  <span className="context-sidebar-meter-grid">
+                    {sidebarMeters.map((meter) => (
+                      <span
+                        key={meter.key}
+                        className={cn(
+                          'context-sidebar-meter',
+                          `is-${meter.tone}`,
+                          meter.value === null && 'is-unavailable',
+                          (meter.value ?? 0) > 0 && 'has-usage',
+                          (meter.value ?? 0) >= 95 && 'is-critical'
+                        )}
+                        title={`${meter.title}: ${formatSidebarMeterValue(meter.value)}`}
+                        style={
+                          {
+                            '--meter-value': `${Math.min(100, Math.max(0, meter.value ?? 0))}%`,
+                            '--meter-color':
+                              meter.value === null
+                                ? 'hsl(var(--muted-foreground) / 0.28)'
+                                : getGradientColor(meter.value),
+                          } as CSSProperties
+                        }
+                      >
+                        <span className="context-sidebar-meter-head">
+                          <span className="context-sidebar-meter-label">{meter.label}</span>
+                          <span className="context-sidebar-meter-value">
+                            {formatSidebarMeterValue(meter.value)}
+                          </span>
+                        </span>
+                        <span className="context-sidebar-bar-track" aria-hidden="true">
+                          <span className="context-sidebar-bar-fill" />
+                        </span>
+                      </span>
+                    ))}
+                  </span>
+                </span>
+              )}
+              {collapsed && (
+                <span className="context-sidebar-collapsed-bars" aria-hidden="true">
                   {sidebarMeters.map((meter) => (
                     <span
                       key={meter.key}
                       className={cn(
-                        'context-sidebar-meter',
-                        `is-${meter.tone}`,
+                        'context-sidebar-bar-track',
                         meter.value === null && 'is-unavailable',
                         (meter.value ?? 0) > 0 && 'has-usage',
                         (meter.value ?? 0) >= 95 && 'is-critical'
@@ -576,73 +561,38 @@ export function ContextPopover({
                         } as CSSProperties
                       }
                     >
-                      <span className="context-sidebar-meter-head">
-                        <span className="context-sidebar-meter-label">{meter.label}</span>
-                        <span className="context-sidebar-meter-value">
-                          {formatSidebarMeterValue(meter.value)}
-                        </span>
-                      </span>
-                      <span className="context-sidebar-bar-track" aria-hidden="true">
-                        <span className="context-sidebar-bar-fill" />
-                      </span>
+                      <span className="context-sidebar-bar-fill" />
                     </span>
                   ))}
                 </span>
+              )}
+            </>
+          ) : (
+            <>
+              <Activity className="h-3 w-3 text-muted-foreground" />
+              {showLabel && (
+                <span className="context-popover-label">
+                  {hasContextWindow ? 'Context' : 'Usage'}
+                </span>
+              )}
+              <div className="w-10 h-1.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  className={cn(
+                    'h-full rounded-full transition-all duration-500',
+                    isCritical && 'animate-pulse'
+                  )}
+                  style={{ width: `${Math.min(percent, 100)}%`, backgroundColor: color }}
+                />
+              </div>
+              <span className="text-[10px] font-mono tabular-nums" style={{ color }}>
+                {rawPercent.toFixed(0)}%
               </span>
-            )}
-            {collapsed && (
-              <span className="context-sidebar-collapsed-bars" aria-hidden="true">
-                {sidebarMeters.map((meter) => (
-                  <span
-                    key={meter.key}
-                    className={cn(
-                      'context-sidebar-bar-track',
-                      meter.value === null && 'is-unavailable',
-                      (meter.value ?? 0) > 0 && 'has-usage',
-                      (meter.value ?? 0) >= 95 && 'is-critical'
-                    )}
-                    title={`${meter.title}: ${formatSidebarMeterValue(meter.value)}`}
-                    style={
-                      {
-                        '--meter-value': `${Math.min(100, Math.max(0, meter.value ?? 0))}%`,
-                        '--meter-color':
-                          meter.value === null
-                            ? 'hsl(var(--muted-foreground) / 0.28)'
-                            : getGradientColor(meter.value),
-                      } as CSSProperties
-                    }
-                  >
-                    <span className="context-sidebar-bar-fill" />
-                  </span>
-                ))}
-              </span>
-            )}
-          </>
-        ) : (
-          <>
-            <Activity className="h-3 w-3 text-muted-foreground" />
-            {showLabel && (
-              <span className="context-popover-label">
-                {hasContextWindow ? 'Context' : 'Usage'}
-              </span>
-            )}
-            <div className="w-10 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className={cn(
-                  'h-full rounded-full transition-all duration-500',
-                  isCritical && 'animate-pulse'
-                )}
-                style={{ width: `${Math.min(percent, 100)}%`, backgroundColor: color }}
-              />
-            </div>
-            <span className="text-[10px] font-mono tabular-nums" style={{ color }}>
-              {rawPercent.toFixed(0)}%
-            </span>
-          </>
-        )}
-      </button>
+            </>
+          )}
+        </button>
+      </DropdownMenuTrigger>
       {popover}
-    </>
+    </DropdownMenu>
   );
 }
 

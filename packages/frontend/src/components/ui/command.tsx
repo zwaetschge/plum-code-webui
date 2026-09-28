@@ -12,7 +12,7 @@ const Command = React.forwardRef<
   <CommandPrimitive
     ref={ref}
     className={cn(
-      'flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground',
+      'flex h-full w-full flex-col overflow-hidden rounded-md bg-transparent text-popover-foreground',
       className
     )}
     {...props}
@@ -37,7 +37,7 @@ function CommandDialog({
         <DialogOverlay />
         <DialogPrimitive.Content
           className={cn(
-            'fixed left-[50%] top-[15%] z-50 grid w-full max-w-2xl translate-x-[-50%] gap-0 border bg-background p-0 shadow-2xl duration-150',
+            'glass-dialog fixed left-[50%] top-[15%] z-50 grid w-full max-w-2xl translate-x-[-50%] gap-0 border p-0 shadow-2xl duration-150',
             'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
             'rounded-xl'
           )}

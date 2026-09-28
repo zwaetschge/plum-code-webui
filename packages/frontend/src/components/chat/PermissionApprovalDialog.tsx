@@ -136,7 +136,7 @@ export function PermissionApprovalDialog({
           onEscapeKeyDown={(event) => event.preventDefault()}
           onPointerDownOutside={(event) => event.preventDefault()}
           onInteractOutside={(event) => event.preventDefault()}
-          className="fixed left-[50%] top-[50%] z-50 w-full max-w-lg translate-x-[-50%] translate-y-[-50%] overflow-y-auto rounded-lg border border-border bg-background p-0 shadow-xl max-h-[90vh]"
+          className="glass-dialog fixed left-[50%] top-[50%] z-50 w-full max-w-lg translate-x-[-50%] translate-y-[-50%] overflow-y-auto rounded-lg border border-border p-0 shadow-xl max-h-[90vh]"
         >
           {/* Header */}
           <div className="p-4 border-b border-border flex items-center gap-3">

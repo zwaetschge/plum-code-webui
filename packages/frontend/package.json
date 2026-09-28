@@ -49,11 +49,13 @@
     "remark-math": "^6.0.0",
     "socket.io-client": "^4.8.1",
     "tailwind-merge": "^2.6.0",
+    "three": "^0.186.0",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.17",
     "@types/react-dom": "^18.3.5",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",

@@ -1,9 +1,13 @@
-import { Inbox } from 'lucide-react';
+import { Inbox, LayoutGrid } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import {
   LayoutDashboard,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Wrench,
+  List,
   Settings,
   Star,
   BarChart3,
@@ -26,6 +30,7 @@ import {
   Loader2,
   ServerCog,
 } from 'lucide-react';
+import { useSessionMenu, type NavigationView } from './SessionMenuContext';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -56,6 +61,7 @@ import type { UsageData } from '@plum-code-webui/shared';
 
 const baseNavItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+  { icon: LayoutGrid, label: 'Monitor', path: '/monitor' },
   { icon: BarChart3, label: 'Analytics', path: '/analytics' },
   { icon: ServerCog, label: 'Operations', path: '/operations' },
   { icon: Settings, label: 'General Settings', path: '/settings' },
@@ -105,6 +111,7 @@ export function Sidebar({
   contextSession,
 }: SidebarProps) {
   const location = useLocation();
+  const sessionMenu = useSessionMenu();
   const navigate = useNavigate();
   const { toast } = useToast();
   const {
@@ -147,6 +154,11 @@ export function Sidebar({
   const iconUploadInputRef = useRef<HTMLInputElement>(null);
 
   const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    const expand = () => setCollapsed(false);
+    window.addEventListener('plum:expand-navigation', expand);
+    return () => window.removeEventListener('plum:expand-navigation', expand);
+  }, []);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('updated');
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<Record<string, boolean>>({});
@@ -190,35 +202,6 @@ export function Sidebar({
         : null,
     [activeId, contextSession, sessions]
   );
-  const activeSessionRunState = useMemo(
-    () =>
-      activeSession
-        ? getSessionRunState(activeSession, {
-            activity: activity[activeSession.id],
-            activeAgent: activeAgent[activeSession.id],
-            agentRuns: agentRuns[activeSession.id],
-            streamingContent: streamingSessionIds.includes(activeSession.id)
-              ? 'streaming'
-              : undefined,
-            tools: toolExecutions[activeSession.id],
-            queue: queueState[activeSession.id],
-            lifecycle: lifecycle[activeSession.id],
-            pendingApprovals: pendingApprovalCounts[activeSession.id],
-          })
-        : null,
-    [
-      activeAgent,
-      activeSession,
-      activity,
-      agentRuns,
-      lifecycle,
-      pendingApprovalCounts,
-      queueState,
-      streamingSessionIds,
-      toolExecutions,
-    ]
-  );
-
   const filteredSessions = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     let list = sessions;
@@ -748,7 +731,7 @@ export function Sidebar({
       >
         <Link
           to={`/session/${session.id}`}
-          title={session.name}
+          title={`${session.name} · ${sessionRunState.detail}`}
           aria-current={isActive ? 'page' : undefined}
           onClick={handleLinkClick}
           aria-label={
@@ -797,6 +780,7 @@ export function Sidebar({
                 title={sessionRunState.detail}
                 aria-hidden="true"
               />
+              <span className="sr-only">{sessionRunState.detail}</span>
             </span>
           )}
         </Link>
@@ -808,11 +792,12 @@ export function Sidebar({
                 className="sidebar-session-options"
                 onClick={(e) => e.stopPropagation()}
                 title="Session options"
+                aria-label={`Options for ${session.name}`}
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuContent navigation align="end" className="w-52">
               <DropdownMenuItem onClick={() => startRename(session)} className="cursor-pointer">
                 <Pencil className="mr-2 h-3.5 w-3.5" />
                 Rename
@@ -938,181 +923,181 @@ export function Sidebar({
     );
   };
 
+  const selectNavigationView = (view: NavigationView) => {
+    setCollapsed(false);
+    sessionMenu.setView(view);
+  };
+  const onViewKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next =
+      event.key === 'Home'
+        ? 'sessions'
+        : event.key === 'End'
+          ? 'tools'
+          : sessionMenu.view === 'tools'
+            ? 'sessions'
+            : 'tools';
+    selectNavigationView(next);
+    event.currentTarget.parentElement
+      ?.querySelector<HTMLButtonElement>(`[data-navigation-view="${next}"]`)
+      ?.focus();
+  };
+  const viewId = mobile ? 'mobile-navigation' : 'desktop-navigation';
+
+  const renderNavigationItem = (item: (typeof baseNavItems)[number]) => {
+    const Icon = item.icon;
+    const selected =
+      item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path);
+    return (
+      <Link
+        key={item.path}
+        to={item.path}
+        onClick={handleLinkClick}
+        aria-label={item.label}
+        aria-current={selected ? 'page' : undefined}
+        title={isCollapsed ? item.label : undefined}
+        className={cn(
+          'sidebar-nav-item flex items-center gap-3 px-3 py-2 text-sm font-medium',
+          selected && 'is-active',
+          isCollapsed && 'is-collapsed'
+        )}
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+        {!isCollapsed && item.label}
+      </Link>
+    );
+  };
+
   return (
     <div
       className={cn(
-        'app-sidebar-shell flex flex-col h-full transition-all duration-300',
+        'app-sidebar-shell app-sidebar-refined flex flex-col h-full transition-all duration-300',
+        activeId && 'app-sidebar-unified',
         mobile ? 'app-sidebar-mobile w-full' : '',
         navigationOnly && !mobile && 'app-sidebar-navigation-only',
         !mobile && (isCollapsed ? 'w-16' : 'w-[272px]')
       )}
     >
-      {/* Active session identity */}
-      <div
-        className={cn(
-          'sidebar-header flex items-center transition-all duration-300',
-          isCollapsed
-            ? 'h-14 justify-center px-2'
-            : activeSession && !mobile
-              ? 'min-h-[3.5rem] px-4 py-2'
-              : 'h-14 px-4'
-        )}
-      >
-        {mobile ? (
-          <Link to="/" onClick={handleLinkClick} className="flex items-center gap-3">
-            <ProviderLogo provider="plum" className="h-7 w-7 text-primary" />
-            <span className="text-sm font-semibold text-foreground">
-              {activeMeta.productName}{' '}
-              <span className="text-muted-foreground font-normal">{activeMeta.tagline}</span>
-            </span>
-          </Link>
-        ) : activeSession ? (
+      <div className={cn('sidebar-header sidebar-refined-header', isCollapsed && 'is-collapsed')}>
+        <Link
+          to="/"
+          onClick={handleLinkClick}
+          className="sidebar-brand"
+          aria-label="Plum Code home"
+          title="Plum Code home"
+        >
+          <ProviderLogo provider="plum" className="h-6 w-6 shrink-0 text-primary" />
+          {!isCollapsed && <span>Plum Code</span>}
+        </Link>
+        {!isCollapsed && <NotificationCenter />}
+        {!mobile && !navigationOnly && (
           <button
+            type="button"
+            className="sidebar-collapse-button"
             onClick={() => setCollapsed(!isCollapsed)}
-            onMouseEnter={(e) => showCollapsedSessionFlyout(activeSession, e.currentTarget)}
-            onMouseLeave={() => hideCollapsedSessionFlyout(activeSession.id)}
-            onFocus={(e) => showCollapsedSessionFlyout(activeSession, e.currentTarget)}
-            onBlur={() => hideCollapsedSessionFlyout(activeSession.id)}
-            className={cn(
-              'sidebar-identity-button min-w-0 transition-colors cursor-pointer',
-              isCollapsed
-                ? 'is-collapsed flex items-center justify-center'
-                : 'flex w-full flex-col items-start gap-1 px-1 py-1 text-left'
-            )}
-            aria-label={isCollapsed ? activeSession.name : 'Collapse sidebar'}
+            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            <span className="flex w-full min-w-0 items-center gap-2">
-              <span className="sidebar-session-provider-icon sidebar-identity-provider-icon">
-                <SessionIcon
-                  session={activeSession}
-                  className="shrink-0 text-primary"
-                  logoClassName="h-5 w-5"
-                  imageClassName="h-6 w-6 rounded-full"
-                />
-                {iconBusySessionId === activeSession.id && (
-                  <span className="session-icon-busy-overlay">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  </span>
-                )}
-              </span>
-              {!isCollapsed && (
-                <>
-                  <span className="min-w-0 truncate text-sm font-semibold text-foreground">
-                    {activeSession.name}
-                  </span>
-                  <span
-                    className={cn(
-                      'session-header-run-dot shrink-0',
-                      activeSessionRunState && `is-${activeSessionRunState.tone}`
-                    )}
-                    title={activeSessionRunState?.detail}
-                  />
-                </>
-              )}
-            </span>
-          </button>
-        ) : (
-          <button
-            onClick={() => {
-              if (!navigationOnly) setCollapsed(!isCollapsed);
-            }}
-            className={cn(
-              'sidebar-identity-button flex items-center gap-3 transition-colors cursor-pointer',
-              isCollapsed ? 'is-collapsed' : '',
-              navigationOnly && 'cursor-default'
-            )}
-            aria-label={
-              navigationOnly
-                ? activeMeta.productName
-                : isCollapsed
-                  ? activeMeta.productName
-                  : 'Collapse sidebar'
-            }
-          >
-            <span className="sidebar-session-provider-icon sidebar-identity-provider-icon">
-              <ProviderLogo provider="plum" className="h-5 w-5 text-primary" />
-            </span>
-            {!isCollapsed && (
-              <span className="text-sm font-semibold text-foreground">
-                {activeMeta.productName}{' '}
-                <span className="text-muted-foreground font-normal">{activeMeta.tagline}</span>
-              </span>
+            {isCollapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
             )}
           </button>
-        )}
-        {!isCollapsed && (
-          <div className="ml-auto shrink-0 pl-2">
-            <NotificationCenter />
-          </div>
         )}
       </div>
 
-      <nav className="flex-1 flex flex-col min-h-0 px-2 pt-2 pb-0 overflow-visible">
-        {/* Notification centre lives with the main navigation: it spans every
+      <nav
+        aria-label="Main navigation"
+        className="sidebar-main-navigation flex-1 flex flex-col min-h-0 px-2 pt-2 pb-0"
+      >
+        <div className="sidebar-primary-links shrink-0">
+          {baseNavItems
+            .filter((item) => !['/operations', '/settings'].includes(item.path))
+            .map(renderNavigationItem)}
+          {/* Notification centre lives with the main navigation: it spans every
             session rather than belonging to the one currently open. */}
 
-        <button
-          type="button"
-          aria-label="Outbox"
-          title="Outbox"
-          className={cn(
-            'sidebar-nav-item flex shrink-0 items-center gap-3 px-3 py-2 text-sm font-medium',
-            isCollapsed && 'is-collapsed'
-          )}
-          onClick={() => {
-            handleLinkClick();
-            window.dispatchEvent(new Event('plum:open-outbox'));
-          }}
-        >
-          <Inbox className="h-4 w-4 shrink-0" />
-          {!isCollapsed && <span>Outbox</span>}
-        </button>
-        {/* Top nav */}
-        <div className="space-y-1 shrink-0">
-          {baseNavItems.map((item) => {
-            const Icon = item.icon;
-            const isActive =
-              item.path === '/settings'
-                ? location.pathname === '/settings'
-                : location.pathname === item.path;
-
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                onClick={handleLinkClick}
-                aria-label={isCollapsed ? item.label : undefined}
-                className={cn(
-                  'sidebar-nav-item flex items-center gap-3 px-3 py-2 text-sm font-medium',
-                  isActive && 'is-active',
-                  isCollapsed && 'is-collapsed'
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                {!isCollapsed && item.label}
-              </Link>
-            );
-          })}
+          <button
+            type="button"
+            aria-label="Outbox"
+            title="Outbox"
+            className={cn(
+              'sidebar-nav-item flex shrink-0 items-center gap-3 px-3 py-2 text-sm font-medium',
+              isCollapsed && 'is-collapsed'
+            )}
+            onClick={() => {
+              handleLinkClick();
+              window.dispatchEvent(new Event('plum:open-outbox'));
+            }}
+          >
+            <Inbox className="h-4 w-4 shrink-0" />
+            {!isCollapsed && <span>Outbox</span>}
+          </button>
         </div>
 
-        {contextUsage && (
-          <div className={cn('sidebar-context-slot shrink-0', isCollapsed && 'is-collapsed')}>
-            <ContextPopover
-              usage={contextUsage}
-              contextStats={contextStats}
-              triggerVariant="sidebarUsageBar"
-              placement="right"
-              collapsed={isCollapsed}
-              sessionId={activeSession?.id ?? activeId}
-              sessionProvider={activeSession?.cliProvider}
-              sessionModel={activeSession?.cliModel}
-              sessionRuntimeModel={activeSession?.runtime?.model}
+        {activeId && (
+          <div
+            className={cn('sidebar-view-switch', isCollapsed && 'is-collapsed')}
+            role="tablist"
+            aria-label="Navigation section"
+          >
+            {(['sessions', 'tools'] as const).map((view) => (
+              <button
+                key={view}
+                type="button"
+                role="tab"
+                data-navigation-view={view}
+                id={`${viewId}-${view}-tab`}
+                aria-controls={`${viewId}-${view}`}
+                aria-selected={sessionMenu.view === view}
+                tabIndex={sessionMenu.view === view ? 0 : -1}
+                title={view === 'sessions' ? 'Sessions' : 'Session tools'}
+                aria-label={view === 'sessions' ? 'Sessions' : 'Session tools'}
+                onClick={() => selectNavigationView(view)}
+                onKeyDown={onViewKeyDown}
+              >
+                {view === 'sessions' ? (
+                  <List className="h-4 w-4" />
+                ) : (
+                  <Wrench className="h-4 w-4" />
+                )}
+                {!isCollapsed && (view === 'sessions' ? 'Sessions' : 'Session tools')}
+              </button>
+            ))}
+          </div>
+        )}
+        {activeId && (
+          <div
+            className={cn(
+              'sidebar-session-tools',
+              (isCollapsed || sessionMenu.view !== 'tools') && 'hidden'
+            )}
+            role="tabpanel"
+            id={`${viewId}-tools`}
+            aria-labelledby={`${viewId}-tools-tab`}
+          >
+            <p className="sidebar-tools-session-name" title={activeSession?.name}>
+              {activeSession?.name}
+            </p>
+            <div
+              ref={mobile ? sessionMenu.setMobileTarget : sessionMenu.setDesktopTarget}
+              className="sidebar-session-tools-slot session-menu-refined"
             />
           </div>
         )}
 
         {/* Sessions section. The dashboard itself is the primary wide session surface. */}
-        <div className={cn('pt-3 flex flex-col flex-1 min-h-0', navigationOnly && 'hidden')}>
+        <div
+          className={cn(
+            'sidebar-sessions pt-3 flex flex-col flex-1 min-h-0',
+            (navigationOnly || (activeId && sessionMenu.view !== 'sessions')) && 'hidden'
+          )}
+          role={activeId ? 'tabpanel' : undefined}
+          id={`${viewId}-sessions`}
+          aria-labelledby={activeId ? `${viewId}-sessions-tab` : undefined}
+        >
           <div
             className={cn(
               'flex items-center px-3 py-1.5 shrink-0',
@@ -1121,12 +1106,10 @@ export function Sidebar({
           >
             {!isCollapsed && (
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Sessions
-                </span>
+                <span className="sidebar-section-label">Sessions</span>
                 {workingCount > 0 && (
                   <span className="session-run-count" title={`${workingCount} sessions working`}>
-                    {workingCount}
+                    {workingCount} active
                   </span>
                 )}
               </div>
@@ -1138,13 +1121,14 @@ export function Sidebar({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 rounded-lg"
+                      className="sidebar-sort-button h-8 w-8 rounded-lg"
+                      aria-label="Sort sessions"
                       title="Sort sessions"
                     >
                       <ArrowUpDown className="h-3.5 w-3.5" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuContent navigation align="end" className="w-48">
                     <DropdownMenuLabel>Sort by</DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     {SORT_OPTIONS.map((opt) => {
@@ -1182,8 +1166,9 @@ export function Sidebar({
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery('')}
-                    className="absolute right-2 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full hover:bg-muted"
+                    className="absolute right-0 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full hover:bg-muted"
                     title="Clear search"
+                    aria-label="Clear search"
                   >
                     <X className="h-3 w-3 text-muted-foreground" />
                   </button>
@@ -1282,6 +1267,27 @@ export function Sidebar({
                   })}
             </div>
           </div>
+        </div>
+        <div className="sidebar-footer shrink-0">
+          {contextUsage && (
+            <div className={cn('sidebar-context-slot shrink-0', isCollapsed && 'is-collapsed')}>
+              <ContextPopover
+                usage={contextUsage}
+                contextStats={contextStats}
+                triggerVariant="sidebarUsageBar"
+                placement="right"
+                collapsed={isCollapsed}
+                sessionId={activeSession?.id ?? activeId}
+                sessionProvider={activeSession?.cliProvider}
+                sessionModel={activeSession?.cliModel}
+                sessionRuntimeModel={activeSession?.runtime?.model}
+              />
+            </div>
+          )}
+
+          {baseNavItems
+            .filter((item) => ['/operations', '/settings'].includes(item.path))
+            .map(renderNavigationItem)}
         </div>
       </nav>
       {collapsedSessionFlyout && (

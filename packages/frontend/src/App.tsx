@@ -29,6 +29,9 @@ const SessionPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage }))
 );
+const MonitorPage = lazy(() =>
+  import('@/pages/MonitorPage').then((m) => ({ default: m.MonitorPage }))
+);
 const AnalyticsPage = lazy(() =>
   import('@/pages/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage }))
 );
@@ -154,6 +157,7 @@ export default function App() {
             >
               <Route index element={<DashboardPage />} />
               <Route path="session/:id" element={<SessionPage />} />
+              <Route path="monitor" element={<MonitorPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />
               <Route
                 path="operations"

@@ -416,19 +416,7 @@ class SocketService {
     this.socket.on('session:agent', (data) => {
       const { recordAgentEvent } = useSessionStore.getState();
       console.log(`[SOCKET] session:agent received:`, data.agentType, data.description);
-      recordAgentEvent(data.sessionId, {
-        agentId: data.agentId,
-        agentType: data.agentType,
-        description: data.description,
-        status: data.status,
-        startedAt: data.startedAt,
-        completedAt: data.completedAt,
-        result: data.result,
-        error: data.error,
-        toolId: data.toolId,
-        externalAgentId: data.externalAgentId,
-        timestamp: data.timestamp,
-      });
+      recordAgentEvent(data.sessionId, data);
     });
 
     this.socket.on('session:todos', (data) => {
@@ -1073,30 +1061,9 @@ class SocketService {
           break;
         }
         case 'agent': {
-          const data = msg.data as {
-            agentId?: string;
-            agentType: string;
-            description?: string;
-            status: 'started' | 'completed' | 'error';
-            startedAt?: number;
-            completedAt?: number;
-            result?: string;
-            error?: string;
-            toolId?: string;
-            externalAgentId?: string;
-            timestamp?: number;
-          };
+          const data = msg.data as Parameters<typeof store.recordAgentEvent>[1];
           store.recordAgentEvent(sessionId, {
-            agentId: data.agentId,
-            agentType: data.agentType,
-            description: data.description,
-            status: data.status,
-            startedAt: data.startedAt,
-            completedAt: data.completedAt,
-            result: data.result,
-            error: data.error,
-            toolId: data.toolId,
-            externalAgentId: data.externalAgentId,
+            ...data,
             timestamp: data.timestamp ?? msg.timestamp,
           });
           break;

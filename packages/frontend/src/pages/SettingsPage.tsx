@@ -69,11 +69,7 @@ import { FolderBrowserDialog } from '@/components/ui/folder-browser';
 import { PluginEditorDialog } from '@/components/ui/plugin-editor';
 import { MarketplaceBrowserDialog } from '@/components/ui/marketplace-browser';
 import { CapabilityCatalogSections } from '@/components/settings/CapabilityCatalogSections';
-import {
-  getSkillCatalogCounts,
-  type AgentInfo,
-  type SkillInfo,
-} from '@/components/settings/capabilityCatalog';
+import { type AgentInfo, type SkillInfo } from '@/components/settings/capabilityCatalog';
 import { api } from '@/services/api';
 import { toast } from '@/hooks/use-toast';
 import { DEFAULT_ANALYTICS_HIDDEN_LIMIT_METRICS } from '@plum-code-webui/shared';
@@ -95,7 +91,6 @@ import type {
   DiscordIntegrationSettingsUpdate,
   DiscordMaintenancePolicy,
   DiscordTestResult,
-  HomeAssistantIntegrationSettings,
   AnalyticsLimitProvider,
 } from '@plum-code-webui/shared';
 import { cn } from '@/lib/utils';
@@ -118,6 +113,7 @@ import { AdminAuditLogPage } from '@/pages/admin/AdminAuditLogPage';
 import { HomeAssistantSettingsCard } from '@/components/integrations/HomeAssistantSettingsCard';
 import { CliDeviceLoginDialog } from '@/components/settings/CliDeviceLoginDialog';
 import { GatewayTokensPanel } from '@/components/settings/GatewayTokensPanel';
+import { FirefoxBrowserPanel } from '@/components/settings/FirefoxBrowserPanel';
 import { SubagentUpstreamsSection } from '@/components/settings/SubagentUpstreamsSection';
 import { CliSubagentsSection } from '@/components/settings/CliSubagentsSection';
 import { ProviderLoginsPanel } from '@/components/settings/ProviderLoginsPanel';
@@ -266,6 +262,7 @@ const ACTIVATABLE_CLI_PROVIDERS: Array<{
   { id: 'opencode', description: 'OpenCode multi-provider harness' },
   { id: 'pi', description: 'Pi harness with OpenCode connections' },
   { id: 'kimi', description: 'Moonshot Kimi Code CLI (browser login)' },
+  { id: 'vibe', description: 'Mistral Vibe CLI (persistent ACP session)' },
 ];
 
 type SettingsTab =
@@ -290,20 +287,23 @@ type GeneralSettingsTab =
   | 'interface'
   | 'opencode';
 type AdminSettingsTab = 'overview' | 'users' | 'audit-log';
-type SettingsNavTone = 'brand' | 'success' | 'warning' | 'neutral';
+type SettingsDestination =
+  | 'appearance'
+  | 'workspace'
+  | 'providers'
+  | 'agents'
+  | 'extensions'
+  | 'integrations'
+  | 'usage'
+  | 'security'
+  | 'system'
+  | 'admin';
 
 interface SettingsSectionShortcut {
   id: string;
   label: string;
-}
-
-interface SettingsTabDescriptor {
-  label: string;
-  eyebrow: string;
-  description: string;
-  icon: LucideIcon;
-  highlights: string[];
-  sections: SettingsSectionShortcut[];
+  keywords?: string[];
+  generalTab?: GeneralSettingsTab;
 }
 
 interface GeneralSettingsTabDescriptor {
@@ -314,11 +314,16 @@ interface GeneralSettingsTabDescriptor {
   sections: SettingsSectionShortcut[];
 }
 
-interface SettingsNavItem extends SettingsTabDescriptor {
-  value: SettingsTab;
-  badge: string;
-  note: string;
-  tone: SettingsNavTone;
+interface SettingsNavItem {
+  value: SettingsDestination;
+  tab: SettingsTab;
+  generalTab?: GeneralSettingsTab;
+  group: string;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+  keywords?: string[];
+  sections: SettingsSectionShortcut[];
 }
 
 interface SettingsNavGroup {
@@ -328,10 +333,10 @@ interface SettingsNavGroup {
 
 interface SettingsSearchResult {
   key: string;
-  tab: SettingsTab;
+  destination: SettingsDestination;
   label: string;
   context: string;
-  sectionId?: string;
+  section?: SettingsSectionShortcut;
   icon: LucideIcon;
 }
 
@@ -359,125 +364,23 @@ const SETTINGS_TABS = new Set<SettingsTab>([
 
 const ADMIN_SETTINGS_TABS = new Set<AdminSettingsTab>(['overview', 'users', 'audit-log']);
 
-const SETTINGS_TAB_DESCRIPTORS: Record<SettingsTab, SettingsTabDescriptor> = {
-  general: {
-    label: 'General',
-    eyebrow: 'Workspace',
-    description:
-      'Default workspace, provider runtime, model menus, and interface behavior live here.',
-    icon: Settings2,
-    highlights: ['Workspace defaults', 'Provider runtime', 'Appearance'],
-    sections: [
-      { id: 'active-providers', label: 'Active providers' },
-      { id: 'default-directory', label: 'Default directory' },
-      { id: 'cli-updates', label: 'CLI updates' },
-      { id: 'codex-cli', label: 'Codex CLI' },
-      { id: 'claude-cli', label: 'Claude Code' },
-      { id: 'zai-cli', label: 'Z.AI Code' },
-      { id: 'pi-cli', label: 'Pi' },
-      { id: 'oracle-browser', label: 'Oracle browser' },
-      { id: 'appearance', label: 'Appearance' },
-      { id: 'opencode-models', label: 'OpenCode models' },
-    ],
-  },
-  analytics: {
-    label: 'Analytics',
-    eyebrow: 'Chart visibility',
-    description: 'Choose which provider quota lines appear in the combined analytics graph.',
-    icon: BarChart3,
-    highlights: ['Provider limits', 'Chart visibility', 'Per-account preferences'],
-    sections: [{ id: 'analytics-limit-metrics', label: 'Limit metrics' }],
-  },
-  security: {
-    label: 'Security',
-    eyebrow: 'Access',
-    description: 'Control the login gate and rotate the credentials used to enter Plum.',
-    icon: Shield,
-    highlights: ['Basic auth', 'Credential rotation', 'Access posture'],
-    sections: [
-      { id: 'login-protection', label: 'Login protection' },
-      { id: 'change-credentials', label: 'Change credentials' },
-    ],
-  },
-  'api-keys': {
-    label: 'API Keys',
-    eyebrow: 'Credentials',
-    description: 'Store provider credentials and per-provider secrets used by integrations.',
-    icon: KeyRound,
-    highlights: ['GitHub access', 'OpenCode providers'],
-    sections: [
-      { id: 'github-token', label: 'GitHub token' },
-      { id: 'opencode-providers', label: 'OpenCode providers' },
-    ],
-  },
-  integrations: {
-    label: 'Integrations',
-    eyebrow: 'External services',
-    description:
-      'Wire Plum into ComfyUI, Discord alerts, and the remaining endpoints used by the stack.',
-    icon: Wand2,
-    highlights: ['ComfyUI endpoint', 'Discord alerts', 'Connectivity tests'],
-    sections: [
-      { id: 'comfyui-integration', label: 'ComfyUI integration' },
-      { id: 'discord-integration', label: 'Discord alerts' },
-    ],
-  },
-  diagnostics: {
-    label: 'Diagnostics',
-    eyebrow: 'Health',
-    description:
-      'Inspect CLI binaries, auth state, model discovery, MCP wiring, and capability flags.',
-    icon: Terminal,
-    highlights: ['Binary availability', 'Auth state', 'Capability matrix'],
-    sections: [{ id: 'provider-diagnostics', label: 'Provider diagnostics' }],
-  },
-  extensions: {
-    label: 'Extensions',
-    eyebrow: 'Tooling',
-    description:
-      'Manage MCP servers plus the local agent, skill, marketplace, and plugin ecosystem.',
-    icon: Puzzle,
-    highlights: ['MCP servers', 'Agents and skills', 'Plugins and marketplaces'],
-    sections: [
-      { id: 'mcp-servers', label: 'MCP servers' },
-      { id: 'agents', label: 'Agents' },
-      { id: 'skills', label: 'Skills' },
-      { id: 'codex-marketplace', label: 'Codex marketplace' },
-      { id: 'plugins', label: 'Plugins' },
-    ],
-  },
-  admin: {
-    label: 'Admin',
-    eyebrow: 'Operations',
-    description: 'User management, audit visibility, and instance-level administration tools.',
-    icon: LayoutDashboard,
-    highlights: ['Overview', 'Users', 'Audit log'],
-    sections: [
-      { id: 'overview', label: 'Overview' },
-      { id: 'users', label: 'Users' },
-      { id: 'audit-log', label: 'Audit log' },
-    ],
-  },
-};
-
 const GENERAL_SETTINGS_TABS: GeneralSettingsTabDescriptor[] = [
   {
     value: 'workspace',
     label: 'Workspace',
-    description: 'Default folder and CLI updates.',
+    description: 'Default folder for new sessions.',
     icon: FolderOpen,
-    sections: [
-      { id: 'active-providers', label: 'Active providers' },
-      { id: 'default-directory', label: 'Default directory' },
-      { id: 'cli-updates', label: 'CLI updates' },
-    ],
+    sections: [{ id: 'default-directory', label: 'Default directory' }],
   },
   {
     value: 'logins',
     label: 'Provider logins',
     description: 'Every sign-in method in one place.',
     icon: KeyRound,
-    sections: [{ id: 'provider-logins', label: 'Provider logins' }],
+    sections: [
+      { id: 'active-providers', label: 'Available providers' },
+      { id: 'provider-logins', label: 'Provider logins' },
+    ],
   },
   {
     value: 'codex',
@@ -551,6 +454,167 @@ const GENERAL_SECTION_TO_TAB = GENERAL_SETTINGS_TABS.reduce((map, tab) => {
   return map;
 }, new Map<string, GeneralSettingsTab>());
 
+/* One destination per user job. Provider details use a local selector inside the
+   provider page; they do not form a second global navigation row. */
+const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
+  {
+    value: 'appearance',
+    tab: 'general',
+    generalTab: 'interface',
+    group: 'Essentials',
+    label: 'Appearance',
+    description: 'Theme, background and device sync',
+    icon: Wand2,
+    keywords: ['light', 'dark', 'e-ink', 'plum waves', 'misty waterdrops', 'neon glow', 'aurora'],
+    sections: [{ id: 'appearance', label: 'Theme and background' }],
+  },
+  {
+    value: 'workspace',
+    tab: 'general',
+    generalTab: 'workspace',
+    group: 'Essentials',
+    label: 'Workspace',
+    description: 'Default directory for new sessions',
+    icon: FolderOpen,
+    sections: [
+      { id: 'default-directory', label: 'Default directory', keywords: ['folder', 'project'] },
+    ],
+  },
+  {
+    value: 'providers',
+    tab: 'general',
+    generalTab: 'logins',
+    group: 'Coding',
+    label: 'Providers & models',
+    description: 'Accounts, credentials and runtime options',
+    icon: Bot,
+    keywords: ['login', 'api key', 'authentication', 'kimi', 'vibe', 'mistral'],
+    sections: [
+      { id: 'active-providers', label: 'Available providers', generalTab: 'logins' },
+      {
+        id: 'provider-logins',
+        label: 'Provider accounts',
+        generalTab: 'logins',
+        keywords: ['opencode api keys', 'kimi login', 'vibe login', 'mistral api key'],
+      },
+      { id: 'codex-cli', label: 'Codex', generalTab: 'codex' },
+      { id: 'claude-cli', label: 'Claude Code', generalTab: 'claude' },
+      { id: 'zai-cli', label: 'Z.AI', generalTab: 'zai', keywords: ['glm', 'token'] },
+      { id: 'opencode-models', label: 'OpenCode models', generalTab: 'opencode' },
+      { id: 'pi-cli', label: 'Pi', generalTab: 'pi' },
+    ],
+  },
+  {
+    value: 'agents',
+    tab: 'general',
+    generalTab: 'subagents',
+    group: 'Coding',
+    label: 'Agents',
+    description: 'Subagent routing and CLI workers',
+    icon: Users,
+    sections: [
+      { id: 'subagent-upstreams', label: 'Model upstreams' },
+      { id: 'cli-subagents', label: 'CLI subagents' },
+    ],
+  },
+  {
+    value: 'extensions',
+    tab: 'extensions',
+    group: 'Coding',
+    label: 'Extensions',
+    description: 'MCP, skills, plugins and marketplace',
+    icon: Puzzle,
+    sections: [
+      { id: 'mcp-servers', label: 'MCP servers' },
+      { id: 'agents', label: 'Agent definitions' },
+      { id: 'skills', label: 'Skills and styles' },
+      { id: 'codex-marketplace', label: 'Codex marketplace' },
+      { id: 'plugins', label: 'Plugins' },
+    ],
+  },
+  {
+    value: 'integrations',
+    tab: 'integrations',
+    group: 'Services',
+    label: 'Integrations',
+    description: 'GitHub, Oracle, ComfyUI, Home Assistant and Discord',
+    icon: Globe2,
+    sections: [
+      { id: 'oracle-browser', label: 'Oracle browser', keywords: ['second opinion'] },
+      { id: 'github-token', label: 'GitHub access', keywords: ['token', 'repository'] },
+      { id: 'home-assistant-integration', label: 'Home Assistant' },
+      { id: 'comfyui-integration', label: 'ComfyUI' },
+      { id: 'discord-integration', label: 'Discord' },
+    ],
+  },
+  {
+    value: 'usage',
+    tab: 'analytics',
+    group: 'Services',
+    label: 'Usage & alerts',
+    description: 'Quota, spend warnings and chart preferences',
+    icon: BarChart3,
+    sections: [
+      {
+        id: 'usage-alerts',
+        label: 'Usage alerts',
+        keywords: ['quota warning', 'daily spend', 'notification'],
+      },
+      {
+        id: 'analytics-limit-metrics',
+        label: 'Provider limit curves',
+        keywords: ['analytics chart'],
+      },
+    ],
+  },
+  {
+    value: 'security',
+    tab: 'security',
+    group: 'Services',
+    label: 'Security & access',
+    description: 'Login protection and gateway tokens',
+    icon: Shield,
+    sections: [
+      { id: 'login-protection', label: 'Login protection' },
+      { id: 'change-credentials', label: 'Change credentials' },
+      { id: 'control-gateway', label: 'Control gateway tokens', keywords: ['api token'] },
+      // The panel renders at the end of this pane; without a rail entry it is
+      // only findable by scrolling, which is how "where do I get the Chrome
+      // extension?" keeps coming up.
+      {
+        id: 'firefox-browser',
+        label: 'Browser control',
+        keywords: ['chrome', 'edge', 'firefox', 'extension', 'browser'],
+      },
+    ],
+  },
+  {
+    value: 'system',
+    tab: 'diagnostics',
+    group: 'System',
+    label: 'System',
+    description: 'Provider diagnostics and CLI updates',
+    icon: Terminal,
+    sections: [
+      { id: 'provider-diagnostics', label: 'Provider diagnostics' },
+      { id: 'cli-updates', label: 'CLI updates' },
+    ],
+  },
+  {
+    value: 'admin',
+    tab: 'admin',
+    group: 'System',
+    label: 'Administration',
+    description: 'Users, instance health and audit log',
+    icon: LayoutDashboard,
+    sections: [
+      { id: 'overview', label: 'Overview' },
+      { id: 'users', label: 'Users' },
+      { id: 'audit-log', label: 'Audit log' },
+    ],
+  },
+];
+
 function SettingsPanel({
   id,
   eyebrow,
@@ -586,7 +650,12 @@ function SettingsPanel({
   );
 }
 
-function getSettingsTab(tab: string | null, isAdmin: boolean): SettingsTab {
+function getSettingsTab(
+  tab: string | null,
+  isAdmin: boolean,
+  generalTab?: string | null,
+  sectionId?: string | null
+): SettingsTab {
   if (
     tab === 'admin-overview' ||
     tab === 'admin-users' ||
@@ -594,6 +663,17 @@ function getSettingsTab(tab: string | null, isAdmin: boolean): SettingsTab {
     tab === 'admin'
   ) {
     return isAdmin ? 'admin' : 'general';
+  }
+
+  // Old settings URLs remain valid after their controls move to new pages.
+  if (sectionId === 'oracle-browser' || generalTab === 'oracle') return 'integrations';
+  if (tab === 'api-keys') return sectionId === 'github-token' ? 'integrations' : 'general';
+
+  const sectionDestination = SETTINGS_NAV_ITEMS.find((item) =>
+    item.sections.some((section) => section.id === sectionId)
+  );
+  if (tab === 'general' && sectionDestination && sectionDestination.tab !== 'general') {
+    return sectionDestination.tab;
   }
 
   if (tab && SETTINGS_TABS.has(tab as SettingsTab)) {
@@ -614,15 +694,16 @@ function getAdminSettingsTab(tab: string | null, adminTab: string | null): Admin
 }
 
 function getGeneralSettingsTab(tab: string | null, sectionId?: string | null): GeneralSettingsTab {
+  if (sectionId === 'opencode-providers' || sectionId === 'active-providers') return 'logins';
   if (sectionId) {
-    return GENERAL_SECTION_TO_TAB.get(sectionId) || 'workspace';
+    return GENERAL_SECTION_TO_TAB.get(sectionId) || 'interface';
   }
 
   if (tab && GENERAL_SETTINGS_TAB_VALUES.has(tab as GeneralSettingsTab)) {
     return tab as GeneralSettingsTab;
   }
 
-  return 'workspace';
+  return 'interface';
 }
 
 export function SettingsPage() {
@@ -639,37 +720,27 @@ export function SettingsPage() {
     return (endpoint: string) => `${endpoint}${endpoint.includes('?') ? '&' : '?'}${configQuery}`;
   }, [configQuery]);
   const activeTab = useMemo(
-    () => getSettingsTab(searchParams.get('tab'), isAdmin),
-    [isAdmin, searchParams]
+    () =>
+      getSettingsTab(
+        searchParams.get('tab'),
+        isAdmin,
+        searchParams.get('generalTab'),
+        searchParams.get('section') || location.hash.slice(1)
+      ),
+    [isAdmin, location.hash, searchParams]
   );
   const activeAdminTab = useMemo(
     () => getAdminSettingsTab(searchParams.get('tab'), searchParams.get('adminTab')),
     [searchParams]
   );
   const activeGeneralTab = useMemo(
-    () => getGeneralSettingsTab(searchParams.get('generalTab'), searchParams.get('section')),
-    [searchParams]
+    () =>
+      getGeneralSettingsTab(
+        searchParams.get('tab') === 'api-keys' ? 'logins' : searchParams.get('generalTab'),
+        searchParams.get('section') || location.hash.slice(1)
+      ),
+    [location.hash, searchParams]
   );
-  const handleSettingsTabChange = (value: string) => {
-    const tab = value as SettingsTab;
-    const next = new URLSearchParams(searchParams);
-    next.set('tab', tab);
-    next.delete('section');
-
-    if (tab === 'admin') {
-      next.set('adminTab', activeAdminTab);
-      next.delete('generalTab');
-    } else if (tab === 'general') {
-      next.set('generalTab', activeGeneralTab);
-      next.delete('adminTab');
-    } else {
-      next.delete('adminTab');
-      next.delete('generalTab');
-    }
-
-    setSearchParams(next);
-    setSettingsSearchQuery('');
-  };
   const handleGeneralTabChange = (value: string) => {
     const generalTab = value as GeneralSettingsTab;
     const next = new URLSearchParams(searchParams);
@@ -698,6 +769,7 @@ export function SettingsPage() {
     () => getStoredBackgroundAnimation()
   );
   const [settingsSearchQuery, setSettingsSearchQuery] = useState('');
+  const [mobileSettingsNavOpen, setMobileSettingsNavOpen] = useState(false);
   const [newMcpServer, setNewMcpServer] = useState<{
     name: string;
     type: 'subprocess' | 'sse';
@@ -877,7 +949,8 @@ export function SettingsPage() {
       const response = await api.get<ApiResponse<CodexPluginInfo[]>>('/api/codex/plugins');
       return response.data.data || [];
     },
-    enabled: activeTab === 'extensions',
+    enabled:
+      activeTab === 'extensions' || (activeTab === 'general' && activeGeneralTab === 'codex'),
   });
 
   const {
@@ -960,7 +1033,7 @@ export function SettingsPage() {
       >('/api/settings/github-token');
       return response.data.data;
     },
-    enabled: activeTab === 'api-keys',
+    enabled: activeTab === 'integrations',
   });
 
   const { data: claudeApiStatus, refetch: refetchClaudeApi } = useQuery({
@@ -982,17 +1055,6 @@ export function SettingsPage() {
       const data = response.data.data ?? { comfyuiUrl: '' };
       setComfyuiUrlInput(data.comfyuiUrl || '');
       return data;
-    },
-    enabled: activeTab === 'integrations',
-  });
-
-  const { data: homeAssistantSettings } = useQuery({
-    queryKey: ['home-assistant-settings'],
-    queryFn: async () => {
-      const response = await api.get<ApiResponse<HomeAssistantIntegrationSettings>>(
-        '/api/home-assistant/settings'
-      );
-      return response.data.data;
     },
     enabled: activeTab === 'integrations',
   });
@@ -1060,11 +1122,6 @@ export function SettingsPage() {
         plugin.marketplace?.toLowerCase().includes(query)
     );
   }, [installedPlugins, pluginSearchQuery]);
-
-  const { skillPackageCount, stylePresetCount } = useMemo(
-    () => getSkillCatalogCounts(claudeSkills),
-    [claudeSkills]
-  );
 
   const filteredCodexPlugins = useMemo(() => {
     if (!codexPlugins) return [];
@@ -1736,14 +1793,6 @@ export function SettingsPage() {
     },
   ];
 
-  const configuredOpenCodeProviders =
-    openCodeProviders?.filter((provider) => provider.hasKey) || [];
-  const configuredApiKeyCount =
-    (githubTokenStatus?.hasToken ? 1 : 0) + configuredOpenCodeProviders.length;
-  const healthyProviderCount =
-    providerDiagnostics?.filter((provider) => provider.installed && provider.authenticated)
-      .length || 0;
-  const totalProviderCount = providerDiagnostics?.length || 0;
   const analyticsLimitMetricsByProvider = useMemo(() => {
     const byProvider = new Map<AnalyticsLimitProvider, Array<{ key: string; label: string }>>();
     ANALYTICS_LIMIT_PROVIDER_ORDER.forEach((provider) => byProvider.set(provider, []));
@@ -1759,19 +1808,6 @@ export function SettingsPage() {
   }, [analyticsLimitHistory]);
   const analyticsHiddenLimitMetrics =
     settings?.analytics?.hiddenLimitMetrics ?? DEFAULT_ANALYTICS_HIDDEN_LIMIT_METRICS;
-  const analyticsLimitMetricCount = Array.from(analyticsLimitMetricsByProvider.values()).reduce(
-    (total, metrics) => total + metrics.length,
-    0
-  );
-  const analyticsVisibleLimitMetricCount = Array.from(
-    analyticsLimitMetricsByProvider.entries()
-  ).reduce(
-    (total, [provider, metrics]) =>
-      total +
-      metrics.filter((metric) => !analyticsHiddenLimitMetrics[provider]?.includes(metric.key))
-        .length,
-    0
-  );
   const updateAnalyticsLimitMetricVisibility = (
     provider: AnalyticsLimitProvider,
     metricKey: string,
@@ -1790,242 +1826,105 @@ export function SettingsPage() {
     updateSettingsMutation.mutate({ analytics: { hiddenLimitMetrics: nextHidden } });
   };
 
-  const settingsNavItems = useMemo<SettingsNavItem[]>(() => {
-    const items: SettingsNavItem[] = [
-      {
-        value: 'general',
-        ...SETTINGS_TAB_DESCRIPTORS.general,
-        badge: settings?.defaultWorkingDir ? 'Ready' : 'Needs setup',
-        note: settings?.defaultWorkingDir
-          ? settings.defaultWorkingDir
-          : 'Set the default workspace, appearance, and tool policy first.',
-        tone: settings?.defaultWorkingDir ? 'success' : 'warning',
-      },
-      {
-        value: 'security',
-        ...SETTINGS_TAB_DESCRIPTORS.security,
-        badge: basicAuthCredentials?.enabled ? 'Protected' : 'Open',
-        note: basicAuthCredentials?.enabled
-          ? `Basic auth enabled for ${basicAuthCredentials.username || 'admin'}.`
-          : 'No basic-auth gate is active before the login screen.',
-        tone: basicAuthCredentials?.enabled ? 'success' : 'warning',
-      },
-      {
-        value: 'analytics',
-        ...SETTINGS_TAB_DESCRIPTORS.analytics,
-        badge:
-          analyticsLimitMetricCount > 0
-            ? `${analyticsVisibleLimitMetricCount}/${analyticsLimitMetricCount}`
-            : 'Defaults',
-        note:
-          analyticsLimitMetricCount > 0
-            ? `${analyticsVisibleLimitMetricCount} provider limit curves visible in Analytics.`
-            : 'Choose which provider limit curves appear in the combined graph.',
-        tone: 'brand',
-      },
-      {
-        value: 'api-keys',
-        ...SETTINGS_TAB_DESCRIPTORS['api-keys'],
-        badge: `${configuredApiKeyCount} saved`,
-        note:
-          configuredApiKeyCount > 0
-            ? `${configuredOpenCodeProviders.length} OpenCode provider key${configuredOpenCodeProviders.length === 1 ? '' : 's'} plus GitHub credentials.`
-            : 'No provider credentials stored yet.',
-        tone: configuredApiKeyCount > 0 ? 'brand' : 'neutral',
-      },
-      {
-        value: 'integrations',
-        ...SETTINGS_TAB_DESCRIPTORS.integrations,
-        badge:
-          integrations?.comfyuiUrl ||
-          discordSettings?.configured ||
-          homeAssistantSettings?.configured
-            ? 'Configured'
-            : 'Pending',
-        note: homeAssistantSettings?.configured
-          ? `Home Assistant session lights ${homeAssistantSettings.enabled ? 'enabled' : 'configured'}.`
-          : discordSettings?.configured
-            ? `Discord alerts ${discordSettings.enabled ? 'enabled' : 'configured'} via ${discordSettings.transport === 'bot' ? 'bot token' : 'webhook'}.`
-            : integrations?.comfyuiUrl
-              ? integrations.comfyuiUrl
-              : 'Add Home Assistant, ComfyUI, or Discord to unlock external workflows.',
-        tone:
-          integrations?.comfyuiUrl ||
-          discordSettings?.configured ||
-          homeAssistantSettings?.configured
-            ? 'success'
-            : 'warning',
-      },
-      {
-        value: 'diagnostics',
-        ...SETTINGS_TAB_DESCRIPTORS.diagnostics,
-        badge: totalProviderCount > 0 ? `${healthyProviderCount}/${totalProviderCount}` : 'Idle',
-        note:
-          totalProviderCount > 0
-            ? `${healthyProviderCount} provider${healthyProviderCount === 1 ? '' : 's'} fully ready right now.`
-            : 'Run diagnostics to inspect CLI availability and auth state.',
-        tone:
-          totalProviderCount === 0
-            ? 'neutral'
-            : healthyProviderCount === totalProviderCount
-              ? 'success'
-              : 'warning',
-      },
-      {
-        value: 'extensions',
-        ...SETTINGS_TAB_DESCRIPTORS.extensions,
-        badge: `${(mcpServers?.length || 0) + (installedPlugins?.length || 0) + (claudeSkills?.length || 0) + (claudeAgents?.length || 0)}`,
-        note: `${mcpServers?.length || 0} MCP · ${claudeAgents?.length || 0} agents · ${skillPackageCount} skills · ${stylePresetCount} presets · ${installedPlugins?.length || 0} plugins`,
-        tone:
-          (mcpServers?.length || 0) +
-            (installedPlugins?.length || 0) +
-            (claudeSkills?.length || 0) >
-          0
-            ? 'brand'
-            : 'neutral',
-      },
-    ];
-
-    if (isAdmin) {
-      items.push({
-        value: 'admin',
-        ...SETTINGS_TAB_DESCRIPTORS.admin,
-        badge: 'Admin',
-        note:
-          activeAdminTab === 'overview'
-            ? 'Instance health and high-level metrics.'
-            : activeAdminTab === 'users'
-              ? 'User management and roles.'
-              : 'Recent audit trail for sensitive actions.',
-        tone: 'brand',
-      });
-    }
-
-    return items;
-  }, [
-    activeAdminTab,
-    analyticsLimitMetricCount,
-    analyticsVisibleLimitMetricCount,
-    basicAuthCredentials?.enabled,
-    basicAuthCredentials?.username,
-    claudeAgents?.length,
-    claudeSkills?.length,
-    configuredApiKeyCount,
-    configuredOpenCodeProviders.length,
-    discordSettings?.configured,
-    discordSettings?.enabled,
-    discordSettings?.transport,
-    healthyProviderCount,
-    homeAssistantSettings?.configured,
-    homeAssistantSettings?.enabled,
-    installedPlugins?.length,
-    skillPackageCount,
-    stylePresetCount,
-    integrations?.comfyuiUrl,
-    isAdmin,
-    mcpServers?.length,
-    settings?.defaultWorkingDir,
-    totalProviderCount,
-  ]);
-
-  const settingsNavGroups = useMemo<SettingsNavGroup[]>(() => {
-    const byValue = new Map(settingsNavItems.map((item) => [item.value, item]));
-    const groups: Array<{ label: string; values: SettingsTab[] }> = [
-      { label: 'Essentials', values: ['general', 'security'] },
-      { label: 'Insights', values: ['analytics'] },
-      { label: 'Connections', values: ['api-keys', 'integrations'] },
-      { label: 'System', values: ['diagnostics', 'extensions', 'admin'] },
-    ];
-
-    return groups
-      .map((group) => ({
-        label: group.label,
-        items: group.values
-          .map((value) => byValue.get(value))
-          .filter((item): item is SettingsNavItem => Boolean(item)),
-      }))
-      .filter((group) => group.items.length > 0);
-  }, [settingsNavItems]);
+  const activeDestination: SettingsDestination =
+    activeTab === 'general'
+      ? activeGeneralTab === 'interface'
+        ? 'appearance'
+        : activeGeneralTab === 'workspace'
+          ? 'workspace'
+          : activeGeneralTab === 'subagents'
+            ? 'agents'
+            : 'providers'
+      : activeTab === 'analytics'
+        ? 'usage'
+        : activeTab === 'diagnostics'
+          ? 'system'
+          : activeTab === 'api-keys'
+            ? 'providers'
+            : activeTab;
+  const settingsNavItems = useMemo(
+    () => SETTINGS_NAV_ITEMS.filter((item) => item.value !== 'admin' || isAdmin),
+    [isAdmin]
+  );
+  const settingsNavGroups = useMemo<SettingsNavGroup[]>(
+    () =>
+      ['Essentials', 'Coding', 'Services', 'System']
+        .map((label) => ({
+          label,
+          items: settingsNavItems.filter((item) => item.group === label),
+        }))
+        .filter((group) => group.items.length > 0),
+    [settingsNavItems]
+  );
+  const activeNavItem =
+    settingsNavItems.find((item) => item.value === activeDestination) || settingsNavItems[0];
 
   const normalizedSettingsSearch = settingsSearchQuery.trim().toLowerCase();
   const settingsSearchResults = useMemo<SettingsSearchResult[]>(() => {
     if (!normalizedSettingsSearch) return [];
-
+    const terms = normalizedSettingsSearch.split(/\s+/);
+    const matches = (values: Array<string | undefined>) => {
+      const haystack = values.filter(Boolean).join(' ').toLowerCase();
+      return terms.every((term) => haystack.includes(term));
+    };
     const results: SettingsSearchResult[] = [];
-    settingsNavItems.forEach((item) => {
-      const tabHaystack = [
-        item.label,
-        item.eyebrow,
-        item.description,
-        item.badge,
-        item.note,
-        ...item.highlights,
-      ]
-        .join(' ')
-        .toLowerCase();
-
-      if (tabHaystack.includes(normalizedSettingsSearch)) {
+    for (const item of settingsNavItems) {
+      if (matches([item.label, item.description, ...(item.keywords || [])])) {
         results.push({
           key: item.value,
-          tab: item.value,
+          destination: item.value,
           label: item.label,
           context: item.description,
           icon: item.icon,
         });
       }
-
-      item.sections.forEach((section) => {
-        const sectionHaystack = `${item.label} ${section.label}`.toLowerCase();
-        if (sectionHaystack.includes(normalizedSettingsSearch)) {
-          results.push({
-            key: `${item.value}-${section.id}`,
-            tab: item.value,
-            sectionId: section.id,
-            label: section.label,
-            context: item.label,
-            icon: item.icon,
-          });
-        }
-      });
-    });
-
-    return results.slice(0, 8);
-  }, [normalizedSettingsSearch, settingsNavItems]);
-
-  const handleSettingsDestination = (tab: SettingsTab, sectionId?: string) => {
-    const next = new URLSearchParams(searchParams);
-    next.set('tab', tab);
-
-    if (tab === 'admin') {
-      next.set('adminTab', (sectionId as AdminSettingsTab | undefined) || activeAdminTab);
-      next.delete('section');
-      next.delete('generalTab');
-    } else {
-      next.delete('adminTab');
-      if (tab === 'general') {
-        next.set(
-          'generalTab',
-          sectionId ? getGeneralSettingsTab(null, sectionId) : activeGeneralTab
-        );
-      } else {
-        next.delete('generalTab');
-      }
-      if (sectionId) {
-        next.set('section', sectionId);
-      } else {
-        next.delete('section');
+      for (const section of item.sections) {
+        if (!matches([item.label, section.label, ...(section.keywords || [])])) continue;
+        results.push({
+          key: `${item.value}-${section.id}`,
+          destination: item.value,
+          section,
+          label: section.label,
+          context: item.label,
+          icon: item.icon,
+        });
       }
     }
+    return results;
+  }, [normalizedSettingsSearch, settingsNavItems]);
 
+  const handleSettingsDestination = (
+    destination: SettingsDestination,
+    section?: SettingsSectionShortcut
+  ) => {
+    const item = SETTINGS_NAV_ITEMS.find((entry) => entry.value === destination);
+    if (!item) return;
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', item.tab);
+    if (section) next.set('section', section.id);
+    else next.delete('section');
+    if (item.tab === 'general') {
+      next.set('generalTab', section?.generalTab || item.generalTab || 'interface');
+      next.delete('adminTab');
+    } else if (item.tab === 'admin') {
+      next.set('adminTab', (section?.id as AdminSettingsTab | undefined) || activeAdminTab);
+      next.delete('generalTab');
+    } else {
+      next.delete('generalTab');
+      next.delete('adminTab');
+    }
     setSearchParams(next);
     setSettingsSearchQuery('');
+    setMobileSettingsNavOpen(false);
   };
 
   useEffect(() => {
     const hashSection = location.hash.startsWith('#')
       ? decodeURIComponent(location.hash.slice(1))
       : '';
-    const sectionId = searchParams.get('section') || hashSection;
+    const requestedSection = searchParams.get('section') || hashSection;
+    const sectionId =
+      requestedSection === 'opencode-providers' ? 'provider-logins' : requestedSection;
     if (!sectionId || activeTab === 'admin') return;
 
     const scrollToSection = () => {
@@ -2066,12 +1965,8 @@ export function SettingsPage() {
   return (
     <div className="settings-shell glass-page settings-dashboard min-h-screen">
       <div className="settings-dashboard-inner w-full px-3 pb-12 sm:px-4 xl:px-6 2xl:px-8">
-        <Tabs
-          value={activeTab}
-          onValueChange={handleSettingsTabChange}
-          className="settings-app-grid"
-        >
-          <aside className="settings-sidebar-panel">
+        <Tabs value={activeTab} className="settings-app-grid">
+          <aside className={cn('settings-sidebar-panel', mobileSettingsNavOpen && 'is-open')}>
             <div className="settings-sidebar-header">
               <div className="settings-app-icon">
                 <Settings2 className="h-5 w-5" />
@@ -2080,16 +1975,16 @@ export function SettingsPage() {
                 <p className="settings-overline">Settings</p>
                 <h1 className="truncate text-xl font-semibold tracking-tight">Plum</h1>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => refetchCodexStatus()}
-                disabled={isRefetchingCodex}
-                className="h-9 w-9 shrink-0 rounded-full"
-                title="Refresh Codex status"
+              <button
+                type="button"
+                className="settings-mobile-nav-toggle"
+                aria-expanded={mobileSettingsNavOpen}
+                aria-controls="settings-category-nav"
+                onClick={() => setMobileSettingsNavOpen((open) => !open)}
               >
-                <RefreshCw className={cn('h-4 w-4', isRefetchingCodex && 'animate-spin')} />
-              </Button>
+                {activeNavItem?.label || 'Categories'}
+                <ChevronRight className={cn('h-4 w-4', mobileSettingsNavOpen && 'rotate-90')} />
+              </button>
             </div>
 
             <div className="settings-search-field">
@@ -2098,6 +1993,7 @@ export function SettingsPage() {
                 value={settingsSearchQuery}
                 onChange={(event) => setSettingsSearchQuery(event.target.value)}
                 placeholder="Search settings"
+                aria-label="Search settings"
                 className="settings-search-input"
               />
               {settingsSearchQuery && (
@@ -2121,7 +2017,9 @@ export function SettingsPage() {
                       <button
                         type="button"
                         key={result.key}
-                        onClick={() => handleSettingsDestination(result.tab, result.sectionId)}
+                        onClick={() =>
+                          handleSettingsDestination(result.destination, result.section)
+                        }
                         className="settings-search-result"
                       >
                         <span className="settings-search-result-icon">
@@ -2143,68 +2041,85 @@ export function SettingsPage() {
               </div>
             )}
 
-            <TabsList className="settings-tabs-list" aria-label="Settings categories">
-              {settingsNavGroups.map((group) => (
-                <div key={group.label} className="settings-nav-group">
-                  <p className="settings-nav-group-label">{group.label}</p>
-                  {group.items.map((item) => {
-                    const Icon = item.icon;
+            {!settingsSearchQuery && (
+              <nav
+                id="settings-category-nav"
+                className="settings-tabs-list"
+                aria-label="Settings categories"
+              >
+                {settingsNavGroups.map((group) => (
+                  <div key={group.label} className="settings-nav-group">
+                    <p className="settings-nav-group-label">{group.label}</p>
+                    {group.items.map((item) => {
+                      const Icon = item.icon;
 
-                    return (
-                      <TabsTrigger
-                        key={item.value}
-                        value={item.value}
-                        className={cn('settings-tab-trigger', `is-${item.tone}`)}
-                      >
-                        <span className="settings-tab-trigger-icon">
-                          <Icon className="h-4 w-4" />
-                        </span>
-                        <span className="settings-tab-trigger-copy">
-                          <span className="settings-tab-trigger-top">
-                            <span className="settings-tab-trigger-label">{item.label}</span>
-                            <span className="settings-tab-trigger-badge">{item.badge}</span>
+                      return (
+                        <button
+                          type="button"
+                          key={item.value}
+                          className="settings-tab-trigger"
+                          data-state={activeDestination === item.value ? 'active' : 'inactive'}
+                          aria-current={activeDestination === item.value ? 'page' : undefined}
+                          onClick={() => handleSettingsDestination(item.value)}
+                        >
+                          <span className="settings-tab-trigger-icon">
+                            <Icon className="h-4 w-4" />
                           </span>
-                          <span className="settings-tab-trigger-note">{item.note}</span>
-                        </span>
-                        <ChevronRight className="settings-tab-trigger-chevron h-4 w-4" />
-                      </TabsTrigger>
-                    );
-                  })}
-                </div>
-              ))}
-            </TabsList>
-
-            <div className="settings-sidebar-footer">
-              <div className="settings-sidebar-stat">
-                <span>Codex</span>
-                <strong>{codexStatus?.authenticated ? 'Ready' : 'Login needed'}</strong>
-              </div>
-              <div className="settings-sidebar-stat">
-                <span>Extensions</span>
-                <strong>
-                  {(claudeAgents?.length || 0) +
-                    (claudeSkills?.length || 0) +
-                    (installedPlugins?.length || 0)}
-                </strong>
-              </div>
-              <div className="settings-sidebar-stat">
-                <span>Providers</span>
-                <strong>
-                  {totalProviderCount > 0
-                    ? `${healthyProviderCount}/${totalProviderCount}`
-                    : 'Idle'}
-                </strong>
-              </div>
-            </div>
-
-            {!codexStatus?.authenticated && codexStatus?.installed && (
-              <Button onClick={() => handleGeneralTabChange('codex')} size="sm" className="w-full">
-                Open Codex login
-              </Button>
+                          <span className="settings-tab-trigger-copy">
+                            <span className="settings-tab-trigger-top">
+                              <span className="settings-tab-trigger-label">{item.label}</span>
+                            </span>
+                            <span className="settings-tab-trigger-note">{item.description}</span>
+                          </span>
+                          <ChevronRight className="settings-tab-trigger-chevron h-4 w-4" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </nav>
             )}
           </aside>
 
           <main className="settings-detail-column">
+            <div className="settings-page-header">
+              <p className="settings-overline">Settings</p>
+              <h2>{activeNavItem?.label || 'Settings'}</h2>
+              <p>{activeNavItem?.description}</p>
+              {activeDestination === 'providers' ? (
+                <label className="settings-provider-picker">
+                  <span>Provider</span>
+                  <select
+                    value={activeGeneralTab}
+                    onChange={(event) => handleGeneralTabChange(event.target.value)}
+                  >
+                    {GENERAL_SETTINGS_TABS.filter((tab) =>
+                      ['logins', 'codex', 'claude', 'zai', 'opencode', 'pi'].includes(tab.value)
+                    ).map((tab) => (
+                      <option key={tab.value} value={tab.value}>
+                        {tab.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {activeDestination !== 'providers' && (activeNavItem?.sections.length || 0) > 1 ? (
+                <nav className="settings-section-nav" aria-label="On this page">
+                  {activeNavItem?.sections.map((section) => (
+                    <button
+                      key={section.id}
+                      type="button"
+                      aria-current={
+                        searchParams.get('section') === section.id ? 'location' : undefined
+                      }
+                      onClick={() => handleSettingsDestination(activeDestination, section)}
+                    >
+                      {section.label}
+                    </button>
+                  ))}
+                </nav>
+              ) : null}
+            </div>
             <div className="settings-content-surface">
               {/* Security Tab */}
               <TabsContent value="security" className="settings-pane-rail mt-0">
@@ -2408,6 +2323,12 @@ export function SettingsPage() {
                     </Button>
                   </SettingsPanel>
                 </>
+                <section id="control-gateway">
+                  <GatewayTokensPanel />
+                </section>
+                <section id="firefox-browser">
+                  <FirefoxBrowserPanel />
+                </section>
               </TabsContent>
 
               {/* General Tab */}
@@ -2418,33 +2339,47 @@ export function SettingsPage() {
                     onValueChange={handleGeneralTabChange}
                     className="settings-general-subtabs"
                   >
-                    <TabsList
-                      className="settings-general-tabs-list"
-                      aria-label="General settings sections"
-                    >
-                      {GENERAL_SETTINGS_TABS.map((tab) => {
-                        const Icon = tab.icon;
-                        return (
-                          <TabsTrigger
-                            key={tab.value}
-                            value={tab.value}
-                            className="settings-general-tab-trigger"
-                          >
-                            <Icon className="h-4 w-4 shrink-0" />
-                            <span className="min-w-0">
-                              <span className="block truncate text-sm font-semibold">
-                                {tab.label}
-                              </span>
-                              <span className="block truncate text-[11px] font-medium text-muted-foreground">
-                                {tab.description}
-                              </span>
-                            </span>
-                          </TabsTrigger>
-                        );
-                      })}
-                    </TabsList>
-
                     <TabsContent value="workspace" className="settings-general-pane mt-0">
+                      <div className="settings-pane-column">
+                        <SettingsPanel
+                          id="default-directory"
+                          eyebrow="Workspace"
+                          title="Default Directory"
+                          description="The base folder Plum starts in for new sessions across every CLI provider."
+                        >
+                          <div className="settings-directory-row flex gap-2">
+                            <div className="settings-field-icon-bubble">
+                              <FolderOpen className="h-4 w-4 text-muted-foreground" />
+                            </div>
+                            <Input
+                              value={settings?.defaultWorkingDir || ''}
+                              onChange={(e) =>
+                                updateSettingsMutation.mutate({
+                                  defaultWorkingDir: e.target.value || null,
+                                })
+                              }
+                              placeholder="/home/user/projects"
+                              className="settings-path-input h-10 flex-1 font-mono text-sm"
+                            />
+                            <Button
+                              variant="secondary"
+                              size="icon"
+                              onClick={() => setShowFolderBrowser(true)}
+                              className="h-10 w-10 shrink-0"
+                            >
+                              <FolderSearch className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Shared across all providers and reused whenever you create a new
+                            session.
+                          </p>
+                        </SettingsPanel>
+                      </div>
+                    </TabsContent>
+
+                    {/* Codex CLI */}
+                    <TabsContent value="logins" className="settings-general-pane mt-0">
                       <div className="settings-pane-column">
                         <SettingsPanel
                           id="active-providers"
@@ -2505,104 +2440,6 @@ export function SettingsPage() {
                           </p>
                         </SettingsPanel>
 
-                        <SettingsPanel
-                          id="default-directory"
-                          eyebrow="Workspace"
-                          title="Default Directory"
-                          description="The base folder Plum starts in for new sessions across every CLI provider."
-                        >
-                          <div className="settings-directory-row flex gap-2">
-                            <div className="settings-field-icon-bubble">
-                              <FolderOpen className="h-4 w-4 text-muted-foreground" />
-                            </div>
-                            <Input
-                              value={settings?.defaultWorkingDir || ''}
-                              onChange={(e) =>
-                                updateSettingsMutation.mutate({
-                                  defaultWorkingDir: e.target.value || null,
-                                })
-                              }
-                              placeholder="/home/user/projects"
-                              className="settings-path-input h-10 flex-1 font-mono text-sm"
-                            />
-                            <Button
-                              variant="secondary"
-                              size="icon"
-                              onClick={() => setShowFolderBrowser(true)}
-                              className="h-10 w-10 shrink-0"
-                            >
-                              <FolderSearch className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            Shared across all providers and reused whenever you create a new
-                            session.
-                          </p>
-                        </SettingsPanel>
-
-                        {/* CLI Updates */}
-                        <section id="cli-updates">
-                          <Card className="settings-utility-card border border-border/70">
-                            <CardHeader className="settings-utility-card-header flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                              <div className="space-y-1">
-                                <CardTitle className="text-base">CLI Updates</CardTitle>
-                                <CardDescription>
-                                  Update Claude, Codex, and OpenCode CLI tools.
-                                </CardDescription>
-                              </div>
-                              <Button
-                                size="sm"
-                                onClick={() => updateCliProvidersMutation.mutate()}
-                                disabled={updateCliProvidersMutation.isPending}
-                              >
-                                {updateCliProvidersMutation.isPending
-                                  ? 'Updating...'
-                                  : 'Update CLI tools'}
-                              </Button>
-                            </CardHeader>
-                            {cliUpdateResults && (
-                              <CardContent className="space-y-3">
-                                <div className="grid gap-2 text-sm">
-                                  {cliUpdateResults.map((result) => (
-                                    <div
-                                      key={result.provider}
-                                      className="flex items-center justify-between"
-                                    >
-                                      <span className="font-medium">
-                                        {CLI_PROVIDER_LABEL[result.provider]}
-                                      </span>
-                                      <span
-                                        className={cn(
-                                          'text-xs font-semibold uppercase tracking-wide',
-                                          result.status === 'updated'
-                                            ? 'text-green-600 dark:text-green-400'
-                                            : 'text-red-600 dark:text-red-400'
-                                        )}
-                                      >
-                                        {result.status}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                                <pre className="max-h-64 overflow-auto rounded-lg border border-border/70 bg-muted/40 p-3 text-xs font-mono whitespace-pre-wrap">
-                                  {cliUpdateResults
-                                    .map((result) => {
-                                      const label = CLI_PROVIDER_LABEL[result.provider];
-                                      const output = result.output || 'No output.';
-                                      return `# ${label} (${result.status})\n${output}`;
-                                    })
-                                    .join('\n\n')}
-                                </pre>
-                              </CardContent>
-                            )}
-                          </Card>
-                        </section>
-                      </div>
-                    </TabsContent>
-
-                    {/* Codex CLI */}
-                    <TabsContent value="logins" className="settings-general-pane mt-0">
-                      <div className="settings-pane-column">
                         <SettingsPanel
                           id="provider-logins"
                           eyebrow="Access"
@@ -3290,253 +3127,6 @@ export function SettingsPage() {
                     </TabsContent>
 
                     {/* Oracle Browser Auth */}
-                    <TabsContent value="oracle" className="settings-general-pane mt-0">
-                      <div className="settings-pane-column">
-                        <section id="oracle-browser">
-                          <Card className="border border-border/70">
-                            <CardHeader>
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <CardTitle className="text-base">Oracle Browser Auth</CardTitle>
-                                  <CardDescription>
-                                    Configure how Oracle reaches ChatGPT for browser-mode second
-                                    opinions.
-                                  </CardDescription>
-                                </div>
-                                <div className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-                                  {(oracleBrowserDraft.mode || 'manual') === 'remote'
-                                    ? 'Remote browser'
-                                    : (oracleBrowserDraft.mode || 'manual') === 'manual'
-                                      ? 'Embedded browser'
-                                      : 'Cookie profile'}
-                                </div>
-                              </div>
-                            </CardHeader>
-                            <CardContent className="space-y-5">
-                              <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-center">
-                                <div>
-                                  <p className="text-sm font-medium">Mode</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    Embedded Browser keeps the ChatGPT login flow inside Plum's
-                                    session browser tab. Remote Browser is only for attaching Oracle
-                                    to a browser you opened somewhere else.
-                                  </p>
-                                </div>
-                                <Select
-                                  value={oracleBrowserDraft.mode || 'manual'}
-                                  onValueChange={(value) =>
-                                    setOracleBrowserDraft((prev) => ({
-                                      ...prev,
-                                      mode: value as OracleBrowserSettings['mode'],
-                                    }))
-                                  }
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="manual">
-                                      Embedded Browser (Recommended)
-                                    </SelectItem>
-                                    <SelectItem value="remote">Remote Browser</SelectItem>
-                                    <SelectItem value="profile">Cookie Profile (Legacy)</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-
-                              <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-center">
-                                <div>
-                                  <p className="text-sm font-medium">ChatGPT URL</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    Oracle opens or targets this ChatGPT location for browser runs.
-                                  </p>
-                                </div>
-                                <Input
-                                  value={oracleBrowserDraft.chatgptUrl || ''}
-                                  onChange={(event) =>
-                                    setOracleBrowserDraft((prev) => ({
-                                      ...prev,
-                                      chatgptUrl: event.target.value,
-                                    }))
-                                  }
-                                  placeholder="https://chatgpt.com/"
-                                />
-                              </div>
-
-                              {(oracleBrowserDraft.mode || 'manual') === 'remote' && (
-                                <div className="space-y-3 rounded-lg border border-border/70 bg-muted/30 p-4">
-                                  <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-center">
-                                    <div>
-                                      <p className="text-sm font-medium">Remote Chrome Target</p>
-                                      <p className="text-xs text-muted-foreground">
-                                        Chrome DevTools endpoint on the host browser you open
-                                        yourself.
-                                      </p>
-                                    </div>
-                                    <Input
-                                      value={oracleBrowserDraft.remoteChrome || ''}
-                                      onChange={(event) =>
-                                        setOracleBrowserDraft((prev) => ({
-                                          ...prev,
-                                          remoteChrome: event.target.value,
-                                        }))
-                                      }
-                                      placeholder="host.docker.internal:9222"
-                                    />
-                                  </div>
-                                  <div className="rounded-md border border-primary/15 bg-primary/5 p-3 text-xs text-muted-foreground">
-                                    Start your browser with DevTools enabled, then sign into ChatGPT
-                                    there. Example:{' '}
-                                    <code>google-chrome --remote-debugging-port=9222</code>
-                                  </div>
-                                </div>
-                              )}
-
-                              {(oracleBrowserDraft.mode || 'manual') === 'manual' && (
-                                <div className="space-y-3 rounded-lg border border-border/70 bg-muted/30 p-4">
-                                  <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-center">
-                                    <div>
-                                      <p className="text-sm font-medium">
-                                        Embedded Browser Profile Dir
-                                      </p>
-                                      <p className="text-xs text-muted-foreground">
-                                        Persistent Chromium profile used by Plum's embedded Oracle
-                                        browser.
-                                      </p>
-                                    </div>
-                                    <Input
-                                      value={oracleBrowserDraft.manualLoginProfileDir || ''}
-                                      onChange={(event) =>
-                                        setOracleBrowserDraft((prev) => ({
-                                          ...prev,
-                                          manualLoginProfileDir: event.target.value,
-                                        }))
-                                      }
-                                      placeholder="/home/node/.codex/oracle/browser-profile"
-                                    />
-                                  </div>
-                                  <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
-                                    Start and control this browser from a session's right-side
-                                    `Browser` tab. Once it is logged into ChatGPT, Oracle can attach
-                                    to that running browser directly without leaving Plum.
-                                  </div>
-                                </div>
-                              )}
-
-                              {(oracleBrowserDraft.mode || 'manual') === 'profile' && (
-                                <div className="space-y-3 rounded-lg border border-border/70 bg-muted/30 p-4">
-                                  <div className="grid gap-3 md:grid-cols-2">
-                                    <label className="space-y-2 text-sm">
-                                      <span className="font-medium">Chrome profile</span>
-                                      <Input
-                                        value={oracleBrowserDraft.chromeProfile || ''}
-                                        onChange={(event) =>
-                                          setOracleBrowserDraft((prev) => ({
-                                            ...prev,
-                                            chromeProfile: event.target.value,
-                                          }))
-                                        }
-                                        placeholder="Default"
-                                      />
-                                    </label>
-                                    <label className="space-y-2 text-sm">
-                                      <span className="font-medium">Cookie DB path</span>
-                                      <Input
-                                        value={oracleBrowserDraft.chromeCookiePath || ''}
-                                        onChange={(event) =>
-                                          setOracleBrowserDraft((prev) => ({
-                                            ...prev,
-                                            chromeCookiePath: event.target.value,
-                                          }))
-                                        }
-                                        placeholder="/path/to/Cookies"
-                                      />
-                                    </label>
-                                  </div>
-                                  <div className="rounded-md border border-border/70 bg-background/70 p-3 text-xs text-muted-foreground">
-                                    Legacy mode: Oracle copies cookies from a browser profile it can
-                                    reach from inside the container.
-                                  </div>
-                                </div>
-                              )}
-
-                              <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-                                <Button
-                                  variant="outline"
-                                  onClick={() =>
-                                    window.open(
-                                      oracleBrowserDraft.chatgptUrl || 'https://chatgpt.com/',
-                                      '_blank',
-                                      'noopener,noreferrer'
-                                    )
-                                  }
-                                  className="gap-2"
-                                >
-                                  <ExternalLink className="h-4 w-4" />
-                                  Open ChatGPT Externally
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  onClick={testOracleBrowserSettings}
-                                  disabled={oracleTestResult.state === 'testing'}
-                                  className="gap-2"
-                                >
-                                  {oracleTestResult.state === 'testing' ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Terminal className="h-4 w-4" />
-                                  )}
-                                  Test Oracle Path
-                                </Button>
-                                <Button
-                                  onClick={saveOracleBrowserSettings}
-                                  disabled={updateSettingsMutation.isPending}
-                                >
-                                  {updateSettingsMutation.isPending
-                                    ? 'Saving...'
-                                    : 'Save Oracle Settings'}
-                                </Button>
-                              </div>
-
-                              {oracleTestResult.state !== 'idle' && (
-                                <div
-                                  className={cn(
-                                    'rounded-lg border p-3 text-sm',
-                                    oracleTestResult.state === 'ok'
-                                      ? 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300'
-                                      : oracleTestResult.state === 'testing'
-                                        ? 'border-border bg-muted/40 text-muted-foreground'
-                                        : 'border-destructive/30 bg-destructive/10 text-destructive'
-                                  )}
-                                >
-                                  <p>
-                                    {oracleTestResult.message ||
-                                      'Testing Oracle browser settings...'}
-                                  </p>
-                                  {oracleTestResult.details?.remoteChrome && (
-                                    <p className="mt-2 text-xs">
-                                      Remote target:{' '}
-                                      <code>{oracleTestResult.details.remoteChrome}</code>
-                                    </p>
-                                  )}
-                                  {oracleTestResult.details?.browserPath && (
-                                    <p className="mt-2 text-xs">
-                                      Browser path:{' '}
-                                      <code>{oracleTestResult.details.browserPath}</code>
-                                    </p>
-                                  )}
-                                  {oracleTestResult.details?.browser && (
-                                    <p className="mt-2 text-xs">
-                                      Browser: <code>{oracleTestResult.details.browser}</code>
-                                    </p>
-                                  )}
-                                </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        </section>
-                      </div>
-                    </TabsContent>
 
                     <TabsContent value="interface" className="settings-general-pane mt-0">
                       <div className="settings-pane-column">
@@ -3561,6 +3151,7 @@ export function SettingsPage() {
                                       e.stopPropagation();
                                       handleThemeChange(option.value);
                                     }}
+                                    aria-pressed={isActive}
                                     className={cn(
                                       'flex min-h-11 items-center gap-2 rounded-xl border px-4 py-2.5 text-left transition-all',
                                       'hover:scale-[1.02] active:scale-[0.98]',
@@ -3608,15 +3199,21 @@ export function SettingsPage() {
                                       handleBackgroundAnimationChange(option.value);
                                     }}
                                     className={cn(
-                                      'flex min-h-[58px] items-center gap-3 rounded-xl border px-3 py-2 text-left transition-all',
-                                      'hover:scale-[1.01] active:scale-[0.99]',
+                                      'settings-background-option flex min-h-[76px] items-center gap-3 rounded-xl border px-3 py-2 text-left transition-all',
                                       backgroundDisabled && 'cursor-not-allowed opacity-55',
                                       isActive
                                         ? 'border-primary bg-primary/10 text-primary'
                                         : 'border-border bg-card hover:border-primary/40'
                                     )}
+                                    aria-pressed={isActive}
                                   >
-                                    <Wand2 className="h-4 w-4 shrink-0" />
+                                    <span
+                                      aria-hidden="true"
+                                      className={cn(
+                                        'settings-background-preview',
+                                        `is-${option.value}`
+                                      )}
+                                    />
                                     <span className="min-w-0 flex-1">
                                       <span className="block truncate text-sm font-medium">
                                         {option.label}
@@ -3662,77 +3259,6 @@ export function SettingsPage() {
                                 }
                               />
                             </label>
-
-                            {/* Alert thresholds live on the account so the app
-                                and the WebUI cannot drift apart. */}
-                            <div className="space-y-3 rounded-xl border border-border bg-card px-4 py-3">
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="min-w-0">
-                                  <span className="block text-sm font-medium">Usage alerts</span>
-                                  <span className="block text-xs text-muted-foreground">
-                                    Notify when a provider quota or the daily spend passes these
-                                    limits.
-                                  </span>
-                                </span>
-                                <input
-                                  type="checkbox"
-                                  className="h-4 w-4 shrink-0 accent-primary"
-                                  checked={settings?.usageAlerts?.enabled ?? true}
-                                  onChange={(event) =>
-                                    updateSettingsMutation.mutate({
-                                      usageAlerts: { enabled: event.target.checked },
-                                    })
-                                  }
-                                />
-                              </div>
-                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                <label className="text-xs text-muted-foreground">
-                                  Quota warning at %
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    max={100}
-                                    defaultValue={settings?.usageAlerts?.quotaPercent ?? 80}
-                                    onBlur={(event) => {
-                                      const value = Number(event.target.value);
-                                      if (value >= 1 && value <= 100) {
-                                        updateSettingsMutation.mutate({
-                                          usageAlerts: { quotaPercent: Math.round(value) },
-                                        });
-                                      }
-                                    }}
-                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
-                                  />
-                                </label>
-                                <label className="text-xs text-muted-foreground">
-                                  Daily spend limit (USD)
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    step="0.5"
-                                    defaultValue={settings?.usageAlerts?.dailyCostUsd ?? 5}
-                                    onBlur={(event) => {
-                                      const value = Number(event.target.value);
-                                      if (Number.isFinite(value) && value >= 0) {
-                                        updateSettingsMutation.mutate({
-                                          usageAlerts: { dailyCostUsd: value },
-                                        });
-                                      }
-                                    }}
-                                    className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
-                                  />
-                                </label>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => void sendTestAlert()}
-                                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:border-primary/40"
-                              >
-                                Send test alert
-                              </button>
-                            </div>
-
-                            <GatewayTokensPanel />
                           </div>
                         </SettingsPanel>
                       </div>
@@ -4098,9 +3624,7 @@ export function SettingsPage() {
                                   type="button"
                                   variant="outline"
                                   size="sm"
-                                  onClick={() =>
-                                    handleSettingsDestination('api-keys', 'opencode-providers')
-                                  }
+                                  onClick={() => handleGeneralTabChange('logins')}
                                   className="shrink-0 gap-2"
                                 >
                                   <KeyRound className="h-3.5 w-3.5" />
@@ -4118,6 +3642,81 @@ export function SettingsPage() {
 
               {/* Analytics Tab */}
               <TabsContent value="analytics" className="settings-pane-rail mt-0">
+                <SettingsPanel
+                  id="usage-alerts"
+                  eyebrow="Notifications"
+                  title="Usage alerts"
+                  description="Choose when quota or daily spend should trigger an alert on your devices."
+                >
+                  {/* Alert thresholds live on the account so the app
+                                and the WebUI cannot drift apart. */}
+                  <div className="space-y-3 rounded-xl border border-border bg-card px-4 py-3">
+                    <label className="flex items-center justify-between gap-3">
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium">Enable alerts</span>
+                        <span className="block text-xs text-muted-foreground">
+                          Notify when a provider quota or the daily spend passes these limits.
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 shrink-0 accent-primary"
+                        checked={settings?.usageAlerts?.enabled ?? true}
+                        onChange={(event) =>
+                          updateSettingsMutation.mutate({
+                            usageAlerts: { enabled: event.target.checked },
+                          })
+                        }
+                      />
+                    </label>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <label className="text-xs text-muted-foreground">
+                        Quota warning at %
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          defaultValue={settings?.usageAlerts?.quotaPercent ?? 80}
+                          onBlur={(event) => {
+                            const value = Number(event.target.value);
+                            if (value >= 1 && value <= 100) {
+                              updateSettingsMutation.mutate({
+                                usageAlerts: { quotaPercent: Math.round(value) },
+                              });
+                            }
+                          }}
+                          className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground">
+                        Daily spend limit (USD)
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.5"
+                          defaultValue={settings?.usageAlerts?.dailyCostUsd ?? 5}
+                          onBlur={(event) => {
+                            const value = Number(event.target.value);
+                            if (Number.isFinite(value) && value >= 0) {
+                              updateSettingsMutation.mutate({
+                                usageAlerts: { dailyCostUsd: value },
+                              });
+                            }
+                          }}
+                          className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
+                        />
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void sendTestAlert()}
+                      className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:border-primary/40"
+                    >
+                      Send test alert
+                    </button>
+                  </div>
+                </SettingsPanel>
+
                 <SettingsPanel
                   id="analytics-limit-metrics"
                   eyebrow="Combined chart"
@@ -4227,106 +3826,6 @@ export function SettingsPage() {
 
               {/* API Keys Tab */}
               <TabsContent value="api-keys" className="settings-pane-rail mt-0">
-                {/* GitHub Token */}
-                <section id="github-token">
-                  <div className="settings-section-headband">
-                    <h2 className="text-lg font-semibold">GitHub Token</h2>
-                    <Github className="h-4 w-4 text-gray-500" />
-                  </div>
-                  <Card
-                    className={cn(
-                      'border',
-                      githubTokenStatus?.hasToken
-                        ? 'border-green-500/30 bg-green-500/5'
-                        : 'border-gray-500/30 bg-gray-500/5'
-                    )}
-                  >
-                    <CardContent className="pt-4 pb-4">
-                      {githubTokenStatus?.hasToken ? (
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 rounded-lg bg-green-500/15">
-                            <Github className="h-4 w-4 text-green-600 dark:text-green-400" />
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-green-600 dark:text-green-400">
-                              Token configured
-                            </p>
-                            <p className="text-xs text-muted-foreground font-mono">
-                              {githubTokenStatus.tokenPreview}
-                            </p>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => deleteGithubTokenMutation.mutate()}
-                            disabled={deleteGithubTokenMutation.isPending}
-                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          >
-                            <Trash2 className="h-4 w-4 mr-1" />
-                            Remove
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-lg bg-gray-500/15">
-                              <Github className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                            </div>
-                            <div className="flex-1">
-                              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
-                                No token set
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                Required for GitHub integration features
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <div className="relative flex-1">
-                              <Input
-                                type={showGithubToken ? 'text' : 'password'}
-                                value={githubTokenInput}
-                                onChange={(e) => setGithubTokenInput(e.target.value)}
-                                placeholder="ghp_..."
-                                className="font-mono text-sm pr-10"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setShowGithubToken(!showGithubToken)}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted"
-                              >
-                                {showGithubToken ? (
-                                  <EyeOff className="h-4 w-4 text-muted-foreground" />
-                                ) : (
-                                  <Eye className="h-4 w-4 text-muted-foreground" />
-                                )}
-                              </button>
-                            </div>
-                            <Button
-                              onClick={() => setGithubTokenMutation.mutate(githubTokenInput)}
-                              disabled={!githubTokenInput || setGithubTokenMutation.isPending}
-                            >
-                              {setGithubTokenMutation.isPending ? 'Saving...' : 'Save'}
-                            </Button>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            Get a Personal Access Token from{' '}
-                            <a
-                              href="https://github.com/settings/tokens/new"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary hover:underline"
-                            >
-                              GitHub Settings
-                            </a>{' '}
-                            (scopes: repo, read:user)
-                          </p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </section>
-
                 {/* OpenCode Providers (wrapped in its own section) */}
                 <section id="opencode-providers">
                   <Card>
@@ -4444,6 +3943,343 @@ export function SettingsPage() {
 
               {/* Integrations Tab */}
               <TabsContent value="integrations" className="settings-pane-rail mt-0">
+                <div className="settings-pane-column">
+                  <section id="oracle-browser">
+                    <Card className="border border-border/70">
+                      <CardHeader>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <CardTitle className="text-base">Oracle Browser Auth</CardTitle>
+                            <CardDescription>
+                              Configure how Oracle reaches ChatGPT for browser-mode second opinions.
+                            </CardDescription>
+                          </div>
+                          <div className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                            {(oracleBrowserDraft.mode || 'manual') === 'remote'
+                              ? 'Remote browser'
+                              : (oracleBrowserDraft.mode || 'manual') === 'manual'
+                                ? 'Embedded browser'
+                                : 'Cookie profile'}
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-5">
+                        <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-center">
+                          <div>
+                            <p className="text-sm font-medium">Mode</p>
+                            <p className="text-xs text-muted-foreground">
+                              Embedded Browser keeps the ChatGPT login flow inside Plum's session
+                              browser tab. Remote Browser is only for attaching Oracle to a browser
+                              you opened somewhere else.
+                            </p>
+                          </div>
+                          <Select
+                            value={oracleBrowserDraft.mode || 'manual'}
+                            onValueChange={(value) =>
+                              setOracleBrowserDraft((prev) => ({
+                                ...prev,
+                                mode: value as OracleBrowserSettings['mode'],
+                              }))
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="manual">Embedded Browser (Recommended)</SelectItem>
+                              <SelectItem value="remote">Remote Browser</SelectItem>
+                              <SelectItem value="profile">Cookie Profile (Legacy)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-center">
+                          <div>
+                            <p className="text-sm font-medium">ChatGPT URL</p>
+                            <p className="text-xs text-muted-foreground">
+                              Oracle opens or targets this ChatGPT location for browser runs.
+                            </p>
+                          </div>
+                          <Input
+                            value={oracleBrowserDraft.chatgptUrl || ''}
+                            onChange={(event) =>
+                              setOracleBrowserDraft((prev) => ({
+                                ...prev,
+                                chatgptUrl: event.target.value,
+                              }))
+                            }
+                            placeholder="https://chatgpt.com/"
+                          />
+                        </div>
+
+                        {(oracleBrowserDraft.mode || 'manual') === 'remote' && (
+                          <div className="space-y-3 rounded-lg border border-border/70 bg-muted/30 p-4">
+                            <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-center">
+                              <div>
+                                <p className="text-sm font-medium">Remote Chrome Target</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Chrome DevTools endpoint on the host browser you open yourself.
+                                </p>
+                              </div>
+                              <Input
+                                value={oracleBrowserDraft.remoteChrome || ''}
+                                onChange={(event) =>
+                                  setOracleBrowserDraft((prev) => ({
+                                    ...prev,
+                                    remoteChrome: event.target.value,
+                                  }))
+                                }
+                                placeholder="host.docker.internal:9222"
+                              />
+                            </div>
+                            <div className="rounded-md border border-primary/15 bg-primary/5 p-3 text-xs text-muted-foreground">
+                              Start your browser with DevTools enabled, then sign into ChatGPT
+                              there. Example:{' '}
+                              <code>google-chrome --remote-debugging-port=9222</code>
+                            </div>
+                          </div>
+                        )}
+
+                        {(oracleBrowserDraft.mode || 'manual') === 'manual' && (
+                          <div className="space-y-3 rounded-lg border border-border/70 bg-muted/30 p-4">
+                            <div className="grid gap-3 md:grid-cols-[1fr_260px] md:items-center">
+                              <div>
+                                <p className="text-sm font-medium">Embedded Browser Profile Dir</p>
+                                <p className="text-xs text-muted-foreground">
+                                  Persistent Chromium profile used by Plum's embedded Oracle
+                                  browser.
+                                </p>
+                              </div>
+                              <Input
+                                value={oracleBrowserDraft.manualLoginProfileDir || ''}
+                                onChange={(event) =>
+                                  setOracleBrowserDraft((prev) => ({
+                                    ...prev,
+                                    manualLoginProfileDir: event.target.value,
+                                  }))
+                                }
+                                placeholder="/home/node/.codex/oracle/browser-profile"
+                              />
+                            </div>
+                            <div className="rounded-md border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+                              Start and control this browser from a session's Browser tool. Once it
+                              is logged into ChatGPT, Oracle can attach to that running browser
+                              directly without leaving Plum.
+                            </div>
+                          </div>
+                        )}
+
+                        {(oracleBrowserDraft.mode || 'manual') === 'profile' && (
+                          <div className="space-y-3 rounded-lg border border-border/70 bg-muted/30 p-4">
+                            <div className="grid gap-3 md:grid-cols-2">
+                              <label className="space-y-2 text-sm">
+                                <span className="font-medium">Chrome profile</span>
+                                <Input
+                                  value={oracleBrowserDraft.chromeProfile || ''}
+                                  onChange={(event) =>
+                                    setOracleBrowserDraft((prev) => ({
+                                      ...prev,
+                                      chromeProfile: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="Default"
+                                />
+                              </label>
+                              <label className="space-y-2 text-sm">
+                                <span className="font-medium">Cookie DB path</span>
+                                <Input
+                                  value={oracleBrowserDraft.chromeCookiePath || ''}
+                                  onChange={(event) =>
+                                    setOracleBrowserDraft((prev) => ({
+                                      ...prev,
+                                      chromeCookiePath: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="/path/to/Cookies"
+                                />
+                              </label>
+                            </div>
+                            <div className="rounded-md border border-border/70 bg-background/70 p-3 text-xs text-muted-foreground">
+                              Legacy mode: Oracle copies cookies from a browser profile it can reach
+                              from inside the container.
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+                          <Button
+                            variant="outline"
+                            onClick={() =>
+                              window.open(
+                                oracleBrowserDraft.chatgptUrl || 'https://chatgpt.com/',
+                                '_blank',
+                                'noopener,noreferrer'
+                              )
+                            }
+                            className="gap-2"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                            Open ChatGPT Externally
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={testOracleBrowserSettings}
+                            disabled={oracleTestResult.state === 'testing'}
+                            className="gap-2"
+                          >
+                            {oracleTestResult.state === 'testing' ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Terminal className="h-4 w-4" />
+                            )}
+                            Test Oracle Path
+                          </Button>
+                          <Button
+                            onClick={saveOracleBrowserSettings}
+                            disabled={updateSettingsMutation.isPending}
+                          >
+                            {updateSettingsMutation.isPending
+                              ? 'Saving...'
+                              : 'Save Oracle Settings'}
+                          </Button>
+                        </div>
+
+                        {oracleTestResult.state !== 'idle' && (
+                          <div
+                            className={cn(
+                              'rounded-lg border p-3 text-sm',
+                              oracleTestResult.state === 'ok'
+                                ? 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300'
+                                : oracleTestResult.state === 'testing'
+                                  ? 'border-border bg-muted/40 text-muted-foreground'
+                                  : 'border-destructive/30 bg-destructive/10 text-destructive'
+                            )}
+                          >
+                            <p>
+                              {oracleTestResult.message || 'Testing Oracle browser settings...'}
+                            </p>
+                            {oracleTestResult.details?.remoteChrome && (
+                              <p className="mt-2 text-xs">
+                                Remote target: <code>{oracleTestResult.details.remoteChrome}</code>
+                              </p>
+                            )}
+                            {oracleTestResult.details?.browserPath && (
+                              <p className="mt-2 text-xs">
+                                Browser path: <code>{oracleTestResult.details.browserPath}</code>
+                              </p>
+                            )}
+                            {oracleTestResult.details?.browser && (
+                              <p className="mt-2 text-xs">
+                                Browser: <code>{oracleTestResult.details.browser}</code>
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </section>
+                </div>
+
+                {/* GitHub Token */}
+                <section id="github-token">
+                  <div className="settings-section-headband">
+                    <h2 className="text-lg font-semibold">GitHub Token</h2>
+                    <Github className="h-4 w-4 text-gray-500" />
+                  </div>
+                  <Card
+                    className={cn(
+                      'border',
+                      githubTokenStatus?.hasToken
+                        ? 'border-green-500/30 bg-green-500/5'
+                        : 'border-gray-500/30 bg-gray-500/5'
+                    )}
+                  >
+                    <CardContent className="pt-4 pb-4">
+                      {githubTokenStatus?.hasToken ? (
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-lg bg-green-500/15">
+                            <Github className="h-4 w-4 text-green-600 dark:text-green-400" />
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-green-600 dark:text-green-400">
+                              Token configured
+                            </p>
+                            <p className="text-xs text-muted-foreground font-mono">
+                              {githubTokenStatus.tokenPreview}
+                            </p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deleteGithubTokenMutation.mutate()}
+                            disabled={deleteGithubTokenMutation.isPending}
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          >
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            Remove
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-gray-500/15">
+                              <Github className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                No token set
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Required for GitHub integration features
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <div className="relative flex-1">
+                              <Input
+                                type={showGithubToken ? 'text' : 'password'}
+                                value={githubTokenInput}
+                                onChange={(e) => setGithubTokenInput(e.target.value)}
+                                placeholder="ghp_..."
+                                className="font-mono text-sm pr-10"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowGithubToken(!showGithubToken)}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted"
+                              >
+                                {showGithubToken ? (
+                                  <EyeOff className="h-4 w-4 text-muted-foreground" />
+                                ) : (
+                                  <Eye className="h-4 w-4 text-muted-foreground" />
+                                )}
+                              </button>
+                            </div>
+                            <Button
+                              onClick={() => setGithubTokenMutation.mutate(githubTokenInput)}
+                              disabled={!githubTokenInput || setGithubTokenMutation.isPending}
+                            >
+                              {setGithubTokenMutation.isPending ? 'Saving...' : 'Save'}
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Get a Personal Access Token from{' '}
+                            <a
+                              href="https://github.com/settings/tokens/new"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline"
+                            >
+                              GitHub Settings
+                            </a>{' '}
+                            (scopes: repo, read:user)
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </section>
+
                 <HomeAssistantSettingsCard />
                 <section id="comfyui-integration">
                   <div className="settings-section-headband">
@@ -4988,6 +4824,61 @@ export function SettingsPage() {
                     )}
                   </CardContent>
                 </Card>
+                {/* CLI Updates */}
+                <section id="cli-updates">
+                  <Card className="settings-utility-card border border-border/70">
+                    <CardHeader className="settings-utility-card-header flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div className="space-y-1">
+                        <CardTitle className="text-base">CLI Updates</CardTitle>
+                        <CardDescription>
+                          Update Claude, Codex, and OpenCode CLI tools.
+                        </CardDescription>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => updateCliProvidersMutation.mutate()}
+                        disabled={updateCliProvidersMutation.isPending}
+                      >
+                        {updateCliProvidersMutation.isPending ? 'Updating...' : 'Update CLI tools'}
+                      </Button>
+                    </CardHeader>
+                    {cliUpdateResults && (
+                      <CardContent className="space-y-3">
+                        <div className="grid gap-2 text-sm">
+                          {cliUpdateResults.map((result) => (
+                            <div
+                              key={result.provider}
+                              className="flex items-center justify-between"
+                            >
+                              <span className="font-medium">
+                                {CLI_PROVIDER_LABEL[result.provider]}
+                              </span>
+                              <span
+                                className={cn(
+                                  'text-xs font-semibold uppercase tracking-wide',
+                                  result.status === 'updated'
+                                    ? 'text-green-600 dark:text-green-400'
+                                    : 'text-red-600 dark:text-red-400'
+                                )}
+                              >
+                                {result.status}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <pre className="max-h-64 overflow-auto rounded-lg border border-border/70 bg-muted/40 p-3 text-xs font-mono whitespace-pre-wrap">
+                          {cliUpdateResults
+                            .map((result) => {
+                              const label = CLI_PROVIDER_LABEL[result.provider];
+                              const output = result.output || 'No output.';
+                              return `# ${label} (${result.status})\n${output}`;
+                            })
+                            .join('\n\n')}
+                        </pre>
+                      </CardContent>
+                    )}
+                  </Card>
+                </section>
               </TabsContent>
 
               {/* Extensions Tab */}

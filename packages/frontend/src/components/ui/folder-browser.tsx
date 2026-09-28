@@ -152,7 +152,7 @@ export function FolderBrowser({ value, onChange, onClose, showFiles = false }: F
   const pathParts = currentPath.split('/').filter(Boolean);
 
   return (
-    <div className="flex flex-col h-full max-h-[500px] bg-card rounded-xl border overflow-hidden">
+    <div className="glass-dialog flex flex-col h-full max-h-[500px] rounded-xl border overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 p-3 border-b bg-muted/30">
         <span className="text-sm font-medium">Select Folder</span>

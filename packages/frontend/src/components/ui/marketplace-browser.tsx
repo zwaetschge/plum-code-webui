@@ -248,7 +248,7 @@ export function MarketplaceBrowser({ onClose, configProvider }: MarketplaceBrows
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-background/80 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-5xl max-h-[90vh] bg-card rounded-2xl border shadow-2xl overflow-hidden animate-scale-in flex flex-col">
+      <div className="glass-dialog relative w-full max-w-5xl max-h-[90vh] rounded-2xl border shadow-2xl overflow-hidden animate-scale-in flex flex-col">
         {/* Header */}
         <div className="flex items-center gap-3 p-5 border-b bg-muted/30">
           <div className="p-2.5 rounded-xl bg-violet-500/10">
@@ -505,7 +505,7 @@ export function MarketplaceBrowser({ onClose, configProvider }: MarketplaceBrows
                               className="fixed inset-0 z-10"
                               onClick={() => setShowCategoryDropdown(false)}
                             />
-                            <div className="absolute right-0 top-full mt-1 z-20 w-48 py-1 bg-popover border rounded-lg shadow-lg">
+                            <div className="plum-popup absolute right-0 top-full mt-1 z-20 w-48 py-1 border rounded-lg shadow-lg">
                               <button
                                 type="button"
                                 onClick={() => {

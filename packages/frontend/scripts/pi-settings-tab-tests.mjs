@@ -33,8 +33,8 @@ assert.match(
 );
 assert.match(
   settingsPage,
-  /handleSettingsDestination\('api-keys', 'opencode-providers'\)/,
-  'Pi settings must link to the provider accounts it shares with OpenCode'
+  /<TabsContent value="pi"[\s\S]*?onClick=\{\(\) => handleGeneralTabChange\('logins'\)\}[\s\S]*?Manage provider accounts/,
+  'Pi settings must link to the shared provider account page'
 );
 
 console.log('Pi settings tab regression tests passed.');

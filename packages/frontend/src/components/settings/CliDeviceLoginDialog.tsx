@@ -24,7 +24,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from '@/hooks/use-toast';
 import { api } from '@/services/api';
 
-type CliLoginProvider = 'claude' | 'codex' | 'kimi' | 'pi';
+type CliLoginProvider = 'claude' | 'codex' | 'kimi' | 'pi' | 'vibe';
 type CliLoginStatus = 'starting' | 'awaiting_code' | 'completed' | 'error';
 
 interface CliLoginData {
@@ -67,13 +67,19 @@ const PROVIDER_COPY = {
     name: 'Antigravity',
     account: 'Google',
     description:
-      'Pi has no sign-in outside a session, so Plum drives its login screen for you. Complete the Google flow, then paste the redirect URL or code below.',
+      'Plum drives Pi’s login for you. Sign in with Google; the browser then lands on a localhost page that does not load. Copy that page’s full address and paste it below.',
   },
   kimi: {
     name: 'Kimi Code',
     account: 'Kimi account',
     description:
       'Start Kimi device authorization in Plum, open the verification URL in your browser, and approve it. Kimi polls automatically — no code entry needed.',
+  },
+  vibe: {
+    name: 'Mistral Vibe',
+    account: 'Mistral account',
+    description:
+      'Start the Mistral sign-in in Plum, open the URL in your browser, and approve it. Vibe keeps the key itself — no code entry needed.',
   },
 } satisfies Record<CliLoginProvider, { name: string; account: string; description: string }>;
 
@@ -331,37 +337,55 @@ export function CliDeviceLoginDialog({
             )}
           </div>
 
-          {provider === 'claude' && status !== 'idle' && status !== 'completed' && (
-            <div className="rounded-lg border border-border/70 bg-muted/30 p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Step 3
-              </p>
-              <p className="mt-1 text-sm font-medium">Return the authorization code if prompted</p>
-              <div className="mt-3 space-y-2">
-                <Label htmlFor="claude-device-login-code">Authorization code</Label>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input
-                    id="claude-device-login-code"
-                    value={code}
-                    onChange={(event) => setCode(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && code.trim()) void submitCode();
-                    }}
-                    placeholder="Paste the code shown by Anthropic"
-                    disabled={!login?.id || working}
-                  />
-                  <Button
-                    type="button"
-                    onClick={submitCode}
-                    disabled={!login?.id || !code.trim() || working}
-                    className="shrink-0"
-                  >
-                    Submit
-                  </Button>
+          {(provider === 'claude' || provider === 'pi') &&
+            status !== 'idle' &&
+            status !== 'completed' && (
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Step 3
+                </p>
+                <p className="mt-1 text-sm font-medium">
+                  {provider === 'pi'
+                    ? 'Paste the address of the page Google redirected you to'
+                    : 'Return the authorization code if prompted'}
+                </p>
+                {provider === 'pi' && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    It starts with <code>http://localhost:51121/oauth-callback?</code> — the page
+                    itself shows an error, that is expected.
+                  </p>
+                )}
+                <div className="mt-3 space-y-2">
+                  <Label htmlFor={`${provider}-device-login-code`}>
+                    {provider === 'pi' ? 'Redirect URL' : 'Authorization code'}
+                  </Label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      id={`${provider}-device-login-code`}
+                      value={code}
+                      onChange={(event) => setCode(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && code.trim()) void submitCode();
+                      }}
+                      placeholder={
+                        provider === 'pi'
+                          ? 'http://localhost:51121/oauth-callback?state=…&code=…'
+                          : 'Paste the code shown by Anthropic'
+                      }
+                      disabled={!login?.id || working}
+                    />
+                    <Button
+                      type="button"
+                      onClick={submitCode}
+                      disabled={!login?.id || !code.trim() || working}
+                      className="shrink-0"
+                    >
+                      Submit
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
           {login?.output && status !== 'completed' && (
             <details className="rounded-lg border border-border/70 bg-muted/20">

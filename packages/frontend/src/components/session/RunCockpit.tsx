@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { isActiveAgent } from '@plum-code-webui/shared';
+import { SubagentPanel } from './SubagentPanel';
+import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertCircle,
@@ -80,14 +82,6 @@ function timeShort(value: string | number): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function durationShort(start: number, end?: number): string {
-  const totalSeconds = Math.max(0, Math.floor(((end ?? Date.now()) - start) / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
 }
 
 function inputPreview(input: unknown): string {
@@ -204,12 +198,7 @@ export function RunCockpit({
   const verifyRef = useRef<HTMLDivElement | null>(null);
   const turnsRef = useRef<HTMLDivElement | null>(null);
   const toolsRef = useRef<HTMLDivElement | null>(null);
-  const activeAgents = agents.filter((agent) => agent.status === 'started');
-  const completedAgents = agents.filter((agent) => agent.status !== 'started');
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const selectedAgent = selectedAgentId
-    ? (agents.find((agent) => agent.id === selectedAgentId) ?? null)
-    : null;
+  const activeAgents = agents.filter(isActiveAgent);
   const isLive =
     sessionStatus === 'running' ||
     activity.type === 'thinking' ||
@@ -232,37 +221,6 @@ export function RunCockpit({
     enabled: !!workingDirectory,
     refetchInterval: isLive ? 4000 : 10000,
   });
-
-  // Which whole CLIs this session may hand work to through the `subagents` MCP
-  // tool. Independent of the provider running the session and of the Claude
-  // model router, so it is listed for every harness — otherwise a configured
-  // target (pi, say) is invisible until it happens to be running.
-  const { data: cliSubagents = [] } = useQuery({
-    queryKey: ['cli-subagents'],
-    queryFn: async () => {
-      try {
-        const response = await api.get<
-          ApiResponse<Array<{ label: string; provider: string; enabled: boolean }>>
-        >('/api/settings/cli-subagents');
-        return response.data.data ?? [];
-      } catch {
-        return [];
-      }
-    },
-    staleTime: 60_000,
-  });
-
-  const delegationTargets = useMemo(
-    () => [
-      ...new Set(
-        cliSubagents
-          .filter((entry) => entry.enabled)
-          .map((entry) => entry.provider)
-          .filter(Boolean)
-      ),
-    ],
-    [cliSubagents]
-  );
 
   const changedFiles = useMemo(() => {
     if (!gitStatus) return [];
@@ -364,12 +322,6 @@ export function RunCockpit({
     rail.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' });
   }, [activeSection, focusVersion]);
 
-  useEffect(() => {
-    if (selectedAgentId && !agents.some((agent) => agent.id === selectedAgentId)) {
-      setSelectedAgentId(null);
-    }
-  }, [agents, selectedAgentId]);
-
   return (
     <aside
       ref={railRef}
@@ -409,7 +361,7 @@ export function RunCockpit({
         />
         <StatPill
           label="Agents"
-          value={activeAgents.length || agents.length}
+          value={activeAgents.length}
           tone={activeAgents.length ? 'live' : 'neutral'}
         />
         <StatPill
@@ -469,146 +421,7 @@ export function RunCockpit({
 
       <div ref={agentsRef}>
         <Section title="Subagents" icon={<Brain className="h-3.5 w-3.5" />}>
-          {/* The delegable CLIs are a property of the account, not of the run, so
-              they stay listed while agents are running -- otherwise the whole
-              list disappears the moment the first subagent starts. */}
-          <div className="mb-2 rounded-md border border-border/45 bg-foreground/[0.02] px-3 py-2 text-xs text-muted-foreground">
-            {delegationTargets.length > 0 ? (
-              <>
-                <span>Delegierbar per </span>
-                <code className="text-[11px]">run_subagent</code>
-                <span>:</span>
-                <span className="mt-1 block font-medium text-foreground/80">
-                  {delegationTargets.join(' · ')}
-                </span>
-              </>
-            ) : (
-              'Keine CLI-Subagenten aktiviert'
-            )}
-          </div>
-          {agents.length === 0 ? (
-            <div className="rounded-md border border-border/45 bg-foreground/[0.02] px-3 py-2 text-xs text-muted-foreground">
-              Keiner läuft.
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {[...activeAgents, ...completedAgents].slice(0, 10).map((agent) => (
-                <button
-                  key={agent.id}
-                  type="button"
-                  onClick={() => setSelectedAgentId(agent.id)}
-                  className={cn(
-                    'w-full rounded-md border px-3 py-2 text-left transition-colors',
-                    agent.status === 'started' &&
-                      'border-primary/35 bg-primary/10 hover:bg-primary/15',
-                    agent.status === 'completed' &&
-                      'border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10',
-                    agent.status === 'error' &&
-                      'border-red-500/25 bg-red-500/10 hover:bg-red-500/15',
-                    selectedAgentId === agent.id && 'ring-1 ring-primary/50'
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        {agent.status === 'started' ? (
-                          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
-                        ) : agent.status === 'error' ? (
-                          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />
-                        ) : (
-                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                        )}
-                        <span className="truncate text-xs font-semibold text-foreground">
-                          {agent.agentType}
-                        </span>
-                      </div>
-                      <div className="mt-1 truncate text-[11px] text-muted-foreground">
-                        {agent.description || agent.result || agent.error || 'No detail yet'}
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                      {agent.status === 'started'
-                        ? durationShort(agent.startedAt)
-                        : timeShort(agent.completedAt ?? agent.startedAt)}
-                    </div>
-                  </div>
-                </button>
-              ))}
-
-              {selectedAgent && (
-                <div className="rounded-md border border-border/50 bg-foreground/[0.025] p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-foreground">
-                        {selectedAgent.agentType}
-                      </div>
-                      <div className="mt-0.5 text-[11px] text-muted-foreground">
-                        {selectedAgent.status === 'started'
-                          ? `Running for ${durationShort(selectedAgent.startedAt)}`
-                          : `${selectedAgent.status} after ${durationShort(
-                              selectedAgent.startedAt,
-                              selectedAgent.completedAt
-                            )}`}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="rail-close"
-                      onClick={() => setSelectedAgentId(null)}
-                      title="Close agent details"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                  <div className="mt-3 space-y-2 text-xs">
-                    <GateRow
-                      tone="live"
-                      label="Started"
-                      detail={timeShort(selectedAgent.startedAt)}
-                    />
-                    <GateRow
-                      tone={
-                        selectedAgent.status === 'started'
-                          ? 'live'
-                          : selectedAgent.status === 'error'
-                            ? 'bad'
-                            : 'good'
-                      }
-                      label="Status"
-                      detail={selectedAgent.status}
-                    />
-                    {selectedAgent.externalAgentId && (
-                      <GateRow
-                        tone="neutral"
-                        label="Agent ID"
-                        detail={selectedAgent.externalAgentId}
-                      />
-                    )}
-                    {selectedAgent.description && (
-                      <div>
-                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                          Brief
-                        </div>
-                        <pre className="max-h-32 overflow-auto rounded-md border border-border/45 bg-muted/35 p-2 text-[11px] leading-relaxed whitespace-pre-wrap">
-                          {selectedAgent.description}
-                        </pre>
-                      </div>
-                    )}
-                    {(selectedAgent.result || selectedAgent.error) && (
-                      <div>
-                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                          {selectedAgent.error ? 'Error' : 'Result'}
-                        </div>
-                        <pre className="max-h-48 overflow-auto rounded-md border border-border/45 bg-muted/35 p-2 text-[11px] leading-relaxed whitespace-pre-wrap">
-                          {selectedAgent.error || selectedAgent.result}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          <SubagentPanel runs={agents} />
         </Section>
       </div>
 

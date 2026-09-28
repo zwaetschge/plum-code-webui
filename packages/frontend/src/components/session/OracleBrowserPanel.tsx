@@ -505,7 +505,7 @@ export function OracleBrowserPanel({ sessionId, className }: OracleBrowserPanelP
             variant="ghost"
             size="sm"
             className="h-7 px-2 text-[11px]"
-            onClick={() => navigate('/settings?tab=general#oracle-browser')}
+            onClick={() => navigate('/settings?tab=integrations&section=oracle-browser')}
           >
             Settings
           </Button>

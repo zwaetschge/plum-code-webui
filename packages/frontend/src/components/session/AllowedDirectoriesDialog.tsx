@@ -88,7 +88,7 @@ export function AllowedDirectoriesDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="navigation-dialog sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FolderKey className="h-5 w-5 text-primary" />

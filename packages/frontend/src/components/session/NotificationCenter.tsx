@@ -140,7 +140,13 @@ export function NotificationCenter() {
         </button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="start" side="right" sideOffset={8} className="notification-panel">
+      <DropdownMenuContent
+        navigation
+        align="start"
+        side="right"
+        sideOffset={8}
+        className="notification-panel"
+      >
         <div className="notification-panel-header">
           <span className="text-xs font-semibold">Notifications</span>
           {unread > 0 && <span className="notification-panel-count">{unread} new</span>}

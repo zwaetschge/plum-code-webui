@@ -71,7 +71,7 @@ export function QuestionApprovalDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-border bg-background shadow-xl">
+      <div className="glass-dialog max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg border border-border shadow-xl">
         <div className="flex items-center gap-3 border-b border-border p-4">
           <div className="rounded-lg bg-primary/10 p-2">
             <HelpCircle className="h-6 w-6 text-primary" />

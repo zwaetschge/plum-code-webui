@@ -1,3 +1,9 @@
+import { RuntimeSelect } from '@/components/session/RuntimeSelect';
+import { createPortal } from 'react-dom';
+import { useSessionMenu } from '@/components/layout/SessionMenuContext';
+import { SubagentPanel } from '@/components/session/SubagentPanel';
+import { isActiveAgent, subagentCounts } from '@plum-code-webui/shared';
+import { CLAUDE_CODE_EFFORT_OPTIONS } from '@plum-code-webui/shared';
 import {
   Fragment,
   useEffect,
@@ -35,10 +41,8 @@ import {
   X,
   Pencil,
   RotateCcw,
-  Settings,
   Square,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   PenLine,
   Smartphone,
@@ -57,6 +61,7 @@ import {
   ScrollText,
   BookmarkPlus,
   Download,
+  MoreHorizontal,
 } from 'lucide-react';
 import 'katex/dist/katex.min.css';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
@@ -69,6 +74,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { StreamingContent } from '@/components/chat/StreamingContent';
@@ -93,7 +105,7 @@ import { GitPanel } from '@/components/git-panel';
 import { GitHubPanel } from '@/components/github/GitHubPanel';
 import { Notepad } from '@/components/notepad';
 import { WebPreview } from '@/components/preview';
-import { TaskWorkbenchHeader, TodoFloatingStrip } from '@/components/session/TaskWorkbench';
+import { TodoFloatingStrip } from '@/components/session/TaskWorkbench';
 import {
   getActiveTodoPresentation,
   getTaskWorkbenchState,
@@ -132,7 +144,6 @@ import type {
   Command,
   CommandExecutionResult,
   SessionMode,
-  SessionSurface,
   PermissionAction,
   CLIProvider,
   UserSettings,
@@ -160,9 +171,8 @@ import {
   toCliProvider,
   type UiProvider,
 } from '@/lib/providers';
-import { TASK_WORKFLOWS } from '@/lib/taskWorkflows';
 import { toast } from '@/hooks/use-toast';
-import { useIsDesktopLayout } from '@/hooks/useMediaQuery';
+import { useIsDesktopLayout, useMediaQuery } from '@/hooks/useMediaQuery';
 
 function generateId() {
   return Math.random().toString(36).substring(2, 9);
@@ -177,7 +187,7 @@ const EMPTY_OPEN_FILES: OpenFile[] = [];
 const EMPTY_AGENT_RUNS: SubagentRun[] = [];
 const IDLE_ACTIVITY: ActivityState = { type: 'idle' };
 type WorkspaceSheetPanel = Exclude<DockablePanel, 'files' | 'tools'>;
-type MobileSheetPanel = WorkspaceSheetPanel | 'settings';
+type MobileSheetPanel = WorkspaceSheetPanel;
 const CLI_SUBAGENT_OFF = '__off__';
 const CLI_SUBAGENT_DEFAULT_MODEL = '__default__';
 
@@ -198,6 +208,7 @@ type RightMenuGroupId =
   | 'styles'
   | 'workspace';
 const DOCKED_PANEL_KEYS: WorkspaceSheetPanel[] = [
+  'agents',
   'tasks',
   'mesh',
   'designStyle',
@@ -216,10 +227,10 @@ const DEFAULT_RIGHT_MENU_GROUPS: Record<RightMenuGroupId, boolean> = {
   chat: true,
   session: true,
   view: true,
-  runtime: true,
-  subagents: true,
-  styles: true,
-  workspace: false,
+  runtime: false,
+  subagents: false,
+  styles: false,
+  workspace: true,
 };
 const ACTIVE_FOLLOWUP_MODE_DEFAULT: ActiveFollowupMode = 'queue';
 const MESSAGE_HISTORY_PAGE_SIZE = 500;
@@ -458,6 +469,8 @@ function TimelineContinuation({ children }: { children: ReactNode }) {
 }
 
 export function SessionPage() {
+  const sessionMenu = useSessionMenu();
+  const closeNavigation = sessionMenu.closeNavigation;
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -564,6 +577,7 @@ export function SessionPage() {
   const autoGoalBySessionRef = useRef<Record<string, string>>({});
   const [showAllowedDirsDialog, setShowAllowedDirsDialog] = useState(false);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
+  const [showAgentConfig, setShowAgentConfig] = useState(false);
   const [templateNameDraft, setTemplateNameDraft] = useState<string | null>(null);
   const [mobileSheetPanel, setMobileSheetPanel] = useState<MobileSheetPanel | null>(null);
   const [goalDraft, setGoalDraft] = useState('');
@@ -578,12 +592,6 @@ export function SessionPage() {
     const handler = () => setShowAllowedDirsDialog(true);
     window.addEventListener('command:open-allowed-dirs', handler);
     return () => window.removeEventListener('command:open-allowed-dirs', handler);
-  }, []);
-
-  useEffect(() => {
-    const handler = () => setMobileSheetPanel('settings');
-    window.addEventListener('session:open-mobile-right-menu', handler);
-    return () => window.removeEventListener('session:open-mobile-right-menu', handler);
   }, []);
 
   const [selectedToolDetail, setSelectedToolDetail] = useState<
@@ -744,15 +752,12 @@ export function SessionPage() {
   const [mainView, setMainView] = useState<'chat' | 'editor' | 'files'>('chat');
   const [configTab, setConfigTab] = useState<'memories' | 'agents'>('memories');
   const isDesktopLayout = useIsDesktopLayout();
-  const [rightDockCollapsed, setRightDockCollapsed] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return window.localStorage.getItem('chat.rightDockCollapsed') === '1';
-  });
+  const isDockLayout = useMediaQuery('(min-width: 1024px)');
   const [rightMenuGroupsOpen, setRightMenuGroupsOpen] = useState<Record<RightMenuGroupId, boolean>>(
     () => {
       if (typeof window === 'undefined') return DEFAULT_RIGHT_MENU_GROUPS;
       try {
-        const saved = window.localStorage.getItem('chat.rightMenuGroupsOpen');
+        const saved = window.localStorage.getItem('chat.rightMenuGroupsOpen.v2');
         if (!saved) return DEFAULT_RIGHT_MENU_GROUPS;
         const parsed = JSON.parse(saved) as Partial<Record<RightMenuGroupId, boolean>>;
         return { ...DEFAULT_RIGHT_MENU_GROUPS, ...parsed };
@@ -769,44 +774,16 @@ export function SessionPage() {
     section: RunCockpitSection;
     version: number;
   }>({ section: 'overview', version: 0 });
-  const toggleRightDockCollapsed = useCallback(() => {
-    setRightDockCollapsed((prev) => {
-      const next = !prev;
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem('chat.rightDockCollapsed', next ? '1' : '0');
-      }
+  const toggleRightMenuGroup = useCallback((groupId: RightMenuGroupId) => {
+    setRightMenuGroupsOpen((prev) => {
+      const next = { ...prev, [groupId]: !prev[groupId] };
+      window.localStorage.setItem('chat.rightMenuGroupsOpen.v2', JSON.stringify(next));
       return next;
     });
   }, []);
-  const toggleRightMenuGroup = useCallback(
-    (groupId: RightMenuGroupId) => {
-      if (rightDockCollapsed) {
-        setRightDockCollapsed(false);
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem('chat.rightDockCollapsed', '0');
-        }
-        setRightMenuGroupsOpen((prev) => {
-          const next = { ...prev, [groupId]: true };
-          if (typeof window !== 'undefined') {
-            window.localStorage.setItem('chat.rightMenuGroupsOpen', JSON.stringify(next));
-          }
-          return next;
-        });
-        return;
-      }
-
-      setRightMenuGroupsOpen((prev) => {
-        const next = { ...prev, [groupId]: !prev[groupId] };
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem('chat.rightMenuGroupsOpen', JSON.stringify(next));
-        }
-        return next;
-      });
-    },
-    [rightDockCollapsed]
-  );
   const openRunCockpitSection = useCallback(
     (section: RunCockpitSection = 'overview') => {
+      closeNavigation();
       unpinAllPanels();
       setRunCockpitOpen(true);
       setRunCockpitTarget((prev) => ({ section, version: prev.version + 1 }));
@@ -814,7 +791,7 @@ export function SessionPage() {
         window.localStorage.setItem('chat.runCockpitOpen', '1');
       }
     },
-    [unpinAllPanels]
+    [unpinAllPanels, closeNavigation]
   );
   const handleOpenRunOverview = useCallback(
     () => openRunCockpitSection('overview'),
@@ -829,6 +806,11 @@ export function SessionPage() {
 
   const openRightPanel = useCallback(
     (panel: WorkspaceSheetPanel) => {
+      closeNavigation();
+      if (window.matchMedia('(max-width: 1023px)').matches) {
+        setMobileSheetPanel(panel);
+        return;
+      }
       const openCount = DOCKED_PANEL_KEYS.filter((key) => pinnedPanels[key]).length;
       const isOnlyOpenPanel = pinnedPanels[panel] && openCount === 1;
 
@@ -838,7 +820,7 @@ export function SessionPage() {
         closeActivityRails();
       }
     },
-    [closeActivityRails, pinnedPanels, setPinnedPanel, unpinAllPanels]
+    [closeActivityRails, pinnedPanels, setPinnedPanel, unpinAllPanels, closeNavigation]
   );
 
   const hasOpenFiles = currentOpenFiles.length > 0;
@@ -1135,16 +1117,12 @@ export function SessionPage() {
     function ChatFooter() {
       const sid = footerDepsRef.current?.id ?? '';
       const footerActivity = useSessionStore((s) => s.activity[sid] ?? IDLE_ACTIVITY);
-      const footerActiveAgent = useSessionStore((s) => s.activeAgent[sid] ?? null);
-      const footerAgentRuns = useSessionStore((s) => s.agentRuns[sid] ?? EMPTY_AGENT_RUNS);
       const footerStreamingContent = useSessionStore((s) => s.streamingContent[sid] ?? '');
       const footerPermissionRequest = useSessionStore((s) => s.permissionRequests[sid] ?? null);
-      const footerActiveAgents = footerAgentRuns.filter((agent) => agent.status === 'started');
       const [footerNow, setFooterNow] = useState(() => Date.now());
       // Only tick while something actually shows a duration; an idle session
       // otherwise re-rendered the footer once per second for the tab's life.
-      const footerTicks =
-        footerActivity.type === 'thinking' || !!footerActiveAgent || footerActiveAgents.length > 0;
+      const footerTicks = footerActivity.type === 'thinking';
       useEffect(() => {
         if (!footerTicks) return;
         setFooterNow(Date.now());
@@ -1155,7 +1133,6 @@ export function SessionPage() {
       if (!deps) {
         return <div aria-hidden className="chat-footer-spacer" />;
       }
-      const footerHasAgentActivity = !!footerActiveAgent || footerActiveAgents.length > 0;
       const footerThinkingDetail =
         footerActivity.type === 'thinking' ? footerActivity.message?.trim() || '' : '';
       const normalizedThinkingDetail = footerThinkingDetail
@@ -1177,84 +1154,32 @@ export function SessionPage() {
               correct chronological position with a live spinner + duration and
               persists after completion. The footer only handles state with no
               timeline equivalent: thinking and active subagents. */}
-          {(footerActivity.type === 'thinking' ||
-            footerActiveAgent ||
-            footerActiveAgents.length > 0) &&
-            !footerStreamingContent && (
-              <div className="turn-asst pl-thinking-turn animate-fade-in">
-                <div className="ai-body">
-                  <div
-                    className={cn('pl-thinking-body', footerHasAgentActivity && 'is-clickable')}
-                    role={footerHasAgentActivity ? 'button' : undefined}
-                    tabIndex={footerHasAgentActivity ? 0 : undefined}
-                    onClick={() => {
-                      if (footerHasAgentActivity) deps.openRunCockpitSection('agents');
-                    }}
-                    onKeyDown={(event) => {
-                      if (!footerHasAgentActivity) return;
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        deps.openRunCockpitSection('agents');
-                      }
-                    }}
-                  >
-                    <span className="pl-thinking-inline-mark" aria-hidden="true">
-                      {footerActiveAgent || footerActiveAgents.length > 0 ? (
-                        <Brain className="h-3.5 w-3.5" />
-                      ) : (
-                        <ProviderLogo provider={deps.uiProvider} className="h-4 w-4" />
-                      )}
-                      <span className="pl-thinking-ping" />
-                    </span>
-                    <div className="pl-thinking-title">
-                      {footerActiveAgent ? (
-                        footerActiveAgents.length > 1 ? (
-                          <>Subagents: {footerActiveAgents.length} running</>
-                        ) : (
-                          <>Agent: {deps.getAgentDisplay(footerActiveAgent.agentType)}</>
-                        )
-                      ) : (
-                        <>
-                          {deps.providerLabel} thinking
-                          <span className="pl-thinking-dots" aria-hidden="true">
-                            <span>.</span>
-                            <span>.</span>
-                            <span>.</span>
-                          </span>
-                          {/* The elapsed time used to disappear whenever the
-                              detail line was hidden, which is exactly the case
-                              where a long wait feels stuck. */}
-                          {footerActivity.messageStartedAt && (
-                            <span className="pl-thinking-elapsed">
-                              {deps.formatElapsed(footerNow - footerActivity.messageStartedAt)}
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </div>
-                    {footerActiveAgent ? (
-                      <div className="pl-thinking-detail">
-                        {footerActiveAgent.description ||
-                          deps.getAgentDescription(footerActiveAgent.agentType)}
-                        {footerActiveAgent.startedAt
-                          ? ` (${deps.formatElapsed(footerNow - footerActiveAgent.startedAt)})`
-                          : ''}
-                      </div>
-                    ) : footerThinkingDetail && !hideThinkingDetail ? (
-                      <div className="pl-thinking-detail">
-                        {footerThinkingDetail}
-                        {footerActivity.messageStartedAt
-                          ? ` (${deps.formatElapsed(footerNow - footerActivity.messageStartedAt)})`
-                          : ''}
-                      </div>
-                    ) : null}
+          {footerActivity.type === 'thinking' && !footerStreamingContent && (
+            <div className="turn-asst pl-thinking-turn">
+              <div className="ai-body">
+                <div className="pl-thinking-body">
+                  <span className="pl-thinking-inline-mark" aria-hidden="true">
+                    <ProviderLogo provider={deps.uiProvider} className="h-4 w-4" />
+                    <span className="pl-thinking-ping" />
+                  </span>
+                  <div className="pl-thinking-title">
+                    Thinking
+                    {footerActivity.messageStartedAt && (
+                      <span className="pl-thinking-elapsed">
+                        {deps.formatElapsed(footerNow - footerActivity.messageStartedAt)}
+                      </span>
+                    )}
                   </div>
+                  {footerThinkingDetail && !hideThinkingDetail && (
+                    <div className="pl-thinking-detail">{footerThinkingDetail}</div>
+                  )}
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
           {footerStreamingContent && (
-            <div className="turn-asst animate-fade-in">
+            <div className="turn-asst">
               <div className="ai-body">
                 <StreamingContent
                   content={footerStreamingContent}
@@ -1336,8 +1261,6 @@ export function SessionPage() {
   });
 
   const sessionProvider = session?.cliProvider ?? toCliProvider();
-  const sessionSurface = session?.surface ?? 'code';
-  const isTaskSurface = sessionSurface === 'task';
   const sessionUiProvider = toUiProvider(sessionProvider);
   const providerLabel = CLI_PROVIDER_LABEL[sessionProvider];
   const sessionRuntime = session?.runtime;
@@ -1516,11 +1439,16 @@ export function SessionPage() {
   }, [currentProviderInfo]);
   // Compact label shown next to the assistant name in each turn (template's `asst-model`).
   const asstModelLabel = (() => {
-    const runtimeModel = session?.runtime?.model;
+    const runtimeModel =
+      session?.runtime?.model && session.runtime.model !== 'unknown' ? session.runtime.model : '';
+    const intended = selectedModel || resolvedDefaultModel || '';
+    // Claude Code reports the bare API id (`claude-opus-5-5`) for both context
+    // variants, so the runtime model labelled a 1M session "200k". When it is
+    // just the selection without its `[1m]`, the selection carries the window.
     const raw =
-      runtimeModel && runtimeModel !== 'unknown'
-        ? runtimeModel
-        : selectedModel || resolvedDefaultModel || '';
+      runtimeModel && intended && runtimeModel === intended.replace(/\[1m\]$/i, '')
+        ? intended
+        : runtimeModel || intended;
     const labelled = modelLabels[raw];
     return (labelled || raw).toString();
   })();
@@ -1549,6 +1477,9 @@ export function SessionPage() {
     sessionProvider === 'pi' ||
     sessionProvider !== 'opencode' ||
     configuredModelsForProvider.length > 0;
+  // Opus 5.5 effort labels apply to both its 200k and its `[1m]` variant.
+  const isClaudeOpus55 =
+    sessionProvider === 'claude' && selectedModel.replace(/\[1m\]$/i, '') === 'claude-opus-5-5';
   const selectedReasoning = session?.cliReasoning || '';
   const reasoningSelectValue = selectedReasoning || '__default__';
   const selectedServiceTier = session?.cliServiceTier || '';
@@ -1556,18 +1487,30 @@ export function SessionPage() {
   const fastModeActive = sessionProvider === 'codex' && serviceTierSelectValue === 'fast';
   const reasoningOptions = useMemo(() => {
     if (sessionProvider === 'claude' || sessionProvider === 'zai') {
-      return [
-        { value: 'low', label: 'Low' },
-        { value: 'medium', label: 'Medium' },
-        { value: 'high', label: 'High' },
-        // The CLI's session-level tier behind the "ultrathink" prompt keyword.
-        { value: 'xhigh', label: 'X-High (ultrathink)' },
-        { value: 'max', label: 'Max' },
-      ];
+      return isClaudeOpus55
+        ? CLAUDE_CODE_EFFORT_OPTIONS.map((option) =>
+            option.value === 'max' ? { ...option, label: 'Max · long thinking' } : option
+          )
+        : CLAUDE_CODE_EFFORT_OPTIONS;
     }
     if (sessionProvider === 'opencode' || sessionProvider === 'pi') {
       return [
         { value: 'minimal', label: 'Minimal' },
+        { value: 'low', label: 'Low' },
+        { value: 'medium', label: 'Medium' },
+        { value: 'high', label: 'High' },
+        { value: 'max', label: 'Max' },
+        // Pi runs Ultracode workflows through scripts/pi-ultracode-extension.ts.
+        ...(sessionProvider === 'pi'
+          ? [{ value: 'ultracode', label: 'Ultracode (workflows)' }]
+          : []),
+      ];
+    }
+    if (sessionProvider === 'vibe') {
+      // Vibe calls this "Thinking" and accepts exactly these five levels; the
+      // backend rejects anything else (see utils/reasoningLevel.ts).
+      return [
+        { value: 'off', label: 'Off' },
         { value: 'low', label: 'Low' },
         { value: 'medium', label: 'Medium' },
         { value: 'high', label: 'High' },
@@ -1584,7 +1527,7 @@ export function SessionPage() {
       { value: 'max', label: 'Max' },
       { value: 'ultra', label: 'Ultra' },
     ];
-  }, [sessionProvider]);
+  }, [sessionProvider, isClaudeOpus55]);
 
   const { data: sessionChatList, isSuccess: sessionChatsReady } = useQuery({
     queryKey: ['session-chats', id],
@@ -1602,6 +1545,46 @@ export function SessionPage() {
 
   const activeHistoryChatId = normalizeMessageChatId(sessionChatList?.activeChatId) ?? null;
   const activeHistoryChatKey = activeHistoryChatId ?? 'main';
+  const [agentHistoryOffset, setAgentHistoryOffset] = useState(0);
+  useEffect(() => setAgentHistoryOffset(0), [id, activeHistoryChatId]);
+  const agentSnapshot = useQuery({
+    queryKey: ['session-agents', id, activeHistoryChatId, agentHistoryOffset],
+    enabled: !!id && sessionChatsReady,
+    queryFn: async () => {
+      const response = await api.get<
+        ApiResponse<{
+          runs: SubagentRun[];
+          totals: ReturnType<typeof subagentCounts>;
+          capturedAt: number;
+          chatId: string | null;
+          hasMore: boolean;
+          nextOffset: number;
+        }>
+      >(
+        `/api/sessions/${id}/agents?chatId=${encodeURIComponent(activeHistoryChatId ?? '')}&offset=${agentHistoryOffset}`
+      );
+      if (!response.data.success || !response.data.data)
+        throw new Error('Agenten konnten nicht geladen werden');
+      useSessionStore.getState().setAgentRuns(id!, response.data.data.runs, response.data.data);
+      return response.data.data;
+    },
+    refetchInterval: 5000,
+  });
+  const scopedAgentRuns = currentAgentRuns.filter(
+    (run) => (run.chatId ?? null) === activeHistoryChatId
+  );
+  const agentCounts = subagentCounts(scopedAgentRuns);
+  const agentPanel = (
+    <SubagentPanel
+      runs={scopedAgentRuns}
+      hasMore={agentSnapshot.data?.hasMore}
+      onLoadMore={() => setAgentHistoryOffset(agentSnapshot.data?.nextOffset ?? 0)}
+      loading={agentSnapshot.isFetching}
+      error={agentSnapshot.isError}
+      capturedAt={agentSnapshot.data?.capturedAt}
+      totals={agentSnapshot.data?.totals}
+    />
+  );
 
   const syncActiveChat = useCallback(
     (chatId: string | null) => {
@@ -2429,29 +2412,6 @@ export function SessionPage() {
     },
   });
 
-  const sessionSurfaceMutation = useMutation({
-    mutationFn: async (surface: SessionSurface) => {
-      const response = await api.patch<ApiResponse<Session>>(`/api/sessions/${id}/surface`, {
-        surface,
-      });
-      return response.data;
-    },
-    onSuccess: (data) => {
-      if (data.success && data.data && id) {
-        queryClient.setQueryData(['session', id], data.data);
-        useSessionStore.getState().updateSession(id, data.data);
-        queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      }
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Surface update failed',
-        description: error.message,
-        variant: 'destructive',
-      });
-    },
-  });
-
   const linkPeerMutation = useMutation({
     mutationFn: async ({ targetSessionId, role }: { targetSessionId: string; role: string }) => {
       const response = await api.post<ApiResponse<SessionPeerLink>>(`/api/sessions/${id}/peers`, {
@@ -2651,12 +2611,6 @@ export function SessionPage() {
     });
     return unsubscribe;
   }, [id, sessionModeStorageKey]);
-
-  useEffect(() => {
-    if (isTaskSurface && mainView !== 'chat') {
-      setMainView('chat');
-    }
-  }, [isTaskSurface, mainView]);
 
   // Show a brief indicator when an assistant message is persisted
   useEffect(() => {
@@ -3032,14 +2986,6 @@ export function SessionPage() {
     applyServiceTier(nextValue || null);
   }, [sessionProvider, id, session?.cliServiceTier, fastModeActive, applyServiceTier]);
 
-  const applySurfaceSelection = (surface: SessionSurface) => {
-    if (!id || surface === sessionSurface) return;
-    sessionSurfaceMutation.mutate(surface);
-    if (surface === 'task') {
-      setMainView('chat');
-    }
-  };
-
   const handleModeChange = useCallback(
     (newMode: SessionMode) => {
       setSessionMode(newMode);
@@ -3295,16 +3241,12 @@ export function SessionPage() {
   const goalObjective = goalDraft.trim();
   const canUseCodexGoal = sessionProvider === 'codex';
   const goalObjectiveTooLong = goalObjective.length > 4000;
-  const visibleDockedPanels: WorkspaceSheetPanel[] = isTaskSurface
-    ? ['tasks', 'mesh', 'designStyle', 'writingStyle', 'browser']
-    : DOCKED_PANEL_KEYS;
+  const visibleDockedPanels: WorkspaceSheetPanel[] = DOCKED_PANEL_KEYS;
   const hasVisiblePinnedPanel = visibleDockedPanels.some((panel) => pinnedPanels[panel]);
-  const activeStyleCount = (session.designStyleSkill ? 1 : 0) + (session.writingStyleSkill ? 1 : 0);
   const styleMenuPanels = visibleDockedPanels.filter((panel) => STYLE_PANEL_KEYS.includes(panel));
   const workspaceMenuPanels = visibleDockedPanels.filter(
     (panel) => !STYLE_PANEL_KEYS.includes(panel)
   );
-  const hasPinnedWorkspacePanel = workspaceMenuPanels.some((panel) => pinnedPanels[panel]);
   const handleStyleSessionUpdated = (updatedSession: Session) => {
     queryClient.setQueryData(['session', id], updatedSession);
     if (id) {
@@ -3648,6 +3590,11 @@ export function SessionPage() {
       icon: <FolderOpen className="h-3.5 w-3.5" />,
       badge: null,
     },
+    agents: {
+      title: 'Agenten',
+      icon: <Brain className="h-3.5 w-3.5" />,
+      badge: <span className="panel-badge">{agentCounts.active}</span>,
+    },
     tasks: {
       title: 'Goal & Tasks',
       icon: <ListTodo className="h-3.5 w-3.5" />,
@@ -3719,10 +3666,10 @@ export function SessionPage() {
     },
   };
 
-  const renderDockedPanel = (panel: WorkspaceSheetPanel) => {
-    const meta = panelMeta[panel];
+  const renderPanelBody = (panel: WorkspaceSheetPanel) => {
     let body: ReactElement | null = null;
-    if (panel === 'tasks') body = <div className="h-full overflow-auto">{tasksBody}</div>;
+    if (panel === 'agents') body = agentPanel;
+    else if (panel === 'tasks') body = <div className="h-full overflow-auto">{tasksBody}</div>;
     else if (panel === 'mesh') body = meshBody;
     else if (panel === 'config') body = renderConfigBody('h-full');
     else if (panel === 'designStyle') {
@@ -3777,6 +3724,12 @@ export function SessionPage() {
       body = <ToolLogPanel executions={currentToolExecutions} className="h-full" />;
     }
 
+    return body;
+  };
+
+  const renderDockedPanel = (panel: WorkspaceSheetPanel) => {
+    const meta = panelMeta[panel];
+    const body = renderPanelBody(panel);
     if (!body) return null;
 
     return (
@@ -3819,7 +3772,7 @@ export function SessionPage() {
       activity={currentActivity}
       todos={currentTodos}
       tools={currentToolExecutions}
-      agents={currentAgentRuns}
+      agents={scopedAgentRuns}
       usage={visibleUsage}
       queue={currentQueue}
       onClose={() => {
@@ -3885,11 +3838,11 @@ export function SessionPage() {
       value: displayValue,
       icon: <Network className="h-3.5 w-3.5" />,
       children: (
-        <select
+        <RuntimeSelect
           id={fieldKey}
           className="session-runtime-select"
           value={selected}
-          onChange={(event) => applyCliSubagentChoice(entry.id, event.target.value)}
+          onValueChange={(value) => applyCliSubagentChoice(entry.id, value)}
           aria-label={`Subagent ${entry.label || entry.provider}`}
           disabled={cliSubagentsSaveMutation.isPending}
         >
@@ -3906,7 +3859,7 @@ export function SessionPage() {
           {entry.model && !models.includes(entry.model) && (
             <option value={entry.model}>{entry.model}</option>
           )}
-        </select>
+        </RuntimeSelect>
       ),
     });
   };
@@ -3931,19 +3884,19 @@ export function SessionPage() {
       modelSelectValue === '__default__'
         ? `Default${resolvedDefaultModel ? ` · ${modelLabels[resolvedDefaultModel] || resolvedDefaultModel}` : ''}`
         : modelLabels[modelSelectValue] || modelSelectValue;
-    const showReasoningControls = ['claude', 'zai', 'codex', 'opencode', 'pi'].includes(
+    const showReasoningControls = ['claude', 'zai', 'codex', 'opencode', 'pi', 'vibe'].includes(
       sessionProvider
     );
     const reasoningValueLabel =
       reasoningSelectValue === '__default__'
-        ? 'Default'
+        ? isClaudeOpus55
+          ? 'Default · Medium'
+          : 'Default'
         : reasoningOptions.find((option) => option.value === reasoningSelectValue)?.label ||
           reasoningSelectValue;
     const activeTool = selectedCliTool
       ? cliTools?.find((tool) => tool.id === selectedCliTool)
       : null;
-    const surfaceValueLabel = sessionSurface === 'task' ? 'Task' : 'Code';
-    const SurfaceIcon = sessionSurface === 'task' ? ListTodo : Code2;
     // Z.AI sessions talk to the Z.AI endpoint directly (no model router), so
     // only GLM targets are reachable there; claude sessions can use them all.
     const routableSubagentGroups =
@@ -3954,35 +3907,16 @@ export function SessionPage() {
     return (
       <div className={cn('session-runtime-controls', variant === 'mobile' && 'is-mobile')}>
         {renderRuntimeField({
-          id: fieldId('surface'),
-          label: 'Surface',
-          value: surfaceValueLabel,
-          icon: <SurfaceIcon className="h-3.5 w-3.5" />,
-          children: (
-            <select
-              id={fieldId('surface')}
-              className="session-runtime-select"
-              value={sessionSurface}
-              onChange={(event) => applySurfaceSelection(event.target.value as SessionSurface)}
-              aria-label="Session surface"
-            >
-              <option value="code">Code</option>
-              <option value="task">Task</option>
-            </select>
-          ),
-        })}
-
-        {renderRuntimeField({
           id: fieldId('mode'),
           label: 'Mode',
           value: activeMode.label,
           icon: <ActiveModeIcon className="h-3.5 w-3.5" />,
           children: (
-            <select
+            <RuntimeSelect
               id={fieldId('mode')}
               className="session-runtime-select"
               value={sessionMode}
-              onChange={(event) => handleModeChange(event.target.value as SessionMode)}
+              onValueChange={(value) => handleModeChange(value as SessionMode)}
               aria-label="Session mode"
             >
               {SESSION_MODE_OPTIONS.map((option) => (
@@ -3990,7 +3924,7 @@ export function SessionPage() {
                   {option.label}
                 </option>
               ))}
-            </select>
+            </RuntimeSelect>
           ),
         })}
 
@@ -4001,11 +3935,11 @@ export function SessionPage() {
             value: currentProvider?.name ?? CLI_PROVIDER_LABEL[sessionProvider],
             icon: <ProviderLogo provider={toUiProvider(sessionProvider)} className="h-3.5 w-3.5" />,
             children: (
-              <select
+              <RuntimeSelect
                 id={fieldId('provider')}
                 className="session-runtime-select"
                 value={sessionProvider}
-                onChange={(event) => providerMutation.mutate(event.target.value as CLIProvider)}
+                onValueChange={(value) => providerMutation.mutate(value as CLIProvider)}
                 aria-label="Session provider"
               >
                 {providerOptions.map((provider) => (
@@ -4018,7 +3952,7 @@ export function SessionPage() {
                         : ''}
                   </option>
                 ))}
-              </select>
+              </RuntimeSelect>
             ),
           })}
 
@@ -4028,11 +3962,11 @@ export function SessionPage() {
           value: modelLabel,
           icon: <Sparkles className="h-3.5 w-3.5" />,
           children: (
-            <select
+            <RuntimeSelect
               id={fieldId('model')}
               className="session-runtime-select"
               value={modelSelectValue}
-              onChange={(event) => applyModelSelection(event.target.value)}
+              onValueChange={(value) => applyModelSelection(value)}
               aria-label="Session model"
             >
               {showDefaultModelOption && (
@@ -4048,7 +3982,7 @@ export function SessionPage() {
                   {modelLabels[model] || model}
                 </option>
               ))}
-            </select>
+            </RuntimeSelect>
           ),
         })}
 
@@ -4059,21 +3993,19 @@ export function SessionPage() {
             value: session.subagentModel || 'Default',
             icon: <Network className="h-3.5 w-3.5" />,
             children: (
-              <select
+              <RuntimeSelect
                 id={fieldId('subagent-model')}
                 className="session-runtime-select"
                 value={session.subagentModel ?? '__default__'}
-                onChange={(event) =>
-                  sessionSubagentModelMutation.mutate(
-                    event.target.value === '__default__' ? null : event.target.value
-                  )
+                onValueChange={(value) =>
+                  sessionSubagentModelMutation.mutate(value === '__default__' ? null : value)
                 }
                 aria-label="Task agent model"
                 disabled={sessionSubagentModelMutation.isPending}
               >
                 <option value="__default__">Default (Agent-Definition)</option>
-                {sessionProvider === 'claude' && modelOptions.length > 0 && (
-                  <optgroup label="Anthropic">
+                {modelOptions.length > 0 && (
+                  <optgroup label={sessionProvider === 'zai' ? 'Z.AI session models' : 'Anthropic'}>
                     {modelOptions.map((model) => (
                       <option key={`sub-${model}`} value={model}>
                         {modelLabels[model] || model}
@@ -4095,7 +4027,7 @@ export function SessionPage() {
                   !routableSubagentGroups.some((group) =>
                     group.models.includes(session.subagentModel as string)
                   ) && <option value={session.subagentModel}>{session.subagentModel}</option>}
-              </select>
+              </RuntimeSelect>
             ),
           })}
 
@@ -4103,24 +4035,30 @@ export function SessionPage() {
           renderRuntimeField({
             id: fieldId('reasoning'),
             label:
-              sessionProvider === 'claude' || sessionProvider === 'zai' ? 'Effort' : 'Reasoning',
+              sessionProvider === 'claude' || sessionProvider === 'zai'
+                ? 'Effort'
+                : sessionProvider === 'vibe'
+                  ? 'Thinking'
+                  : 'Reasoning',
             value: reasoningValueLabel,
             icon: <Brain className="h-3.5 w-3.5" />,
             children: (
-              <select
+              <RuntimeSelect
                 id={fieldId('reasoning')}
                 className="session-runtime-select"
                 value={reasoningSelectValue}
-                onChange={(event) => applyReasoningSelection(event.target.value)}
+                onValueChange={(value) => applyReasoningSelection(value)}
                 aria-label="Session reasoning"
               >
-                <option value="__default__">Default</option>
+                <option value="__default__">
+                  {isClaudeOpus55 ? 'Default · Medium on Opus 5.5' : 'Default'}
+                </option>
                 {reasoningOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
                 ))}
-              </select>
+              </RuntimeSelect>
             ),
           })}
 
@@ -4132,11 +4070,11 @@ export function SessionPage() {
             value: activeTool?.name ?? 'No tool',
             icon: <Wrench className="h-3.5 w-3.5" />,
             children: (
-              <select
+              <RuntimeSelect
                 id={fieldId('cli-tool')}
                 className="session-runtime-select"
                 value={selectedCliTool ?? ''}
-                onChange={(event) => setSelectedCliTool(event.target.value || null)}
+                onValueChange={(value) => setSelectedCliTool(value || null)}
                 aria-label="CLI tool"
               >
                 <option value="">No tool</option>
@@ -4145,7 +4083,7 @@ export function SessionPage() {
                     {tool.name}
                   </option>
                 ))}
-              </select>
+              </RuntimeSelect>
             ),
           })}
 
@@ -4159,11 +4097,11 @@ export function SessionPage() {
               (session.homeAssistantEntityId ? session.homeAssistantEntityId : 'No light'),
             icon: <Lightbulb className="h-3.5 w-3.5" />,
             children: (
-              <select
+              <RuntimeSelect
                 id={fieldId('home-assistant-light')}
                 className="session-runtime-select"
                 value={session.homeAssistantEntityId || ''}
-                onChange={(event) => homeAssistantLightMutation.mutate(event.target.value || null)}
+                onValueChange={(value) => homeAssistantLightMutation.mutate(value || null)}
                 aria-label="Home Assistant status light"
                 disabled={homeAssistantLightMutation.isPending}
               >
@@ -4178,7 +4116,7 @@ export function SessionPage() {
                         : ' (pulse only)'}
                   </option>
                 ))}
-              </select>
+              </RuntimeSelect>
             ),
           })}
 
@@ -4205,30 +4143,6 @@ export function SessionPage() {
             ))}
           </div>
         )}
-
-        {variant === 'sidebar' && (
-          <div className="session-runtime-actions">
-            <button
-              type="button"
-              className="session-runtime-action"
-              onClick={handleInterrupt}
-              disabled={!hasLiveRunActivity && !hasQueuedRunWork && session.status !== 'running'}
-              title="Interrupt session"
-            >
-              <Square className="h-3.5 w-3.5" />
-              <span>Interrupt</span>
-            </button>
-            <button
-              type="button"
-              className="session-runtime-action"
-              onClick={handleRestart}
-              title="Restart session"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span>Restart</span>
-            </button>
-          </div>
-        )}
       </div>
     );
   };
@@ -4236,7 +4150,7 @@ export function SessionPage() {
   const { todo: activeTodo, text: activeTodoText } = getActiveTodoPresentation(currentTodos);
   const activeAgentLabel = currentActiveAgent
     ? getAgentDisplay(currentActiveAgent.agentType)
-    : currentAgentRuns.find((agent) => agent.status === 'started')?.agentType ||
+    : scopedAgentRuns.find(isActiveAgent)?.agentType ||
       (session.runtime?.currentAgentType
         ? getAgentDisplay(session.runtime.currentAgentType)
         : undefined);
@@ -4324,8 +4238,10 @@ export function SessionPage() {
     open,
     badge,
     badgePulse,
+    summary,
   }: {
     id: RightMenuGroupId;
+    summary?: string;
     label: string;
     icon: ReactElement;
     children: ReactNode;
@@ -4344,7 +4260,10 @@ export function SessionPage() {
           title={label}
         >
           <span className="session-side-menu-icon">{icon}</span>
-          <span className="session-side-menu-group-title">{label}</span>
+          <span className="session-side-menu-group-title">
+            {label}
+            {summary && <small className="session-menu-summary">{summary}</small>}
+          </span>
           {badge && badge > 0 ? (
             <span className={cn('session-side-menu-badge', badgePulse && 'is-pulsing')}>
               {badge}
@@ -4381,221 +4300,188 @@ export function SessionPage() {
     });
   };
 
-  const renderMobileSheetContent = () => {
-    if (!mobileSheetPanel) return null;
-
-    if (mobileSheetPanel === 'settings') {
-      return (
-        <div className="mobile-session-sheet-content">
-          <div className="mobile-session-sheet-header">
-            <Settings className="h-4 w-4 text-muted-foreground" />
-            <h3>Session</h3>
-          </div>
-          <div className="mobile-session-sheet-body space-y-4">
-            <div className="mobile-view-switch">
-              <button
-                type="button"
-                onClick={() => {
-                  setMainView('chat');
-                  setMobileSheetPanel(null);
-                }}
-                className={cn(mainView === 'chat' && 'is-active')}
-              >
-                <MessageSquare className="h-4 w-4" />
-                <span>Chat</span>
-              </button>
-              {!isTaskSurface && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMainView('editor');
-                      setMobileSheetPanel(null);
-                    }}
-                    disabled={!hasOpenFiles}
-                    className={cn(mainView === 'editor' && 'is-active')}
-                  >
-                    <Code2 className="h-4 w-4" />
-                    <span>Code</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMainView('files');
-                      setMobileSheetPanel(null);
-                    }}
-                    className={cn(mainView === 'files' && 'is-active')}
-                  >
-                    <FolderOpen className="h-4 w-4" />
-                    <span>Files</span>
-                  </button>
-                </>
-              )}
-            </div>
-            <div className="session-runtime-mobile-card">
-              {renderSessionRuntimeControls('mobile')}
-              {cliSubagents.length > 0 && (
-                <>
-                  <p className="mt-2 px-1 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
-                    Delegierbar per run_subagent
-                  </p>
-                  <div className="session-runtime-controls is-mobile">
-                    {cliSubagents.map((entry) => (
-                      <Fragment key={`mobile-${entry.id || entry.provider}`}>
-                        {renderCliSubagentField(entry, 'mobile')}
-                      </Fragment>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-            {/* The right dock is desktop-only, so the chat switcher gets its
-                own slot here instead of being unreachable on a phone. */}
-            {id && (
-              <div className="space-y-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Chat
-                </div>
-                <ChatThreadSwitcher
-                  sessionId={id}
-                  onSwitched={(chatId) => {
-                    syncActiveChat(chatId);
-                    setMobileSheetPanel(null);
-                  }}
-                />
-              </div>
-            )}
-            <div className="space-y-2">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Styles
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {styleMenuPanels.map((panel) => {
-                  const meta = panelMeta[panel];
-                  return (
-                    <button
-                      key={panel}
-                      type="button"
-                      onClick={() => setMobileSheetPanel(panel)}
-                      className="mobile-sheet-command"
-                    >
-                      {meta.icon}
-                      <span>{meta.title}</span>
-                      {meta.badge}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Workspace
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {workspaceMenuPanels.map((panel) => {
-                  const meta = panelMeta[panel];
-                  return (
-                    <button
-                      key={panel}
-                      type="button"
-                      onClick={() => setMobileSheetPanel(panel)}
-                      className="mobile-sheet-command"
-                    >
-                      {meta.icon}
-                      <span>{meta.title}</span>
-                      {meta.badge}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileSheetPanel(null);
+  const renderSessionMenu = (mobile = false) => {
+    const closeMobile = () => {
+      if (mobile) closeNavigation();
+    };
+    const openView = (view: 'chat' | 'files' | 'editor') => {
+      setMainView(view);
+      closeMobile();
+    };
+    const secondaryPanels = workspaceMenuPanels.filter(
+      (p) => !['tasks', 'agents', 'git', 'preview', 'notes'].includes(p)
+    );
+    const enabledAgents = cliSubagents.filter((entry) => entry.enabled).length;
+    return (
+      <>
+        <div className="session-menu-chat-row">
+          {id && (
+            <ChatThreadSwitcher
+              sessionId={id}
+              showNewButton
+              onSwitched={(chatId) => {
+                syncActiveChat(chatId);
+                closeMobile();
+              }}
+            />
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="session-menu-more"
+              aria-label="Session actions"
+              title="Session actions"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent navigation align="start">
+              <DropdownMenuItem
+                onSelect={() => {
+                  closeMobile();
                   setShowRenameDialog(true);
                 }}
-                className="mobile-sheet-command"
               >
-                <Pencil className="h-4 w-4" />
-                <span>Rename</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileSheetPanel(null);
-                  setShowAllowedDirsDialog(true);
-                }}
-                className="mobile-sheet-command"
-              >
-                <FolderKey className="h-4 w-4" />
-                <span>Directories</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileSheetPanel(null);
+                <Pencil className="mr-2 h-4 w-4" />
+                Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  closeMobile();
                   setTemplateNameDraft(session.name);
                 }}
-                className="mobile-sheet-command"
               >
-                <BookmarkPlus className="h-4 w-4" />
-                <span>Template</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileSheetPanel(null);
+                <BookmarkPlus className="mr-2 h-4 w-4" />
+                Save as template
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  closeMobile();
                   void handleExportSession();
                 }}
-                className="mobile-sheet-command"
               >
-                <Download className="h-4 w-4" />
-                <span>Export</span>
-              </button>
-              {session.status === 'running' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileSheetPanel(null);
-                    handleInterrupt();
-                  }}
-                  className="mobile-sheet-command"
-                >
-                  <Square className="h-4 w-4" />
-                  <span>Interrupt</span>
-                </button>
-              )}
-              {isExecutingTool && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileSheetPanel(null);
-                    handleCancelCliTool();
-                  }}
-                  className="mobile-sheet-command"
-                >
-                  <X className="h-4 w-4" />
-                  <span>Cancel tool</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileSheetPanel(null);
+                <Download className="mr-2 h-4 w-4" />
+                Export transcript
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  closeMobile();
+                  setShowAllowedDirsDialog(true);
+                }}
+              >
+                <FolderKey className="mr-2 h-4 w-4" />
+                Directories
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => {
+                  closeMobile();
                   handleRestart();
                 }}
-                className="mobile-sheet-command"
               >
-                <RotateCcw className="h-4 w-4" />
-                <span>Restart</span>
-              </button>
-            </div>
-          </div>
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Restart session
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      );
-    }
+        {(canInterruptActiveRun || isExecutingTool) &&
+          renderSideMenuItem({
+            id: 'stop-run',
+            label: isExecutingTool ? 'Cancel tool' : 'Stop current run',
+            icon: <Square className="h-4 w-4" />,
+            onClick: isExecutingTool ? handleCancelCliTool : handleInterrupt,
+          })}
+        {mainView !== 'chat' &&
+          renderSideMenuItem({
+            id: 'back-chat',
+            label: 'Back to chat',
+            icon: <MessageSquare className="h-4 w-4" />,
+            onClick: () => openView('chat'),
+          })}
+        {renderSideMenuGroup({
+          id: 'workspace',
+          label: 'Tools',
+          icon: <Wrench className="h-4 w-4" />,
+          children: (
+            <>
+              <div className="session-primary-tools">
+                {renderPanelMenuItem('tasks')}
+                <button
+                  type="button"
+                  className={cn(
+                    'session-side-menu-item session-menu-agents',
+                    pinnedPanels.agents && 'is-active'
+                  )}
+                  onClick={() => openRightPanel('agents')}
+                  title="Agent activity"
+                >
+                  <span className="session-side-menu-icon">
+                    <Brain className="h-4 w-4" />
+                  </span>
+                  <span className="session-side-menu-label">
+                    Agents
+                    <small className="session-menu-summary">
+                      {agentCounts.active} active · {agentCounts.waiting} waiting
+                    </small>
+                  </span>
+                </button>
+                {renderSideMenuItem({
+                  id: 'files',
+                  label: 'Files',
+                  icon: <FolderOpen className="h-4 w-4" />,
+                  onClick: () => openView('files'),
+                  active: mainView === 'files',
+                })}
+                {hasOpenFiles &&
+                  renderSideMenuItem({
+                    id: 'editor',
+                    label: 'Editor',
+                    icon: <Code2 className="h-4 w-4" />,
+                    onClick: () => openView('editor'),
+                    active: mainView === 'editor',
+                  })}
+                {renderPanelMenuItem('git')}
+                {renderPanelMenuItem('preview')}
+                {renderPanelMenuItem('notes')}
+              </div>
+              <details className="session-menu-secondary">
+                <summary>More tools</summary>
+                {secondaryPanels.map((p) => renderPanelMenuItem(p))}
+              </details>
+              <button
+                type="button"
+                className="session-menu-configure"
+                onClick={() => {
+                  closeMobile();
+                  setShowAgentConfig(true);
+                }}
+              >
+                Configure agents <span>{enabledAgents} configured</span>
+              </button>
+            </>
+          ),
+        })}
+        {renderSideMenuGroup({
+          id: 'runtime',
+          label: 'Model & execution',
+          icon: <Sparkles className="h-4 w-4" />,
+          summary: `${providerLabel} · ${asstModelLabel} · ${session.cliReasoning || 'Default'} · ${SESSION_MODE_OPTIONS.find((o) => o.value === sessionMode)?.label || sessionMode}`,
+          children: renderSessionRuntimeControls(mobile ? 'mobile' : 'sidebar'),
+        })}
+        {renderSideMenuGroup({
+          id: 'styles',
+          label: 'Appearance',
+          icon: <Palette className="h-4 w-4" />,
+          summary:
+            [session.designStyleSkill, session.writingStyleSkill].filter(Boolean).join(' · ') ||
+            'Default appearance',
+          children: styleMenuPanels.map((p) => renderPanelMenuItem(p)),
+        })}
+      </>
+    );
+  };
+
+  const renderMobileSheetContent = () => {
+    if (!mobileSheetPanel) return null;
 
     const meta = panelMeta[mobileSheetPanel];
     return (
@@ -4605,37 +4491,7 @@ export function SessionPage() {
           <h3>{meta.title}</h3>
         </div>
         <div className="mobile-session-sheet-body">
-          {mobileSheetPanel === 'tasks' && (
-            <div className="h-[56dvh] overflow-auto">{tasksBody}</div>
-          )}
-          {mobileSheetPanel === 'mesh' && <div className="h-[76dvh] overflow-auto">{meshBody}</div>}
-          {mobileSheetPanel === 'browser' && (
-            <OracleBrowserPanel sessionId={session.id} className="h-[76dvh]" />
-          )}
-          {mobileSheetPanel === 'android' && (
-            <AndroidDevicePanel sessionId={session.id} className="h-[76dvh]" />
-          )}
-          {mobileSheetPanel === 'designStyle' && (
-            <SessionStyleLibraryPanel
-              sessionId={session.id}
-              provider={sessionProvider}
-              kind="design"
-              selectedSkill={session.designStyleSkill}
-              onSessionUpdated={handleStyleSessionUpdated}
-              className="h-[76dvh]"
-            />
-          )}
-          {mobileSheetPanel === 'writingStyle' && (
-            <SessionStyleLibraryPanel
-              sessionId={session.id}
-              provider={sessionProvider}
-              kind="writing"
-              selectedSkill={session.writingStyleSkill}
-              onSessionUpdated={handleStyleSessionUpdated}
-              className="h-[76dvh]"
-            />
-          )}
-          {mobileSheetPanel === 'config' && renderConfigBody('h-[56dvh]')}
+          <div className="h-[70dvh] min-h-0 overflow-auto">{renderPanelBody(mobileSheetPanel)}</div>
         </div>
       </div>
     );
@@ -4644,43 +4500,20 @@ export function SessionPage() {
   return (
     <div
       ref={rootShellRef}
-      className={cn(
-        'flex h-full min-h-0 relative overflow-hidden',
-        isTaskSurface ? 'session-surface-task' : 'session-surface-code'
-      )}
+      className={cn('flex h-full min-h-0 relative overflow-hidden', 'session-surface-code')}
     >
       {/* Main column: layered chat viewport with transparent topbar/composer overlays */}
       <div
         className={cn(
-          'session-main-column flex-1 min-h-0 flex flex-col overflow-hidden',
-          mainView === 'chat' && 'session-chat-layered',
-          isTaskSurface && 'session-task-main'
+          'session-main-column flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden',
+          mainView === 'chat' && 'session-chat-layered'
         )}
       >
-        {/* Session Header measurement point; visible runtime controls live in the right menu. */}
-        <div
-          ref={setHeaderBarEl}
-          className={cn(
-            'chat-topbar relative shrink-0',
-            isTaskSurface ? 'task-workbench-topbar' : 'is-empty'
-          )}
-        >
+        {/* Session Header measurement point; visible runtime controls live in the left session menu. */}
+        <div ref={setHeaderBarEl} className={cn('chat-topbar relative shrink-0', 'is-empty')}>
           <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
             {messageJumpStatus}
           </span>
-          {isTaskSurface && (
-            <TaskWorkbenchHeader
-              sessionName={session.name}
-              state={taskWorkbenchState}
-              queuedDepth={queuedDepth}
-              contextUsedPercent={visibleUsage?.contextUsedPercent}
-              canInterruptActiveRun={canInterruptActiveRun}
-              onOpenRun={() => openRunCockpitSection(isActive ? 'overview' : 'turns')}
-              onOpenTasks={() => openRightPanel('tasks')}
-              onInterrupt={handleInterrupt}
-              onRestart={handleRestart}
-            />
-          )}
         </div>
 
         {/* Main Content - Chat or Editor */}
@@ -4709,7 +4542,7 @@ export function SessionPage() {
                 <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--chat-header-h)+0.5rem)] z-30 flex justify-center px-4">
                   <div
                     role="status"
-                    className="pointer-events-auto flex max-w-md items-center gap-2 rounded-full border border-amber-400/30 bg-background/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur"
+                    className="chat-history-status-pill pointer-events-auto flex max-w-md items-center gap-2 rounded-full border border-amber-400/30 px-3 py-2 text-xs text-foreground"
                   >
                     <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden="true" />
                     <span>
@@ -4750,46 +4583,6 @@ export function SessionPage() {
                         <RotateCcw className="h-4 w-4" />
                         Try again
                       </button>
-                    </div>
-                  </div>
-                ) : isTaskSurface ? (
-                  <div className="task-empty-state">
-                    <div className="task-empty-mark">
-                      <MessageSquare className="h-7 w-7" />
-                    </div>
-                    <h2>{session.name}</h2>
-                    <p>Pick a starting point or write a specific task below.</p>
-                    <div className="task-workflow-grid">
-                      {TASK_WORKFLOWS.map((workflow) => {
-                        const WorkflowIcon =
-                          workflow.id === 'quick-brief'
-                            ? FileText
-                            : workflow.id === 'research-brief'
-                              ? Globe
-                              : workflow.id === 'draft-message'
-                                ? MessageSquare
-                                : workflow.id === 'plan-project'
-                                  ? ListTodo
-                                  : workflow.id === 'creative-direction'
-                                    ? Sparkles
-                                    : workflow.id === 'decision-support'
-                                      ? Brain
-                                      : ListTodo;
-                        return (
-                          <button
-                            key={workflow.id}
-                            type="button"
-                            onClick={() => handleSendMessage(workflow.prompt)}
-                          >
-                            <span>
-                              <WorkflowIcon className="h-3.5 w-3.5" />
-                              {workflow.shortTitle}
-                            </span>
-                            <small>{workflow.description}</small>
-                            <em>{workflow.meta}</em>
-                          </button>
-                        );
-                      })}
                     </div>
                   </div>
                 ) : (
@@ -4867,27 +4660,7 @@ export function SessionPage() {
                     } else if (item.type === 'tool') {
                       content = (
                         <TimelineContinuation>
-                          {isTaskSurface ? (
-                            <div className={cn('task-progress-card', `is-${item.data.status}`)}>
-                              <span className="task-progress-dot" />
-                              <span>
-                                <strong>
-                                  {item.data.status === 'completed'
-                                    ? 'Step completed'
-                                    : item.data.status === 'error'
-                                      ? 'Needs attention'
-                                      : 'Working'}
-                                </strong>
-                                <small>
-                                  {item.data.actionSummary?.title ||
-                                    item.data.actionSummary?.explanation ||
-                                    'Plum is applying the requested task.'}
-                                </small>
-                              </span>
-                            </div>
-                          ) : (
-                            <ToolExecutionCard execution={item.data} />
-                          )}
+                          <ToolExecutionCard execution={item.data} />
                         </TimelineContinuation>
                       );
                     } else {
@@ -4942,8 +4715,8 @@ export function SessionPage() {
                         }
                         tabIndex={item.type === 'message' ? -1 : undefined}
                         className={cn(
-                          'mx-auto w-full px-4 sm:px-7 animate-fade-in',
-                          isTaskSurface ? 'task-timeline-item max-w-[840px]' : 'max-w-[760px]',
+                          'mx-auto w-full px-4 sm:px-7',
+                          'max-w-[760px]',
                           isInTurn ? 'asst-turn-item' : 'pb-9',
                           isInTurn && turnSegment?.startsAfterUser && 'asst-turn-start',
                           isInTurn && turnSegment?.continuesBefore && 'asst-turn-link-before',
@@ -4973,7 +4746,7 @@ export function SessionPage() {
                 isAtTop &&
                 (historyPagination.hasMore || isLoadingOlderMessages || olderMessagesError) && (
                   <div className="pointer-events-none absolute inset-x-0 top-[calc(var(--chat-header-h)+0.5rem)] z-30 flex justify-center px-4">
-                    <div className="pointer-events-auto flex min-h-10 items-center gap-2 rounded-full border border-border/70 bg-background/90 px-3 py-2 text-xs text-foreground shadow-lg backdrop-blur">
+                    <div className="chat-history-status-pill pointer-events-auto flex min-h-10 items-center gap-2 rounded-full border px-3 py-2 text-xs text-foreground">
                       {isLoadingOlderMessages ? (
                         <>
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -5036,6 +4809,25 @@ export function SessionPage() {
         {mainView === 'chat' && (
           <div ref={setInputBarEl} className="composer-wrap shrink-0">
             <div className="composer-inner">
+              {scopedAgentRuns.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.matchMedia('(max-width: 1023px)').matches)
+                      setMobileSheetPanel('agents');
+                    else openRightPanel('agents');
+                  }}
+                  className="session-agents-summary mb-2 flex w-full items-center gap-2 border px-3 py-2 text-left text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  <Brain className="h-4 w-4 shrink-0" />
+                  <span>
+                    <strong>{agentCounts.active} Agenten aktiv</strong> · {agentCounts.waiting}{' '}
+                    warten · {agentCounts.completed} fertig
+                  </span>
+                  <span className="ml-auto">Anzeigen</span>
+                </button>
+              )}
+
               {showSavedIndicator && (
                 <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground animate-fade-in pb-2">
                   <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
@@ -5045,7 +4837,8 @@ export function SessionPage() {
               <TodoFloatingStrip
                 todo={activeTodo}
                 pendingTasksCount={pendingTasksCount}
-                mode="desktop"
+                completedTasksCount={completedTasksCount}
+                totalTasksCount={totalTasksCount}
                 onOpenTasks={() => openRightPanel('tasks')}
               />
               <ChatInput
@@ -5055,7 +4848,9 @@ export function SessionPage() {
                 onSendMessage={handleSendMessage}
                 onSendMessageWithFiles={handleSendMessageWithFiles}
                 onCommandExecute={handleCommandExecute}
-                onInterrupt={handleInterrupt}
+                onInterrupt={isExecutingTool ? handleCancelCliTool : handleInterrupt}
+                onRestart={handleRestart}
+                canInterrupt={canInterruptActiveRun || isExecutingTool}
                 commands={commands}
                 selectedToolName={selectedToolName}
                 selectedCliTool={selectedCliTool}
@@ -5065,7 +4860,6 @@ export function SessionPage() {
                 isActive={isActive}
                 queuesWhileActive={composerQueuesWhileActive}
                 steersWhileActive={composerSteersWhileActive}
-                surface={sessionSurface}
                 activeStatusLabel={taskWorkbenchState.composerStatusLabel}
                 activeStatusDetail={taskWorkbenchState.composerStatusDetail}
                 activeFollowupMode={composerActiveFollowupMode}
@@ -5084,202 +4878,35 @@ export function SessionPage() {
       </div>
       {/* /main column */}
 
-      {/* Right session menu: former More actions, Run, and workspace panels live here. */}
-      {/* Gated in JS, not only by `hidden md:flex`: display:none still mounts the
-          subtree, so on a phone the docked browser preview and task list ran a
-          second time alongside the copies inside the mobile sheet. */}
-      {isDesktopLayout && (
+      {sessionMenu.target &&
+        createPortal(
+          <nav aria-label="Session tools">{renderSessionMenu(!isDesktopLayout)}</nav>,
+          sessionMenu.target
+        )}
+
+      {/* Tool content may open beside the chat; navigation lives in the left sidebar. */}
+      {isDockLayout && (runCockpitOpen || hasVisiblePinnedPanel) && (
         <div
-          className={cn('session-right-dock hidden md:flex', rightDockCollapsed && 'is-collapsed')}
-        >
-          {(runCockpitOpen || hasVisiblePinnedPanel) && (
-            <div
-              className={cn(
-                'session-docked-panel-column',
-                !runCockpitOpen && pinnedPanels.browser && 'is-browser-active'
-              )}
-            >
-              {runCockpitOpen
-                ? renderRunCockpitPanel()
-                : visibleDockedPanels.map((p) => (pinnedPanels[p] ? renderDockedPanel(p) : null))}
-            </div>
+          className={cn(
+            'session-right-dock session-content-dock hidden lg:flex',
+            !runCockpitOpen && pinnedPanels.browser && 'has-browser'
           )}
-          <nav className="session-right-menu" aria-label="Session menu">
-            <div className="session-right-menu-header">
-              <button
-                type="button"
-                className="session-right-collapse-button"
-                onClick={toggleRightDockCollapsed}
-                title={rightDockCollapsed ? 'Expand right menu' : 'Collapse right menu'}
-                aria-label={rightDockCollapsed ? 'Expand right menu' : 'Collapse right menu'}
-              >
-                {rightDockCollapsed ? (
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                ) : (
-                  <ChevronRight className="h-3.5 w-3.5" />
-                )}
-              </button>
-            </div>
-
-            <div className="session-side-menu-scroll">
-              {/* Chat threads belong to the session, so they live in the right
-                menu with the other per-session controls rather than floating
-                over the transcript. */}
-              {id &&
-                renderSideMenuGroup({
-                  id: 'chat',
-                  label: 'Chat',
-                  icon: <MessageSquare className="h-3.5 w-3.5" />,
-                  children: rightDockCollapsed ? null : (
-                    <div className="session-side-menu-embed">
-                      <ChatThreadSwitcher
-                        sessionId={id}
-                        onSwitched={(chatId) => {
-                          syncActiveChat(chatId);
-                        }}
-                      />
-                    </div>
-                  ),
-                })}
-
-              {renderSideMenuGroup({
-                id: 'session',
-                label: 'Session',
-                icon: <Settings className="h-3.5 w-3.5" />,
-                children: (
-                  <>
-                    {renderSideMenuItem({
-                      id: 'session-rename',
-                      label: 'Rename',
-                      icon: <Pencil className="h-3.5 w-3.5" />,
-                      onClick: () => setShowRenameDialog(true),
-                      nested: true,
-                    })}
-                    {renderSideMenuItem({
-                      id: 'session-template',
-                      label: 'Save as template',
-                      icon: <BookmarkPlus className="h-3.5 w-3.5" />,
-                      onClick: () => setTemplateNameDraft(session.name),
-                      nested: true,
-                    })}
-                    {renderSideMenuItem({
-                      id: 'session-export',
-                      label: 'Export transcript',
-                      icon: <Download className="h-3.5 w-3.5" />,
-                      onClick: () => void handleExportSession(),
-                      nested: true,
-                    })}
-                    {renderSideMenuItem({
-                      id: 'session-directories',
-                      label: 'Directories',
-                      icon: <FolderKey className="h-3.5 w-3.5" />,
-                      onClick: () => setShowAllowedDirsDialog(true),
-                      nested: true,
-                    })}
-                  </>
-                ),
-              })}
-
-              {renderSideMenuGroup({
-                id: 'view',
-                label: 'View',
-                icon: <MessageSquare className="h-3.5 w-3.5" />,
-                children: (
-                  <>
-                    {renderSideMenuItem({
-                      id: 'view-chat',
-                      label: 'Chat view',
-                      icon: <MessageSquare className="h-3.5 w-3.5" />,
-                      onClick: () => setMainView('chat'),
-                      active: mainView === 'chat',
-                      nested: true,
-                    })}
-                    {!isTaskSurface &&
-                      hasOpenFiles &&
-                      renderSideMenuItem({
-                        id: 'view-editor',
-                        label: 'Editor view',
-                        icon: <Code2 className="h-3.5 w-3.5" />,
-                        onClick: () => setMainView('editor'),
-                        active: mainView === 'editor',
-                        nested: true,
-                      })}
-                    {!isTaskSurface &&
-                      renderSideMenuItem({
-                        id: 'view-files',
-                        label: 'Files view',
-                        icon: <FolderOpen className="h-3.5 w-3.5" />,
-                        onClick: () => setMainView('files'),
-                        active: mainView === 'files',
-                        nested: true,
-                      })}
-                  </>
-                ),
-              })}
-
-              {renderSideMenuGroup({
-                id: 'runtime',
-                label: 'Runtime',
-                icon: <Sparkles className="h-3.5 w-3.5" />,
-                children: <>{!rightDockCollapsed && renderSessionRuntimeControls('sidebar')}</>,
-              })}
-
-              {renderSideMenuGroup({
-                id: 'subagents',
-                label: 'CLI subagents',
-                icon: <Brain className="h-3.5 w-3.5" />,
-                badge: cliSubagents.filter((entry) => entry.enabled).length,
-                children: (
-                  <>
-                    {cliSubagents.length === 0 ? (
-                      <p className="px-3 py-1.5 text-[11px] leading-snug text-muted-foreground">
-                        Keine CLI-Subagenten konfiguriert. Einstellungen &rarr; Subagenten.
-                      </p>
-                    ) : (
-                      !rightDockCollapsed && (
-                        <>
-                          <p className="px-3 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
-                            Delegierbar per run_subagent
-                          </p>
-                          <div className="session-runtime-controls">
-                            {cliSubagents.map((entry) => (
-                              <Fragment key={entry.id || entry.provider}>
-                                {renderCliSubagentField(entry)}
-                              </Fragment>
-                            ))}
-                          </div>
-                        </>
-                      )
-                    )}
-                  </>
-                ),
-              })}
-
-              {renderSideMenuGroup({
-                id: 'styles',
-                label: 'Styles',
-                icon: <Palette className="h-3.5 w-3.5" />,
-                badge: activeStyleCount,
-                children: <>{styleMenuPanels.map((panel) => renderPanelMenuItem(panel, true))}</>,
-              })}
-
-              {renderSideMenuGroup({
-                id: 'workspace',
-                label: 'Workspace',
-                icon: <FolderOpen className="h-3.5 w-3.5" />,
-                open: rightMenuGroupsOpen.workspace || hasPinnedWorkspacePanel,
-                badge: pendingTasksCount + meshPeers.length + (session.androidDeviceSerial ? 1 : 0),
-                children: (
-                  <>{workspaceMenuPanels.map((panel) => renderPanelMenuItem(panel, true))}</>
-                ),
-              })}
-            </div>
-          </nav>
+        >
+          <div
+            className={cn(
+              'session-docked-panel-column',
+              !runCockpitOpen && pinnedPanels.browser && 'is-browser-active'
+            )}
+          >
+            {runCockpitOpen
+              ? renderRunCockpitPanel()
+              : visibleDockedPanels.map((p) => (pinnedPanels[p] ? renderDockedPanel(p) : null))}
+          </div>
         </div>
       )}
 
-      {runCockpitOpen && !isDesktopLayout && (
-        <div className="md:hidden">{renderRunCockpitPanel('rail')}</div>
+      {runCockpitOpen && !isDockLayout && (
+        <div className="lg:hidden">{renderRunCockpitPanel('rail')}</div>
       )}
 
       <Sheet
@@ -5288,10 +4915,35 @@ export function SessionPage() {
           if (!open) setMobileSheetPanel(null);
         }}
       >
-        <SheetContent side="bottom" title="Session tools" className="mobile-session-sheet p-0">
+        <SheetContent side="left" title="Session tools" className="mobile-session-sheet p-0">
           {renderMobileSheetContent()}
         </SheetContent>
       </Sheet>
+
+      <Dialog open={showAgentConfig} onOpenChange={setShowAgentConfig}>
+        <DialogContent className="navigation-dialog max-h-[85dvh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Configure agents</DialogTitle>
+            <DialogDescription>
+              Choose which workers this session can delegate to. Configured workers are not
+              necessarily active.
+            </DialogDescription>
+          </DialogHeader>
+          {cliSubagents.length ? (
+            <div className="session-runtime-controls">
+              {cliSubagents.map((entry) => (
+                <Fragment key={entry.id || entry.provider}>
+                  {renderCliSubagentField(entry)}
+                </Fragment>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No workers configured. Add workers in Settings → Subagents.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Permission Approval Dialog (hooks-based flow) */}
       {currentPendingPermission && (
@@ -5333,7 +4985,7 @@ export function SessionPage() {
         open={templateNameDraft !== null}
         onOpenChange={(open) => !open && setTemplateNameDraft(null)}
       >
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="navigation-dialog sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Save as template</DialogTitle>
             <DialogDescription>

@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button';
 import { CommandMenu } from '@/components/chat/CommandMenu';
 import { cn } from '@/lib/utils';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
-import type { Command, SessionSurface } from '@plum-code-webui/shared';
+import type { Command } from '@plum-code-webui/shared';
 import type { FileUploadProgress, SendMessageAck } from '@/services/socket';
 
 type AttachmentType = 'image' | 'text' | 'pdf' | 'document';
@@ -146,6 +146,8 @@ interface ChatInputProps {
   ) => ChatSendResult;
   onCommandExecute: (input: string) => Promise<void>;
   onInterrupt?: () => void;
+  onRestart?: () => void;
+  canInterrupt?: boolean;
   commands?: Command[];
   selectedToolName?: string | null;
   selectedCliTool?: string | null;
@@ -155,7 +157,6 @@ interface ChatInputProps {
   isActive?: boolean;
   queuesWhileActive?: boolean;
   steersWhileActive?: boolean;
-  surface?: SessionSurface;
   activeStatusLabel?: string;
   activeStatusDetail?: string;
   activeFollowupMode?: ActiveFollowupMode;
@@ -174,6 +175,8 @@ export const ChatInput = memo(function ChatInput({
   onSendMessageWithFiles,
   onCommandExecute,
   onInterrupt,
+  onRestart,
+  canInterrupt = false,
   commands,
   selectedToolName,
   selectedCliTool,
@@ -183,7 +186,6 @@ export const ChatInput = memo(function ChatInput({
   isActive,
   queuesWhileActive,
   steersWhileActive,
-  surface = 'code',
   activeStatusLabel,
   activeStatusDetail,
   activeFollowupMode,
@@ -438,10 +440,7 @@ export const ChatInput = memo(function ChatInput({
   const composerBriefLabel = composerStatusLabel;
   const composerBriefDetail = composerStatusDetail;
   const showStatusStrip =
-    !!isActive ||
-    queueDepth > 0 ||
-    showFastModeButton ||
-    (surface === 'task' && !!selectedToolName);
+    !!isActive || queueDepth > 0 || showFastModeButton || !!selectedToolName || !!onRestart;
   const showStatusBubble = !!composerBriefLabel || !!composerBriefDetail;
   const composerTone = isActive
     ? steersWhileActive
@@ -460,9 +459,7 @@ export const ChatInput = memo(function ChatInput({
         : queuesWhileActive
           ? 'Add a follow-up...'
           : 'Current run is active...'
-      : surface === 'task'
-        ? 'Give Plum a task...'
-        : 'Message...';
+      : 'Message...';
 
   const sendDraft = useCallback(
     async (draft: Omit<DeliveryState, 'status' | 'error'>) => {
@@ -807,7 +804,6 @@ export const ChatInput = memo(function ChatInput({
         aria-busy={deliveryPending}
         className={cn(
           'glass-chrome chat-composer-form relative rounded-[18px] md:rounded-2xl shadow-lg shadow-black/5 dark:shadow-black/20',
-          surface === 'task' && 'is-task-composer',
           selectedCliTool && 'ring-1 ring-orange-500/30',
           isDraggingFiles && 'ring-2 ring-primary ring-offset-2 ring-offset-background'
         )}
@@ -867,16 +863,28 @@ export const ChatInput = memo(function ChatInput({
             )}
 
             <div className="composer-brief-actions">
-              {queueDepth > 0 && isActive && onInterrupt && (
+              {onInterrupt && canInterrupt && (
                 <button
                   type="button"
-                  className="composer-bubble-button"
+                  className="composer-bubble-button composer-session-action is-interrupt"
                   onClick={onInterrupt}
-                  aria-label="Interrupt and run queued follow-up now"
-                  title="Interrupt the active turn and run the queued follow-up now"
+                  aria-label={isExecutingTool ? 'Cancel tool' : 'Interrupt current run'}
+                  title={isExecutingTool ? 'Cancel the active tool' : 'Interrupt the current run'}
                 >
                   <StopCircle className="h-3.5 w-3.5" />
-                  <span>Interrupt &amp; run now</span>
+                  <span>{isExecutingTool ? 'Cancel tool' : 'Interrupt'}</span>
+                </button>
+              )}
+              {onRestart && (
+                <button
+                  type="button"
+                  className="composer-bubble-button composer-session-action"
+                  onClick={onRestart}
+                  aria-label="Restart session"
+                  title="Restart session with fresh CLI context; queued follow-ups will be cleared"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Restart</span>
                 </button>
               )}
               {showActiveFollowupButton && (
@@ -1012,45 +1020,31 @@ export const ChatInput = memo(function ChatInput({
                 )}
               </Button>
             )}
-            {onInterrupt && isActive && !allowsActiveFollowup ? (
-              <Button
-                type="button"
-                size="icon"
-                variant="destructive"
-                onClick={onInterrupt}
-                className="composer-control-button composer-control-danger"
-                title="Stop (Escape)"
-                aria-label="Stop generation"
-              >
-                <StopCircle className="h-4 w-4" />
-              </Button>
-            ) : (
-              <Button
-                type="submit"
-                size="icon"
-                variant="ghost"
-                disabled={
-                  (!input.trim() && attachments.length === 0) ||
-                  disabled ||
-                  isSending ||
-                  isExecutingTool ||
-                  blocksSubmitForActiveRun ||
-                  deliveryPending
-                }
-                className={cn(
-                  'composer-control-button composer-control-send',
-                  selectedCliTool && 'composer-control-tool'
-                )}
-                title={isActive ? activeSubmitLabel : 'Send'}
-                aria-label={isActive ? activeSubmitLabel : 'Send message'}
-              >
-                {isSending || deliveryPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </Button>
-            )}
+            <Button
+              type="submit"
+              size="icon"
+              variant="ghost"
+              disabled={
+                (!input.trim() && attachments.length === 0) ||
+                disabled ||
+                isSending ||
+                isExecutingTool ||
+                blocksSubmitForActiveRun ||
+                deliveryPending
+              }
+              className={cn(
+                'composer-control-button composer-control-send',
+                selectedCliTool && 'composer-control-tool'
+              )}
+              title={isActive ? activeSubmitLabel : 'Send'}
+              aria-label={isActive ? activeSubmitLabel : 'Send message'}
+            >
+              {isSending || deliveryPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+            </Button>
           </div>
         </div>
       </form>
