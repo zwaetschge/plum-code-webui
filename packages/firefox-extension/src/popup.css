@@ -1,0 +1,51 @@
+body {
+  width: 360px;
+  min-height: 0;
+}
+
+.popup {
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.card {
+  padding: 12px;
+}
+
+.card .row {
+  margin-top: 10px;
+}
+
+.card .row button {
+  flex: 1 1 auto;
+  padding: 7px 8px;
+  font-size: 0.82rem;
+}
+
+#detail:empty {
+  display: none;
+}
+
+#detail {
+  margin: 8px 0 0;
+}
+
+.list li .when {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.list li .what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list li.clickable {
+  cursor: pointer;
+}
+
+.list li.clickable:hover {
+  background: rgba(255, 255, 255, 0.95);
+}

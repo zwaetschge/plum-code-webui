@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plum Browser – Einstellungen</title>
+    <link rel="stylesheet" href="ui.css" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="brand">
+        <img src="icons/icon-128.png" alt="" />
+        <div>
+          <h1>Plum Browser</h1>
+          <p class="muted">
+            Lässt deine Plum-Code-Agents diesen Browser steuern – jede Session in ihrem eigenen
+            Fenster mit Tab-Gruppe.
+          </p>
+        </div>
+      </header>
+
+      <section class="glass card">
+        <div class="card-head">
+          <h2>Verbindung</h2>
+          <div class="status"><span class="dot" id="dot"></span><span id="status">…</span></div>
+        </div>
+        <form id="form" autocomplete="off">
+          <div class="field">
+            <label for="serverUrl">Plum-Adresse</label>
+            <input id="serverUrl" type="url" placeholder="https://code.example.ch" required />
+            <p class="hint">
+              Die Adresse deiner Plum-WebUI. Hinter Authelia/SSO wird automatisch der
+              <span class="mono">/mobile</span>-Zugang verwendet.
+            </p>
+          </div>
+          <div class="field">
+            <label for="token">Browser-Token</label>
+            <input id="token" type="password" placeholder="plum_ff_…" required />
+            <p class="hint">
+              In Plum unter
+              <strong>Settings → Browser control → Pair browser</strong> erzeugen. Der Token erlaubt
+              nur die Browser-Steuerung, keinen API-Zugriff.
+            </p>
+          </div>
+          <div class="field">
+            <label for="label">Name dieses Browsers</label>
+            <input id="label" type="text" placeholder="z. B. Firefox Laptop" maxlength="60" />
+          </div>
+          <div class="row">
+            <button class="primary" type="submit">Speichern &amp; verbinden</button>
+            <button id="disconnect" type="button">Trennen</button>
+          </div>
+          <div id="message" class="message" hidden></div>
+        </form>
+      </section>
+
+      <section class="glass card">
+        <h2>Sicherheit</h2>
+        <div class="field toggle">
+          <span>
+            Steuerung pausieren
+            <span class="hint">Agents bekommen eine Fehlermeldung, bis du fortsetzt.</span>
+          </span>
+          <input id="paused" type="checkbox" />
+        </div>
+        <div class="field toggle">
+          <span>
+            JavaScript-Ausführung erlauben
+            <span class="hint"
+              >Werkzeug <span class="mono">evaluate_js</span>: Agents können Code in Seiten der
+              Tab-Gruppe ausführen.</span
+            >
+          </span>
+          <input id="allowJs" type="checkbox" />
+        </div>
+        <p class="hint">
+          Agents sehen und steuern nur Tabs in der Tab-Gruppe ihrer Session („Plum · …“). Ziehe
+          einen Tab in eine Gruppe, um ihn freizugeben; schließe die Gruppe, um den Zugriff zu
+          beenden. Beim Arbeiten zeigt der Tab einen violetten Rahmen.
+        </p>
+      </section>
+    </main>
+    <script src="shared.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plum</title>
+    <link rel="stylesheet" href="ui.css" />
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header class="bar glass">
+      <img src="icons/icon-32.png" alt="" />
+      <div class="title">
+        <strong>Plum Browser</strong>
+        <span class="status"><span class="dot" id="dot"></span><span id="status">…</span></span>
+      </div>
+      <button id="toSessions" type="button" title="Sessions">Sessions</button>
+      <button id="pause" type="button"></button>
+      <button id="options" class="icon" type="button" aria-label="Einstellungen">⚙</button>
+    </header>
+
+    <main id="chatView" class="view chat-view" hidden></main>
+
+    <main id="sessionsView" class="view overview" hidden>
+      <p class="muted" id="detail"></p>
+      <section id="picker"></section>
+
+      <section class="glass card" id="newSessionCard">
+        <h2>Neue Session</h2>
+        <form id="newSession" class="new-session">
+          <label class="picker-field">
+            <span>Name</span>
+            <input
+              id="newName"
+              type="text"
+              required
+              maxlength="100"
+              placeholder="z. B. Rechnungen prüfen"
+            />
+          </label>
+          <label class="picker-field">
+            <span>Provider</span>
+            <select id="newProvider"></select>
+          </label>
+          <label class="picker-field">
+            <span>Modell</span>
+            <select id="newModel"></select>
+          </label>
+          <label class="picker-field">
+            <span>Ordner</span>
+            <input id="newDir" type="text" placeholder="Standardordner" />
+          </label>
+          <label class="toggle">
+            <span>Aktuellen Tab übergeben</span>
+            <input id="newHandOver" type="checkbox" checked />
+          </label>
+          <button class="primary" type="submit" id="newSubmit">Session starten</button>
+          <p class="message" id="newMessage" hidden></p>
+        </form>
+      </section>
+
+      <details class="glass card more">
+        <summary>Session-Fenster und letzte Aktionen</summary>
+        <h2>Session-Fenster</h2>
+        <ul class="list" id="sessions"></ul>
+        <p class="muted" id="noSessions">Noch keine Session hat den Browser benutzt.</p>
+        <h2>Letzte Aktionen</h2>
+        <ul class="list" id="actions"></ul>
+        <p class="muted" id="noActions">Noch keine Aktionen.</p>
+        <button id="reconnect" type="button">Neu verbinden</button>
+      </details>
+    </main>
+
+    <script src="shared.js"></script>
+    <script src="picker.js"></script>
+    <script src="chat.js"></script>
+    <script src="panel.js"></script>
+  </body>
+</html>

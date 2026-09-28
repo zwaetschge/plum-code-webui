@@ -1,0 +1,41 @@
+.page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 40px 20px 60px;
+  display: grid;
+  gap: 18px;
+}
+
+.page > .brand img {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+}
+
+.page > .brand h1 {
+  font-size: 1.6rem;
+}
+
+.page > .brand p {
+  margin: 4px 0 0;
+}
+
+.card {
+  padding: 20px;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.card-head h2 {
+  margin: 0;
+}
+
+.toggle .hint {
+  display: block;
+  font-weight: 400;
+}

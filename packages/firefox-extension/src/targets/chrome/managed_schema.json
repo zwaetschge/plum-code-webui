@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "serverUrl": { "type": "string", "description": "Plum address, e.g. https://code.example.ch" },
+    "token": { "type": "string", "description": "plum_ff_ pairing token" },
+    "label": { "type": "string", "description": "Name of this browser in Plum" }
+  }
+}

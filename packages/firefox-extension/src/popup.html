@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <title>Plum Browser</title>
+    <link rel="stylesheet" href="ui.css" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <header class="glass card">
+        <div class="brand">
+          <img src="icons/icon-48.png" alt="" />
+          <div>
+            <h1>Plum Browser</h1>
+            <div class="status"><span class="dot" id="dot"></span><span id="status">…</span></div>
+          </div>
+        </div>
+        <p class="muted" id="detail"></p>
+        <div class="row">
+          <button id="pause" type="button"></button>
+          <button id="reconnect" type="button">Neu verbinden</button>
+          <button id="options" type="button">Einstellungen</button>
+        </div>
+      </header>
+
+      <section id="picker"></section>
+
+      <section class="glass card" id="sessionsCard">
+        <h2>Session-Fenster</h2>
+        <ul class="list" id="sessions"></ul>
+        <p class="muted" id="noSessions">Noch keine Session hat Firefox benutzt.</p>
+      </section>
+
+      <section class="glass card">
+        <h2>Letzte Aktionen</h2>
+        <ul class="list" id="actions"></ul>
+        <p class="muted" id="noActions">Noch keine Aktionen.</p>
+      </section>
+    </main>
+    <script src="shared.js"></script>
+    <script src="picker.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

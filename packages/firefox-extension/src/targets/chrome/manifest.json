@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "Plum Browser",
+  "version": "0.5.1",
+  "description": "Lässt Plum-Code-Agents Chrome steuern – jede Session in ihrem eigenen Fenster mit Tab-Gruppe.",
+  "author": "Plum Code",
+  "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3Ak4TOiQD64uMkY19X8+M893okjLbasl3+fjgNs6G8y5jVRqbecWX25l9H1Lc8WEeSe5WRvc9sLCV+H2HY/E2xLkOuSR4f26MQXI9igLxpdN7fh39w44rEcbO6T6YpIqphJzEMjI49e53d86Ox+PTKf0pT03ylafIU1nmpfJpJY2/UyvoJMpEQwlxOl818NLzRIoS+lR6jTS4FDaoczKL3p1UOqL4jSYDMkyNhvl9NHiOX0ERpMHotcq7XS8BFmNaPXnsj7FJ+ZnBhW+E0eDeUhOuYBXbhTlF6CiOLHz2SxIkYM5NUQt1tZX10G9fJ83Rk0jfIU72x96jVibS6muoQIDAQAB",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "storage",
+    "scripting",
+    "sidePanel",
+    "alarms",
+    "debugger",
+    "system.display"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "Plum Browser – Status & Chat",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
+      "description": "Plum-Chat öffnen"
+    }
+  },
+  "storage": {
+    "managed_schema": "managed_schema.json"
+  }
+}

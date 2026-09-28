@@ -1,0 +1,62 @@
+{
+  "manifest_version": 2,
+  "name": "Plum Browser",
+  "version": "0.5.1",
+  "description": "Lässt Plum-Code-Agents Firefox steuern – jede Session in ihrer eigenen Tab-Gruppe.",
+  "author": "Plum Code",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "plum-browser@zwaetschge-webui.ch",
+      "strict_min_version": "128.0"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": ["tabs", "tabGroups", "storage", "<all_urls>"],
+  "background": {
+    "scripts": ["shared.js", "background.js"],
+    "persistent": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "browser_action": {
+    "default_title": "Plum Browser",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_security_policy": "script-src 'self' 'unsafe-eval'; object-src 'self'",
+  "sidebar_action": {
+    "default_panel": "panel.html",
+    "default_title": "Plum",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    },
+    "open_at_install": false
+  },
+  "commands": {
+    "_execute_sidebar_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+P"
+      },
+      "description": "Plum-Chat ein-/ausblenden"
+    }
+  }
+}
