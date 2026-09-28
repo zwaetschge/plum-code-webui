@@ -1,5 +1,7 @@
 package com.claudewebui.app.ui.screens.chat
 
+import com.claudewebui.app.ui.components.common.localizedLabel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.claudewebui.app.ui.theme.PlumTheme
 
 import com.claudewebui.app.R
@@ -74,6 +76,10 @@ fun ChatScreen(
     onNavigateToNotes: (String) -> Unit = {},
     onNavigateToMemory: (String) -> Unit = {},
     onNavigateToDevTools: (String) -> Unit = {},
+    showBackButton: Boolean = true,
+    // The two-pane workspace turns the back arrow into its list toggle.
+    navigationIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    navigationLabel: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val t = PlumTheme.tokens
@@ -94,20 +100,27 @@ fun ChatScreen(
         viewModelStoreOwner = sessionStoreOwner,
         parameters = { parametersOf(sessionId) },
     )
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     BoxWithConstraints(modifier.fillMaxSize()) {
     val isWideLayout = maxWidth >= 840.dp
+    val isCompactPane = maxWidth < 600.dp
     var sidePanel by remember(sessionId) { mutableStateOf(ChatSidePanel.GIT) }
-    var showSidePanel by remember(sessionId) { mutableStateOf(true) }
+    // Open by default only where the chat keeps a comfortable measure beside
+    // the 360dp panel. At 840-1100dp (a tablet with its list hidden) it left
+    // the chat ~500dp and squeezed the panel's own buttons; Git, Notes and
+    // Checkpoints still open it on demand.
+    var showSidePanel by remember(sessionId) { mutableStateOf(maxWidth >= 1100.dp) }
     var showSessionSettings by remember { mutableStateOf(false) }
+    var showAgents by remember { mutableStateOf(false) }
     var showToolLog by remember { mutableStateOf(false) }
+    var showToolsMenu by remember { mutableStateOf(false) }
     var showChatDetails by remember(sessionId) { mutableStateOf(false) }
     var showAttention by remember(sessionId) { mutableStateOf(false) }
     var showOutbox by remember(sessionId) { mutableStateOf(false) }
     val pagedMessages = viewModel.pagedMessages.collectAsLazyPagingItems()
     val messages = pagedMessages.itemSnapshotList.items.asReversed()
-    val outboxItems by viewModel.outbox.collectAsState()
-    val session by viewModel.session.collectAsState()
+    val outboxItems by viewModel.outbox.collectAsStateWithLifecycle()
+    val session by viewModel.session.collectAsStateWithLifecycle()
     val isDesignPreview = BuildConfig.DEBUG && sessionId == "preview"
     val displaySession = session ?: if (isDesignPreview) previewSession() else null
     val displayUiState = if (isDesignPreview) previewChatState() else uiState
@@ -201,7 +214,10 @@ fun ChatScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         var seenFirstResume = false
+        viewModel.setAgentScreenVisible(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
         val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) viewModel.setAgentScreenVisible(true)
+            if (event == Lifecycle.Event.ON_STOP) viewModel.setAgentScreenVisible(false)
             if (event == Lifecycle.Event.ON_RESUME) {
                 // The first ON_RESUME is the initial entry — initializeChat
                 // already loads everything then.
@@ -209,7 +225,7 @@ fun ChatScreen(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose { viewModel.setAgentScreenVisible(false); lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val dictation = rememberVoiceDictation(viewModel::transcribeAndAppend)
@@ -222,6 +238,7 @@ fun ChatScreen(
             onTextChange = viewModel::onInputChange,
             onSend = viewModel::sendMessage,
             onInterrupt = viewModel::interrupt,
+            onRestart = viewModel::restart,
             onRemoveAttachment = viewModel::removeAttachment,
             onActiveFollowupModeChange = viewModel::setActiveFollowupMode,
             onCancelDelivery = viewModel::cancelDelivery,
@@ -296,6 +313,14 @@ fun ChatScreen(
             if (!keyboardOwnsTheScreen) ChatTopBar(
                 session = displaySession,
                 header = ChatHeaderState.from(displayUiState, uiState.isEditingTitle),
+                // A landscape phone or tablet has ~600dp of height: the tab row
+                // alone cost a fifth of it. Its destinations stay one tap away
+                // under ⋮ → Werkzeuge, exactly as on a portrait phone.
+                compact = isCompactPane || isShortWindow() ||
+                    androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp < 720,
+                showBackButton = showBackButton,
+                navigationIcon = navigationIcon,
+                navigationLabel = navigationLabel,
                 actions = remember(
                     viewModel, displaySession?.workingDirectory, isWideLayout, onNavigateBack,
                     onNavigateToFiles, onNavigateToGit, onNavigateToCheckpoints,
@@ -315,7 +340,8 @@ fun ChatScreen(
                     else onNavigateToCheckpoints(sessionId)
                 },
                 onToggleUsage = { showChatDetails = true },
-                onOpenToolLog = { showToolLog = true },
+                onOpenToolLog = { showToolsMenu = true },
+                onOpenAgents = { showAgents = true },
                 onOpenSessionSettings = {
                     viewModel.loadAvailableModels()
                     showSessionSettings = true
@@ -340,6 +366,10 @@ fun ChatScreen(
             )
         },
         bottomBar = {
+            Column {
+            val currentAgents = uiState.agentRuns.filter { it.chatId == uiState.activeChatId }
+            if (currentAgents.isNotEmpty()) SubagentSummary(currentAgents) { showAgents = true }
+            TaskProgressSummary(displayUiState.todos) { showChatDetails = true }
             ChatComposerBar(
                 composer = ChatComposerState.from(uiState),
                 activity = ChatActivityState.from(displayUiState),
@@ -352,6 +382,7 @@ fun ChatScreen(
                 onShowDetails = { showChatDetails = true },
                 onShowOutbox = { showOutbox = true },
             )
+            }
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { padding ->
@@ -447,6 +478,32 @@ fun ChatScreen(
         }
     }
 
+    if (showAgents) {
+        ModalBottomSheet(onDismissRequest = { showAgents = false }, containerColor = MaterialTheme.colorScheme.background) {
+            SubagentPanel(uiState, viewModel::loadMoreAgents)
+        }
+    }
+    if (showToolsMenu) {
+        ModalBottomSheet(onDismissRequest = { showToolsMenu = false }, containerColor = MaterialTheme.colorScheme.background) {
+            val agents = displayUiState.agentRuns.filter { it.chatId == displayUiState.activeChatId }
+            val openRuntime = { showToolsMenu = false; viewModel.loadAvailableModels(); showSessionSettings = true }
+            SessionToolsMenu(
+                modelSummary = listOfNotNull(displaySession?.cliModel, displaySession?.cliReasoning, displaySession?.mode?.localizedLabel()).joinToString(" · "),
+                appearanceSummary = listOfNotNull(displaySession?.designStyleSkill, displaySession?.writingStyleSkill).joinToString(" · ").ifBlank { stringResource(R.string.session_menu_default_appearance) },
+                activeAgents = agents.count { it.isActive }, waitingAgents = agents.count { it.isActive && it.activity == "waiting" },
+                onTasks = { showToolsMenu = false; showChatDetails = true },
+                onAgents = { showToolsMenu = false; showAgents = true },
+                onFiles = { showToolsMenu = false; onNavigateToFiles(displaySession?.workingDirectory ?: "") },
+                onGit = { showToolsMenu = false; if (isWideLayout) { sidePanel = ChatSidePanel.GIT; showSidePanel = true } else onNavigateToGit(displaySession?.workingDirectory ?: "") },
+                onNotes = { showToolsMenu = false; if (isWideLayout) { sidePanel = ChatSidePanel.NOTES; showSidePanel = true } else onNavigateToNotes(sessionId) },
+                onLog = { showToolsMenu = false; showToolLog = true },
+                onChecks = { showToolsMenu = false; onNavigateToCheckpoints(sessionId) },
+                onMemory = { showToolsMenu = false; onNavigateToMemory(displaySession?.workingDirectory ?: "") },
+                onDevTools = { showToolsMenu = false; onNavigateToDevTools(displaySession?.workingDirectory ?: "") },
+                onRuntime = openRuntime, onAppearance = openRuntime,
+            )
+        }
+    }
     if (showToolLog) {
         ToolLogSheet(
             tools = displayUiState.toolHistory.values.sortedByDescending { it.timestamp },

@@ -40,6 +40,8 @@
     <string name="native_input">Eingabe</string>
     <string name="native_limits">Anbieterlimits</string>
     <string name="native_models">Modelle</string>
+    <string name="native_monitor">Monitor</string>
+    <string name="native_monitor_empty">Noch keine Sitzungen im Monitor</string>
     <string name="native_more">+%1$d weitere</string>
     <string name="native_need_you">%1$d benötigen dich</string>
     <string name="native_needs_working">%1$d benötigen dich · %2$d arbeiten</string>
@@ -101,6 +103,7 @@
     <string name="native_week_title">Diese Woche</string>
     <string name="native_widget_options">Widget-Einstellungen</string>
     <string name="native_window_five_hours">5 Stunden</string>
+    <string name="native_window_month">Monat</string>
     <string name="native_window_week">7 Tage</string>
     <string name="native_window_week_sonnet">7 Tage Sonnet</string>
     <string name="native_working">%1$d arbeiten</string>

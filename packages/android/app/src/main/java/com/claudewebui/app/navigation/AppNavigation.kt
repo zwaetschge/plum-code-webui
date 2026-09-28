@@ -45,6 +45,7 @@ import com.claudewebui.app.ui.screens.chat.UsageViewModel
 import com.claudewebui.app.ui.components.common.WindowWidth
 import com.claudewebui.app.ui.components.common.rememberWindowWidth
 import com.claudewebui.app.ui.screens.dashboard.AdaptiveSessionWorkspace
+import com.claudewebui.app.ui.screens.monitor.MonitorScreen
 import com.claudewebui.app.ui.theme.LayoutPrefs
 import com.claudewebui.app.ui.screens.dashboard.DashboardScreen
 import com.claudewebui.app.ui.screens.filemanager.FileManagerScreen
@@ -139,7 +140,9 @@ fun AppNavigation(
     val startDestination = remember(deepLinkUri) {
         val isDesignPreview = BuildConfig.DEBUG && deepLinkUri == "claudewebui://preview"
         val isChatPreview = BuildConfig.DEBUG && deepLinkUri == "claudewebui://preview-chat"
+        val isMonitorPreview = BuildConfig.DEBUG && deepLinkUri == "claudewebui://preview-monitor"
         when {
+            isMonitorPreview -> MONITOR_PREVIEW_ROUTE
             isChatPreview -> Routes.Chat.createRoute("preview")
             isAnalyticsPreview -> Routes.Analytics.route
             TokenStore.isLoggedIn || isDesignPreview -> Routes.Dashboard.route
@@ -152,8 +155,15 @@ fun AppNavigation(
     }
 
     // An expired token used to leave the app sitting on cached data forever.
+    // Debug design previews run without a login, so their 401s are expected
+    // and must not bounce the fixture screen to the login page.
+    val isDesignPreviewLink = BuildConfig.DEBUG && deepLinkUri?.startsWith("claudewebui://preview") == true
     LaunchedEffect(Unit) {
         AuthEvents.sessionExpired.collect {
+            if (isDesignPreviewLink && !TokenStore.isLoggedIn) {
+                AuthEvents.consume()
+                return@collect
+            }
             socketManager.disconnect()
             AuthEvents.consume()
             navController.navigate(Routes.Login.route) {
@@ -206,6 +216,9 @@ fun AppNavigation(
                 viewModel = viewModel,
                 onAuthenticated = { _ ->
                     socketManager.connect()
+                    // The shared settings ViewModel is created before login;
+                    // fetch synced appearance again now that auth exists.
+                    settingsViewModel.loadSettings()
                     navController.navigate(Routes.Dashboard.route) {
                         popUpTo(Routes.Login.route) { inclusive = true }
                     }
@@ -282,6 +295,30 @@ fun AppNavigation(
                 },
                 onNavigateMain = { navController.navigateMain(it) },
             )
+        }
+
+        composable(
+            route = Routes.Monitor.route,
+            deepLinks = listOf(navDeepLink { uriPattern = "claudewebui://monitor" }),
+        ) {
+            MonitorScreen(
+                onNavigateMain = { navController.navigateMain(it) },
+                onOpenSession = { sessionId ->
+                    navController.navigate(Routes.Chat.createRoute(sessionId))
+                },
+            )
+        }
+
+        if (BuildConfig.DEBUG) {
+            // Fixture-backed render of the grid, reachable without a login so
+            // the layout can be checked on a real device.
+            composable(route = MONITOR_PREVIEW_ROUTE) {
+                MonitorScreen(
+                    onNavigateMain = {},
+                    onOpenSession = {},
+                    previewState = com.claudewebui.app.ui.screens.monitor.previewMonitorState(),
+                )
+            }
         }
 
         composable(route = Routes.Activity.route) {
@@ -634,9 +671,12 @@ fun AppNavigation(
     }
 }
 
+private const val MONITOR_PREVIEW_ROUTE = "monitor_preview"
+
 private fun NavHostController.navigateMain(destination: MainDestination) {
     val route = when (destination) {
         MainDestination.SESSIONS -> Routes.Dashboard.route
+        MainDestination.MONITOR -> Routes.Monitor.route
         MainDestination.ACTIVITY -> Routes.Activity.route
         MainDestination.ANALYTICS -> Routes.Analytics.route
         MainDestination.LIBRARY -> Routes.Library.route

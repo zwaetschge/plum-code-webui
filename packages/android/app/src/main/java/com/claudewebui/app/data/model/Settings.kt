@@ -7,7 +7,16 @@ import kotlinx.serialization.Serializable
 enum class Theme {
     @SerialName("dark") DARK,
     @SerialName("light") LIGHT,
-    @SerialName("system") SYSTEM
+    @SerialName("system") SYSTEM,
+    @SerialName("eink") EINK
+}
+
+@Serializable
+enum class BackgroundAnimation {
+    @SerialName("aurora") AURORA,
+    @SerialName("glass") GLASS,
+    @SerialName("ribbons") RIBBONS,
+    @SerialName("still") STILL
 }
 
 @Serializable
@@ -18,13 +27,15 @@ enum class UiProvider {
     @SerialName("codex") CODEX,
     @SerialName("opencode") OPENCODE,
     @SerialName("pi") PI,
-    @SerialName("kimi") KIMI
+    @SerialName("kimi") KIMI,
+    @SerialName("vibe") VIBE
 }
 
 @Serializable
 data class UserSettings(
     val userId: String,
     val theme: Theme = Theme.DARK,
+    val backgroundAnimation: BackgroundAnimation = BackgroundAnimation.AURORA,
     val defaultWorkingDir: String? = null,
     val allowedTools: List<String> = emptyList(),
     val customSystemPrompt: String? = null,
@@ -45,6 +56,8 @@ data class UserSettings(
 @Serializable
 data class UpdateSettingsInput(
     val theme: Theme? = null,
+    val backgroundAnimation: BackgroundAnimation? = null,
+    val appearanceSync: Boolean? = null,
     val defaultWorkingDir: String? = null,
     val allowedTools: List<String>? = null,
     val customSystemPrompt: String? = null,

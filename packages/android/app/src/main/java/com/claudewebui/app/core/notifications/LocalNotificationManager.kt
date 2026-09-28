@@ -31,7 +31,7 @@ import kotlinx.coroutines.flow.onEach
  * Manages local notifications without requiring Firebase or WorkManager.
  *
  * Responsibilities:
- * 1. Monitor [SocketManager] flows and post notifications when the app is in background.
+ * 1. Monitor [SocketManager] flows and post Android system notifications in foreground and background.
  * 2. Handle Android 13+ POST_NOTIFICATIONS permission requests.
  * 3. Serve as the in-process dispatcher for inline notification actions (approve permission).
  */
@@ -54,7 +54,21 @@ object LocalNotificationManager {
      */
     val foreground: StateFlow<Boolean> = _foreground.asStateFlow()
 
-    private val appInForeground: Boolean get() = _foreground.value
+    /**
+     * A reply now reaches the phone on two channels — the session room's
+     * `session:message` and the user room's `notification:new` — and the
+     * periodic safety net can see it a third time. One announcement per
+     * session and kind inside this window is the rule that keeps that from
+     * turning into three buzzes for one turn.
+     */
+    private val recentlyAnnounced = ConcurrentHashMap<String, Long>()
+    private const val ANNOUNCE_DEDUPE_MS = 20_000L
+
+    /** Whether the live path already told the user about this, for the safety net. */
+    fun wasRecentlyAnnounced(sessionId: String, kind: String): Boolean {
+        val stamp = recentlyAnnounced["$sessionId|$kind"] ?: return false
+        return System.currentTimeMillis() - stamp < ANNOUNCE_DEDUPE_MS * 3
+    }
 
     // Sessions with a turn in flight — drives the foreground keep-alive
     // service so the socket survives Doze until the reply lands.
@@ -90,7 +104,47 @@ object LocalNotificationManager {
         this.sessionRepository = sessionRepository
         NotificationService.createChannels(context.applicationContext)
         observeSocketEvents(socket)
+        observeLifecycle(socket, sessionRepository)
         observeMonitoredSessions(socket, sessionRepository)
+    }
+
+    /**
+     * The account-wide heartbeat, applied to the cache for every session.
+     *
+     * This is how a session nobody has opened moves from working to waiting
+     * on the dashboard and the monitor grid without a refresh — and how the
+     * keep-alive learns about turns started from the desktop on sessions the
+     * room subscriptions never reached.
+     */
+    private fun observeLifecycle(socket: SocketManager, repository: SessionRepository) {
+        socket.lifecycle
+            .onEach { event ->
+                repository.cacheLifecycle(event)
+                if (event.busy) onTurnStarted(event.sessionId) else onTurnFinished(event.sessionId)
+                if (event.activitySummary != null && event.busy) {
+                    activeDetail[event.sessionId] = event.activitySummary
+                    pushWatchDetail()
+                }
+                refreshWidgets()
+            }
+            .launchIn(scope)
+
+        // The durable feed, live. Independent of every room subscription, so
+        // a turn that finished on a session outside the monitored window still
+        // announces itself.
+        socket.notificationNew
+            .onEach { item ->
+                val sessionId = item.sessionId ?: return@onEach
+                appContext?.let { AttentionSync.markFeedSeen(it, item.id) }
+                when (item.kind) {
+                    "reply", "goal", "error", "question" ->
+                        announce(sessionId, item.kind, body = item.body, serverTitle = item.title)
+                    // Approvals keep their richer room-path notification with
+                    // inline Approve/Deny; the feed row only mirrors it.
+                    else -> Unit
+                }
+            }
+            .launchIn(scope)
     }
 
     /**
@@ -115,6 +169,7 @@ object LocalNotificationManager {
                     .sortedByDescending { it.lastActivityAt ?: it.updatedAt }
                     .take(SocketManager.MONITORED_SESSION_LIMIT)
                     .map { it.id }
+                socket.subscribeAll()
                 socket.syncMonitoredSessions(ids, openSessionId = openSessionId)
 
                 // The Quick Settings tile had a working update path that
@@ -136,7 +191,8 @@ object LocalNotificationManager {
      * not go quiet because thirty other sessions were busier.
      */
     @Volatile
-    private var openSessionId: String? = null
+    var openSessionId: String? = null
+        private set
 
     /** Called by the chat screen so its session is never unsubscribed underneath it. */
     fun setOpenSession(sessionId: String?) {
@@ -145,7 +201,7 @@ object LocalNotificationManager {
 
     /**
      * Notify the manager that the app entered the foreground.
-     * While in foreground we suppress background-only notifications.
+     * Presence changes do not affect system notification delivery.
      */
     fun onAppForegrounded() {
         _foreground.value = true
@@ -240,20 +296,10 @@ object LocalNotificationManager {
                 onTurnFinished(message.sessionId)
                 cacheIdle(message.sessionId)
                 refreshWidgets()
-                if (appInForeground) return@onEach
-                val ctx = appContext ?: return@onEach
-                if (!NotificationPreferences.canPostNotifications(ctx)) return@onEach
                 val content = message.content.trim()
                 if (content.isEmpty()) return@onEach
-                val name = sessionName(message.sessionId)
                 val isGoal = content.startsWith("Goal complete", ignoreCase = true)
-                NotificationService.notifySessionCompleted(
-                    ctx,
-                    message.sessionId,
-                    name,
-                    summary = content.take(300),
-                    title = if (isGoal) ctx.getString(R.string.native_goal_complete, name) else ctx.getString(R.string.native_reply_ready, name),
-                )
+                announce(message.sessionId, if (isGoal) "goal" else "reply", body = content.take(300))
             }
             .launchIn(scope)
 
@@ -273,14 +319,8 @@ object LocalNotificationManager {
                 }
                 sessionRepository?.cacheStatus(sessionId, status)
                 refreshWidgets()
-                if (appInForeground) return@onEach
-                val ctx = appContext ?: return@onEach
-                if (!NotificationPreferences.canPostNotifications(ctx)) return@onEach
                 if (shouldPostGenericStatusNotification(status)) {
-                    NotificationService.notifyError(
-                        ctx, sessionId, sessionName(sessionId),
-                        ctx.getString(R.string.native_session_error)
-                    )
+                    announce(sessionId, "error", body = appContext?.getString(R.string.native_session_error))
                 }
             }
             .launchIn(scope)
@@ -290,10 +330,10 @@ object LocalNotificationManager {
         // prompts need the full UI, so those fall back to an open-the-app nudge.
         socket.question
             .onEach { event ->
-                if (appInForeground) return@onEach
                 val ctx = appContext ?: return@onEach
-                if (!NotificationPreferences.canPostNotifications(ctx)) return@onEach
                 val question = event.questions.firstOrNull()
+                markAnnounced(event.sessionId, "question")
+                if (!NotificationPreferences.canPostNotifications(ctx)) return@onEach
                 if (event.questions.size == 1 && question != null) {
                     NotificationService.notifyQuestion(
                         ctx,
@@ -319,7 +359,6 @@ object LocalNotificationManager {
         socket.permission
             .onEach { permissionJson ->
                 refreshWidgets()
-                if (appInForeground) return@onEach
                 val ctx = appContext ?: return@onEach
                 if (!NotificationPreferences.canPostNotifications(ctx)) return@onEach
                 val obj = permissionJson.toString()
@@ -336,6 +375,7 @@ object LocalNotificationManager {
                     // Now that approvals arrive from any session, a uuid tells
                     // the user nothing about which one is blocked.
                     if (sessionId.isNotBlank() && requestId.isNotBlank()) {
+                        markAnnounced(sessionId, "approval:$requestId")
                         NotificationService.notifyPermissionRequest(
                             ctx, sessionId, sessionName(sessionId), toolName, requestId
                         )
@@ -357,13 +397,54 @@ object LocalNotificationManager {
             .onEach { (sessionId, errorMsg) ->
                 onTurnFinished(sessionId)
                 cacheIdle(sessionId)
-                if (appInForeground) return@onEach
-                val ctx = appContext ?: return@onEach
-                if (!NotificationPreferences.canPostNotifications(ctx)) return@onEach
-                NotificationService.notifyError(ctx, sessionId, sessionName(sessionId), errorMsg)
+                announce(sessionId, "error", body = errorMsg)
             }
             .launchIn(scope)
 
+    }
+
+    // ── Announcements ──────────────────────────────────────────────────────────
+
+    private fun markAnnounced(sessionId: String, kind: String) {
+        recentlyAnnounced["$sessionId|$kind"] = System.currentTimeMillis()
+    }
+
+    /**
+     * Tell the user once about a reply, goal, error or question — as a native
+     * system notification, including while this session is open. Android owns
+     * presentation, sound and suppression through its notification settings.
+     */
+    private suspend fun announce(
+        sessionId: String,
+        kind: String,
+        body: String?,
+        serverTitle: String? = null,
+    ) {
+        val ctx = appContext ?: return
+        val key = "$sessionId|$kind"
+        val now = System.currentTimeMillis()
+        val previous = recentlyAnnounced.put(key, now)
+        if (previous != null && now - previous < ANNOUNCE_DEDUPE_MS) return
+        val name = sessionName(sessionId)
+        val title = when (kind) {
+            "goal" -> ctx.getString(R.string.native_goal_complete, name)
+            "reply" -> ctx.getString(R.string.native_reply_ready, name)
+            "error" -> ctx.getString(R.string.native_error_session, name)
+            "question" -> ctx.getString(R.string.native_agent_question, name)
+            else -> serverTitle ?: name
+        }
+        if (!NotificationPreferences.canPostNotifications(ctx)) return
+        when (kind) {
+            "reply", "goal" -> NotificationService.notifySessionCompleted(
+                ctx, sessionId, name, summary = body?.take(300), title = title,
+            )
+            "error" -> NotificationService.notifyError(
+                ctx, sessionId, name, body ?: ctx.getString(R.string.native_session_error),
+            )
+            "question" -> NotificationService.notifyError(
+                ctx, sessionId, name, body ?: ctx.getString(R.string.native_question_asked), isWarning = true,
+            )
+        }
     }
 
     // ── Room cache writes ──────────────────────────────────────────────────────

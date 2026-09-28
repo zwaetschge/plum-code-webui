@@ -56,6 +56,7 @@ data class AuthProviders(
     val opencode: Boolean = false,
     val pi: Boolean = false,
     val kimi: Boolean = false,
+    val vibe: Boolean = false,
     val zai: Boolean = false,
     val proxy: Boolean = false,
 )

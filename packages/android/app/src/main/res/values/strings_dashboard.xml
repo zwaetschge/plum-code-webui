@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="dashboard_more_filters">More filters</string>
+    <string name="dashboard_categories_label">Categories</string>
+    <string name="dashboard_working_count">%1$d working</string>
+    <string name="dashboard_attention_count">%1$d need attention</string>
     <string name="dashboard_1_active_session_050e7">1 active session</string>
     <string name="dashboard_1_approval_b75cb">1 approval</string>
     <string name="dashboard_1_approval_tap_to_answer_642d9">1 approval — tap to answer.</string>

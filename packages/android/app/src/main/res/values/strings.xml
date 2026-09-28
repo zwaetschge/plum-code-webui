@@ -23,8 +23,11 @@
     <string name="widget_desc_week_chart">Bar chart of daily token usage over the last seven days.</string>
     <string name="widget_label_top_sessions">Top Sessions</string>
     <string name="widget_desc_top_sessions">Most expensive sessions this week by cost and tokens.</string>
+    <string name="widget_label_monitor">Monitor</string>
+    <string name="widget_desc_monitor">The four sessions from the Monitor tab, with what each one is doing.</string>
     <string name="widget_chart_description">Daily token usage chart</string>
 
     <!-- Quick Settings Tile -->
     <string name="tile_label">Plum Code</string>
+    <string name="component_reasoning_ultracode">Ultracode (Workflows)</string>
 </resources>

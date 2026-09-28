@@ -24,6 +24,10 @@ data class NotesUiState(
     val draftTitle: String = "",
     val draftContent: String = "",
     val isSaving: Boolean = false,
+    val isDirty: Boolean = false,
+    val editSwitchBlocked: Boolean = false,
+    val savedTitle: String = "",
+    val savedContent: String = "",
     val error: String? = null,
 )
 
@@ -37,6 +41,7 @@ data class NotesUiState(
 class NotesViewModel(
     private val sessionId: String,
     private val repository: NoteRepository,
+    private val drafts: com.claudewebui.app.data.local.EditorDraftStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(NotesUiState())
@@ -46,7 +51,12 @@ class NotesViewModel(
     private var debounceJob: Job? = null
     private val saveMutex = Mutex()
 
+    private val draftKey = "notes:$sessionId"
+
     init {
+        drafts.read(draftKey)?.let { d ->
+            _uiState.update { it.copy(editingId = d.id, draftTitle = d.title, draftContent = d.content, isDirty = true) }
+        }
         load()
     }
 
@@ -62,26 +72,39 @@ class NotesViewModel(
     }
 
     fun startNew() {
-        _uiState.update { it.copy(editingId = NEW_NOTE, draftTitle = "", draftContent = "") }
+        if (_uiState.value.isDirty || _uiState.value.isSaving) {
+            _uiState.update { it.copy(editSwitchBlocked = true) }; return
+        }
+        _uiState.update { it.copy(editingId = NEW_NOTE, draftTitle = "", draftContent = "", savedTitle = "", savedContent = "", error = null) }
     }
 
     fun startEditing(note: Note) {
+        if (_uiState.value.isDirty || _uiState.value.isSaving) {
+            _uiState.update { it.copy(editSwitchBlocked = true) }; return
+        }
         _uiState.update {
-            it.copy(editingId = note.id, draftTitle = note.title, draftContent = note.content)
+            it.copy(editingId = note.id, draftTitle = note.title, draftContent = note.content, savedTitle = note.title, savedContent = note.content, error = null)
         }
     }
 
     fun onTitleChange(value: String) {
-        _uiState.update { it.copy(draftTitle = value) }
+        _uiState.update { it.copy(draftTitle = value, isDirty = true) }
         scheduleSave()
     }
 
     fun onContentChange(value: String) {
-        _uiState.update { it.copy(draftContent = value) }
+        _uiState.update { it.copy(draftContent = value, isDirty = true) }
         scheduleSave()
     }
 
+    private fun rememberDraft() {
+        val s = _uiState.value
+        if (s.editingId != null && s.isDirty) drafts.write(draftKey, com.claudewebui.app.data.local.EditorDraft(s.editingId, s.draftTitle, s.draftContent))
+        else drafts.clear(draftKey)
+    }
+
     private fun scheduleSave() {
+        rememberDraft()
         debounceJob?.cancel()
         debounceJob = viewModelScope.launch {
             delay(900)
@@ -103,12 +126,15 @@ class NotesViewModel(
     }
 
     /** Write the draft. Creates on first save, updates afterwards. */
-    private suspend fun persist() {
+    private suspend fun persist(): Boolean {
         val state = _uiState.value
-        val id = state.editingId ?: return
-        if (state.draftTitle.isBlank() && state.draftContent.isBlank()) return
+        val id = state.editingId ?: return true
+        if (!state.isDirty) return true
+        if (id == NEW_NOTE && state.draftTitle.isBlank() && state.draftContent.isBlank()) {
+            _uiState.update { it.copy(isDirty = false) }; rememberDraft(); return true
+        }
 
-        _uiState.update { it.copy(isSaving = true) }
+        _uiState.update { it.copy(isSaving = true, error = null) }
         val result = if (id == NEW_NOTE) {
             repository.create(sessionId, state.draftTitle, state.draftContent)
         } else {
@@ -117,27 +143,32 @@ class NotesViewModel(
         result
             .onSuccess { saved ->
                 _uiState.update { current ->
-                    val others = current.notes.filterNot { it.id == saved.id }
-                    current.copy(
-                        notes = listOf(saved) + others,
-                        // A freshly created note gets a server id; keep editing it
-                        // rather than creating a second note on the next keystroke.
-                        editingId = if (current.editingId == NEW_NOTE) saved.id else current.editingId,
-                        isSaving = false,
-                    )
+                    current.acknowledgeNoteSave(state, saved)
                 }
             }
             .onFailure { error ->
                 _uiState.update { it.copy(isSaving = false, error = error.screenErrorMessage("notes", "persist")) }
             }
+        rememberDraft()
+        return result.isSuccess
     }
 
     fun closeEditor() {
         debounceJob?.cancel()
         viewModelScope.launch {
-            persistSafely()
-            _uiState.update { it.copy(editingId = null, draftTitle = "", draftContent = "") }
+            val saved = persistSafely()
+            _uiState.update { it.closeAfterSave(saved) }
+            if (_uiState.value.editingId == null) drafts.clear(draftKey)
         }
+    }
+
+    fun retrySave() { scheduleSave() }
+
+    fun discardDraft() {
+        if (_uiState.value.isSaving) return
+        debounceJob?.cancel()
+        _uiState.update { it.copy(editingId = null, draftTitle = "", draftContent = "", isDirty = false, error = null) }
+        drafts.clear(draftKey)
     }
 
     fun togglePinned(note: Note) {
@@ -169,3 +200,15 @@ class NotesViewModel(
         const val NEW_NOTE = "__new__"
     }
 }
+
+internal fun NotesUiState.acknowledgeNoteSave(sent: NotesUiState, saved: Note): NotesUiState = copy(
+    notes = listOf(saved) + notes.filterNot { it.id == saved.id },
+    editingId = if (editingId == "__new__") saved.id else editingId,
+    isSaving = false,
+    isDirty = draftTitle != sent.draftTitle || draftContent != sent.draftContent,
+    savedTitle = sent.draftTitle, savedContent = sent.draftContent,
+    editSwitchBlocked = false,
+)
+
+internal fun NotesUiState.closeAfterSave(success: Boolean): NotesUiState =
+    if (success && !isDirty) copy(editingId = null, draftTitle = "", draftContent = "", editSwitchBlocked = false) else this

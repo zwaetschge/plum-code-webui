@@ -23,6 +23,20 @@ interface ProvidersApi {
     /** DELETE /api/cli-login/:id — abandon the run. */
     suspend fun cancelCliLogin(id: String): ApiResponse<Unit>
 
+    // ---- Mistral Vibe credentials ------------------------------------------
+    // Vibe signs in through its ACP agent (the generic flow above) or with a
+    // pasted key. The key itself is write-only: the status endpoint reports
+    // flags and the key's source, never its value.
+
+    /** GET /api/cli-login/vibe/status */
+    suspend fun getVibeAuthStatus(): ApiResponse<VibeAuthStatus>
+
+    /** POST /api/cli-login/vibe/key */
+    suspend fun saveVibeApiKey(input: VibeApiKeyInput): ApiResponse<VibeAuthStatus>
+
+    /** DELETE /api/cli-login/vibe/key — sign out by removing the stored key. */
+    suspend fun clearVibeApiKey(): ApiResponse<Unit>
+
     // ---- OpenCode providers ------------------------------------------------
 
     suspend fun getOpenCodeProviders(): ApiResponse<List<OpenCodeProvider>>
@@ -50,6 +64,15 @@ class ProvidersApiImpl(private val http: ApiHttp) : ProvidersApi {
 
     override suspend fun cancelCliLogin(id: String): ApiResponse<Unit> =
         http.delete("/api/cli-login/$id")
+
+    override suspend fun getVibeAuthStatus(): ApiResponse<VibeAuthStatus> =
+        http.get("/api/cli-login/vibe/status")
+
+    override suspend fun saveVibeApiKey(input: VibeApiKeyInput): ApiResponse<VibeAuthStatus> =
+        http.post("/api/cli-login/vibe/key") { setBody(input) }
+
+    override suspend fun clearVibeApiKey(): ApiResponse<Unit> =
+        http.delete("/api/cli-login/vibe/key")
 
     override suspend fun getOpenCodeProviders(): ApiResponse<List<OpenCodeProvider>> =
         http.get("/api/opencode/providers")

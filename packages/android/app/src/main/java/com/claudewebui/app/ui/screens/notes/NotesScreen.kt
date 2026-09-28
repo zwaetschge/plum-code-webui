@@ -32,8 +32,9 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -68,7 +69,15 @@ fun NotesScreen(
     val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
     androidx.compose.ui.platform.LocalConfiguration.current
 
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var confirmDiscard by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    if (confirmDiscard) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { confirmDiscard = false },
+        title = { Text(screenResources.getString(R.string.recovery_discard_title)) },
+        text = { Text(screenResources.getString(R.string.recovery_discard_body)) },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { viewModel.discardDraft(); confirmDiscard = false }) { Text(screenResources.getString(R.string.recovery_discard)) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDiscard = false }) { Text(screenResources.getString(R.string.action_cancel)) } },
+    )
 
     PlumBackdrop {
         Scaffold(
@@ -127,9 +136,16 @@ fun NotesScreen(
                                         focusedLabelColor = PlumAccent,
                                     ),
                                 )
+                                if (state.editSwitchBlocked) Text(screenResources.getString(R.string.notes_finish_first), color = PlumMuted)
+                                if (state.isDirty) {
+                                    Row {
+                                        androidx.compose.material3.TextButton(enabled = !state.isSaving, onClick = viewModel::retrySave) { Text(screenResources.getString(R.string.recovery_retry)) }
+                                        androidx.compose.material3.TextButton(enabled = !state.isSaving, onClick = { confirmDiscard = true }) { Text(screenResources.getString(R.string.recovery_discard)) }
+                                    }
+                                }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        if (state.isSaving) screenResources.getString(R.string.notes_saving_56a22) else screenResources.getString(R.string.notes_saved_automatically_5bee9),
+                                        if (state.isSaving) screenResources.getString(R.string.notes_saving_56a22) else if (state.isDirty) screenResources.getString(R.string.recovery_unsaved) else screenResources.getString(R.string.notes_saved_automatically_5bee9),
                                         color = PlumMuted,
                                         fontSize = 11.sp,
                                         modifier = Modifier.weight(1f),

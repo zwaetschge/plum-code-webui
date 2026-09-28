@@ -4,6 +4,14 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import com.claudewebui.app.ui.screens.chat.ChatTopBar
+import com.claudewebui.app.ui.screens.chat.ChatHeaderState
+import com.claudewebui.app.ui.screens.chat.ChatTopBarActions
+import com.claudewebui.app.ui.screens.chat.previewSession
+import com.claudewebui.app.ui.screens.chat.previewChatState
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -34,6 +42,55 @@ import java.io.File
 /** Behaviour and rendered-surface regressions; no backend or account required. */
 class ChatSurfaceTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun agentPanelShowsAllParallelWorkersAndTheirTasks() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val runs = (1..40).map { com.claudewebui.app.data.model.SubagentRun(id = "run-$it", agentType = "Worker $it", description = "Task $it", provider = "zai", model = "glm-5.3", startedAt = System.currentTimeMillis()) }
+        compose.setContent { TestTheme(true) {
+            com.claudewebui.app.ui.screens.chat.SubagentPanel(
+                com.claudewebui.app.ui.screens.chat.ChatUiState(agentRuns = runs, isConnected = true), {})
+        } }
+        compose.onNodeWithText(context.getString(R.string.agents_summary, 40, 0, 0)).assertIsDisplayed()
+        compose.onNodeWithText("Task 1").assertIsDisplayed()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Task 40"))
+        compose.onNodeWithText("Task 40").assertIsDisplayed()
+    }
+
+    @Test fun narrowHeaderKeepsTabsOnOneLineAndToolsReachable() {
+        var fontScale by mutableStateOf(1f)
+        var toolsOpened = false
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val labels = listOf(R.string.chat_tab, R.string.chat_files, R.string.chat_panel_git,
+            R.string.chat_checks, R.string.chat_stats, R.string.chat_tools).map { context.getString(it) }
+        compose.setContent {
+            val density = LocalDensity.current.density
+            CompositionLocalProvider(LocalDensity provides Density(density, fontScale)) {
+                TestTheme(true) {
+                    Column(Modifier.width(360.dp)) {
+                        ChatTopBar(
+                            previewSession(),
+                            ChatHeaderState.from(previewChatState(), false),
+                            ChatTopBarActions({}, {}, {}, {}, {}, {}, {}, { toolsOpened = true },
+                                {}, {}, {}, {}, {}, {}, {}, {}),
+                        )
+                    }
+                }
+            }
+        }
+        for (scale in listOf(1f, 2f)) {
+            compose.runOnIdle { fontScale = scale }
+            val heights = labels.map { label ->
+                val tab = compose.onNodeWithText(label)
+                tab.performScrollTo().assertIsDisplayed()
+                tab.fetchSemanticsNode().boundsInRoot.height
+            }
+            assertTrue("All tabs must stay on one row at font scale $scale",
+                heights.max() - heights.min() < 2f)
+            compose.onNodeWithText(labels.last()).performClick()
+            compose.runOnIdle { assertTrue(toolsOpened); toolsOpened = false }
+            screenshot("chat-header-$scale.png")
+        }
+    }
 
     @Test fun composerKeepsFollowupWhileAgentIsWorking() {
         var sent: String? = null

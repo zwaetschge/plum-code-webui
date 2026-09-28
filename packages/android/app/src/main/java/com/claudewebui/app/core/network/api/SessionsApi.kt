@@ -8,6 +8,8 @@ import kotlinx.serialization.json.JsonElement
 
 /** `/api/sessions` — the session records, their chat threads and settings. */
 interface SessionsApi {
+    suspend fun getSessionAgents(id: String, chatId: String?, offset: Int = 0): ApiResponse<SubagentSnapshot>
+
     /** GET /api/sessions */
     suspend fun getSessions(): ApiResponse<List<Session>>
 
@@ -93,6 +95,12 @@ interface SessionsApi {
 }
 
 class SessionsApiImpl(private val http: ApiHttp) : SessionsApi {
+    override suspend fun getSessionAgents(id: String, chatId: String?, offset: Int): ApiResponse<SubagentSnapshot> =
+        http.get("/api/sessions/${http.pathSegment(id)}/agents") {
+            parameter("chatId", chatId.orEmpty())
+            parameter("offset", offset)
+        }
+
 
     override suspend fun getSessions(): ApiResponse<List<Session>> =
         http.get("/api/sessions")

@@ -22,6 +22,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import com.claudewebui.app.core.network.toAppError
 import androidx.compose.ui.platform.LocalDensity
@@ -329,16 +330,30 @@ internal fun ChatMessageList(
             } else if (displayItems.isEmpty()) {
                 EmptyChat(onWorkflow = actions.onWorkflow, modifier = Modifier.fillMaxSize().padding(contentPadding))
             } else {
+                // The list scrolls behind the opaque header and composer cards,
+                // but not into the system bars around them: bubbles used to show
+                // under the clock/battery and below the composer. Clipping the
+                // list at the insets removes that without changing where the
+                // content rests.
+                // Plus the header card's outer margin (spacing.xs in ChatTopBar).
+                val systemTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + t.spacing.xs
+                // Plus the composer card's own outer margin (spacing.xs in
+                // ChatComposerBar), or a sliver of text peeks out beneath it.
+                val systemBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + t.spacing.xs
                 LazyColumn(
                     state = listState,
                     // Bubbles dissolve into the header and the composer
                     // rather than disappearing at the scrim's edge.
                     modifier = Modifier
                         .fillMaxSize()
+                        .padding(top = systemTop, bottom = systemBottom)
+                        // The lazy list's own clip is not enough here: items were
+                        // still drawn into the status bar above its bounds.
+                        .clipToBounds()
                         .fadingEdges(top = t.spacing.section, bottom = t.spacing.section),
                     contentPadding = PaddingValues(
-                        top = contentPadding.calculateTopPadding() + t.spacing.sm,
-                        bottom = contentPadding.calculateBottomPadding() + t.spacing.sm,
+                        top = (contentPadding.calculateTopPadding() - systemTop).coerceAtLeast(0.dp) + t.spacing.sm,
+                        bottom = (contentPadding.calculateBottomPadding() - systemBottom).coerceAtLeast(0.dp) + t.spacing.sm,
                     ),
                 ) {
                     if (boundaryFailure != null) {
@@ -549,6 +564,7 @@ private fun StreamingBubble(
     val t = PlumTheme.tokens
     Row(
         modifier = modifier
+            .widthIn(max = 520.dp)
             .fillMaxWidth()
             .padding(start = t.spacing.lg, end = 48.dp, top = t.spacing.sm, bottom = t.spacing.sm),
         verticalAlignment = Alignment.Top,

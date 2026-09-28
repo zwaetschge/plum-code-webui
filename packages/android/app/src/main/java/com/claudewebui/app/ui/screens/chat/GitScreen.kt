@@ -199,21 +199,26 @@ private fun GitStatusTab(
     ) {
         // Quick actions
         item {
+            val gitActionPadding = PaddingValues(horizontal = t.spacing.sm, vertical = t.spacing.sm)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(t.spacing.sm)
             ) {
                 OutlinedButton(
                     onClick = onStageAll,
-                    modifier = Modifier.weight(1f)
+                    // In the 360dp chat side panel three equal buttons broke
+                    // "Alle vormerken" and "Commit" mid-word.
+                    modifier = Modifier.weight(1.4f),
+                    contentPadding = gitActionPadding,
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(t.spacing.lg))
                     Spacer(Modifier.width(t.spacing.xs))
-                    Text(stringResource(R.string.chat_stage_all))
+                    Text(stringResource(R.string.chat_stage_all), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 FilledTonalButton(
                     onClick = onCommit,
                     modifier = Modifier.weight(1f),
+                    contentPadding = gitActionPadding,
                     enabled = !isCommitting && (status?.staged?.isNotEmpty() == true)
                 ) {
                     if (isCommitting) {
@@ -222,11 +227,12 @@ private fun GitStatusTab(
                         Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(t.spacing.lg))
                     }
                     Spacer(Modifier.width(t.spacing.xs))
-                    Text(stringResource(R.string.chat_commit))
+                    Text(stringResource(R.string.chat_commit), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 FilledTonalButton(
                     onClick = onPush,
                     modifier = Modifier.weight(1f),
+                    contentPadding = gitActionPadding,
                     enabled = !isPushing
                 ) {
                     if (isPushing) {
@@ -235,7 +241,7 @@ private fun GitStatusTab(
                         Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(t.spacing.lg))
                     }
                     Spacer(Modifier.width(t.spacing.xs))
-                    Text(stringResource(R.string.chat_push))
+                    Text(stringResource(R.string.chat_push), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

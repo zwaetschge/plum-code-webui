@@ -50,6 +50,13 @@ data class ChatUiState(
     val thinkingStartTime: Long = 0L,
     /** Server-provided activity label ("Writing response", tool name, …). */
     val thinkingLabel: String? = null,
+    val agentRuns: List<com.claudewebui.app.data.model.SubagentRun> = emptyList(),
+    val agentTotals: com.claudewebui.app.data.model.SubagentTotals? = null,
+    val agentsCapturedAt: Long? = null,
+    val agentsError: Boolean = false,
+    val agentsLoading: Boolean = false,
+    val agentsHasMore: Boolean = false,
+    val agentsNextOffset: Int = 0,
     val activeTools: Map<String, ToolExecution> = emptyMap(),
     /** Retained across turn resets, bounded to the latest 300 tool calls. */
     val toolHistory: Map<String, ToolExecution> = emptyMap(),

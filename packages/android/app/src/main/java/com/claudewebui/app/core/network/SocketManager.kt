@@ -212,6 +212,33 @@ class SocketManager {
     private val _turnStarted = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val turnStarted: SharedFlow<String> = _turnStarted.asSharedFlow()
 
+    /**
+     * Account-wide heartbeat, one beat per state change per session. Arrives on
+     * the user room, so it covers sessions this client never subscribed to.
+     */
+    private val _lifecycle = MutableSharedFlow<SessionLifecycleEvent>(extraBufferCapacity = 64)
+    val lifecycle: SharedFlow<SessionLifecycleEvent> = _lifecycle.asSharedFlow()
+
+    /**
+     * The server's durable notification centre, pushed live. A reply, goal,
+     * approval, question or error is filed there before any session-room
+     * event goes out, and it reaches the user room regardless of which rooms
+     * this socket joined — the one completion signal that does not depend on
+     * a per-session subscription.
+     */
+    private val _notificationNew = MutableSharedFlow<AppNotification>(extraBufferCapacity = 32)
+    val notificationNew: SharedFlow<AppNotification> = _notificationNew.asSharedFlow()
+
+    /**
+     * Ids covered by the last `session:subscribe-all` acknowledgement. Empty on
+     * a server without the handler, in which case per-session subscribes carry
+     * the monitoring exactly as before.
+     */
+    private val allCovered = ConcurrentHashMap.newKeySet<String>()
+
+    @Volatile
+    private var subscribeAllWanted = false
+
     // ========================================================================
     // Connection Lifecycle
     // ========================================================================
@@ -267,6 +294,8 @@ class SocketManager {
                 on("session:presence", onPresence)
                 on("session:compact", onCompact)
                 on("session:mode", onMode)
+                on("session:lifecycle", onLifecycle)
+                on("notification:new", onNotificationNew)
 
                 connect()
             }
@@ -292,6 +321,8 @@ class SocketManager {
         if (clearSubscriptions) {
             subscribedSessions.clear()
             monitoredSessions.clear()
+            allCovered.clear()
+            subscribeAllWanted = false
         }
         _connectionState.value = ConnectionState.DISCONNECTED
     }
@@ -335,11 +366,21 @@ class SocketManager {
      * Join a session room.
      *
      * Only emitted when the room is not already joined: the server answers a
-     * subscribe by running `recoverInterruptedKimiTurn` for that session, so a
+     * subscribe by recovering an interrupted turn of the persistent ACP
+     * harnesses (`recoverInterruptedKimiTurn`, which Vibe shares), so a
      * redundant call is a database query, not a no-op.
      */
     fun subscribeToSession(sessionId: String) {
         if (subscribedSessions.add(sessionId)) socket?.emit("session:subscribe", sessionId)
+    }
+
+    /**
+     * Make sure events for this session arrive, without paying for a second
+     * join when the account-wide subscription already covers it.
+     */
+    fun ensureSubscribed(sessionId: String) {
+        if (sessionId in allCovered) return
+        subscribeToSession(sessionId)
     }
 
     /**
@@ -370,12 +411,57 @@ class SocketManager {
         monitoredSessions.removeAll(gone)
         for (id in gone) {
             if (id == openSessionId) continue
+            if (id in allCovered) continue
             if (subscribedSessions.remove(id)) socket?.emit("session:unsubscribe", id)
         }
         for (id in wanted) {
             monitoredSessions.add(id)
+            // Rooms the account-wide join already covers must not be joined a
+            // second time: every per-session subscribe costs a turn-recovery
+            // query on the server, which is what the bulk call exists to avoid.
+            if (id in allCovered) continue
             if (subscribedSessions.add(id)) socket?.emit("session:subscribe", id)
         }
+    }
+
+    /**
+     * Join every session this account owns in one round trip.
+     *
+     * Monitoring used to mean up to thirty individual `session:subscribe`
+     * calls — thirty ownership queries and thirty turn recoveries per
+     * reconnect, and a hard cap after which a busy session simply went
+     * unwatched. The bulk join has no such ceiling, and it is replayed on
+     * every reconnect. Sessions created after the join are picked up by
+     * [syncMonitoredSessions] individually until the next reconnect.
+     */
+    fun subscribeAll() {
+        // Idempotent: the session list re-emits on every cached state change,
+        // and each bulk join is a server-side query plus up to 200 room joins.
+        if (subscribeAllWanted) return
+        subscribeAllWanted = true
+        emitSubscribeAll()
+    }
+
+    private fun emitSubscribeAll() {
+        val active = socket ?: return
+        active.emit("session:subscribe-all", Ack { args ->
+            val obj = when (val raw = args.firstOrNull()) {
+                is JSONObject -> raw
+                is Map<*, *> -> JSONObject(raw)
+                else -> null
+            }
+            val ids = obj?.optJSONArray("sessionIds") ?: return@Ack
+            val covered = buildList {
+                for (index in 0 until ids.length()) ids.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+            }
+            allCovered.clear()
+            allCovered.addAll(covered)
+            monitoredSessions.addAll(covered)
+            // Individually joined rooms the bulk call now covers need no replay
+            // of their own on the next reconnect; the open chat keeps its
+            // explicit subscription because it also drives turn recovery.
+            Breadcrumbs.add("socket", "subscribe-all covers ${covered.size} sessions")
+        })
     }
 
     // ========================================================================
@@ -557,8 +643,13 @@ class SocketManager {
         Breadcrumbs.add("socket", "connected (resubscribing ${subscribedSessions.size} sessions)")
         reconnectAttempt = 0
         reconnectJob?.cancel()
+        // The bulk join first, so the individual replays below stay limited to
+        // what it cannot cover (the open chat and anything joined before the
+        // acknowledgement lands).
+        if (subscribeAllWanted) emitSubscribeAll()
         // Re-subscribe to previously subscribed sessions
         subscribedSessions.forEach { sessionId ->
+            if (subscribeAllWanted && sessionId in allCovered && sessionId in monitoredSessions) return@forEach
             socket?.emit("session:subscribe", sessionId)
         }
     }
@@ -719,6 +810,14 @@ class SocketManager {
             _chatSyncEvents.dispatch(ChatSyncEvent.Compact(it))
             _compact.dispatch(it)
         }
+    }
+
+    private val onLifecycle = Emitter.Listener { args ->
+        parseAndEmit<SessionLifecycleEvent>(args) { _lifecycle.dispatch(it) }
+    }
+
+    private val onNotificationNew = Emitter.Listener { args ->
+        parseAndEmit<AppNotification>(args) { _notificationNew.dispatch(it) }
     }
 
     private val onMode = Emitter.Listener { args ->

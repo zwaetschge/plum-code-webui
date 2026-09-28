@@ -21,6 +21,9 @@
     <string name="widget_desc_week_chart">Balkendiagramm des täglichen Tokenverbrauchs der letzten sieben Tage.</string>
     <string name="widget_label_top_sessions">Top-Sitzungen</string>
     <string name="widget_desc_top_sessions">Teuerste Sitzungen dieser Woche nach Kosten und Tokens.</string>
+    <string name="widget_label_monitor">Monitor</string>
+    <string name="widget_desc_monitor">Die vier Sitzungen aus dem Monitor-Tab mit ihrem aktuellen Stand.</string>
     <string name="widget_chart_description">Diagramm des täglichen Tokenverbrauchs</string>
     <string name="tile_label">Plum Code</string>
+    <string name="component_reasoning_ultracode">Ultracode (Workflows)</string>
 </resources>

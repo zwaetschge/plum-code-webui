@@ -22,6 +22,8 @@ data class WidgetSnapshot(
     val sessions: List<WSession> = emptyList(),
     val approvals: List<WApproval> = emptyList(),
     val questions: List<WQuestion> = emptyList(),
+    /** The Monitor tab's four slots, in slot order; defaults when none were chosen. */
+    val monitorSessions: List<WSession> = emptyList(),
     // How many the server actually had, so a widget showing the first eight can
     // say so instead of quietly presenting a truncated list as the whole truth.
     val sessionTotal: Int = 0,

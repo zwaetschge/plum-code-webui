@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.chat
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.claudewebui.app.ui.theme.PlumTheme
 
 import androidx.compose.foundation.layout.*
@@ -48,7 +49,7 @@ internal fun ChatSessionSidePanel(
                         viewModelStoreOwner = storeOwner,
                         parameters = { parametersOf(sessionId) },
                     )
-                    val state by vm.uiState.collectAsState()
+                    val state by vm.uiState.collectAsStateWithLifecycle()
                     GitScreen(
                         workingDirectory = state.workingDirectory,
                         gitStatus = state.gitStatus,
@@ -72,7 +73,7 @@ internal fun ChatSessionSidePanel(
                         viewModelStoreOwner = storeOwner,
                         parameters = { parametersOf(sessionId) },
                     )
-                    val state by vm.uiState.collectAsState()
+                    val state by vm.uiState.collectAsStateWithLifecycle()
                     CheckpointScreen(
                         sessionId = sessionId,
                         checkpoints = state.checkpoints,

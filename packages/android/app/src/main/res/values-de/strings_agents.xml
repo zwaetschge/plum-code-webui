@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agents_title">Agenten</string>
+    <string name="agents_summary_label">Subagenten</string>
+    <string name="agents_summary">%1$d aktiv · %2$d wartend · %3$d fertig</string>
+    <string name="agents_counts">%1$d geplant · %2$d fehlgeschlagen · %3$d abgebrochen / unterbrochen</string>
+    <string name="agents_scope">Subagenten dieses Chats. Hauptagent und konfigurierte Ziele werden nicht mitgezählt. Verlauf zählt den gesamten Chat.</string>
+    <string name="agents_stale">Verbindung unterbrochen oder Aktualisierung fehlgeschlagen. Letzter bekannter Stand.</string>
+    <string name="agents_updated">Stand: %1$s</string>
+    <string name="agents_all">Alle</string>
+    <string name="agents_active">Aktiv</string>
+    <string name="agents_history">Verlauf</string>
+    <string name="agents_waiting">Wartet</string>
+    <string name="agents_done">Fertig</string>
+    <string name="agents_failed">Fehlgeschlagen</string>
+    <string name="agents_cancelled">Abgebrochen</string>
+    <string name="agents_interrupted">Unterbrochen</string>
+    <string name="agents_queued">Geplant</string>
+    <string name="agents_empty">Keine Agenten in dieser Ansicht.</string>
+    <string name="agents_loading">Agenten werden geladen…</string>
+    <string name="agents_more">Älteren Verlauf laden</string>
+    <string name="agents_no_task">Aufgabe nicht übermittelt</string>
+    <string name="agents_no_provider">Provider nicht übermittelt</string>
+    <string name="agents_no_model">Modell nicht übermittelt</string>
+    <string name="agents_no_activity">Keine Detailaktivität übermittelt</string>
+    <string name="agents_background">Hintergrund</string>
+    <string name="agents_parent">Übergeordneter Agent: %1$s</string>
+    <string name="agents_timing">Dauer %1$ds · Letztes Ereignis vor %2$ds</string>
+</resources>

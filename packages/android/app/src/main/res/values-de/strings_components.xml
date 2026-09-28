@@ -166,7 +166,7 @@
     <string name="component_permission_required">Freigabe erforderlich</string>
     <string name="component_permission_required_destructive">Freigabe erforderlich — destruktive Aktion</string>
     <string name="component_planner">Planung</string>
-    <string name="component_possibly_stuck">Seit %1$s still — möglicherweise blockiert</string>
+    <string name="component_possibly_stuck">Seit %1$s keine neue Aktivität</string>
     <string name="component_preparing_transcript">Gespräch wird vorbereitet…</string>
     <string name="component_presentation_presets">Darstellungsvorlagen</string>
     <string name="component_provider">Anbieter</string>
@@ -187,6 +187,7 @@
     <string name="component_reasoning_max">Maximal</string>
     <string name="component_reasoning_medium">Mittel</string>
     <string name="component_reasoning_minimal">Minimal</string>
+    <string name="component_reasoning_off">Aus</string>
     <string name="component_reasoning_ultra">Ultra</string>
     <string name="component_reasoning_xhigh">Sehr hoch</string>
     <string name="component_remove">Entfernen</string>
@@ -283,4 +284,18 @@
     <string name="component_writing">Schreibstil</string>
     <string name="component_writing_file">Datei wird geschrieben…</string>
     <string name="component_yesterday">gestern</string>
+    <string name="activity_summary_searching">Sucht: %1$s</string>
+    <string name="activity_summary_searching_workspace">Durchsucht den Arbeitsbereich</string>
+    <string name="activity_summary_reading">Liest %1$s</string>
+    <string name="activity_summary_reading_files">Liest Dateien</string>
+    <string name="activity_summary_editing">Bearbeitet %1$s</string>
+    <string name="activity_summary_editing_files">Bearbeitet Dateien</string>
+    <string name="activity_summary_updating_tasks">Aktualisiert Aufgaben</string>
+    <string name="activity_summary_web_search">Websuche: %1$s</string>
+    <string name="activity_summary_web_search_plain">Sucht im Web</string>
+    <string name="activity_summary_using">Nutzt %1$s</string>
+    <string name="activity_summary_subagents">%1$s Subagenten laufen</string>
+    <string name="activity_summary_agent">Agent %1$s läuft</string>
+    <string name="activity_summary_writing">Schreibt Antwort</string>
+    <string name="activity_summary_thinking">Denkt nach</string>
 </resources>

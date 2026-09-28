@@ -28,7 +28,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,14 +84,21 @@ fun CliProviderDetailScreen(
     val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
     androidx.compose.ui.platform.LocalConfiguration.current
 
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     val provider = CLIProvider.entries.firstOrNull { it.name.equals(providerId, ignoreCase = true) }
     val config = state.cliProviders.firstOrNull { it.id.equals(providerId, ignoreCase = true) }
+    val isVibe = providerId.equals("vibe", ignoreCase = true)
     val selectedModel = state.userSettings?.cliProviderModels?.get(providerId.lowercase())
         ?: config?.defaultModel
     // Before the registry arrives, screenResources.getString(R.string.settings_no_config_b4b66) and screenResources.getString(R.string.settings_harness_not_installed_50f6e) look
     // identical — say which one it is instead of claiming it needs a login.
     val stillLoading = config == null && state.isLoading
+
+    // Fetched on demand: the server answers by spawning `vibe-acp`, so this must
+    // not run for every provider row the user merely scrolls past.
+    androidx.compose.runtime.LaunchedEffect(isVibe) {
+        if (isVibe) viewModel.loadVibeAuth()
+    }
 
     PlumBackdrop {
         Scaffold(
@@ -161,7 +168,7 @@ fun CliProviderDetailScreen(
                     )
                 }
 
-                if (providerId.lowercase() in setOf("codex", "opencode", "pi")) {
+                if (providerId.lowercase() in setOf("codex", "opencode", "pi", "vibe")) {
                     item {
                         RuntimeDefaultsPanel(
                             providerId = providerId.lowercase(),
@@ -185,6 +192,18 @@ fun CliProviderDetailScreen(
                             error = state.error,
                             onSave = viewModel::saveZaiApi,
                             onReset = viewModel::resetZaiApi,
+                        )
+                    }
+                }
+
+                if (isVibe) {
+                    item {
+                        VibeKeyPanel(
+                            status = state.vibeAuth,
+                            saving = state.vibeAuthSaving,
+                            error = state.error,
+                            onSaveKey = viewModel::saveVibeApiKey,
+                            onSignOut = viewModel::signOutVibe,
                         )
                     }
                 }
@@ -335,6 +354,135 @@ private fun ZaiApiPanel(
     }
 }
 
+/**
+ * Mistral Vibe credentials.
+ *
+ * The browser sign-in above is the path that draws on the plan's Vibe Code
+ * allowance; a key pasted from Code › Vibe CLI does too, while a regular console
+ * key spends the much smaller API allowance. The field is write-only in both
+ * directions — the server reports whether a key exists and where it came from,
+ * never its value — so nothing is ever pre-filled, echoed or displayed.
+ */
+@Composable
+private fun VibeKeyPanel(
+    status: com.claudewebui.app.data.model.VibeAuthStatus?,
+    saving: Boolean,
+    error: String?,
+    onSaveKey: (String) -> Unit,
+    onSignOut: () -> Unit,
+) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+
+    var apiKey by remember { mutableStateOf("") }
+    val signedIn = status?.authenticated == true
+    val fromProcessEnv = status?.source == "process-env"
+
+    GlassPanel(Modifier.fillMaxWidth(), radius = 19.dp) {
+        Column(Modifier.padding(screenTokens.spacing.lg), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    screenResources.getString(R.string.settings_vibe_key_title),
+                    color = PlumText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                StatusPill(
+                    screenResources.getString(
+                        when {
+                            status == null -> R.string.settings_loading_33ce4
+                            signedIn -> R.string.settings_vibe_key_signed_in
+                            else -> R.string.settings_vibe_key_signed_out
+                        },
+                    ),
+                    when {
+                        status == null -> PlumMuted
+                        signedIn -> PlumGreen
+                        else -> PlumAmber
+                    },
+                )
+            }
+
+            if (status?.installed == false) {
+                Text(
+                    screenResources.getString(R.string.settings_vibe_not_installed),
+                    color = PlumAmber,
+                    fontSize = 11.sp,
+                )
+            }
+
+            // Where the key lives decides what can be done with it: only Vibe's
+            // own .env is Plum's to remove, a container-wide env key is not.
+            status?.let { current ->
+                Text(
+                    screenResources.getString(
+                        when (current.source) {
+                            "dot-env" -> R.string.settings_vibe_key_source_dotenv
+                            "process-env" -> R.string.settings_vibe_key_source_process
+                            else -> R.string.settings_vibe_key_source_none
+                        },
+                    ),
+                    color = PlumMuted,
+                    fontSize = 11.sp,
+                )
+            }
+
+            Text(
+                screenResources.getString(R.string.settings_vibe_key_hint),
+                color = PlumMuted,
+                fontSize = 11.sp,
+            )
+
+            OutlinedTextField(
+                value = apiKey,
+                onValueChange = { apiKey = it },
+                label = { Text(screenResources.getString(R.string.settings_vibe_key_field)) },
+                supportingText = { Text(screenResources.getString(R.string.settings_vibe_key_never_shown)) },
+                singleLine = true,
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            error?.let { Text(it, color = PlumRed, fontSize = 11.sp) }
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm, Alignment.End),
+            ) {
+                if (status?.canSignOut == true) {
+                    ActionButton(
+                        screenResources.getString(R.string.settings_vibe_key_sign_out),
+                        enabled = !saving,
+                        onClick = onSignOut,
+                    )
+                }
+                ActionButton(
+                    screenResources.getString(R.string.settings_vibe_key_save),
+                    enabled = apiKey.isNotBlank() && !saving,
+                ) {
+                    onSaveKey(apiKey.trim())
+                    // Drop the secret from composition as soon as it is on its
+                    // way; only the status read-back is kept.
+                    apiKey = ""
+                }
+            }
+
+            if (fromProcessEnv) {
+                Text(
+                    screenResources.getString(R.string.settings_vibe_key_process_env_locked),
+                    color = PlumMuted,
+                    fontSize = 10.sp,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun RuntimeDefaultsPanel(
     providerId: String,
@@ -352,6 +500,11 @@ private fun RuntimeDefaultsPanel(
 
     val reasoningOptions = if (providerId == "codex") {
         listOf("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+    } else if (providerId == "claude" || providerId == "zai" || providerId == "pi") {
+        listOf("low", "medium", "high", "xhigh", "max", "ultracode")
+    } else if (providerId == "vibe") {
+        // Vibe calls the setting "Thinking" and names its lowest level "off".
+        listOf("off", "low", "medium", "high", "max")
     } else {
         listOf("low", "medium", "high", "xhigh", "max")
     }
@@ -452,6 +605,10 @@ private fun CliLoginPanel(
     val clipboard = LocalClipboardManager.current
     val uriHandler = LocalUriHandler.current
     var code by remember(login?.id) { mutableStateOf("") }
+    // Vibe's sign-in is delegated to the browser through its ACP agent: the
+    // server polls the attempt and completes on its own, so `awaiting_code`
+    // there means "waiting for the browser", not "type a code".
+    val isVibeLogin = providerId.equals("vibe", ignoreCase = true)
 
     GlassPanel(Modifier.fillMaxWidth(), radius = 19.dp) {
         Column(Modifier.padding(screenTokens.spacing.lg), verticalArrangement = Arrangement.spacedBy(11.dp)) {
@@ -520,7 +677,7 @@ private fun CliLoginPanel(
                         ActionButton(screenResources.getString(R.string.settings_open_sign_in_page_b324e)) { uriHandler.openUri(loginUrl) }
                         Text(loginUrl, color = PlumMuted, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                    if (login.needsCode) {
+                    if (login.needsCode && !isVibeLogin) {
                         OutlinedTextField(
                             value = code,
                             onValueChange = { code = it },
@@ -529,6 +686,13 @@ private fun CliLoginPanel(
                             modifier = Modifier.fillMaxWidth(),
                         )
                         ActionButton(screenResources.getString(R.string.settings_submit_code_32aef), enabled = code.isNotBlank()) { onSubmitCode(code.trim()) }
+                    }
+                    if (isVibeLogin) {
+                        Text(
+                            screenResources.getString(R.string.settings_vibe_login_waiting),
+                            color = PlumMuted,
+                            fontSize = 12.sp,
+                        )
                     }
                     if (login.output.isNotBlank()) {
                         Text(

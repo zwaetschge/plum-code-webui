@@ -31,10 +31,8 @@ enum class SessionActivity { NEEDS_YOU, WORKING, QUEUED, FAILED, IDLE }
 /**
  * How long a session has gone without a sign of life, in three steps.
  *
- * `status` only reports that a process exists, so a harness that died mid-turn
- * claims RUNNING for as long as the row survives. Time since the last activity
- * is the only signal that separates "working" from "hung", and the dashboard
- * has to say which one it is rather than showing a hopeful green dot.
+ * `status` only reports that a process exists. Silence is relevant only while
+ * the runtime reports an active turn; an idle resident process is not stuck.
  */
 enum class Stillness { ACTIVE, STILL, SUSPICIOUS }
 
@@ -151,7 +149,8 @@ fun effectiveState(
         quiet < idleAfterMinutes * 3 -> Stillness.STILL
         else -> Stillness.SUSPICIOUS
     }
-    val working = facts.busy || facts.status == SessionStatus.RUNNING
+    // RUNNING means that the CLI process is resident, not that a turn is active.
+    val working = facts.busy
     val activity = when {
         facts.pendingApprovals > 0 -> SessionActivity.NEEDS_YOU
         facts.status == SessionStatus.ERROR -> SessionActivity.FAILED
@@ -193,8 +192,8 @@ private fun label(
             (facts.activitySummary?.takeIf { it.isNotBlank() } ?: "Working") + queueSuffix(facts)
         // Past the threshold the claim and the evidence disagree, so the card
         // reports the evidence instead of repeating the claim.
-        Stillness.STILL -> "No sign of life for ${quiet ?: 0}m"
-        Stillness.SUSPICIOUS -> "Silent for ${humanQuiet(quiet)} — may be stuck"
+        Stillness.STILL -> "No new activity for ${quiet ?: 0}m"
+        Stillness.SUSPICIOUS -> "No new activity for ${humanQuiet(quiet)}"
     }
 
     SessionActivity.QUEUED ->
@@ -332,7 +331,7 @@ fun SessionState.localizedLabel(context: Context, facts: SessionFacts): String {
         else text(R.string.component_waiting_approval)
         SessionActivity.FAILED -> text(R.string.component_ended_error) + suffix
         SessionActivity.WORKING -> when (stillness) {
-            Stillness.ACTIVE -> (facts.activitySummary?.takeIf { it.isNotBlank() }
+            Stillness.ACTIVE -> (facts.activitySummary?.takeIf { it.isNotBlank() }?.let { localizeActivitySummary(context, it) }
                 ?: text(R.string.component_working)) + if (facts.queueDepth > 0)
                 "  •  ${text(R.string.component_queue_count, facts.queueDepth)}" else ""
             Stillness.STILL -> text(R.string.component_no_activity, quietForMinutes ?: 0)
@@ -341,5 +340,38 @@ fun SessionState.localizedLabel(context: Context, facts: SessionFacts): String {
         SessionActivity.QUEUED -> if (facts.queueDepth == 1) text(R.string.component_message_queued)
             else text(R.string.component_messages_queued, facts.queueDepth)
         SessionActivity.IDLE -> text(R.string.component_idle) + suffix
+    }
+}
+
+/**
+ * The backend describes live activity in English ("Using mcp__x__y",
+ * "Writing response"). Translate the known shapes at the UI boundary and turn
+ * raw MCP tool ids into "server · tool"; anything unrecognised passes through.
+ */
+fun localizeActivitySummary(context: Context, summary: String): String {
+    fun text(id: Int, vararg args: Any): String = context.getString(id, *args)
+    fun tool(raw: String): String = raw.trim().let { name ->
+        if (name.startsWith("mcp__")) name.removePrefix("mcp__").split("__").filter { it.isNotBlank() }
+            .joinToString(" · ") { it.replace('_', ' ') }
+        else name
+    }
+    val s = summary.trim()
+    return when {
+        s.startsWith("Running command", ignoreCase = true) -> text(R.string.component_running_command)
+        s.startsWith("Searching the web: ") -> text(R.string.activity_summary_web_search, s.removePrefix("Searching the web: "))
+        s == "Searching the web" || s.equals("Web search", ignoreCase = true) -> text(R.string.activity_summary_web_search_plain)
+        s == "Searching the workspace" -> text(R.string.activity_summary_searching_workspace)
+        s.startsWith("Searching: ") -> text(R.string.activity_summary_searching, s.removePrefix("Searching: "))
+        s == "Reading files" -> text(R.string.activity_summary_reading_files)
+        s.startsWith("Reading ") -> text(R.string.activity_summary_reading, s.removePrefix("Reading "))
+        s == "Editing files" -> text(R.string.activity_summary_editing_files)
+        s.startsWith("Editing ") -> text(R.string.activity_summary_editing, s.removePrefix("Editing "))
+        s == "Updating tasks" -> text(R.string.activity_summary_updating_tasks)
+        s.startsWith("Using ") -> text(R.string.activity_summary_using, tool(s.removePrefix("Using ")))
+        s == "Writing response" -> text(R.string.activity_summary_writing)
+        s == "Thinking" -> text(R.string.activity_summary_thinking)
+        s.endsWith(" subagents running") -> text(R.string.activity_summary_subagents, s.removeSuffix(" subagents running"))
+        s.startsWith("Running ") && s.endsWith(" agent") -> text(R.string.activity_summary_agent, s.removePrefix("Running ").removeSuffix(" agent"))
+        else -> s
     }
 }

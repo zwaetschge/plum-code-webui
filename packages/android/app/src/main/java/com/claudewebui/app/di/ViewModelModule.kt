@@ -7,6 +7,7 @@ import com.claudewebui.app.data.repository.SessionRepository
 import com.claudewebui.app.data.repository.NoteRepository
 import com.claudewebui.app.data.repository.SettingsRepository
 import com.claudewebui.app.ui.screens.activity.ActivityViewModel
+import com.claudewebui.app.ui.screens.monitor.MonitorViewModel
 import com.claudewebui.app.ui.screens.analytics.AnalyticsViewModel
 import com.claudewebui.app.ui.screens.auth.LoginViewModel
 import com.claudewebui.app.ui.screens.chat.ChatViewModel
@@ -61,10 +62,10 @@ val viewModelModule = module {
     viewModel { SettingsViewModel(get(), get(), androidContext()) }
 
     // NotesViewModel(sessionId, noteRepository)
-    viewModel { (sessionId: String) -> NotesViewModel(sessionId, get()) }
+    viewModel { (sessionId: String) -> NotesViewModel(sessionId, get(), com.claudewebui.app.data.local.EditorDraftStore(androidContext())) }
 
     // FileEditorViewModel(path, apiClient)
-    viewModel { (path: String) -> FileEditorViewModel(path, get()) }
+    viewModel { (path: String) -> FileEditorViewModel(path, get(), com.claudewebui.app.data.local.EditorDraftStore(androidContext())) }
 
     // FileManagerViewModel(sessionId, initialPath) — uses KoinComponent internally for ApiClient
     viewModel { (sessionId: String, initialPath: String) ->
@@ -74,6 +75,9 @@ val viewModelModule = module {
     // AnalyticsViewModel(apiClient)
     viewModel { AnalyticsViewModel(get()) }
     viewModel { ActivityViewModel(get(), get()) }
+
+    // MonitorViewModel(sessionRepository, gatewayRepository, messageRepository, socketManager, apiClient, context)
+    viewModel { MonitorViewModel(get(), get(), get(), get(), get(), androidContext()) }
 
     // CheckpointViewModel(sessionId, apiClient)
     viewModel { (sessionId: String) -> CheckpointViewModel(sessionId, get(), get()) }

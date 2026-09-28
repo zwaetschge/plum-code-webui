@@ -161,6 +161,11 @@ class ChatViewModel(
         refreshChats = { refreshChatList(refreshHistory = false) },
     )
 
+    private val agentScreenVisible = MutableStateFlow(false)
+    fun setAgentScreenVisible(visible: Boolean) { agentScreenVisible.value = visible }
+
+    private val agentLoadMutex = kotlinx.coroutines.sync.Mutex()
+
     init {
         Breadcrumbs.add("chat", "created")
         socket.observeConnectionState()
@@ -175,7 +180,39 @@ class ChatViewModel(
         loadMeshPeers()
         probeVoiceInput()
         initializeChat()
+        // Observe only while the screen has UI subscribers; reconnect/thread changes refresh immediately.
+        viewModelScope.launch {
+            combine(agentScreenVisible, _uiState.map { it.activeChatId to it.isConnected }.distinctUntilChanged()) { visible, connection -> visible to connection }
+                .collectLatest { (visible, connection) ->
+                    if (visible && connection.second) while (isActive) { refreshAgents(); delay(5_000) }
+                }
+        }
     }
+
+    private suspend fun refreshAgents(loadMore: Boolean = false) {
+        if (!agentLoadMutex.tryLock()) return
+        try {
+            val chatId = _uiState.value.activeChatId
+            val offset = if (loadMore) _uiState.value.agentsNextOffset else 0
+            _uiState.update { it.copy(agentsLoading = true) }
+            val response = sessionRepository.getAgents(sessionId, chatId, offset)
+            _uiState.update { current ->
+                if (current.activeChatId != chatId) current.copy(agentsLoading = false)
+                else response.fold(
+                    onSuccess = { snapshot -> current.copy(
+                        agentRuns = reconcileSubagents(current.agentRuns.filter { it.chatId == chatId }, snapshot),
+                        agentTotals = snapshot.totals, agentsCapturedAt = snapshot.capturedAt, agentsError = false, agentsLoading = false,
+                        agentsHasMore = if (offset == 0 && current.agentsNextOffset > 50) current.agentsHasMore else snapshot.hasMore,
+                        agentsNextOffset = maxOf(current.agentsNextOffset, snapshot.nextOffset),
+                    ) },
+                    onFailure = { current.copy(agentsError = true, agentsLoading = false) },
+                )
+            }
+        } finally { agentLoadMutex.unlock() }
+    }
+
+    fun loadMoreAgents() { viewModelScope.launch { refreshAgents(loadMore = true) } }
+
 
     // ── Room-backed observers ───────────────────────────────────────────────
 
@@ -403,6 +440,11 @@ class ChatViewModel(
                 chats = list.chats,
                 activeChatId = list.activeChatId,
                 isSwitchingChat = false,
+                agentRuns = if (changed) emptyList() else it.agentRuns,
+                agentTotals = if (changed) null else it.agentTotals,
+                agentsHasMore = if (changed) false else it.agentsHasMore,
+                agentsNextOffset = if (changed) 0 else it.agentsNextOffset,
+                agentsCapturedAt = if (changed) null else it.agentsCapturedAt,
                 activeTools = if (changed) emptyMap() else it.activeTools,
                 queuedCount = if (changed) 0 else it.queuedCount,
                 settingsNotice = notice ?: it.settingsNotice,
@@ -514,6 +556,10 @@ class ChatViewModel(
     fun interrupt() {
         socketManager.interruptSession(sessionId)
         streaming.resetActivity()
+    }
+
+    fun restart() {
+        socketManager.restartSession(sessionId)
     }
 
     // ========================================================================

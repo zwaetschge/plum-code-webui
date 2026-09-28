@@ -36,6 +36,7 @@ enum class WidgetKind(val titleResource: Int) {
     LIMITS(R.string.native_limits),
     CHART(R.string.native_activity_week),
     TOP_SESSIONS(R.string.native_top_week),
+    MONITOR(R.string.native_monitor),
 }
 
 /**
@@ -110,8 +111,34 @@ object WidgetRenderer {
             WidgetKind.LIMITS -> renderLimits(context, views, snapshot, maxRows)
             WidgetKind.CHART -> renderChart(context, views, snapshot, config)
             WidgetKind.TOP_SESSIONS -> renderTopSessions(context, views, snapshot, maxRows)
+            WidgetKind.MONITOR -> renderMonitor(context, views, snapshot, maxRows)
         }
         return views
+    }
+
+    /**
+     * The same four sessions the Monitor tab shows, with the dashboard's
+     * verdict per row. Tapping a row opens that chat; the title opens the tab.
+     */
+    private fun renderMonitor(context: Context, views: RemoteViews, s: WidgetSnapshot, maxRows: Int) {
+        val now = Instant.now()
+        val rows = s.monitorSessions.map { it to effectiveState(it.facts(), now, IdleThreshold.DEFAULT.minutes) }
+        val working = rows.count { it.second.activity == SessionActivity.WORKING }
+        val needsYou = rows.count { it.second.activity == SessionActivity.NEEDS_YOU }
+        views.setTextViewText(
+            R.id.widget_headline,
+            if (needsYou > 0) context.getString(R.string.native_needs_working, needsYou, working)
+            else context.getString(R.string.native_working, working),
+        )
+        bindRows(views, rows.size, maxRows, emptyMessage = context.getString(R.string.native_monitor_empty)) { i, ids ->
+            val (session, state) = rows[i]
+            views.setTextColor(ids[1], widgetArgb(state))
+            views.setTextViewText(ids[2], session.name)
+            views.setTextViewText(ids[3], session.provider)
+            views.setViewVisibility(ids[4], View.VISIBLE)
+            views.setTextViewText(ids[4], state.localizedLabel(context, session.facts()))
+            views.setOnClickPendingIntent(ids[0], sessionIntent(context, session.id, i))
+        }
     }
 
     private fun title(context: Context, kind: WidgetKind, config: WidgetConfig): String {
@@ -557,6 +584,7 @@ object WidgetRenderer {
             WidgetKind.PROVIDERS, WidgetKind.MODELS, WidgetKind.LIMITS,
             WidgetKind.CHART, WidgetKind.TOP_SESSIONS ->
                 "claudewebui://analytics?range=7d"
+            WidgetKind.MONITOR -> "claudewebui://monitor"
             else -> null
         }
         val intent = Intent(context, MainActivity::class.java).apply {

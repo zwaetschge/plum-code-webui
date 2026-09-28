@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.components.filemanager
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.claudewebui.app.ui.theme.PlumTheme
 import androidx.compose.ui.res.stringResource
 import com.claudewebui.app.R
@@ -36,7 +37,7 @@ fun FileUploadSheet(
 ) {
     val componentTokens = PlumTheme.tokens
     val context = LocalContext.current
-    val state by viewModel.state.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
 
     var selectedFiles by remember { mutableStateOf<List<Pair<Uri, String>>>(emptyList()) }
 

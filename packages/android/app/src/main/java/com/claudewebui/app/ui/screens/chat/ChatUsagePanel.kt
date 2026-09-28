@@ -111,7 +111,17 @@ internal fun UsageBanner(usage: UsageData?, session: Session?, limits: UsageLimi
             )
             val windows = buildList {
                 limits?.fiveHour?.let { add("5h" to it) }
-                limits?.sevenDay?.let { add(stringResource(R.string.chat_week) to it) }
+                limits?.sevenDay?.let {
+                    // Vibe reports its billing month in the long slot, exactly
+                    // like the Mistral API plan; labelling it "Week" would
+                    // promise a reset that does not happen for another month.
+                    val label = if (session?.cliProvider == CLIProvider.VIBE) {
+                        stringResource(R.string.analytics_window_month)
+                    } else {
+                        stringResource(R.string.chat_week)
+                    }
+                    add(label to it)
+                }
             }
             if (windows.isEmpty()) {
                 Text(text = stringResource(R.string.chat_limits_empty), color = PlumMuted, fontSize = 11.sp)

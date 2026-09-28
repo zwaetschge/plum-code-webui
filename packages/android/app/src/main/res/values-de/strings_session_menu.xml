@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="session_menu_tasks">Aufgaben</string>
+    <string name="session_menu_agent_activity">%1$d aktiv · %2$d warten</string>
+    <string name="session_menu_tool_log">Werkzeugprotokoll</string>
+    <string name="session_menu_more">Weitere Werkzeuge</string>
+    <string name="session_menu_less">Weniger Werkzeuge</string>
+    <string name="session_menu_runtime">Modell &amp; Ausführung</string>
+    <string name="session_menu_appearance">Gestaltung</string>
+    <string name="session_menu_default_appearance">Standardgestaltung</string>
+</resources>

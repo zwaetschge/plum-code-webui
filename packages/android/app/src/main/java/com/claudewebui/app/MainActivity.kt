@@ -10,7 +10,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -31,6 +33,7 @@ import androidx.compose.material3.SnackbarHostState
 import com.claudewebui.app.ui.components.common.LocalPlumSnackbar
 import com.claudewebui.app.ui.components.common.PlumBackdrop
 import com.claudewebui.app.ui.theme.AppThemeStore
+import com.claudewebui.app.ui.theme.AppBackgroundStore
 import com.claudewebui.app.ui.components.dashboard.IdlePrefs
 import com.claudewebui.app.ui.theme.LayoutPrefs
 import com.claudewebui.app.ui.theme.ClaudeWebUITheme
@@ -102,6 +105,7 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
         super.onCreate(savedInstanceState)
         AppThemeStore.initialize(this)
+        AppBackgroundStore.initialize(this)
         LayoutPrefs.initialize(this)
         IdlePrefs.initialize(this)
         incomingDeepLink = intent?.data?.toString()
@@ -164,11 +168,7 @@ class MainActivity : ComponentActivity() {
                     // screen, so screens with transparent scaffolds read as
                     // frosted glass instead of floating on flat black.
                     PlumBackdrop(modifier = Modifier.fillMaxSize()) {
-                        // Pass deep link intent to the navigation host
-                        AppNavigation(
-                            navController = navController,
-                            deepLinkUri = incomingDeepLink
-                        )
+                        AppNavigation(navController = navController, deepLinkUri = incomingDeepLink)
                     }
                 }
             }

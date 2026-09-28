@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.filemanager
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.claudewebui.app.R
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -55,7 +56,7 @@ fun FileManagerScreen(
     val viewModel: FileManagerViewModel = koinViewModel(
         parameters = { parametersOf(sessionId, workingDirectory) }
     )
-    val state by viewModel.state.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
 
     var showUploadSheet by remember { mutableStateOf(false) }
     var longPressedFile by remember { mutableStateOf<FileInfo?>(null) }

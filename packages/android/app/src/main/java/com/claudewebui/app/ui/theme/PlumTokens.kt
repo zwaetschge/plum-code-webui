@@ -261,7 +261,7 @@ data class PlumSizing(
     val badge: Dp = 15.dp,
     val navBarHeight: Dp = 78.dp,
     val navBarHeightShort: Dp = 54.dp,
-    val navRailWidth: Dp = 96.dp,
+    val navRailWidth: Dp = 82.dp,
     val navRailWidthShort: Dp = 68.dp,
 )
 

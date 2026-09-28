@@ -291,6 +291,18 @@
         </receiver>
 
         <receiver
+            android:name=".widget.MonitorWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_label_monitor">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/monitor_widget_info" />
+        </receiver>
+
+        <receiver
             android:name=".widget.TopSessionsWidgetReceiver"
             android:exported="true"
             android:label="@string/widget_label_top_sessions">

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -30,10 +31,13 @@ import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.TextButton
 import com.claudewebui.app.data.local.entity.OutboxStatus
+import com.claudewebui.app.ui.components.dashboard.facts
+import com.claudewebui.app.ui.components.dashboard.localizeActivitySummary
+import com.claudewebui.app.ui.components.dashboard.localizedLabel
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -103,13 +107,13 @@ fun ActivityScreen(
     val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
     androidx.compose.ui.platform.LocalConfiguration.current
 
-    val state by viewModel.uiState.collectAsState()
-    val activity by activityViewModel.uiState.collectAsState()
-    val outbox by activityViewModel.outbox.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val activity by activityViewModel.uiState.collectAsStateWithLifecycle()
+    val outbox by activityViewModel.outbox.collectAsStateWithLifecycle()
     var showOutbox by remember { mutableStateOf(false) }
     val socket: SocketManager = koinInject()
-    val connection by socket.connectionState.collectAsState()
-    val idleAfter by IdlePrefs.threshold.collectAsState()
+    val connection by socket.connectionState.collectAsStateWithLifecycle()
+    val idleAfter by IdlePrefs.threshold.collectAsStateWithLifecycle()
     var filter by remember { mutableStateOf(ActivityFilter.ALL) }
 
     // Ordered by urgency, not by recency: the whole point of this screen is that
@@ -128,6 +132,10 @@ fun ActivityScreen(
     val queued = counts[SessionActivity.QUEUED] ?: 0
     val failed = counts[SessionActivity.FAILED] ?: 0
 
+    // A landscape tablet has ~600dp: header, outbox link, 112dp tiles and the
+    // filter row filled two thirds of it before the first session.
+    val tight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp < 720
+
     PlumBackdrop {
         PlumNavScaffold(
             selected = MainDestination.ACTIVITY,
@@ -142,7 +150,7 @@ fun ActivityScreen(
                 item {
                     PlumScreenHeader(
                         title = screenResources.getString(R.string.activity_activity_81c0d),
-                        subtitle = screenResources.getString(R.string.activity_realtime_overview_of_agents_tools_and_events_a04c0),
+                        subtitle = if (tight) null else screenResources.getString(R.string.activity_realtime_overview_of_agents_tools_and_events_a04c0),
                         live = connection == ConnectionState.CONNECTED,
                         actions = {
                             PlumIconButton(
@@ -156,7 +164,7 @@ fun ActivityScreen(
                         },
                     )
                 }
-                item {
+                if (!tight || outbox.isNotEmpty() || showOutbox) item {
                     TextButton(onClick = { showOutbox = !showOutbox }, modifier = Modifier.padding(horizontal = screenTokens.spacing.cozy)) {
                         Text(screenResources.getString(R.string.activity_outbox_1_s_this_device_9640e, outbox.size))
                     }
@@ -190,10 +198,10 @@ fun ActivityScreen(
                         Modifier.fillMaxWidth().padding(horizontal = screenTokens.spacing.cozy),
                         horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
                     ) {
-                        ActivityMetric(screenResources.getString(R.string.activity_needs_you_0d9d0), needsYou, Icons.Outlined.Security, PlumAmber, Modifier.weight(1f))
-                        ActivityMetric(screenResources.getString(R.string.activity_working_3b4df), working, Icons.Outlined.PlayCircle, PlumGreen, Modifier.weight(1f))
-                        ActivityMetric(screenResources.getString(R.string.activity_queued_6a599), queued, Icons.Outlined.Layers, PlumAccent, Modifier.weight(1f))
-                        ActivityMetric(screenResources.getString(R.string.activity_failed_09fef), failed, Icons.Outlined.ErrorOutline, PlumRed, Modifier.weight(1f))
+                        ActivityMetric(screenResources.getString(R.string.activity_needs_you_0d9d0), needsYou, Icons.Outlined.Security, PlumAmber, Modifier.weight(1f), compact = tight)
+                        ActivityMetric(screenResources.getString(R.string.activity_working_3b4df), working, Icons.Outlined.PlayCircle, PlumGreen, Modifier.weight(1f), compact = tight)
+                        ActivityMetric(screenResources.getString(R.string.activity_queued_6a599), queued, Icons.Outlined.Layers, PlumAccent, Modifier.weight(1f), compact = tight)
+                        ActivityMetric(screenResources.getString(R.string.activity_failed_09fef), failed, Icons.Outlined.ErrorOutline, PlumRed, Modifier.weight(1f), compact = tight)
                         // The only tile with a history behind it, so the only
                         // one that draws a curve.
                         ActivityMetric(
@@ -203,6 +211,7 @@ fun ActivityScreen(
                             color = PlumBlue,
                             modifier = Modifier.weight(1f),
                             trend = activity.requestsPerHour,
+                            compact = tight,
                         )
                     }
                 }
@@ -301,8 +310,34 @@ private fun ActivityMetric(
     color: Color,
     modifier: Modifier = Modifier,
     trend: List<Float> = emptyList(),
+    compact: Boolean = false,
 ) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+
+    if (compact) {
+        // One line of icon and number over the label: the same five facts
+        // in about half the height.
+        GlassPanel(modifier.height(58.dp), radius = 14.dp) {
+            Column(
+                Modifier.fillMaxSize().padding(horizontal = 9.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, null, tint = color, modifier = Modifier.size(16.dp))
+                    Text(
+                        value.toString(),
+                        color = color,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 6.dp).weight(1f),
+                    )
+                    if (trend.size >= 2) Sparkline(color, trend, Modifier.size(width = 34.dp, height = 12.dp))
+                }
+                Text(label, color = PlumMuted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        return
+    }
 
     GlassPanel(modifier.height(112.dp), radius = 16.dp) {
         Column(
@@ -332,12 +367,13 @@ private fun ActivityRow(row: SupervisedSession, onClick: () -> Unit) {
 
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
 
+    val context = androidx.compose.ui.platform.LocalContext.current
     val session = row.session
     val state: SessionState = row.state
     val accent = accentFor(state)
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(15.dp),
-        verticalAlignment = Alignment.Top,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 15.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier.size(42.dp).background(providerColor(session.cliProvider).copy(alpha = .16f), CircleShape),
@@ -350,8 +386,8 @@ private fun ActivityRow(row: SupervisedSession, onClick: () -> Unit) {
             // What the agent is actually doing, falling back to the last thing
             // it said. "Session ready" was shown even for a failed session.
             Text(
-                session.activitySummary?.takeIf { it.isNotBlank() }
-                    ?: session.lastMessage?.takeIf { it.isNotBlank() }
+                session.activitySummary?.takeIf { it.isNotBlank() }?.let { localizeActivitySummary(context, it) }
+                    ?: session.lastMessage?.takeIf { it.isNotBlank() }?.let { com.claudewebui.app.ui.components.common.plainTextPreview(it) }
                     ?: screenResources.getString(R.string.activity_nothing_in_progress_a710d),
                 color = PlumMuted,
                 fontSize = 13.sp,
@@ -360,11 +396,19 @@ private fun ActivityRow(row: SupervisedSession, onClick: () -> Unit) {
             )
             Text("${sessionModel(session)}  •  ${session.workingDirectory.substringAfterLast('/')}", color = PlumMuted, fontSize = 11.sp)
         }
-        Column(horizontalAlignment = Alignment.End) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             // The verdict, which already carries the queue depth, the approval
             // count and how long it has been quiet.
-            StatusPill(state.label, accent)
-            Spacer(Modifier.height(7.dp))
+            // Working sessions get the short word: the line beside it already
+            // says what they are doing, and a pill repeating a 40-character
+            // tool name pushed the text column to half its width.
+            StatusPill(
+                if (state.activity == SessionActivity.WORKING && state.stillness == com.claudewebui.app.ui.components.dashboard.Stillness.ACTIVE) {
+                    screenResources.getString(R.string.component_working)
+                } else state.localizedLabel(context, session.facts()),
+                accent,
+            )
+            Spacer(Modifier.width(screenTokens.spacing.xs))
             Icon(Icons.Outlined.MoreVert, screenResources.getString(R.string.activity_more_4bab2), tint = PlumMuted, modifier = Modifier.size(screenTokens.sizing.iconMd))
         }
     }

@@ -473,6 +473,7 @@ private fun CLIProvider.toCliProvider(): CliProvider = when (this) {
     CLIProvider.OPENCODE -> CliProvider.OPENCODE
     CLIProvider.PI -> CliProvider.PI
     CLIProvider.KIMI -> CliProvider.KIMI
+    CLIProvider.VIBE -> CliProvider.VIBE
     CLIProvider.ZAI -> CliProvider.ZAI
 }
 

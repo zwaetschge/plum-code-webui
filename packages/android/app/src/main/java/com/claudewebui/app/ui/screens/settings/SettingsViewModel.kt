@@ -11,6 +11,8 @@ import com.claudewebui.app.core.notifications.LocalNotificationManager
 import com.claudewebui.app.core.notifications.NotificationPreferences
 import com.claudewebui.app.core.security.TokenStore
 import com.claudewebui.app.data.model.AuthUser
+import com.claudewebui.app.data.model.BrowserConnection
+import com.claudewebui.app.data.model.BrowserToken
 import com.claudewebui.app.data.model.CreateCustomAgentInput
 import com.claudewebui.app.data.model.CLIProviderConfig
 import com.claudewebui.app.data.model.CliLoginSession
@@ -33,16 +35,20 @@ import com.claudewebui.app.data.model.McpServerType
 import com.claudewebui.app.data.model.OpenCodeProvider
 import com.claudewebui.app.data.model.SlashCommand
 import com.claudewebui.app.data.model.Theme
+import com.claudewebui.app.data.model.BackgroundAnimation
 import com.claudewebui.app.data.model.UpdateCustomAgentInput
 import com.claudewebui.app.data.model.UpdateMcpServerInput
 import com.claudewebui.app.data.model.UserSettings
 import com.claudewebui.app.data.model.UpdateZaiApiInput
+import com.claudewebui.app.data.model.VibeAuthStatus
 import com.claudewebui.app.data.model.SaveOpenCodeProviderInput
 import com.claudewebui.app.data.model.ZaiApiStatus
 import com.claudewebui.app.data.repository.AuthRepository
 import com.claudewebui.app.data.repository.SettingsRepository
 import com.claudewebui.app.ui.theme.AppThemeOption
 import com.claudewebui.app.ui.theme.AppThemeStore
+import com.claudewebui.app.ui.theme.AppBackgroundStore
+import com.claudewebui.app.ui.theme.AppBackgroundStyle
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
@@ -53,6 +59,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -96,6 +104,8 @@ data class SettingsUiState(
 
     // Local-only prefs
     val theme: AppThemeOption = AppThemeOption.SYSTEM,
+    val backgroundStyle: AppBackgroundStyle = AppBackgroundStyle.AURORA,
+    val appearanceSaving: Boolean = false,
     val fontSize: FontSize = FontSize.MEDIUM,
     val notificationsEnabled: Boolean = true,
     val notificationsAllowedBySystem: Boolean = true,
@@ -109,6 +119,10 @@ data class SettingsUiState(
     val cliProviders: List<CLIProviderConfig> = emptyList(),
     val zaiApi: ZaiApiStatus? = null,
     val zaiApiSaving: Boolean = false,
+    // Mistral Vibe: sign-in state plus the write-only key field. Never holds a
+    // key — the status endpoint only reports whether one exists and where.
+    val vibeAuth: VibeAuthStatus? = null,
+    val vibeAuthSaving: Boolean = false,
     val openCodeProviders: List<OpenCodeProvider> = emptyList(),
     val openCodeSaving: Boolean = false,
     val openCodeTestResults: Map<String, TestResult> = emptyMap(),
@@ -118,6 +132,9 @@ data class SettingsUiState(
     // reachable only from the WebUI before.
     val gatewayTokens: List<GatewayToken> = emptyList(),
     val newGatewayTokenSecret: String? = null,
+    val browserTokens: List<BrowserToken> = emptyList(),
+    val browserConnections: List<BrowserConnection> = emptyList(),
+    val newBrowserTokenSecret: String? = null,
     val codexPlugins: List<CodexPlugin> = emptyList(),
     val parityBusy: Boolean = false,
 
@@ -203,6 +220,10 @@ class SettingsViewModel(
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
     private var cliLoginJob: Job? = null
+    private var appearanceChangeGeneration = 0L
+    private var appearanceWritesPending = 0
+    private var pendingAppearanceBeforeSettings = false
+    private val appearanceWriteMutex = Mutex()
 
     init {
         loadLocalPrefs()
@@ -217,6 +238,7 @@ class SettingsViewModel(
             it.copy(
                 serverUrl = TokenStore.getServerUrl() ?: "",
                 theme = AppThemeStore.theme.value,
+                backgroundStyle = AppBackgroundStore.style.value,
                 fontSize = FontSize.entries.firstOrNull { e -> e.name == fontSizeName } ?: FontSize.MEDIUM,
                 notificationsEnabled = NotificationPreferences.isEnabled(context),
                 notificationsAllowedBySystem = NotificationPreferences.systemAllowsNotifications(context),
@@ -235,6 +257,10 @@ class SettingsViewModel(
      * "nothing configured" rather than "still loading".
      */
     fun loadSettings() {
+        val appearanceGenerationAtRequest = appearanceChangeGeneration
+        // A GET started during a PUT may read the previous server value even if
+        // that PUT finishes before the GET returns.
+        val appearanceWritePendingAtRequest = appearanceWritesPending > 0
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, libraryLoading = true, error = null) }
 
@@ -246,7 +272,20 @@ class SettingsViewModel(
                 launch {
                     settingsRepository.getSettings()
                         .onSuccess { settings ->
-                            _uiState.update { it.copy(userSettings = settings) }
+                            if (appearanceGenerationAtRequest != appearanceChangeGeneration ||
+                                appearanceWritePendingAtRequest || appearanceWritesPending > 0 ||
+                                pendingAppearanceBeforeSettings
+                            ) {
+                                // A newer phone selection wins over an in-flight GET.
+                                _uiState.update { current -> current.copy(
+                                    userSettings = current.userSettings ?: settings,
+                                ) }
+                                if (pendingAppearanceBeforeSettings) {
+                                    pendingAppearanceBeforeSettings = false
+                                    if (settings.appearanceSync) pushSelectedAppearance()
+                                }
+                                return@onSuccess
+                            }
                             // Only follows the account when the user enabled
                             // appearance sync in the WebUI.
                             AppThemeStore.applyServerTheme(
@@ -254,6 +293,16 @@ class SettingsViewModel(
                                 settings.theme.name.lowercase(),
                                 settings.appearanceSync,
                             )
+                            AppBackgroundStore.applyServerBackground(
+                                context,
+                                settings.backgroundAnimation.name.lowercase(),
+                                settings.appearanceSync,
+                            )
+                            _uiState.update { it.copy(
+                                userSettings = settings,
+                                theme = AppThemeStore.theme.value,
+                                backgroundStyle = AppBackgroundStore.style.value,
+                            ) }
                         }
                         .onFailure { e -> _uiState.update { it.copy(error = e.screenErrorMessage("settings", "loadSettings", context)) } }
                     // Depends on the allowedTools allowlist from the call above.
@@ -581,8 +630,54 @@ class SettingsViewModel(
      * setting visibly inert, which is what it used to do.
      */
     fun updateTheme(option: AppThemeOption) {
+        appearanceChangeGeneration++
         AppThemeStore.set(context, option)
         _uiState.update { it.copy(theme = option) }
+        if (_uiState.value.userSettings == null) pendingAppearanceBeforeSettings = true
+        else pushSelectedAppearance()
+    }
+
+    fun updateBackgroundStyle(style: AppBackgroundStyle) {
+        appearanceChangeGeneration++
+        AppBackgroundStore.set(context, style)
+        _uiState.update { it.copy(backgroundStyle = style) }
+        if (_uiState.value.userSettings == null) pendingAppearanceBeforeSettings = true
+        else pushSelectedAppearance()
+    }
+
+    fun updateAppearanceSync(enabled: Boolean) {
+        if (_uiState.value.appearanceSaving) return
+        appearanceChangeGeneration++
+        _uiState.update { it.copy(appearanceSaving = true, error = null) }
+        pushSelectedAppearance(syncOverride = enabled)
+    }
+
+    private fun pushSelectedAppearance(syncOverride: Boolean? = null) {
+        // Increment before launching so a refresh in the same UI turn can see
+        // the queued write, including time spent waiting on the mutex.
+        appearanceWritesPending++
+        viewModelScope.launch {
+            try {
+                appearanceWriteMutex.withLock {
+                    if (syncOverride == null && _uiState.value.userSettings?.appearanceSync != true) return@withLock
+                    val enabled = syncOverride ?: true
+                    settingsRepository.updateSettings(
+                        appearanceSync = syncOverride,
+                        theme = if (enabled) Theme.valueOf(AppThemeStore.theme.value.name) else null,
+                        backgroundAnimation = if (enabled) BackgroundAnimation.valueOf(AppBackgroundStore.style.value.name) else null,
+                    ).onSuccess { settings ->
+                        _uiState.update { it.copy(userSettings = settings, appearanceSaving = false) }
+                    }.onFailure { e ->
+                        _uiState.update { it.copy(
+                            appearanceSaving = false,
+                            error = e.screenErrorMessage("settings", "pushSelectedAppearance", context),
+                        ) }
+                    }
+                }
+            } finally {
+                appearanceWritesPending--
+            }
+        }
     }
 
     fun updateFontSize(size: FontSize) {
@@ -677,6 +772,55 @@ class SettingsViewModel(
 
     fun dismissGatewayTokenSecret() {
         _uiState.update { it.copy(newGatewayTokenSecret = null) }
+    }
+
+    // ── Firefox browser (Plum Browser extension) ───────────────────────────
+
+    fun loadBrowserBridge() {
+        viewModelScope.launch {
+            val status = settingsRepository.getBrowserBridgeStatus().getOrNull()
+            val tokens = settingsRepository.getBrowserTokens().getOrNull()
+            _uiState.update {
+                it.copy(
+                    browserConnections = status?.connections ?: it.browserConnections,
+                    browserTokens = tokens ?: it.browserTokens,
+                )
+            }
+        }
+    }
+
+    fun createBrowserToken(name: String) {
+        val clean = name.trim().ifEmpty { "Firefox" }
+        viewModelScope.launch {
+            _uiState.update { it.copy(parityBusy = true, error = null) }
+            val result = settingsRepository.createBrowserToken(clean)
+            _uiState.update {
+                it.copy(
+                    newBrowserTokenSecret = result.getOrNull()?.token,
+                    error = result.exceptionOrNull()?.screenErrorMessage("settings", "createBrowserToken", context) ?: it.error,
+                    parityBusy = false,
+                )
+            }
+            loadBrowserBridge()
+        }
+    }
+
+    fun dismissBrowserTokenSecret() {
+        _uiState.update { it.copy(newBrowserTokenSecret = null) }
+    }
+
+    fun revokeBrowserToken(id: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(parityBusy = true, error = null) }
+            val result = settingsRepository.revokeBrowserToken(id)
+            _uiState.update {
+                it.copy(
+                    error = result.exceptionOrNull()?.screenErrorMessage("settings", "revokeBrowserToken", context) ?: it.error,
+                    parityBusy = false,
+                )
+            }
+            loadBrowserBridge()
+        }
     }
 
     fun revokeGatewayToken(id: String) {
@@ -980,6 +1124,84 @@ class SettingsViewModel(
                 }
                 .onFailure { error ->
                     _uiState.update { it.copy(zaiApiSaving = false, error = error.screenErrorMessage("settings", "resetZaiApi", context)) }
+                }
+        }
+    }
+
+    // ── Mistral Vibe credentials ────────────────────────────────────────────
+
+    /**
+     * Read the Vibe sign-in state. Lazy: the probe spawns `vibe-acp` on the
+     * server, so it runs when the Vibe detail screen opens rather than with the
+     * rest of the settings load.
+     */
+    fun loadVibeAuth() {
+        viewModelScope.launch {
+            settingsRepository.getVibeAuthStatus()
+                .onSuccess { status -> _uiState.update { it.copy(vibeAuth = status) } }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(error = error.screenErrorMessage("settings", "loadVibeAuth", context))
+                    }
+                }
+        }
+    }
+
+    /**
+     * Store a pasted key. The secret lives only inside this call: state keeps
+     * the server's flag answer, and the caller clears its own field.
+     */
+    fun saveVibeApiKey(apiKey: String) {
+        val key = apiKey.trim()
+        if (key.isEmpty() || _uiState.value.vibeAuthSaving) return
+        _uiState.update { it.copy(vibeAuthSaving = true, error = null) }
+        viewModelScope.launch {
+            settingsRepository.saveVibeApiKey(key)
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            vibeAuthSaving = false,
+                            toastMessage = context.getString(R.string.settings_vibe_key_saved),
+                        )
+                    }
+                    loadVibeAuth()
+                    // A stored key is what makes the harness report as available.
+                    loadSettings()
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            vibeAuthSaving = false,
+                            error = error.screenErrorMessage("settings", "saveVibeApiKey", context),
+                        )
+                    }
+                }
+        }
+    }
+
+    /** Sign out by removing the stored key. A key from the container env is not ours. */
+    fun signOutVibe() {
+        if (_uiState.value.vibeAuthSaving) return
+        _uiState.update { it.copy(vibeAuthSaving = true, error = null) }
+        viewModelScope.launch {
+            settingsRepository.clearVibeApiKey()
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            vibeAuthSaving = false,
+                            toastMessage = context.getString(R.string.settings_vibe_key_removed),
+                        )
+                    }
+                    loadVibeAuth()
+                    loadSettings()
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            vibeAuthSaving = false,
+                            error = error.screenErrorMessage("settings", "signOutVibe", context),
+                        )
+                    }
                 }
         }
     }

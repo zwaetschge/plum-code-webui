@@ -148,7 +148,7 @@
     <string name="component_needs_you">Needs you</string>
     <string name="component_new_category">New category</string>
     <string name="component_new_session">New Session</string>
-    <string name="component_no_activity">No sign of life for %1$d min</string>
+    <string name="component_no_activity">No new activity for %1$d min</string>
     <string name="component_no_additional_roots">No additional roots</string>
     <string name="component_no_categories_yet">No categories yet</string>
     <string name="component_no_category">No category</string>
@@ -166,7 +166,7 @@
     <string name="component_permission_required">Permission required</string>
     <string name="component_permission_required_destructive">Permission Required — Destructive</string>
     <string name="component_planner">Planner</string>
-    <string name="component_possibly_stuck">Silent for %1$s — may be stuck</string>
+    <string name="component_possibly_stuck">No new activity for %1$s</string>
     <string name="component_preparing_transcript">Preparing transcript…</string>
     <string name="component_presentation_presets">Presentation presets</string>
     <string name="component_provider">Provider</string>
@@ -187,6 +187,7 @@
     <string name="component_reasoning_max">Maximum</string>
     <string name="component_reasoning_medium">Medium</string>
     <string name="component_reasoning_minimal">Minimal</string>
+    <string name="component_reasoning_off">Off</string>
     <string name="component_reasoning_ultra">Ultra</string>
     <string name="component_reasoning_xhigh">Extra high</string>
     <string name="component_remove">Remove</string>
@@ -283,4 +284,18 @@
     <string name="component_writing">Writing</string>
     <string name="component_writing_file">Writing file…</string>
     <string name="component_yesterday">yesterday</string>
+    <string name="activity_summary_searching">Searching: %1$s</string>
+    <string name="activity_summary_searching_workspace">Searching the workspace</string>
+    <string name="activity_summary_reading">Reading %1$s</string>
+    <string name="activity_summary_reading_files">Reading files</string>
+    <string name="activity_summary_editing">Editing %1$s</string>
+    <string name="activity_summary_editing_files">Editing files</string>
+    <string name="activity_summary_updating_tasks">Updating tasks</string>
+    <string name="activity_summary_web_search">Searching the web: %1$s</string>
+    <string name="activity_summary_web_search_plain">Searching the web</string>
+    <string name="activity_summary_using">Using %1$s</string>
+    <string name="activity_summary_subagents">%1$s subagents running</string>
+    <string name="activity_summary_agent">Running %1$s agent</string>
+    <string name="activity_summary_writing">Writing response</string>
+    <string name="activity_summary_thinking">Thinking</string>
 </resources>

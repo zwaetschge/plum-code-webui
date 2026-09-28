@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recovery_unsaved">Unsaved · draft kept on this device</string>
+    <string name="recovery_retry">Retry save</string>
+    <string name="recovery_discard">Discard draft</string>
+    <string name="recovery_discard_title">Discard unsaved changes?</string>
+    <string name="recovery_discard_body">This removes the local draft. The saved version stays unchanged.</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_select">Select</string>
+    <string name="action_archive">Archive</string>
+    <string name="action_restore">Restore</string>
+    <string name="filter_attention">Needs you</string>
+    <string name="filter_unread">Unread</string>
+    <string name="selected_count">%1$d selected</string>
+    <string name="continue_latest">Continue latest session</string>
+    <string name="update_failed">Update failed. Check the connection and try again.</string>
+    <string name="update_download_failed">Download failed (%1$d). Retry the update.</string>
+    <string name="update_download_title">Plum Code update</string>
+    <string name="update_downloading">Downloading update…</string>
+    <string name="update_missing">Downloaded update is missing. Please download again.</string>
+    <string name="update_installer_failed">Could not open the installer. Allow app installation for Plum Code in Android settings.</string>
+    <string name="settings_search">Search settings</string>
+    <string name="settings_no_results">No matching settings</string>
+    <string name="chart_previous">Previous interval</string>
+    <string name="chart_next">Next interval</string>
+    <string name="chart_values">Show values as a list</string>
+    <string name="notes_finish_first">Save or discard this draft before editing another note.</string>
+    <string name="workspace_hide_session_list">Hide session list</string>
+    <string name="workspace_show_session_list">Show session list</string>
+</resources>

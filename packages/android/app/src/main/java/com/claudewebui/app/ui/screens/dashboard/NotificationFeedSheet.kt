@@ -55,6 +55,8 @@ fun NotificationFeedContent(
     onMarkAllRead: () -> Unit,
     onClearAll: () -> Unit,
     onRespond: (AppNotification, Boolean) -> Unit,
+    pendingRequestIds: Set<String> = emptySet(),
+    respondingRequestIds: Set<String> = emptySet(),
 ) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
 
@@ -65,30 +67,18 @@ fun NotificationFeedContent(
         modifier = Modifier.fillMaxWidth().padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.md),
         verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(screenResources.getString(R.string.dashboard_notifications_753a2), color = PlumText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            if (unreadCount > 0) {
-                Spacer(Modifier.size(8.dp))
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(PlumAccent.copy(alpha = .18f))
-                        .padding(horizontal = screenTokens.spacing.sm, vertical = screenTokens.spacing.xxs),
-                ) {
-                    Text(screenResources.getString(R.string.dashboard_1_s_new_f595b, unreadCount), color = PlumAccent, fontSize = 11.sp)
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            SheetAction(screenResources.getString(R.string.dashboard_mark_read_3bf98), onMarkAllRead)
-            Spacer(Modifier.size(10.dp))
-            SheetAction(screenResources.getString(R.string.dashboard_clear_719ea), onClearAll)
+        Text(screenResources.getString(R.string.dashboard_notifications_753a2), color = PlumText, style = androidx.compose.material3.MaterialTheme.typography.titleLarge)
+        androidx.compose.foundation.lazy.LazyRow(verticalAlignment = Alignment.CenterVertically) {
+            if (unreadCount > 0) item { Text(screenResources.getString(R.string.dashboard_1_s_new_f595b, unreadCount), color = PlumAccent) }
+            item { SheetAction(screenResources.getString(R.string.dashboard_mark_read_3bf98), onMarkAllRead) }
+            item { SheetAction(screenResources.getString(R.string.dashboard_clear_719ea), onClearAll) }
         }
 
         if (notifications.isEmpty()) {
             Text(
                 screenResources.getString(R.string.dashboard_nothing_yet_replies_approvals_and_budget_alerts_land_here_8a6cb),
                 color = PlumMuted,
-                fontSize = 13.sp,
+                style = androidx.compose.material3.MaterialTheme.typography.titleSmall,
             )
             return@Column
         }
@@ -99,7 +89,7 @@ fun NotificationFeedContent(
             verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
         ) {
             items(notifications, key = { it.id }) { item ->
-                NotificationRow(item, onOpenSession, onRespond)
+                NotificationRow(item, onOpenSession, onRespond, pendingRequestIds, respondingRequestIds)
             }
         }
     }
@@ -110,6 +100,8 @@ private fun NotificationRow(
     item: AppNotification,
     onOpenSession: (String) -> Unit,
     onRespond: (AppNotification, Boolean) -> Unit,
+    pendingRequestIds: Set<String> = emptySet(),
+    respondingRequestIds: Set<String> = emptySet(),
 ) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
 
@@ -123,10 +115,7 @@ private fun NotificationRow(
         "goal" -> PlumGreen
         else -> PlumText
     }
-    val canAnswer = item.kind == "approval" &&
-        unread &&
-        item.data?.requestId != null &&
-        item.sessionId != null
+    val canAnswer = canAnswerFeedApproval(item, pendingRequestIds)
 
     GlassPanel(Modifier.fillMaxWidth(), radius = 15.dp) {
         Column(
@@ -146,27 +135,27 @@ private fun NotificationRow(
                 Text(
                     item.title,
                     color = accent,
-                    fontSize = 13.sp,
+                    style = androidx.compose.material3.MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Text(relativeTime(item.createdAt), color = PlumMuted, fontSize = 10.sp)
+                Text(relativeTime(item.createdAt), color = PlumMuted, style = androidx.compose.material3.MaterialTheme.typography.labelMedium)
             }
             item.body?.takeIf { it.isNotBlank() }?.let {
                 Text(
-                    it,
+                    com.claudewebui.app.ui.components.common.plainTextPreview(it),
                     color = PlumMuted,
-                    fontSize = 12.sp,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
             if (canAnswer) {
                 Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)) {
-                    AnswerButton(screenResources.getString(R.string.dashboard_allow_3ad0e), PlumGreen, Modifier.weight(1f)) { onRespond(item, true) }
-                    AnswerButton(screenResources.getString(R.string.dashboard_deny_53577), PlumRed, Modifier.weight(1f)) { onRespond(item, false) }
+                    AnswerButton(screenResources.getString(R.string.dashboard_allow_3ad0e), PlumGreen, Modifier.weight(1f), enabled = item.data?.requestId !in respondingRequestIds) { onRespond(item, true) }
+                    AnswerButton(screenResources.getString(R.string.dashboard_deny_53577), PlumRed, Modifier.weight(1f), enabled = item.data?.requestId !in respondingRequestIds) { onRespond(item, false) }
                 }
             }
         }
@@ -178,6 +167,7 @@ private fun AnswerButton(
     label: String,
     tint: Color,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     Box(
@@ -185,23 +175,18 @@ private fun AnswerButton(
             .clip(RoundedCornerShape(9.dp))
             .background(tint.copy(alpha = .14f))
             .border(1.dp, tint.copy(alpha = .35f), RoundedCornerShape(9.dp))
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            .heightIn(min = 48.dp)
             .padding(vertical = 7.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = tint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = tint, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
 private fun SheetAction(label: String, onClick: () -> Unit) {
-    Text(
-        label,
-        color = PlumAccent,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.clickable(onClick = onClick),
-    )
+    androidx.compose.material3.TextButton(onClick = onClick) { Text(label, color = PlumAccent) }
 }
 
 /** Bell with an unread badge. */
@@ -266,3 +251,6 @@ private fun relativeTime(iso: String): String {
         else -> "${minutes / 1440}d"
     }
 }
+
+internal fun canAnswerFeedApproval(item: AppNotification, pendingRequestIds: Set<String>): Boolean =
+    item.kind == "approval" && item.sessionId != null && item.data?.requestId in pendingRequestIds

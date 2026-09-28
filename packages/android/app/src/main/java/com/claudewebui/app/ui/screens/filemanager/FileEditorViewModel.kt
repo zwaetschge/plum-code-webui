@@ -33,12 +33,18 @@ data class FileEditorUiState(
 class FileEditorViewModel(
     private val path: String,
     private val api: ApiClient,
+    private val drafts: com.claudewebui.app.data.local.EditorDraftStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FileEditorUiState(path = path))
     val uiState: StateFlow<FileEditorUiState> = _uiState.asStateFlow()
 
+    private val draftKey = "file:$path"
+
     init {
+        drafts.read(draftKey)?.let { recovered ->
+            _uiState.update { it.copy(draft = recovered.content, original = recovered.baseline) }
+        }
         load()
     }
 
@@ -57,7 +63,7 @@ class FileEditorViewModel(
                     _uiState.update {
                         it.copy(
                             original = file.content,
-                            draft = file.content,
+                            draft = drafts.read(draftKey)?.content ?: file.content,
                             isLoading = false,
                         )
                     }
@@ -70,6 +76,7 @@ class FileEditorViewModel(
 
     fun onDraftChange(value: String) {
         _uiState.update { it.copy(draft = value) }
+        rememberDraft()
     }
 
     fun save() {
@@ -88,8 +95,9 @@ class FileEditorViewModel(
                     _uiState.update {
                         // The saved text becomes the new baseline so the
                         // unsaved-changes marker clears.
-                        it.copy(original = it.draft, isSaving = false, savedAt = "Saved")
+                        it.acknowledgeSave(state.draft)
                     }
+                    rememberDraft()
                 }
                 .onFailure { failure ->
                     _uiState.update { it.copy(isSaving = false, error = failure.screenErrorMessage("filemanager", "save")) }
@@ -99,9 +107,20 @@ class FileEditorViewModel(
 
     fun revert() {
         _uiState.update { it.copy(draft = it.original) }
+        drafts.clear(draftKey)
+    }
+
+    private fun rememberDraft() {
+        val current = _uiState.value
+        if (current.hasChanges) drafts.write(draftKey, com.claudewebui.app.data.local.EditorDraft(path, content = current.draft, baseline = current.original))
+        else drafts.clear(draftKey)
     }
 
     fun dismissError() {
         _uiState.update { it.copy(error = null) }
     }
 }
+
+/** A response acknowledges the sent revision, never text typed while it was in flight. */
+internal fun FileEditorUiState.acknowledgeSave(sent: String): FileEditorUiState =
+    copy(original = sent, isSaving = false, savedAt = "Saved")

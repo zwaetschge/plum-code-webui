@@ -42,6 +42,20 @@ data class AnalyticsSummary(
     val compactEvents: Long = 0,
     val latestContextPercent: Double = 0.0,
     val windowLabel: String = "",
+    val activeProviders: Int = 0,
+    /** The previous window cut to the same elapsed time; null for "all". */
+    val previous: PeriodTotals? = null,
+)
+
+/** Totals of the comparison window, same shape as the headline numbers. */
+data class PeriodTotals(
+    val costUsd: Double,
+    val totalTokens: Long,
+    val totalRequests: Long,
+    val inputTokens: Long,
+    val cacheReadTokens: Long,
+    val cacheCreationTokens: Long,
+    val activeProviders: Int,
 )
 
 data class ProviderUsageItem(
@@ -97,6 +111,10 @@ data class TopSessionItem(
     val tokenCount: Long,
     val requestCount: Long,
     val costUsd: Double,
+    /** The provider that did most of the session's work in this window. */
+    val provider: String? = null,
+    /** ISO timestamp of the session's latest request in this window. */
+    val lastActive: String? = null,
 )
 
 data class MissingPricingItem(
@@ -109,6 +127,7 @@ enum class AnalyticsTimeRange(private val labelRes: Int, val apiPeriod: String) 
     TODAY(R.string.analytics_24h_02779, "24h"),
     WEEK(R.string.analytics_weekly_158f3, "7d"),
     MONTH(R.string.analytics_monthly_d31ed, "30d"),
+    QUARTER(R.string.analytics_range_90d, "90d"),
     ALL(R.string.analytics_all_6a720, "all");
 
     val label: String
@@ -159,6 +178,11 @@ data class ProviderLimitItem(
     val windows: List<ProviderLimitWindow>,
     val color: Long,
     val note: String? = null,
+    /**
+     * Mistral and Vibe: the month so far from Plum's own ledger, and the
+     * declared budget it is measured against.
+     */
+    val planUsage: com.claudewebui.app.data.model.PlanUsage? = null,
 )
 
 data class AnalyticsUiState(
@@ -232,6 +256,29 @@ class AnalyticsViewModel(
         }
     }
 
+    /**
+     * Save a plan budget.
+     *
+     * One editor serves both allowances of a Mistral plan, but they are stored
+     * apart server-side: a config declaring the Vibe allowance goes to the Vibe
+     * endpoint, everything else stays on the API/Studio side. Routing here keeps
+     * a Vibe budget from overwriting the API one.
+     */
+    fun saveMistralPlan(config: com.claudewebui.app.data.model.MistralPlanConfig, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val normalized = config.copy(billingDay = config.billingDay.coerceIn(1, 28))
+            val ok = apiCall {
+                if (normalized.allowance == com.claudewebui.app.data.model.MistralAllowance.VIBE.id) {
+                    api.putVibePlan(normalized)
+                } else {
+                    api.putMistralPlan(normalized)
+                }
+            }.getOrNull()?.success == true
+            onDone(ok)
+            if (ok) loadProviderLimits()
+        }
+    }
+
     private fun toLimitItem(
         provider: UsageLimitProvider,
         response: UsageLimitsResponse?,
@@ -257,7 +304,11 @@ class AnalyticsViewModel(
 
         val windows = buildList {
             data.fiveHour?.let { add(ProviderLimitWindow("5-hour", it.utilization, it.resetsAt)) }
-            data.sevenDay?.let { add(ProviderLimitWindow("Weekly", it.utilization, it.resetsAt)) }
+            data.sevenDay?.let {
+                // The Mistral plan ledgers measure a billing month, not a week.
+                val label = if (provider.isMonthlyPlan) "Monthly" else "Weekly"
+                add(ProviderLimitWindow(label, it.utilization, it.resetsAt))
+            }
             data.sevenDaySonnet?.let {
                 add(ProviderLimitWindow("Weekly (Sonnet)", it.utilization, it.resetsAt))
             }
@@ -265,7 +316,9 @@ class AnalyticsViewModel(
                 add(ProviderLimitWindow(extra.name, extra.utilization, extra.resetsAt))
             }
         }
-        if (windows.isEmpty()) return null
+        // A plan without a declared budget has no percentage, but its month so
+        // far is still worth showing — and it is where the budget gets set.
+        if (windows.isEmpty() && data.planUsage == null) return null
 
         return ProviderLimitItem(
             providerId = provider.id,
@@ -274,6 +327,7 @@ class AnalyticsViewModel(
             plan = data.subscriptionType?.takeIf { it.isNotBlank() },
             windows = windows,
             color = color,
+            planUsage = data.planUsage,
         )
     }
 
@@ -283,6 +337,10 @@ class AnalyticsViewModel(
         UsageLimitProvider.ZAI -> 0xFF14B8A6L
         UsageLimitProvider.KIMI -> 0xFF2582EDL
         UsageLimitProvider.ALIBABA -> 0xFFFF8A3DL
+        UsageLimitProvider.MISTRAL -> 0xFFFA520FL
+        // Same family as the Mistral API row, one shade apart: two allowances of
+        // one plan must not read as the same tracker.
+        UsageLimitProvider.VIBE -> 0xFFFF7000L
     }
 
     fun selectTimeRange(range: AnalyticsTimeRange) {
@@ -403,6 +461,23 @@ internal object AnalyticsParser {
             compactEvents = events.longValue("compactEvents"),
             latestContextPercent = latestContext.doubleValue("contextUsedPercent"),
             windowLabel = window.stringValue("label") ?: summaryRoot.stringValue("period").orEmpty(),
+            activeProviders = summaryRoot.arrayValue("byProvider").count { element ->
+                (element as? JsonObject)?.longValue("requests")?.let { it > 0 } == true
+            },
+            previous = (summaryRoot["comparison"] as? JsonObject)?.let { comparison ->
+                val previousTotals = comparison.objectValue("totals")
+                PeriodTotals(
+                    costUsd = previousTotals.doubleValue("totalCost"),
+                    totalTokens = previousTotals.longValue("totalTokens"),
+                    totalRequests = previousTotals.longValue("totalRequests"),
+                    inputTokens = previousTotals.longValue("inputTokens"),
+                    cacheReadTokens = previousTotals.longValue("cacheReadTokens"),
+                    cacheCreationTokens = previousTotals.longValue("cacheCreationTokens"),
+                    activeProviders = comparison.arrayValue("byProvider").count { element ->
+                        (element as? JsonObject)?.longValue("requests")?.let { it > 0 } == true
+                    },
+                )
+            },
         )
 
         val providerUsage = summaryRoot.arrayValue("byProvider").mapNotNull { element ->
@@ -474,6 +549,8 @@ internal object AnalyticsParser {
                 tokenCount = item.longValue("total_tokens"),
                 requestCount = item.longValue("requests"),
                 costUsd = item.doubleValue("api_equivalent_cost", item.doubleValue("cost")),
+                provider = item.stringValue("provider"),
+                lastActive = item.stringValue("last_active"),
             )
         }
 
@@ -508,10 +585,12 @@ internal object AnalyticsParser {
     private fun providerColor(provider: String): Long = when (provider.lowercase()) {
         "codex" -> 0xFF22C55EL
         "kimi" -> 0xFF2582EDL
-        "opencode" -> 0xFF3B82F6L
+        "opencode" -> 0xFFF472B6L
         "pi" -> 0xFFA855F7L
         "z.ai", "zai", "z.ai code" -> 0xFF14B8A6L
         "claude", "claude code" -> 0xFFF97316L
+        // The backend groups every Mistral-model turn under the "Vibe" family.
+        "vibe", "mistral" -> 0xFFFF7000L
         else -> 0xFF94A3B8L
     }
 

@@ -13,6 +13,7 @@ import com.claudewebui.app.data.model.PermissionResponse
 import com.claudewebui.app.data.model.Session
 import com.claudewebui.app.data.model.StyleKind
 import com.claudewebui.app.data.model.SessionChatList
+import com.claudewebui.app.data.model.SessionLifecycleEvent
 import com.claudewebui.app.data.model.SessionStatus
 import com.claudewebui.app.data.model.SwitchProviderInput
 import com.claudewebui.app.data.model.UpdateSessionInput
@@ -209,6 +210,27 @@ class SessionRepository(
         apiCall { dao.setIdle(sessionId, nowIso()) }
     }
 
+    /**
+     * One account-wide heartbeat, written through to the cached row.
+     *
+     * Approvals and questions are summed into the one column the dashboard's
+     * verdict reads: both block the agent on a human, and the card only has to
+     * say that someone is waiting.
+     */
+    suspend fun cacheLifecycle(event: SessionLifecycleEvent) {
+        apiCall {
+            dao.setRuntime(
+                id = event.sessionId,
+                busy = event.busy,
+                activitySummary = event.activitySummary,
+                queueDepth = event.queueDepth,
+                lastActivityAt = event.lastActivityAt ?: nowIso(),
+            )
+            dao.setStatus(event.sessionId, event.status.name)
+            dao.setPendingApprovals(event.sessionId, event.pendingApprovals + event.pendingQuestions)
+        }
+    }
+
     /** Queue depth from a queue event, so the badge is right outside the chat too. */
     suspend fun cacheQueue(sessionId: String, depth: Int, busy: Boolean) {
         apiCall { dao.setQueue(sessionId, depth, busy) }
@@ -335,6 +357,12 @@ class SessionRepository(
     }
 
     /** List chat threads of a session. */
+    suspend fun getAgents(id: String, chatId: String?, offset: Int = 0): Result<com.claudewebui.app.data.model.SubagentSnapshot> = apiCall {
+        val response = api.getSessionAgents(id, chatId, offset)
+        if (!response.success || response.data == null) error(response.error?.message ?: "Failed to load agents")
+        response.data
+    }
+
     suspend fun getChats(id: String): Result<SessionChatList> = apiCall {
         val response = api.getSessionChats(id)
         if (!response.success || response.data == null) {

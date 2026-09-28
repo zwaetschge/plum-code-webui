@@ -23,8 +23,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,7 +63,14 @@ fun FileEditorScreen(
     val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
     androidx.compose.ui.platform.LocalConfiguration.current
 
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var confirmDiscard by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    if (confirmDiscard) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { confirmDiscard = false },
+        title = { Text(screenResources.getString(R.string.recovery_discard_title)) },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { viewModel.revert(); confirmDiscard = false }) { Text(screenResources.getString(R.string.recovery_discard)) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDiscard = false }) { Text(screenResources.getString(R.string.action_cancel)) } },
+    )
 
     PlumBackdrop {
         Scaffold(
@@ -95,7 +103,7 @@ fun FileEditorScreen(
                     Text(
                         when {
                             state.isSaving -> screenResources.getString(R.string.filemanager_saving_56a22)
-                            state.hasChanges -> screenResources.getString(R.string.filemanager_unsaved_changes_29267)
+                            state.hasChanges -> screenResources.getString(R.string.recovery_unsaved)
                             state.savedAt != null -> screenResources.getString(R.string.filemanager_saved_c0ae8)
                             else -> screenResources.getString(R.string.filemanager_no_changes_24a61)
                         },
@@ -104,7 +112,7 @@ fun FileEditorScreen(
                         modifier = Modifier.weight(1f),
                     )
                     if (state.hasChanges) {
-                        ActionChip(screenResources.getString(R.string.filemanager_revert_27260), enabled = !state.isSaving, onClick = viewModel::revert)
+                        ActionChip(screenResources.getString(R.string.filemanager_revert_27260), enabled = !state.isSaving, onClick = { confirmDiscard = true })
                     }
                     ActionChip(
                         screenResources.getString(R.string.filemanager_save_efc00),
@@ -143,9 +151,9 @@ fun FileEditorScreen(
                             onValueChange = viewModel::onDraftChange,
                             textStyle = TextStyle(
                                 color = PlumText,
-                                fontSize = 12.sp,
+                                fontSize = 14.sp,
                                 fontFamily = FontFamily.Monospace,
-                                lineHeight = 17.sp,
+                                lineHeight = 21.sp,
                             ),
                             cursorBrush = SolidColor(PlumAccent),
                             modifier = Modifier

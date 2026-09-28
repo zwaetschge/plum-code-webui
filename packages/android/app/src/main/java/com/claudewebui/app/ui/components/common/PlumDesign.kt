@@ -32,6 +32,7 @@ import androidx.compose.material.icons.outlined.Analytics
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.ShowChart
+import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.ViewList
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -80,6 +81,10 @@ import com.claudewebui.app.ui.theme.plumGlass
 import com.claudewebui.app.ui.theme.LocalPlumHazeReady
 import com.claudewebui.app.ui.theme.LocalPlumPalette
 import com.claudewebui.app.ui.theme.PlumTheme
+import com.claudewebui.app.ui.theme.AppBackgroundStore
+import com.claudewebui.app.ui.theme.AppBackgroundStyle
+import com.claudewebui.app.ui.theme.VibeColor
+import androidx.compose.runtime.collectAsState
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.haze
 
@@ -131,6 +136,7 @@ enum class MainDestination(
     val icon: ImageVector,
 ) {
     SESSIONS(R.string.component_sessions, Icons.Outlined.ViewList),
+    MONITOR(R.string.component_monitor, Icons.Outlined.GridView),
     ACTIVITY(R.string.component_activity, Icons.Outlined.ShowChart),
     ANALYTICS(R.string.component_analytics, Icons.Outlined.Analytics),
     LIBRARY(R.string.component_library, Icons.Outlined.FolderOpen),
@@ -156,6 +162,9 @@ val LocalPlumHaze = staticCompositionLocalOf { HazeState() }
  */
 val LocalPlumSnackbar = staticCompositionLocalOf { SnackbarHostState() }
 
+/** Prevent screen-level backdrops from drawing a second hidden animation. */
+private val LocalBackdropAlreadyDrawn = staticCompositionLocalOf { false }
+
 // ── 3. Backdrop and glass surfaces ───────────────────────────────────────────
 
 @Composable
@@ -163,13 +172,24 @@ fun PlumBackdrop(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    if (LocalBackdropAlreadyDrawn.current) {
+        Box(modifier.fillMaxSize()) { content() }
+        return
+    }
     val palette = LocalPlumPalette.current
+    val backgroundStyle = AppBackgroundStore.style.collectAsState().value
+    val waveTime = rememberAmbientWaveTime(
+        animate = backgroundStyle == AppBackgroundStyle.AURORA &&
+            palette.waveViolet != Color.Transparent && !PlumTheme.tokens.motion.reduceMotion,
+    )
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(palette.background),
     ) {
-        Canvas(Modifier.fillMaxSize()) {
+        if (backgroundStyle != AppBackgroundStyle.AURORA && palette.waveViolet != Color.Transparent) {
+            AppearanceBackdropEffects(backgroundStyle, palette, Modifier.fillMaxSize())
+        } else if (backgroundStyle == AppBackgroundStyle.AURORA) Canvas(Modifier.fillMaxSize()) {
             if (palette.glowPrimary != Color.Transparent) {
                 drawCircle(
                     brush = Brush.radialGradient(
@@ -192,6 +212,7 @@ fun PlumBackdrop(
                     center = Offset(size.width * .98f, size.height * .04f),
                 )
             }
+            drawAuroraWaves(palette, waveTime.value)
             if (palette.grid != Color.Transparent) {
                 // Grid pitch is a backdrop texture, not a layout value.
                 val step = 36.dp.toPx()
@@ -207,7 +228,7 @@ fun PlumBackdrop(
                 }
             }
         }
-        content()
+        CompositionLocalProvider(LocalBackdropAlreadyDrawn provides true) { content() }
     }
 }
 
@@ -472,7 +493,7 @@ fun PlumIconButton(
 @Composable
 fun PlumScreenHeader(
     title: String,
-    subtitle: String,
+    subtitle: String?,
     modifier: Modifier = Modifier,
     live: Boolean = false,
     actions: @Composable RowScope.() -> Unit = {},
@@ -508,7 +529,7 @@ fun PlumScreenHeader(
                     Text(stringResource(R.string.component_live), color = PlumMuted, fontSize = 14.sp)
                 }
             }
-            Text(
+            if (subtitle != null) Text(
                 subtitle,
                 color = PlumMuted,
                 style = MaterialTheme.typography.bodyMedium,
@@ -592,8 +613,8 @@ fun PlumNavRail(
             .wrapContentHeight()
             .width(if (short) tokens.sizing.navRailWidthShort else tokens.sizing.navRailWidth)
             .padding(start = tokens.spacing.compact, bottom = tokens.spacing.compact),
-        // Between radius.xl and radius.bar; matches the rail's narrower width.
-        radius = 26.dp,
+        // Match the card radius so the smaller rail belongs to the same system.
+        radius = tokens.radius.panel,
     ) {
         Column(
             modifier = Modifier
@@ -601,11 +622,11 @@ fun PlumNavRail(
                 .wrapContentHeight()
                 .navigationBarsPadding()
                 .padding(
-                    vertical = if (short) tokens.spacing.inline else tokens.spacing.md,
+                    vertical = if (short) tokens.spacing.inline else tokens.spacing.sm,
                     horizontal = tokens.spacing.inline,
                 ),
             verticalArrangement = Arrangement.spacedBy(
-                if (short) tokens.spacing.xxs else tokens.spacing.inline,
+                if (short) tokens.spacing.xxs else tokens.spacing.xs,
             ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -624,7 +645,7 @@ fun PlumNavRail(
                         )
                         .semantics { this.selected = active }
                         .clickable(role = Role.Button) { onNavigate(destination) }
-                        .padding(vertical = if (short) 7.dp else tokens.spacing.compact),
+                        .padding(vertical = if (short) 7.dp else tokens.spacing.sm),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     NavDestinationIcon(
@@ -705,6 +726,7 @@ fun PlumNavScaffold(
      * their own header inside the content.
      */
     header: (@Composable () -> Unit)? = null,
+    embedded: Boolean = false,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     val tokens = PlumTheme.tokens
@@ -714,6 +736,13 @@ fun PlumNavScaffold(
     val snackbarHostState = LocalPlumSnackbar.current
     // Floating action button inset from the content corner.
     val fabInset = 22.dp
+    if (embedded) {
+        Box(Modifier.fillMaxSize()) {
+            content(PaddingValues(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(), bottom = 72.dp))
+            floatingActionButton?.let { fab -> Box(Modifier.align(Alignment.BottomEnd).padding(16.dp)) { fab() } }
+        }
+        return
+    }
     if (isTabletWidth()) {
         // The header floats over the top-left corner instead of sitting in a row
         // above everything: a real row also pushes the right-hand pane down, which
@@ -905,6 +934,10 @@ fun PlumBottomBar(
                         color = if (active) PlumAccent else PlumMuted,
                         fontSize = 11.sp,
                         fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        // Six destinations on a phone-width bar: a label that
+                        // wraps would push the bar taller than its glass.
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -922,6 +955,7 @@ fun providerColor(provider: CLIProvider): Color = when (provider) {
     CLIProvider.OPENCODE -> PlumAccent
     CLIProvider.PI -> PlumBlue
     CLIProvider.KIMI -> Color(0xFF2582ED)
+    CLIProvider.VIBE -> VibeColor
     CLIProvider.ZAI -> Color(0xFF7ED957)
     CLIProvider.CLAUDE -> PlumAmber
 }
@@ -931,6 +965,7 @@ fun providerLabel(provider: CLIProvider): String = when (provider) {
     CLIProvider.OPENCODE -> "OPENCODE"
     CLIProvider.PI -> "PI"
     CLIProvider.KIMI -> "KIMI"
+    CLIProvider.VIBE -> "VIBE"
     CLIProvider.ZAI -> "Z.AI"
     CLIProvider.CLAUDE -> "CLAUDE"
 }
@@ -940,6 +975,9 @@ fun providerModel(provider: CLIProvider): String = when (provider) {
     CLIProvider.OPENCODE -> "glm-5.1"
     CLIProvider.PI -> "glm-5.1"
     CLIProvider.KIMI -> "kimi-for-coding"
+    // Vibe ships one hosted model: the alias of mistral-vibe-cli-latest that the
+    // plan's Vibe Code allowance pays for.
+    CLIProvider.VIBE -> "mistral-medium-3.5"
     CLIProvider.ZAI -> "opus"
     CLIProvider.CLAUDE -> "sonnet"
 }

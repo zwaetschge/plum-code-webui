@@ -143,17 +143,18 @@ class DashboardViewModel(
      * visible instead of hiding an agent that is still blocked.
      */
     fun respondToPendingApproval(item: PendingPermissionItem, allow: Boolean) {
-        if (item.requestId.isBlank()) return
+        if (item.requestId.isBlank() || item.requestId in _uiState.value.respondingApprovals) return
         _uiState.update { it.copy(respondingApprovals = it.respondingApprovals + item.requestId) }
         viewModelScope.launch {
             apiCall {
-                apiClient.respondToPermission(
+                val response = apiClient.respondToPermission(
                     PermissionResponse(
                         sessionId = item.sessionId,
                         requestId = item.requestId,
                         action = if (allow) PermissionAction.ALLOW_ONCE else PermissionAction.DENY,
                     )
                 )
+                check(response.success) { "Approval was not accepted" }
             }.onSuccess {
                 gatewayRepository.forgetApproval(item.requestId)
             }.onFailure { error ->
@@ -204,20 +205,28 @@ class DashboardViewModel(
     fun respondToApproval(notification: AppNotification, allow: Boolean) {
         val sessionId = notification.sessionId ?: return
         val requestId = notification.data?.requestId ?: return
+        if (requestId in _uiState.value.respondingApprovals) return
+        _uiState.update { it.copy(respondingApprovals = it.respondingApprovals + requestId) }
         viewModelScope.launch {
-            apiCall {
-                apiClient.respondToPermission(
-                    PermissionResponse(
-                        sessionId = sessionId,
-                        requestId = requestId,
+            try {
+                val result = apiCall {
+                    val response = apiClient.respondToPermission(PermissionResponse(
+                        sessionId = sessionId, requestId = requestId,
                         action = if (allow) PermissionAction.ALLOW_ONCE else PermissionAction.DENY,
-                    )
-                )
-            }.onFailure {
-                _uiState.update { state -> state.copy(error = it.message ?: "Approval failed") }
+                    ))
+                    check(response.success) { "Approval was not accepted" }
+                }
+                result.onFailure { failure ->
+                    _uiState.update { it.copy(error = failure.screenErrorMessage("dashboard", "respondToApproval", appContext)) }
+                }.onSuccess {
+                    gatewayRepository.forgetApproval(requestId)
+                    apiCall { apiClient.markNotificationsRead(listOf(notification.id)) }
+                    loadNotifications()
+                    refresh()
+                }
+            } finally {
+                _uiState.update { it.copy(respondingApprovals = it.respondingApprovals - requestId) }
             }
-            apiCall { apiClient.markNotificationsRead(listOf(notification.id)) }
-            loadNotifications()
         }
     }
 
@@ -272,6 +281,8 @@ class DashboardViewModel(
 
     // ── Archive and bulk actions ────────────────────────────────────────────
 
+    fun requestNewSession() { viewModelScope.launch { _events.send(DashboardEvent.ShowNewSessionDialog) } }
+
     fun toggleArchiveView() {
         _uiState.update { it.copy(showArchived = !it.showArchived, selectedSessionIds = emptySet()) }
         loadData()
@@ -294,10 +305,11 @@ class DashboardViewModel(
         val ids = _uiState.value.selectedSessionIds.toList()
         if (ids.isEmpty()) return
         viewModelScope.launch {
-            apiCall { apiClient.bulkSessions(BulkSessionInput(ids, action, categoryId)) }
-                .onFailure { reportBackground(it, "Bulk action failed") }
-            _uiState.update { it.copy(selectedSessionIds = emptySet()) }
-            loadData()
+            apiCall {
+                val response = apiClient.bulkSessions(BulkSessionInput(ids, action, categoryId))
+                check(response.success) { response.error?.message ?: "Bulk action failed" }
+            }.onFailure { reportBackground(it, "Bulk action failed") }
+                .onSuccess { clearSelection(); loadData() }
         }
     }
 
@@ -429,18 +441,21 @@ class DashboardViewModel(
             )
         }
         if (scope == DashboardSearchScope.MESSAGES) {
-            viewModelScope.launch { searchMessages(_uiState.value.searchQuery) }
+            searchJob = viewModelScope.launch { searchMessages(_uiState.value.searchQuery) }
         } else applyCurrentFilters()
     }
 
     private suspend fun searchMessages(query: String) {
+        val requestedQuery = query.trim()
+        fun isCurrent() = acceptsMessageSearch(_uiState.value, requestedQuery)
         if (query.trim().length < 2) {
             _uiState.update { it.copy(messageSearchResults = emptyList(), isSearchingMessages = false) }
             return
         }
         _uiState.update { it.copy(isSearchingMessages = true) }
-        apiCall { apiClient.searchMessages(query.trim()) }
+        apiCall { apiClient.searchMessages(requestedQuery) }
             .onSuccess { response ->
+                if (!isCurrent()) return@onSuccess
                 _uiState.update {
                     it.copy(
                         isSearchingMessages = false,
@@ -451,7 +466,7 @@ class DashboardViewModel(
             }
             .onFailure { error ->
                 _uiState.update {
-                    it.copy(isSearchingMessages = false, messageSearchError = error.screenErrorMessage("dashboard", "searchMessages", appContext))
+                    if (!isCurrent()) it else it.copy(isSearchingMessages = false, messageSearchError = error.screenErrorMessage("dashboard", "searchMessages", appContext))
                 }
             }
     }
@@ -754,3 +769,6 @@ internal fun filterDashboardSessions(
     // Most recently touched first; the grouping downstream decides the rest.
     return result.sortedByDescending { it.updatedAt }
 }
+
+internal fun acceptsMessageSearch(current: DashboardUiState, requestedQuery: String): Boolean =
+    current.searchScope == DashboardSearchScope.MESSAGES && current.searchQuery.trim() == requestedQuery

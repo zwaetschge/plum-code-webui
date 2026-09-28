@@ -37,10 +37,4 @@ data class ToolExecutionEvent(
     val actionSummary: String? = null
 )
 
-@Serializable
-data class AgentEvent(
-    val sessionId: String,
-    val agentType: String,
-    val description: String? = null,
-    val status: ToolStatus
-)
+typealias AgentEvent = SubagentRun

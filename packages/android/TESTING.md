@@ -44,6 +44,19 @@ that the two renders differ. PNGs land in the app's external files directory
 under `ui-test-screenshots`. These are render assertions and review artifacts;
 they are not pixel-perfect golden comparisons.
 
+`SystemNotificationsTest` posts replies, errors, approvals and questions while an
+Activity is visible, then checks Android's active notifications, deep-link intents
+and inline actions. It also checks that the user's notification switch suppresses
+all four types. The test grants Android 13+ notification permission for the test
+app. It replaces the old in-app-banner layout test: session events now use system
+notifications in both foreground and background. Manually verify delivery from a
+real session, notification shade, lock screen and inline actions; OS channel and
+Do Not Disturb preferences remain authoritative.
+
+`AndroidQualityTest.sessionToolsKeepWorkVisibleAndConfigurationReachable` checks
+that Tasks, active/waiting agents and model settings remain reachable in the
+compact session tools menu. It requires a device run; compiling it is not a pass.
+
 `MessagePagingTest` exercises the generated Room PagingSource against real
 SQLite: 241 messages across pages, timestamp tie ordering, session/thread/null
 isolation, invalidation, retained read anchors and search-window replacement.

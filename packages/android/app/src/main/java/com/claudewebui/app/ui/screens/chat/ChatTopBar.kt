@@ -7,6 +7,8 @@ import androidx.compose.ui.res.stringResource
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -14,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -24,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -102,6 +106,7 @@ internal class ChatTopBarActions(
     val onSwitchChat: (String) -> Unit,
     val onNewChat: () -> Unit,
     val onDeleteChat: (String) -> Unit,
+    val onOpenAgents: () -> Unit = {},
 )
 
 // ── Top Bar ───────────────────────────────────────────────────────────────────
@@ -112,6 +117,10 @@ internal fun ChatTopBar(
     session: Session?,
     header: ChatHeaderState,
     actions: ChatTopBarActions,
+    compact: Boolean = false,
+    showBackButton: Boolean = true,
+    navigationIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    navigationLabel: String? = null,
 ) {
     val t = PlumTheme.tokens
     var editTitleText by remember(session?.name) { mutableStateOf(session?.name ?: "") }
@@ -126,25 +135,38 @@ internal fun ChatTopBar(
         }
     }
 
-    // The bar itself is fully opaque — every pixel of it, tab row included.
-    // The fade lives in its own strip *below* the bar, so the transcript
-    // dissolves under the tabs instead of showing through them as
-    // double-exposed text. Putting the gradient on the padded column meant
-    // the last 12% of the bar was translucent, and that is exactly where the
-    // tabs sit.
+    // Keep the status-bar area and the wallpaper visible around a single
+    // readable header surface. The transcript is laid out below this bar by
+    // Scaffold, so no chat text is double-exposed behind its translucent fill.
     val palette = LocalPlumPalette.current
-    Column(Modifier.fillMaxWidth()) {
+    val headerShape = RoundedCornerShape(22.dp)
+    // The transcript scrolls behind this bar: at .72 its text read straight
+    // through and collided with the title. Opaque; border, shadow and the
+    // gradient carry the glass look.
+    val headerTopAlpha = 1f
+    val headerBottomAlpha = 1f
+    Column(Modifier.fillMaxWidth().statusBarsPadding()) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(palette.background)
-            .statusBarsPadding()
-            .padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
+            .padding(horizontal = t.spacing.sm, vertical = t.spacing.xs)
+            .shadow(8.dp, headerShape, ambientColor = palette.glassShadow, spotColor = palette.glassShadow)
+            .clip(headerShape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        palette.surfaceStrong.copy(alpha = headerTopAlpha),
+                        palette.surface.copy(alpha = headerBottomAlpha),
+                    ),
+                ),
+            )
+            .border(1.dp, palette.border.copy(alpha = .85f), headerShape)
+            .padding(horizontal = t.spacing.sm, vertical = t.spacing.sm),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = actions.onNavigateBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.chat_back), tint = PlumText)
+            if (showBackButton) IconButton(onClick = actions.onNavigateBack) {
+                Icon(navigationIcon ?: Icons.AutoMirrored.Filled.ArrowBack, navigationLabel ?: stringResource(R.string.chat_back), tint = PlumText)
             }
             Box(Modifier.weight(1f)) {
             if (header.isEditingTitle) {
@@ -329,7 +351,7 @@ internal fun ChatTopBar(
 
             // Tapping the provider badge opens session settings, the fastest
             // path to switching provider, model and reasoning effort.
-            if (!largeText) {
+            if (!largeText && !compact) {
                 session?.cliProvider?.let { ChatProviderBadge(it, onClick = actions.onOpenSessionSettings) }
             }
             Box {
@@ -343,6 +365,19 @@ internal fun ChatTopBar(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
                 ) {
+                    if (compact) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.chat_tools)) },
+                            leadingIcon = { Icon(Icons.Outlined.Terminal, contentDescription = null) },
+                            onClick = { showMenu = false; actions.onOpenToolLog() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.chat_stats)) },
+                            leadingIcon = { Icon(Icons.Outlined.BarChart, contentDescription = null) },
+                            onClick = { showMenu = false; actions.onToggleUsage() },
+                        )
+                        HorizontalDivider()
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.chat_settings)) },
                         leadingIcon = { Icon(Icons.Outlined.Tune, contentDescription = null) },
@@ -367,42 +402,33 @@ internal fun ChatTopBar(
             }
         }
 
-        Row(
+        if (!compact) Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .glassSurface(RoundedCornerShape(18.dp))
-                .padding(t.spacing.xs),
+                .padding(t.spacing.xs)
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
         ) {
-            ChatTab(stringResource(R.string.chat_tab), Icons.Outlined.ChatBubbleOutline, true, Modifier.weight(1f), {})
-            ChatTab(stringResource(R.string.chat_files), Icons.Outlined.FolderOpen, false, Modifier.weight(1f), actions.onNavigateToFiles)
-            ChatTab(stringResource(R.string.chat_panel_git), Icons.Outlined.MergeType, false, Modifier.weight(1f), actions.onNavigateToGit)
-            ChatTab(stringResource(R.string.chat_checks), Icons.Outlined.Security, false, Modifier.weight(1f), actions.onNavigateToCheckpoints)
+            ChatTab(stringResource(R.string.chat_tab), Icons.Outlined.ChatBubbleOutline, true, Modifier, {})
+            ChatTab(stringResource(R.string.chat_files), Icons.Outlined.FolderOpen, false, Modifier, actions.onNavigateToFiles)
+            ChatTab(stringResource(R.string.chat_panel_git), Icons.Outlined.MergeType, false, Modifier, actions.onNavigateToGit)
+            ChatTab(stringResource(R.string.chat_checks), Icons.Outlined.Security, false, Modifier, actions.onNavigateToCheckpoints)
             // Model, account limits and context/token/cost all live behind
             // this toggle — the header stays as small as possible.
-            ChatTab(stringResource(R.string.chat_stats), Icons.Outlined.BarChart, header.showUsageBanner, Modifier.weight(1f), actions.onToggleUsage)
+            ChatTab(stringResource(R.string.chat_stats), Icons.Outlined.BarChart, header.showUsageBanner, Modifier, actions.onToggleUsage)
+            ChatTab(stringResource(R.string.agents_title), Icons.Outlined.Groups, false, Modifier, actions.onOpenAgents)
             // Mirrors the WebUI's Tool Log dock: every tool call of this session
             // in one place, instead of only inline in the transcript.
             ChatTab(
                 stringResource(R.string.chat_tools),
                 Icons.Outlined.Terminal,
                 header.hasActiveTools,
-                Modifier.weight(1f),
+                Modifier,
                 actions.onOpenToolLog,
             )
         }
     }
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(22.dp)
-            .background(
-                Brush.verticalGradient(
-                    0f to palette.background,
-                    1f to Color.Transparent,
-                ),
-            ),
-    )
     }
 }
 
@@ -415,9 +441,9 @@ private fun ChatTab(
     onClick: () -> Unit,
 ) {
     val t = PlumTheme.tokens
-    val largeText = LocalDensity.current.fontScale >= 1.5f
     Row(
         modifier = modifier
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(t.spacing.cozy))
             .background(if (selected) Color(0xFF8044C5) else Color.Transparent)
             .semantics {
@@ -425,14 +451,19 @@ private fun ChatTab(
                 role = Role.Button
             }
             .clickable(onClick = onClick)
-            .padding(vertical = 9.dp),
-        horizontalArrangement = Arrangement.Center,
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = if (selected) Color.White else PlumMuted, modifier = Modifier.size(18.dp))
-        if (!largeText) {
-            Text("  $label", color = if (selected) Color.White else PlumMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        }
+        Text(
+            label,
+            color = if (selected) Color.White else PlumMuted,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 

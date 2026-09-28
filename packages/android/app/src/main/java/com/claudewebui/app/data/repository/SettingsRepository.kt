@@ -4,10 +4,14 @@ import com.claudewebui.app.core.network.apiCall
 import com.claudewebui.app.core.network.ApiClient
 import com.claudewebui.app.data.model.Category
 import com.claudewebui.app.data.model.CodexPlugin
+import com.claudewebui.app.data.model.BrowserBridgeStatus
+import com.claudewebui.app.data.model.BrowserToken
 import com.claudewebui.app.data.model.GatewayToken
 import com.claudewebui.app.data.model.CLIProvider
 import com.claudewebui.app.data.model.CLIProviderConfig
 import com.claudewebui.app.data.model.CliLoginSession
+import com.claudewebui.app.data.model.VibeApiKeyInput
+import com.claudewebui.app.data.model.VibeAuthStatus
 import com.claudewebui.app.data.model.CliSubagentEntry
 import com.claudewebui.app.data.model.ConfigAgent
 import com.claudewebui.app.data.model.ConfigDocument
@@ -33,6 +37,7 @@ import com.claudewebui.app.data.model.SaveConfigSkillInput
 import com.claudewebui.app.data.model.SlashCommand
 import com.claudewebui.app.data.model.StyleLibrary
 import com.claudewebui.app.data.model.Theme
+import com.claudewebui.app.data.model.BackgroundAnimation
 import com.claudewebui.app.data.model.UiProvider
 import com.claudewebui.app.data.model.UpdateCategoryInput
 import com.claudewebui.app.data.model.UpdateCustomAgentInput
@@ -85,6 +90,37 @@ class SettingsRepository(
     suspend fun revokeGatewayToken(id: String): Result<Unit> = apiCall {
         val response = api.revokeGatewayToken(id)
         if (!response.success) error(response.error?.message ?: "Failed to revoke token")
+        Unit
+    }
+
+    // ---- Firefox browser (Plum Browser extension) ----------------------------
+
+    suspend fun getBrowserBridgeStatus(): Result<BrowserBridgeStatus> = apiCall {
+        val response = api.getBrowserBridgeStatus()
+        if (!response.success || response.data == null) {
+            error(response.error?.message ?: "Failed to fetch browser status")
+        }
+        response.data
+    }
+
+    suspend fun getBrowserTokens(): Result<List<BrowserToken>> = apiCall {
+        val response = api.getBrowserTokens()
+        if (!response.success) error(response.error?.message ?: "Failed to fetch browser tokens")
+        response.data.orEmpty()
+    }
+
+    /** The response carries the secret exactly once; it is never retrievable later. */
+    suspend fun createBrowserToken(name: String): Result<BrowserToken> = apiCall {
+        val response = api.createBrowserToken(name)
+        if (!response.success || response.data == null) {
+            error(response.error?.message ?: "Failed to pair browser")
+        }
+        response.data
+    }
+
+    suspend fun revokeBrowserToken(id: String): Result<Unit> = apiCall {
+        val response = api.revokeBrowserToken(id)
+        if (!response.success) error(response.error?.message ?: "Failed to unpair browser")
         Unit
     }
 
@@ -149,6 +185,8 @@ class SettingsRepository(
     /** Update settings with only the fields that changed. */
     suspend fun updateSettings(
         theme: Theme? = null,
+        backgroundAnimation: BackgroundAnimation? = null,
+        appearanceSync: Boolean? = null,
         defaultWorkingDir: String? = null,
         allowedTools: List<String>? = null,
         customSystemPrompt: String? = null,
@@ -162,6 +200,8 @@ class SettingsRepository(
     ): Result<UserSettings> = apiCall {
         val input = UpdateSettingsInput(
             theme = theme,
+            backgroundAnimation = backgroundAnimation,
+            appearanceSync = appearanceSync,
             defaultWorkingDir = defaultWorkingDir,
             allowedTools = allowedTools,
             customSystemPrompt = customSystemPrompt,
@@ -554,6 +594,38 @@ class SettingsRepository(
 
     suspend fun cancelCliLogin(id: String): Result<Unit> = apiCall {
         api.cancelCliLogin(id)
+        Unit
+    }
+
+    // ---- Mistral Vibe credentials -------------------------------------------
+
+    /** Sign-in state of the Vibe harness. Carries flags only, never the key. */
+    suspend fun getVibeAuthStatus(): Result<VibeAuthStatus> = apiCall {
+        val response = api.getVibeAuthStatus()
+        if (!response.success || response.data == null) {
+            error(response.error?.message ?: "Failed to read the Vibe sign-in state")
+        }
+        response.data
+    }
+
+    /**
+     * Store a pasted key. Write-only in both directions: the request is the only
+     * place the secret exists, and the answer is discarded in favour of a fresh
+     * status read so no client ever caches a key.
+     */
+    suspend fun saveVibeApiKey(apiKey: String): Result<Unit> = apiCall {
+        val response = api.saveVibeApiKey(VibeApiKeyInput(apiKey))
+        if (!response.success) {
+            error(response.error?.message ?: "Failed to store the Vibe API key")
+        }
+        Unit
+    }
+
+    suspend fun clearVibeApiKey(): Result<Unit> = apiCall {
+        val response = api.clearVibeApiKey()
+        if (!response.success) {
+            error(response.error?.message ?: "Failed to remove the Vibe API key")
+        }
         Unit
     }
 

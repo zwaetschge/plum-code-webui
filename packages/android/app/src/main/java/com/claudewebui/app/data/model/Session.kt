@@ -17,10 +17,13 @@ enum class CLIProvider(val displayName: String) {
     @SerialName("opencode") OPENCODE("OpenCode"),
     @SerialName("pi") PI("Pi"),
     @SerialName("kimi") KIMI("Kimi"),
+    @SerialName("vibe") VIBE("Vibe"),
     @SerialName("zai") ZAI("Z.AI");
 
     companion object {
-        val active: List<CLIProvider> = listOf(CODEX, OPENCODE, PI, KIMI, ZAI, CLAUDE)
+        // Codex first, Claude last (legacy); Vibe sits beside Kimi because both
+        // are persistent ACP harnesses.
+        val active: List<CLIProvider> = listOf(CODEX, OPENCODE, PI, KIMI, VIBE, ZAI, CLAUDE)
 
         fun fromId(id: String): CLIProvider? =
             entries.firstOrNull { it.name.equals(id, ignoreCase = true) }
@@ -111,6 +114,28 @@ fun Session.withFlattenedRuntime(): Session {
     )
 }
 
+/**
+ * `session:lifecycle` — the account-wide heartbeat the server sends on the
+ * user room for every session, not just the subscribed ones.
+ *
+ * Carries the verdict only (busy, queue depth, what is blocking the agent),
+ * never the transcript. This is what lets the dashboard, the monitor grid and
+ * the notification manager follow every session without joining its room.
+ */
+@Serializable
+data class SessionLifecycleEvent(
+    val sessionId: String,
+    val reason: String = "",
+    val status: SessionStatus = SessionStatus.STOPPED,
+    val busy: Boolean = false,
+    val queueDepth: Int = 0,
+    val pendingApprovals: Int = 0,
+    val pendingQuestions: Int = 0,
+    val activitySummary: String? = null,
+    val lastActivityAt: String? = null,
+    val at: String? = null,
+)
+
 /** `PATCH /api/sessions/:id/star` returns only the flag, not the session. */
 @Serializable
 data class StarResult(val starred: Boolean = false)
@@ -127,13 +152,16 @@ data class CategoryAssignment(val category: String? = null)
  */
 enum class ReasoningLevel(val id: String, val label: String) {
     NONE("none", "None"),
+    /** Vibe names its lowest thinking level "off" rather than "none". */
+    OFF("off", "Off"),
     MINIMAL("minimal", "Minimal"),
     LOW("low", "Low"),
     MEDIUM("medium", "Medium"),
     HIGH("high", "High"),
     XHIGH("xhigh", "XHigh"),
     MAX("max", "Max"),
-    ULTRA("ultra", "Ultra");
+    ULTRA("ultra", "Ultra"),
+    ULTRACODE("ultracode", "Ultracode");
 
     companion object {
         /**
@@ -142,8 +170,12 @@ enum class ReasoningLevel(val id: String, val label: String) {
          * harness rejects silently downgrades the turn, so the lists must match.
          */
         fun forProvider(provider: CLIProvider): List<ReasoningLevel> = when (provider) {
-            CLIProvider.CLAUDE, CLIProvider.ZAI -> listOf(LOW, MEDIUM, HIGH, XHIGH, MAX)
-            CLIProvider.OPENCODE, CLIProvider.PI -> listOf(MINIMAL, LOW, MEDIUM, HIGH, MAX)
+            CLIProvider.CLAUDE, CLIProvider.ZAI -> listOf(LOW, MEDIUM, HIGH, XHIGH, MAX, ULTRACODE)
+            CLIProvider.OPENCODE -> listOf(MINIMAL, LOW, MEDIUM, HIGH, MAX)
+            // Vibe calls the setting "Thinking" and accepts exactly these five.
+            CLIProvider.VIBE -> listOf(OFF, LOW, MEDIUM, HIGH, MAX)
+            // Pi runs Ultracode workflows through the Plum pi-ultracode extension.
+            CLIProvider.PI -> listOf(MINIMAL, LOW, MEDIUM, HIGH, MAX, ULTRACODE)
             else -> listOf(NONE, MINIMAL, LOW, MEDIUM, HIGH, XHIGH, MAX, ULTRA)
         }
 

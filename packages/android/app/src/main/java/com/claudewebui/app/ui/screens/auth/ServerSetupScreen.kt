@@ -54,7 +54,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,6 +66,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import com.claudewebui.app.ui.components.common.PlumBackdrop
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -85,8 +86,8 @@ fun ServerSetupScreen(
     val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
     androidx.compose.ui.platform.LocalConfiguration.current
 
-    val authState by viewModel.authState.collectAsState()
-    val recentServers by viewModel.recentServers.collectAsState()
+    val authState by viewModel.authState.collectAsStateWithLifecycle()
+    val recentServers by viewModel.recentServers.collectAsStateWithLifecycle()
 
     var serverUrl by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
@@ -100,9 +101,10 @@ fun ServerSetupScreen(
     val isLoading = authState is AuthState.Connecting
     val errorMessage = (authState as? AuthState.Error)?.message
 
+    PlumBackdrop {
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
+        color = Color.Transparent,
     ) {
         LazyColumn(
             modifier = Modifier
@@ -287,6 +289,7 @@ fun ServerSetupScreen(
                 }
             }
         }
+    }
     }
 }
 

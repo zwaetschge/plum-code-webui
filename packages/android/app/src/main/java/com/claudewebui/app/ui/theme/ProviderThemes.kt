@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
@@ -19,6 +20,7 @@ enum class CliProvider(val displayName: String, val id: String) {
     OPENCODE("OpenCode", "opencode"),
     PI("Pi", "pi"),
     KIMI("Kimi", "kimi"),
+    VIBE("Vibe", "vibe"),
     ZAI("Z.AI", "zai"),
     UNKNOWN("Unknown", "unknown"),
     ;
@@ -97,6 +99,17 @@ object ProviderThemes {
             onContainerColorDark = Color(0xFF9BC9FF),
             icon = Icons.Filled.Bedtime,
             displayName = "Kimi",
+        ),
+        // Mistral Vibe: persistent ACP harness, brand orange like Mistral.
+        CliProvider.VIBE to ProviderTheme(
+            color = VibeColor,
+            colorDark = Color(0xFFFF9A4D),
+            containerColor = Color(0xFFFFEFE3),
+            containerColorDark = Color(0xFF43200A),
+            onContainerColor = Color(0xFF9A4400),
+            onContainerColorDark = Color(0xFFFFB27A),
+            icon = Icons.Filled.LocalFireDepartment,
+            displayName = "Vibe",
         ),
         CliProvider.ZAI to ProviderTheme(
             color = Color(0xFF4F9A37),

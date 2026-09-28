@@ -14,12 +14,18 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.claudewebui.app.core.audio.VoiceRecorder
@@ -30,6 +36,7 @@ import com.claudewebui.app.ui.components.chat.ChatInput
 import com.claudewebui.app.ui.components.chat.ThinkingIndicator
 import com.claudewebui.app.ui.components.common.PlumAmber
 import com.claudewebui.app.ui.components.common.PlumMuted
+import com.claudewebui.app.ui.components.common.isShortWindow
 import com.claudewebui.app.ui.theme.LocalPlumPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -94,6 +101,7 @@ internal class ChatComposerActions(
     val onTextChange: (String) -> Unit,
     val onSend: (String) -> Unit,
     val onInterrupt: () -> Unit,
+    val onRestart: () -> Unit,
     val onRemoveAttachment: (Int) -> Unit,
     val onActiveFollowupModeChange: (ActiveFollowupMode) -> Unit,
     val onCancelDelivery: (String) -> Unit,
@@ -103,8 +111,7 @@ internal class ChatComposerActions(
 
 /**
  * The bottom bar: quick-access row (attention / details / outbox), the
- * thinking indicator and the composer itself, over a fade so the transcript
- * scrolls in behind it.
+ * thinking indicator and the composer itself in a floating glass dock.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -119,48 +126,60 @@ internal fun ChatComposerBar(
     onShowOutbox: () -> Unit,
 ) {
     val t = PlumTheme.tokens
-    // Soft scrim instead of a solid bar: the chat scrolls in behind
-    // the composer and fades out under it.
     val palette = LocalPlumPalette.current
-    // The fade is a fixed 24dp at the top edge, then solid. Stops
-    // expressed as fractions were stretched over the whole node, and
-    // the node includes the keyboard and navigation-bar padding — so
-    // with the keyboard up the entire visible bar fell inside the
-    // transparent start and the transcript read straight through the
-    // text field. Clamp keeps the last stop solid past endY.
-    Column(Modifier.fillMaxWidth()) {
-        // The fade is its own strip *above* the bar, so nothing inside the
-        // bar — the diff row, the queue line, the composer — ever sits on
-        // a half-transparent scrim. The bar itself is solid.
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(t.spacing.section)
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        1f to palette.background,
-                    ),
-                ),
-        )
+    val composerShape = RoundedCornerShape(22.dp)
+    // The transcript scrolls behind the dock; at .72 (and still at .92) its
+    // text showed through and overlapped the action row and the input hint.
+    // Opaque: the glass look stays in the border, shadow and gradient.
+    val composerTopAlpha = 1f
+    val composerBottomAlpha = 1f
+    // Landscape: the action row is squeezed to button height so the
+    // transcript keeps more of the ~600dp window.
+    val short = isShortWindow()
+    val actionPadding = if (short) PaddingValues(horizontal = t.spacing.sm, vertical = 0.dp) else ButtonDefaults.TextButtonContentPadding
+    // TextButton enforces a 40dp minimum height; only a fixed height shrinks it.
+    val actionModifier = if (short) Modifier.height(32.dp) else Modifier
+    Box(
+        Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
         Column(
             modifier = Modifier
-                .background(palette.background)
-                .navigationBarsPadding()
-                .imePadding(),
+                .widthIn(max = 960.dp)
+                .fillMaxWidth()
+                .padding(horizontal = t.spacing.sm, vertical = t.spacing.xs)
+                .shadow(8.dp, composerShape, ambientColor = palette.glassShadow, spotColor = palette.glassShadow)
+                .clip(composerShape)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            palette.surface.copy(alpha = composerTopAlpha),
+                            palette.surfaceStrong.copy(alpha = composerBottomAlpha),
+                        ),
+                    ),
+                )
+                .border(1.dp, palette.border.copy(alpha = .85f), composerShape),
         ) {
             FlowRow(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = t.spacing.md),
                 horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
             ) {
                 if (activity.needsAttention) {
-                    TextButton(onClick = onShowAttention) { Text(stringResource(R.string.chat_attention), color = PlumAmber) }
+                    TextButton(onClick = onShowAttention, modifier = actionModifier, contentPadding = actionPadding) { Text(stringResource(R.string.chat_attention), color = PlumAmber) }
                 }
-                TextButton(onClick = onShowDetails) {
+                TextButton(onClick = onShowDetails, modifier = actionModifier, contentPadding = actionPadding) {
                     Text(if (activity.queuedCount > 0) stringResource(R.string.chat_details_queue, activity.queuedCount) else stringResource(R.string.chat_details), color = PlumMuted)
                 }
-                TextButton(onClick = onShowOutbox) {
+                TextButton(onClick = onShowOutbox, modifier = actionModifier, contentPadding = actionPadding) {
                     Text(stringResource(R.string.chat_outbox_count, outboxPendingCount), color = PlumMuted)
+                }
+                if (composer.isWorking) {
+                    TextButton(onClick = actions.onInterrupt, modifier = actionModifier, contentPadding = actionPadding) {
+                        Text(stringResource(R.string.chat_interrupt), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                TextButton(onClick = actions.onRestart, modifier = actionModifier, contentPadding = actionPadding) {
+                    Text(stringResource(R.string.chat_restart_session), color = PlumMuted)
                 }
             }
 

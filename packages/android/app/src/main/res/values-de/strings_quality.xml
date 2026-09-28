@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="recovery_unsaved">Ungespeichert · Entwurf auf diesem Gerät gesichert</string>
+    <string name="recovery_retry">Speichern wiederholen</string>
+    <string name="recovery_discard">Entwurf verwerfen</string>
+    <string name="recovery_discard_title">Ungespeicherte Änderungen verwerfen?</string>
+    <string name="recovery_discard_body">Der lokale Entwurf wird entfernt. Die gespeicherte Version bleibt erhalten.</string>
+    <string name="action_cancel">Abbrechen</string>
+    <string name="action_select">Auswählen</string>
+    <string name="action_archive">Archivieren</string>
+    <string name="action_restore">Wiederherstellen</string>
+    <string name="filter_attention">Braucht dich</string>
+    <string name="filter_unread">Ungelesen</string>
+    <string name="selected_count">%1$d ausgewählt</string>
+    <string name="continue_latest">Letzte Sitzung fortsetzen</string>
+    <string name="update_failed">Update fehlgeschlagen. Verbindung prüfen und erneut versuchen.</string>
+    <string name="update_download_failed">Download fehlgeschlagen (%1$d). Update erneut versuchen.</string>
+    <string name="update_download_title">Plum Code Update</string>
+    <string name="update_downloading">Update wird heruntergeladen…</string>
+    <string name="update_missing">Heruntergeladenes Update fehlt. Bitte erneut herunterladen.</string>
+    <string name="update_installer_failed">Installation konnte nicht geöffnet werden. App-Installationen für Plum Code in den Android-Einstellungen erlauben.</string>
+    <string name="settings_search">Einstellungen suchen</string>
+    <string name="settings_no_results">Keine passenden Einstellungen</string>
+    <string name="chart_previous">Vorheriger Zeitraum</string>
+    <string name="chart_next">Nächster Zeitraum</string>
+    <string name="chart_values">Werte als Liste anzeigen</string>
+    <string name="notes_finish_first">Diesen Entwurf speichern oder verwerfen, bevor du eine andere Notiz bearbeitest.</string>
+    <string name="workspace_hide_session_list">Sitzungsliste ausblenden</string>
+    <string name="workspace_show_session_list">Sitzungsliste einblenden</string>
+</resources>

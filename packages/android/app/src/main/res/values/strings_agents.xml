@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agents_title">Agents</string>
+    <string name="agents_summary_label">Subagents</string>
+    <string name="agents_summary">%1$d active · %2$d waiting · %3$d done</string>
+    <string name="agents_counts">%1$d queued · %2$d failed · %3$d cancelled / interrupted</string>
+    <string name="agents_scope">Subagents in this chat. Main agent and configured targets are excluded. History counts cover the whole chat.</string>
+    <string name="agents_stale">Connection interrupted or refresh failed. Showing last known state.</string>
+    <string name="agents_updated">Updated: %1$s</string>
+    <string name="agents_all">All</string>
+    <string name="agents_active">Active</string>
+    <string name="agents_history">History</string>
+    <string name="agents_waiting">Waiting</string>
+    <string name="agents_done">Done</string>
+    <string name="agents_failed">Failed</string>
+    <string name="agents_cancelled">Cancelled</string>
+    <string name="agents_interrupted">Interrupted</string>
+    <string name="agents_queued">Queued</string>
+    <string name="agents_empty">No agents in this view.</string>
+    <string name="agents_loading">Loading agents…</string>
+    <string name="agents_more">Load older history</string>
+    <string name="agents_no_task">Task not reported</string>
+    <string name="agents_no_provider">Provider not reported</string>
+    <string name="agents_no_model">Model not reported</string>
+    <string name="agents_no_activity">No detailed activity reported</string>
+    <string name="agents_background">Background</string>
+    <string name="agents_parent">Parent agent: %1$s</string>
+    <string name="agents_timing">Duration %1$ds · Last event %2$ds ago</string>
+</resources>

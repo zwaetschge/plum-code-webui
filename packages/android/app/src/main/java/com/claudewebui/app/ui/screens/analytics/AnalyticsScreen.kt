@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,7 +36,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +50,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.claudewebui.app.BuildConfig
@@ -110,12 +113,13 @@ fun AnalyticsScreen(
             "24h" -> AnalyticsTimeRange.TODAY
             "7d" -> AnalyticsTimeRange.WEEK
             "30d" -> AnalyticsTimeRange.MONTH
+            "90d" -> AnalyticsTimeRange.QUARTER
             "all" -> AnalyticsTimeRange.ALL
             else -> null
         }
         range?.let { viewModel.selectTimeRange(it) }
     }
-    val liveState by viewModel.uiState.collectAsState()
+    val liveState by viewModel.uiState.collectAsStateWithLifecycle()
     val state = if (designPreview && BuildConfig.DEBUG) {
         previewAnalyticsState(chartMetric = liveState.chartMetric)
     } else {
@@ -156,7 +160,8 @@ fun AnalyticsScreen(
                     // it moves into the subtitle and the panel is gone.
                     PlumScreenHeader(
                         title = screenResources.getString(R.string.analytics_analytics_25bc9),
-                        subtitle = summary.windowLabel.ifBlank { screenResources.getString(R.string.analytics_one_ledger_across_every_provider_cc847) },
+                        subtitle = localizedPeriodLabel(summary.windowLabel, screenResources)
+                            .ifBlank { screenResources.getString(R.string.analytics_one_ledger_across_every_provider_cc847) },
                         live = state.isLoaded && state.error == null,
                         actions = {
                             PlumIconButton(Icons.Outlined.Refresh, screenResources.getString(R.string.analytics_refresh_56e3b), viewModel::refreshData)
@@ -164,20 +169,9 @@ fun AnalyticsScreen(
                     )
                 }
 
-                item {
-                    ProviderLimitsPanel(state.providerLimits, state.limitsLoading)
-                }
-
-                state.dailyCostLimitUsd?.let { limit ->
-                    item {
-                        SpendAgainstLimitPanel(
-                            spent = state.latestBucketCostUsd,
-                            limit = limit,
-                            onTestAlert = { viewModel.sendTestAlert(it) },
-                        )
-                    }
-                }
-
+                // Same order as the WebUI dashboard: the window first, then
+                // the headline numbers, trend, mix, models, limits, health
+                // and sessions.
                 item {
                     TimeRangeSelector(state.timeRange, viewModel::selectTimeRange)
                 }
@@ -202,27 +196,36 @@ fun AnalyticsScreen(
                     item {
                         // Six tiles, laid out 2-up on a phone and up to 4-up on a
                         // tablet rather than always stacking in fixed pairs.
+                        val previous = summary.previous
+                        val compareCaption = screenResources.getString(
+                            when (state.timeRange) {
+                                AnalyticsTimeRange.TODAY -> R.string.analytics_compare_24h
+                                AnalyticsTimeRange.WEEK -> R.string.analytics_compare_week
+                                AnalyticsTimeRange.MONTH -> R.string.analytics_compare_month
+                                else -> R.string.analytics_compare_90d
+                            },
+                        )
+                        val previousCacheRate = previous?.let {
+                            val prompt = it.inputTokens + it.cacheReadTokens + it.cacheCreationTokens
+                            if (prompt > 0) it.cacheReadTokens * 100.0 / prompt else null
+                        }
+                        val previousAverageCost = previous?.takeIf { it.totalRequests > 0 }?.let { it.costUsd / it.totalRequests }
                         val metrics = listOf(
+                            MetricSpec(
+                                screenResources.getString(R.string.analytics_total_spend),
+                                formatCurrency(summary.totalCostUsd),
+                                screenResources.getString(R.string.analytics_avg_1_s_request_1e8d8, formatCurrency(averageCost)),
+                                Icons.Outlined.AttachMoney,
+                                PlumGreen,
+                                percentDelta(summary.totalCostUsd, previous?.costUsd, DeltaTone.LOWER_BETTER, compareCaption),
+                            ),
                             MetricSpec(
                                 screenResources.getString(R.string.analytics_total_tokens_e6dad),
                                 compactNumber(summary.totalTokens),
                                 screenResources.getString(R.string.analytics_1_s_in_2_s_out_05ea8, compactNumber(summary.inputTokens), compactNumber(summary.outputTokens)),
                                 Icons.Outlined.Tag,
                                 PlumAccent,
-                            ),
-                            MetricSpec(
-                                screenResources.getString(R.string.analytics_api_spend_449eb),
-                                formatCurrency(summary.totalCostUsd),
-                                screenResources.getString(R.string.analytics_avg_1_s_request_1e8d8, formatCurrency(averageCost)),
-                                Icons.Outlined.AttachMoney,
-                                PlumGreen,
-                            ),
-                            MetricSpec(
-                                screenResources.getString(R.string.analytics_effective_rate_ea76b),
-                                formatCurrency(effectiveRate),
-                                screenResources.getString(R.string.analytics_per_1m_total_tokens_91005),
-                                Icons.Outlined.Bolt,
-                                PlumAmber,
+                                percentDelta(summary.totalTokens.toDouble(), previous?.totalTokens?.toDouble(), DeltaTone.NEUTRAL, compareCaption),
                             ),
                             MetricSpec(
                                 screenResources.getString(R.string.analytics_requests_f7194),
@@ -230,6 +233,15 @@ fun AnalyticsScreen(
                                 screenResources.getString(R.string.analytics_avg_1_s_tokens_8b937, compactNumber(averageTokens)),
                                 Icons.Outlined.Token,
                                 PlumBlue,
+                                percentDelta(summary.totalRequests.toDouble(), previous?.totalRequests?.toDouble(), DeltaTone.NEUTRAL, compareCaption),
+                            ),
+                            MetricSpec(
+                                screenResources.getString(R.string.analytics_avg_cost_per_request),
+                                formatCurrency(averageCost),
+                                screenResources.getString(R.string.analytics_per_1m_total_tokens_91005) + ": " + formatCurrency(effectiveRate),
+                                Icons.Outlined.Bolt,
+                                PlumAmber,
+                                percentDelta(averageCost, previousAverageCost, DeltaTone.LOWER_BETTER, compareCaption),
                             ),
                             MetricSpec(
                                 screenResources.getString(R.string.analytics_cache_efficiency_e5eb1),
@@ -237,13 +249,27 @@ fun AnalyticsScreen(
                                 screenResources.getString(R.string.analytics_1_s_cache_hits_67de3, compactNumber(summary.cacheReadTokens)),
                                 Icons.Outlined.Hub,
                                 PlumBlue,
+                                previousCacheRate?.let { before ->
+                                    val points = cacheRate - before
+                                    MetricDelta(
+                                        text = "${deltaArrow(points)} ${String.format(java.util.Locale.getDefault(), "%.1f", kotlin.math.abs(points))} pt · $compareCaption",
+                                        color = if (kotlin.math.abs(points) < 0.5) PlumMuted else if (points > 0) PlumGreen else PlumAmber,
+                                    )
+                                },
                             ),
                             MetricSpec(
-                                screenResources.getString(R.string.analytics_pricing_coverage_f1529),
-                                "${summary.pricingCoveragePercent}%",
-                                screenResources.getString(R.string.analytics_1_s_unpriced_a81ba, compactNumber(summary.unpricedTokens)),
-                                Icons.Outlined.AttachMoney,
-                                if (summary.unpricedTokens == 0L) PlumGreen else PlumAmber,
+                                screenResources.getString(R.string.analytics_active_providers),
+                                summary.activeProviders.toString(),
+                                screenResources.getString(R.string.analytics_providers_in_window),
+                                Icons.Outlined.Hub,
+                                PlumAccent,
+                                previous?.let {
+                                    val diff = summary.activeProviders - it.activeProviders
+                                    MetricDelta(
+                                        text = "${if (diff > 0) "+" else if (diff < 0) "−" else "±"}${kotlin.math.abs(diff)} · $compareCaption",
+                                        color = PlumMuted,
+                                    )
+                                },
                             ),
                         )
                         val perRow = metricColumns()
@@ -257,10 +283,11 @@ fun AnalyticsScreen(
                                         AnalyticsMetric(
                                             metric.label,
                                             metric.value,
-                                            metric.detail,
+                                            metric.delta?.text ?: metric.detail,
                                             metric.icon,
                                             metric.color,
                                             Modifier.weight(1f),
+                                            detailColor = metric.delta?.color ?: PlumMuted,
                                         )
                                     }
                                     repeat(perRow - rowMetrics.size) { Box(Modifier.weight(1f)) }
@@ -277,9 +304,9 @@ fun AnalyticsScreen(
                         )
                     }
 
-                    // These four are short enough to sit two-up once there is
-                    // width; stacking them full-width on a tablet just makes
-                    // the page long and the lines over-wide.
+                    // Short panels sit two-up once there is width; stacking
+                    // them full-width on a tablet makes the page long and the
+                    // lines over-wide.
                     if (wide) {
                         item {
                             Row(
@@ -289,36 +316,38 @@ fun AnalyticsScreen(
                                 Box(Modifier.weight(1f)) {
                                     ProviderMixPanel(state.providerUsage, summary.totalCostUsd)
                                 }
-                                Box(Modifier.weight(1f)) {
-                                    PricingHealthPanel(summary, state.missingPricing)
-                                }
-                            }
-                        }
-                        item {
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
-                            ) {
                                 Box(Modifier.weight(1f)) { TopModelsPanel(state.modelUsage) }
-                                Box(Modifier.weight(1f)) { TopSessionsPanel(state.topSessions) }
                             }
                         }
                     } else {
-                        item {
-                            ProviderMixPanel(state.providerUsage, summary.totalCostUsd)
-                        }
+                        item { ProviderMixPanel(state.providerUsage, summary.totalCostUsd) }
+                        item { TopModelsPanel(state.modelUsage) }
+                    }
+                }
 
-                        item {
-                            PricingHealthPanel(summary, state.missingPricing)
-                        }
+                item {
+                    ProviderLimitsPanel(state.providerLimits, state.limitsLoading, viewModel::saveMistralPlan)
+                }
 
-                        item {
-                            TopModelsPanel(state.modelUsage)
-                        }
+                if (state.isLoaded) {
+                    item {
+                        PricingHealthPanel(summary, state.missingPricing)
+                    }
+                }
 
-                        item {
-                            TopSessionsPanel(state.topSessions)
-                        }
+                state.dailyCostLimitUsd?.let { limit ->
+                    item {
+                        SpendAgainstLimitPanel(
+                            spent = state.latestBucketCostUsd,
+                            limit = limit,
+                            onTestAlert = { viewModel.sendTestAlert(it) },
+                        )
+                    }
+                }
+
+                if (state.isLoaded) {
+                    item {
+                        TopSessionsPanel(state.topSessions)
                     }
                 }
 
@@ -334,7 +363,37 @@ private data class MetricSpec(
     val detail: String,
     val icon: ImageVector,
     val color: Color,
+    val delta: MetricDelta? = null,
 )
+
+private data class MetricDelta(val text: String, val color: Color)
+
+private enum class DeltaTone { LOWER_BETTER, NEUTRAL }
+
+private fun deltaArrow(change: Double): String = when {
+    kotlin.math.abs(change) < 0.5 -> "→"
+    change > 0 -> "↑"
+    else -> "↓"
+}
+
+/**
+ * Change against the comparison window. Spend falling is good; volume
+ * (tokens, requests) is shown without judgement, the same as in the WebUI.
+ */
+@Composable
+private fun percentDelta(current: Double, previous: Double?, tone: DeltaTone, caption: String): MetricDelta? {
+    if (previous == null || previous <= 0.0) return null
+    val percent = (current - previous) / previous * 100.0
+    val magnitude = kotlin.math.abs(percent)
+    val shown = if (magnitude >= 100) magnitude.roundToInt().toString() else String.format(java.util.Locale.getDefault(), "%.1f", magnitude)
+    val color = when {
+        magnitude < 0.5 -> PlumMuted
+        tone == DeltaTone.NEUTRAL -> PlumBlue
+        percent < 0 -> PlumGreen
+        else -> PlumAmber
+    }
+    return MetricDelta("${deltaArrow(percent)} $shown% · $caption", color)
+}
 
 @Composable
 private fun TimeRangeSelector(selected: AnalyticsTimeRange, onSelect: (AnalyticsTimeRange) -> Unit) {
@@ -410,6 +469,7 @@ private fun AnalyticsMetric(
     icon: ImageVector,
     color: Color,
     modifier: Modifier,
+    detailColor: Color = PlumMuted,
 ) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
 
@@ -420,7 +480,7 @@ private fun AnalyticsMetric(
                 Icon(icon, null, tint = color, modifier = Modifier.size(17.dp))
             }
             Text(value, color = PlumText, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            Text(detail, color = PlumMuted, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(detail, color = detailColor, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -497,7 +557,11 @@ private fun SpendAgainstLimitPanel(
 }
 
 @Composable
-private fun ProviderLimitsPanel(items: List<ProviderLimitItem>, isLoading: Boolean) {
+private fun ProviderLimitsPanel(
+    items: List<ProviderLimitItem>,
+    isLoading: Boolean,
+    onSaveMistralPlan: (com.claudewebui.app.data.model.MistralPlanConfig, (Boolean) -> Unit) -> Unit = { _, _ -> },
+) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
 
     val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
@@ -523,9 +587,10 @@ private fun ProviderLimitsPanel(items: List<ProviderLimitItem>, isLoading: Boole
                     }
 
                 supported.isEmpty() ->
-                    EmptyPanelMessage(screenResources.getString(R.string.analytics_no_provider_reports_account_limits_right_now_2c8d8))
+                    // One line of text, not a chart placeholder: keep the card short.
+                    EmptyPanelMessage(screenResources.getString(R.string.analytics_no_provider_reports_account_limits_right_now_2c8d8), height = 40.dp)
 
-                else -> supported.forEach { item -> ProviderLimitCard(item) }
+                else -> supported.forEach { item -> ProviderLimitCard(item, onSaveMistralPlan) }
             }
 
             if (unsupported.isNotEmpty()) {
@@ -540,8 +605,13 @@ private fun ProviderLimitsPanel(items: List<ProviderLimitItem>, isLoading: Boole
 }
 
 @Composable
-private fun ProviderLimitCard(item: ProviderLimitItem) {
+private fun ProviderLimitCard(
+    item: ProviderLimitItem,
+    onSaveMistralPlan: (com.claudewebui.app.data.model.MistralPlanConfig, (Boolean) -> Unit) -> Unit = { _, _ -> },
+) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    var editingBudget by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
 
     Column(
         Modifier
@@ -561,7 +631,15 @@ private fun ProviderLimitCard(item: ProviderLimitItem) {
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
-            item.plan?.let {
+            (item.planUsage?.let { plan ->
+                screenResources.getString(
+                    if (plan.allowanceKind == com.claudewebui.app.data.model.MistralAllowance.VIBE) {
+                        R.string.analytics_mistral_allowance_vibe
+                    } else {
+                        R.string.analytics_mistral_allowance_api
+                    },
+                )
+            } ?: item.plan)?.let {
                 Text(
                     it,
                     color = PlumMuted,
@@ -575,7 +653,163 @@ private fun ProviderLimitCard(item: ProviderLimitItem) {
             }
         }
         item.windows.forEach { window -> LimitWindowRow(window, item.color) }
+        item.planUsage?.let { plan ->
+            // The Vibe Code allowance of a Mistral plan, tracked on its own.
+            val isVibeLedger = item.providerId == "vibe"
+            Text(
+                screenResources.getString(
+                    R.string.analytics_mistral_month_summary,
+                    "≈" + formatMoney(plan.spend, plan.currency),
+                    compactNumber(plan.tokens),
+                    compactNumber(plan.requests),
+                ),
+                color = PlumText,
+                fontSize = 12.sp,
+            )
+            if (plan.budget == null) {
+                Text(screenResources.getString(R.string.analytics_mistral_no_budget), color = PlumMuted, fontSize = 10.sp)
+            }
+            // Both plan ledgers are Plum's own estimate against a declared
+            // budget, so both are editable; upstream quotas are read-only.
+            if (isVibeLedger || item.providerId == "mistral") {
+                Text(
+                    screenResources.getString(R.string.analytics_mistral_set_budget),
+                    color = PlumAccent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable { editingBudget = true }
+                        .padding(vertical = screenTokens.spacing.xs),
+                )
+            }
+            if (editingBudget) {
+                MistralBudgetDialog(
+                    plan = plan,
+                    // This ledger can only ever be the Vibe Code allowance, so
+                    // offering the API/Studio choice here would mislabel it.
+                    allowanceLocked = isVibeLedger,
+                    onDismiss = { editingBudget = false },
+                    onSave = { config ->
+                        onSaveMistralPlan(config) { ok -> if (ok) editingBudget = false }
+                    },
+                )
+            }
+        }
     }
+}
+
+private fun formatMoney(amount: Double, currency: String): String =
+    java.text.NumberFormat.getCurrencyInstance(java.util.Locale.GERMANY).apply {
+        this.currency = java.util.Currency.getInstance(if (currency == "USD") "USD" else "EUR")
+        maximumFractionDigits = 2
+        minimumFractionDigits = 2
+    }.format(amount)
+
+/**
+ * Mistral has no quota API for Pro plans, so the month is measured against the
+ * allowance picked here: a regular API key (what Pi and OpenCode use) draws on
+ * API/Studio, a key created under Code › Vibe CLI — or a Vibe browser sign-in —
+ * on Vibe Code. The Vibe ledger has no choice to make, so it locks the picker.
+ */
+@Composable
+private fun MistralBudgetDialog(
+    plan: com.claudewebui.app.data.model.PlanUsage,
+    allowanceLocked: Boolean = false,
+    onDismiss: () -> Unit,
+    onSave: (com.claudewebui.app.data.model.MistralPlanConfig) -> Unit,
+) {
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    val current = if (allowanceLocked) {
+        com.claudewebui.app.data.model.MistralAllowance.VIBE
+    } else {
+        com.claudewebui.app.data.model.MistralAllowance.fromId(plan.allowance)
+    }
+    val offered = if (allowanceLocked) {
+        listOf(com.claudewebui.app.data.model.MistralAllowance.VIBE)
+    } else {
+        com.claudewebui.app.data.model.MistralAllowance.entries.toList()
+    }
+    var allowance by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(current.id) }
+    var budget by androidx.compose.runtime.saveable.rememberSaveable {
+        androidx.compose.runtime.mutableStateOf(plan.budget?.let { String.format(java.util.Locale.US, "%.2f", it) }.orEmpty())
+    }
+    var day by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(plan.billingDay.toString()) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                screenResources.getString(
+                    if (allowanceLocked) R.string.analytics_vibe_budget_title
+                    else R.string.analytics_mistral_budget_title,
+                )
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    screenResources.getString(
+                        if (allowanceLocked) R.string.analytics_vibe_budget_hint
+                        else R.string.analytics_mistral_budget_hint,
+                    ),
+                    fontSize = 12.sp,
+                    color = PlumMuted,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    offered.forEach { option ->
+                        androidx.compose.material3.FilterChip(
+                            selected = allowance == option.id,
+                            onClick = {
+                                allowance = option.id
+                                budget = String.format(java.util.Locale.US, "%.2f", option.presetEur)
+                            },
+                            label = {
+                                Text(
+                                    screenResources.getString(
+                                        if (option == com.claudewebui.app.data.model.MistralAllowance.API) {
+                                            R.string.analytics_mistral_preset_api
+                                        } else {
+                                            R.string.analytics_mistral_preset_vibe
+                                        },
+                                    ),
+                                    fontSize = 12.sp,
+                                )
+                            },
+                        )
+                    }
+                }
+                androidx.compose.material3.OutlinedTextField(
+                    value = budget,
+                    onValueChange = { budget = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
+                    label = { Text(screenResources.getString(R.string.analytics_mistral_budget_field)) },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = day,
+                    onValueChange = { day = it.filter(Char::isDigit).take(2) },
+                    label = { Text(screenResources.getString(R.string.analytics_mistral_billing_day)) },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                )
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                onSave(
+                    com.claudewebui.app.data.model.MistralPlanConfig(
+                        monthlyBudget = budget.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0 },
+                        currency = plan.currency,
+                        allowance = allowance,
+                        billingDay = day.toIntOrNull() ?: 1,
+                    ),
+                )
+            }) { Text(screenResources.getString(R.string.analytics_mistral_save)) }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text(screenResources.getString(R.string.action_cancel)) }
+        },
+    )
 }
 
 @Composable
@@ -593,7 +827,7 @@ private fun LimitWindowRow(window: ProviderLimitWindow, providerColor: Long) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(window.label, color = PlumMuted, fontSize = 11.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(localizedLimitLabel(window.label, androidx.compose.ui.platform.LocalContext.current.resources), color = PlumMuted, fontSize = 11.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             formatResetDelta(window.resetsAt)?.let {
                 Text(screenResources.getString(R.string.analytics_resets_1_s_64c5e, it), color = PlumMuted, fontSize = 10.sp)
             }
@@ -694,7 +928,16 @@ private fun UsageTimelinePanel(
                 }
                 // Reading a bar off a gridline only gets you an order of
                 // magnitude; tapping one gives the actual numbers.
+                Row {
+                    androidx.compose.material3.TextButton(enabled = selected == null || selected!! > 0, onClick = { selected = ((selected ?: points.size) - 1).coerceAtLeast(0) }) { Text(screenResources.getString(R.string.chart_previous)) }
+                    androidx.compose.material3.TextButton(enabled = selected == null || selected!! < points.lastIndex, onClick = { selected = ((selected ?: -1) + 1).coerceAtMost(points.lastIndex) }) { Text(screenResources.getString(R.string.chart_next)) }
+                }
                 TimelineReadout(points, selected, metric)
+                var showValues by remember { mutableStateOf(false) }
+                androidx.compose.material3.TextButton(onClick = { showValues = !showValues }) { Text(screenResources.getString(R.string.chart_values)) }
+                if (showValues) androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
+                    items(points.size) { index -> TimelineReadout(points, index, metric) }
+                }
             }
         }
     }
@@ -703,9 +946,9 @@ private fun UsageTimelinePanel(
 /** Segment colours for the stacked token breakdown, in stacking order. */
 @Composable
 private fun tokenSegmentColors(): List<Pair<String, Color>> = listOf(
-    "Input" to PlumBlue,
-    "Output" to PlumAccent,
-    "Cache write" to PlumAmber,
+    stringResource(R.string.analytics_series_input) to PlumBlue,
+    stringResource(R.string.analytics_series_output) to PlumAccent,
+    stringResource(R.string.analytics_series_cache_write) to PlumAmber,
 )
 
 @Composable
@@ -855,7 +1098,7 @@ private fun TimelineReadout(
 
     val point = selectedIndex?.let { points.getOrNull(it) }
     if (point == null) {
-        Text(screenResources.getString(R.string.analytics_tap_a_bar_for_exact_figures_f75e6), color = PlumMuted, fontSize = 11.sp)
+        Text(screenResources.getString(R.string.analytics_tap_a_bar_for_exact_figures_f75e6), color = PlumMuted, fontSize = 14.sp)
         return
     }
     Column(
@@ -871,14 +1114,14 @@ private fun TimelineReadout(
         Text(
             screenResources.getString(R.string.analytics_1_s_tokens_2_s_3_s_req_f096d, compactNumber(point.tokenCount), formatCurrency(point.costUsd), point.requestCount),
             color = PlumMuted,
-            fontSize = 11.sp,
+            fontSize = 14.sp,
         )
         if (metric == AnalyticsChartMetric.TOKENS) {
             Text(
                 screenResources.getString(R.string.analytics_1_s_in_2_s_out_65307, compactNumber(point.inputTokens), compactNumber(point.outputTokens)) +
                     screenResources.getString(R.string.analytics_1_s_cache_read_2_s_cache_write_f5fb1, compactNumber(point.cacheReadTokens), compactNumber(point.cacheCreationTokens)),
                 color = PlumMuted,
-                fontSize = 10.sp,
+                fontSize = 14.sp,
             )
         }
     }
@@ -1096,12 +1339,30 @@ private fun TopSessionsPanel(sessions: List<TopSessionItem>) {
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(PlumSubtleFill).border(1.dp, PlumBorder, RoundedCornerShape(13.dp)).padding(11.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Box(Modifier.size(28.dp).background(PlumTrackFill, CircleShape), contentAlignment = Alignment.Center) {
+                        Box(
+                            Modifier
+                                .size(28.dp)
+                                .background(
+                                    session.provider?.let { Color(analyticsProviderColor(it)).copy(alpha = .22f) } ?: PlumTrackFill,
+                                    CircleShape,
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
                             Text("${index + 1}", color = PlumText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                         Column(Modifier.weight(1f).padding(start = screenTokens.spacing.compact)) {
                             Text(session.name, color = PlumText, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(screenResources.getString(R.string.analytics_1_s_tokens_2_s_req_db341, compactNumber(session.tokenCount), session.requestCount), color = PlumMuted, fontSize = 10.sp)
+                            Text(
+                                listOfNotNull(
+                                    session.provider,
+                                    session.lastActive?.let { relativeTime(it, screenResources) },
+                                    screenResources.getString(R.string.analytics_1_s_tokens_2_s_req_db341, compactNumber(session.tokenCount), session.requestCount),
+                                ).joinToString(" · "),
+                                color = PlumMuted,
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                         Text(formatCurrency(session.costUsd), color = PlumText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
@@ -1112,8 +1373,8 @@ private fun TopSessionsPanel(sessions: List<TopSessionItem>) {
 }
 
 @Composable
-private fun EmptyPanelMessage(message: String) {
-    Box(Modifier.fillMaxWidth().height(90.dp), contentAlignment = Alignment.Center) {
+private fun EmptyPanelMessage(message: String, height: Dp = 90.dp) {
+    Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
         Text(message, color = PlumMuted, fontSize = 12.sp)
     }
 }
@@ -1131,7 +1392,9 @@ private fun compactNumber(value: Long): String = when {
     else -> value.toString()
 }
 
-private fun formatCurrency(value: Double): String = if (abs(value) >= 100) {
+// Cents from $1 up ("$10.12", not "$10.1202"); sub-dollar amounts keep four
+// places so a cheap model's per-request cost does not collapse to $0.00.
+private fun formatCurrency(value: Double): String = if (abs(value) >= 1) {
     String.format(Locale.US, "$%,.2f", value)
 } else {
     String.format(Locale.US, "$%,.4f", value)
@@ -1209,4 +1472,63 @@ private fun previewAnalyticsState(chartMetric: AnalyticsChartMetric): AnalyticsU
             TopSessionItem("preview-3", "Mobile gateway integration", 710_000_000, 49, 418.05),
         ),
     )
+}
+
+// The backend names its windows in English ("This week", "Weekly · All"); the
+// WebUI shows them as-is, the app translates the known ones and keeps any
+// unknown label verbatim.
+private val PERIOD_BACK = Regex("""^(Week|Month|24h window) (\d+) back$""")
+
+private fun localizedPeriodLabel(raw: String, res: android.content.res.Resources): String {
+    val head = raw.substringBefore(" · ")
+    val tail = raw.substringAfter(" · ", "").let { if (it.isEmpty()) "" else " · $it" }
+    val translated = when (head) {
+        "Last 24 hours" -> res.getString(R.string.analytics_period_last_24h)
+        "This week" -> res.getString(R.string.analytics_period_this_week)
+        "Previous week" -> res.getString(R.string.analytics_period_previous_week)
+        "This month" -> res.getString(R.string.analytics_period_this_month)
+        "Previous month" -> res.getString(R.string.analytics_period_previous_month)
+        "All time" -> res.getString(R.string.analytics_period_all_time)
+        else -> PERIOD_BACK.matchEntire(head)?.let { match ->
+            val n = match.groupValues[2].toInt()
+            when (match.groupValues[1]) {
+                "Week" -> res.getString(R.string.analytics_period_weeks_back, n)
+                "Month" -> res.getString(R.string.analytics_period_months_back, n)
+                else -> res.getString(R.string.analytics_period_days_back, n)
+            }
+        } ?: head
+    }
+    return translated + tail
+}
+
+private fun localizedLimitLabel(raw: String, res: android.content.res.Resources): String = when {
+    raw == "5-hour" || raw == "5h" -> res.getString(R.string.native_window_five_hours)
+    raw == "Weekly" -> res.getString(R.string.native_window_week)
+    raw == "Monthly" -> res.getString(R.string.analytics_window_month)
+    raw == "Weekly (Sonnet)" || raw == "Weekly Sonnet" -> res.getString(R.string.native_window_week_sonnet)
+    raw.startsWith("Weekly · ") -> res.getString(R.string.native_window_week) + raw.removePrefix("Weekly")
+    else -> raw
+}
+
+private fun relativeTime(iso: String, resources: android.content.res.Resources): String? {
+    val time = runCatching { java.time.Instant.parse(iso) }.getOrNull() ?: return null
+    val minutes = java.time.Duration.between(time, java.time.Instant.now()).toMinutes().coerceAtLeast(0)
+    return when {
+        minutes < 1 -> resources.getString(R.string.component_just_now)
+        minutes < 60 -> resources.getString(R.string.component_minutes_ago, minutes.toInt())
+        minutes < 1440 -> resources.getString(R.string.component_hours_ago, (minutes / 60).toInt())
+        else -> resources.getString(R.string.component_days_ago, (minutes / 1440).toInt())
+    }
+}
+
+private fun analyticsProviderColor(provider: String): Long = when (provider.lowercase()) {
+    "codex" -> 0xFF22C55EL
+    "kimi" -> 0xFF2582EDL
+    "opencode" -> 0xFFF472B6L
+    "pi" -> 0xFFA855F7L
+    "z.ai", "zai" -> 0xFF14B8A6L
+    "claude" -> 0xFFF97316L
+    // Mistral turns are attributed to the Vibe family by the shared label map.
+    "vibe", "mistral" -> 0xFFFF7000L
+    else -> 0xFF94A3B8L
 }

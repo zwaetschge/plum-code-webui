@@ -39,6 +39,7 @@ import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Edit
@@ -64,7 +65,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -119,6 +120,8 @@ import com.claudewebui.app.ui.components.dashboard.IdlePrefs
 import com.claudewebui.app.ui.components.dashboard.SessionState
 import com.claudewebui.app.ui.components.dashboard.accentFor
 import com.claudewebui.app.ui.components.dashboard.effectiveState
+import com.claudewebui.app.ui.components.dashboard.facts
+import com.claudewebui.app.ui.components.dashboard.localizedLabel
 import com.claudewebui.app.ui.components.dashboard.superviseSessions
 import com.claudewebui.app.ui.components.dashboard.NewSessionDialog
 import org.koin.compose.viewmodel.koinViewModel
@@ -132,18 +135,21 @@ fun DashboardScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateMain: (MainDestination) -> Unit = {},
     viewModel: DashboardViewModel = koinViewModel(),
+    embedded: Boolean = false,
+    selectedSessionId: String? = null,
 ) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
 
     val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
     androidx.compose.ui.platform.LocalConfiguration.current
 
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showNewSessionDialog by remember { mutableStateOf(false) }
     // Selection mode drives the bulk action bar; archiving replaces deleting as
     // the default way to get a session out of the list.
     val selectionActive = state.selectedSessionIds.isNotEmpty()
     var selectedFilter by remember { mutableStateOf("All") }
+    var showMoreFilters by remember { mutableStateOf(false) }
     var showNotifications by remember { mutableStateOf(false) }
     var showCategoryManager by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Session?>(null) }
@@ -173,35 +179,47 @@ fun DashboardScreen(
     // How long a session may claim to be working with nothing to show for it
     // before the dashboard says so instead. Read as a flow so changing it in
     // Settings repaints the open dashboard.
-    val idleAfter by IdlePrefs.threshold.collectAsState()
+    val idleAfter by IdlePrefs.threshold.collectAsStateWithLifecycle()
 
     val visibleSessions = state.filteredSessions.filter { session ->
         when (selectedFilter) {
-            "Running" -> session.status == SessionStatus.RUNNING
+            "Running" -> effectiveState(session).activity == com.claudewebui.app.ui.components.dashboard.SessionActivity.WORKING
+            "Attention" -> session.id in state.needsAttention
+            "Unread" -> session.unreadCount > 0
             "Starred" -> session.starred
             "Recent" -> isRecentlyUpdated(session.updatedAt)
             else -> true
         }
     }
-    val runningCount = state.sessions.count { it.status == SessionStatus.RUNNING }
+    val runningCount = state.sessions.count { effectiveState(it).activity == com.claudewebui.app.ui.components.dashboard.SessionActivity.WORKING }
     // From the gateway overview, not derived here: a session blocked on an
     // approval is still "running", so counting ERROR rows missed exactly the
     // sessions that are waiting on the user.
     val attentionCount = state.attentionCount
+    val windowWidth = if (embedded) WindowWidth.COMPACT else rememberWindowWidth()
+    val phoneLayout = windowWidth == WindowWidth.COMPACT && !embedded
+    // Landscape phones and tablets have the width of a tablet but the height of
+    // a phone: three chip rows and a hero header filled the whole first screen
+    // before a single session showed, and the FAB sat on the cards' star.
+    // The compact list (one filter row, header "+" instead of a FAB, denser
+    // cards) is what that height needs.
+    val shortWindow = !embedded && isShortWindow()
+    // Portrait tablets (600-839dp, one column beside the rail) got the hero
+    // header, three chip rows, a FAB and full cards: two sessions per screen.
+    val compactList = phoneLayout || embedded || shortWindow || windowWidth == WindowWidth.MEDIUM
+    // One ~520dp column beside the rail reads like a mail list: dense
+    // two-line rows show five times as many sessions as the full cards.
+    val denseRows = embedded || windowWidth == WindowWidth.MEDIUM
+    val extraFilters = if (embedded) listOf("Running", "Unread", "Starred", "Recent") else listOf("Unread", "Starred", "Recent")
 
-    // Launcher shortcuts come from the shared ViewModel; this row only mirrors
-    // the same ordering on screen.
-    val quickSwitchSessions = remember(state.sessions) {
-        state.sessions.sortedByDescending { it.updatedAt }.take(5)
-    }
-
-    PlumBackdrop {
+    DashboardBackdrop(embedded) {
         PlumNavScaffold(
             selected = MainDestination.SESSIONS,
             onNavigate = onNavigateMain,
             badgeCount = attentionCount,
+            embedded = embedded,
             floatingActionButton = {
-                Box(
+                if (!compactList) Box(
                     modifier = Modifier
                         .size(62.dp)
                         .clip(RoundedCornerShape(screenTokens.radius.panel))
@@ -219,178 +237,106 @@ fun DashboardScreen(
         ) { padding ->
             // Phones and short windows prioritize the actual session list;
             // expanded windows use two real columns with a capped line length.
-            val windowWidth = rememberWindowWidth()
             // The expanded rail already provides hierarchy on wide screens, so
             // keep metrics/search in two compact rows there. Portrait phones
             // retain the richer hero cards where vertical space is plentiful.
-            val compactHeader = isShortWindow() || windowWidth != WindowWidth.COMPACT
+            val compactHeader = embedded || isShortWindow() || windowWidth != WindowWidth.COMPACT
             val largeText = LocalDensity.current.fontScale >= 1.5f
-            val columns = listColumns()
+            val columns = if (embedded) 1 else listColumns()
             PlumContentWidth(
                 // Only the top inset shrinks the surface; the bottom inset goes
                 // into the grid's contentPadding so cards scroll *under* the
                 // floating nav bar instead of ending in a hard edge above it.
-                modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
+                modifier = Modifier.fillMaxSize().padding(top = if (embedded) 0.dp else padding.calculateTopPadding()),
                 max = 1180.dp,
             ) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(columns),
                 // Cards fade out under the floating nav bar instead of ending
                 // in a straight line across the glass.
-                modifier = Modifier.fillMaxSize().fadingEdges(bottom = 36.dp),
+                modifier = Modifier.fillMaxSize().fadingEdges(top = if (embedded) 12.dp else 0.dp, bottom = 36.dp),
                 contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 12.dp,
+                    start = if (embedded) 10.dp else 16.dp,
+                    end = if (embedded) 10.dp else 16.dp,
+                    top = if (embedded) 8.dp else 12.dp,
                     bottom = 12.dp + padding.calculateBottomPadding(),
                 ),
-                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.cozy),
+                verticalArrangement = Arrangement.spacedBy(if (denseRows) 6.dp else screenTokens.spacing.cozy),
                 horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.cozy),
             ) {
-                if (compactHeader) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        CompactSessionsHeader(
-                            online = !state.isOffline,
-                            runningCount = runningCount,
-                            approvals = attentionCount,
-                            showMetricPills = windowWidth != WindowWidth.COMPACT,
-                            unreadNotifications = state.unreadNotifications,
-                            onNotifications = {
-                                viewModel.loadNotifications()
-                                showNotifications = true
-                            },
-                            onSettings = onNavigateToSettings,
-                        )
-                    }
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        if (windowWidth == WindowWidth.COMPACT || largeText) {
-                            DashboardSearchField(
-                                value = state.searchQuery,
-                                onValueChange = viewModel::setSearchQuery,
-                                placeholder = if (state.searchScope == DashboardSearchScope.MESSAGES) {
-                                    screenResources.getString(R.string.dashboard_search_every_message_5f424)
-                                } else screenResources.getString(R.string.dashboard_search_sessions_folders_or_providers_a7ef1),
-                                showShortcutHint = false,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(9.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                DashboardSearchField(
-                                    value = state.searchQuery,
-                                    onValueChange = viewModel::setSearchQuery,
-                                    placeholder = if (state.searchScope == DashboardSearchScope.MESSAGES) {
-                                        screenResources.getString(R.string.dashboard_search_every_message_5f424)
-                                    } else screenResources.getString(R.string.dashboard_search_sessions_folders_or_providers_a7ef1),
-                                    showShortcutHint = false,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                listOf("All", "Running", "Starred", "Recent").forEach { label ->
-                                    FilterPill(
-                                        label = if (label == "All") screenResources.getString(R.string.dashboard_all_1_s_a86c9, state.sessions.size) else dashboardFilterLabel(label, screenResources),
-                                        selected = selectedFilter == label,
-                                        onClick = { selectedFilter = label },
-                                    )
-                                }
-                            }
+                if (selectionActive) item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column {
+                        Text(screenResources.getString(R.string.selected_count, state.selectedSessionIds.size), color = PlumText)
+                        LazyRow {
+                            item { TextButton(onClick = { viewModel.bulkAction(if (state.showArchived) "unarchive" else "archive") }) { Text(screenResources.getString(if (state.showArchived) R.string.action_restore else R.string.action_archive)) } }
+                            item { TextButton(onClick = { viewModel.bulkAction("star") }) { Text(dashboardFilterLabel("Starred", screenResources)) } }
+                            item { TextButton(onClick = viewModel::clearSelection) { Text(screenResources.getString(R.string.action_cancel)) } }
                         }
                     }
-                    if (windowWidth == WindowWidth.COMPACT || largeText) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                                items(listOf("All", "Running", "Starred", "Recent")) { label ->
+                }
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    CompactSessionsHeader(
+                        online = !state.isOffline, runningCount = runningCount, approvals = attentionCount,
+                        showMetricPills = !embedded && !largeText,
+                        unreadNotifications = state.unreadNotifications,
+                        onNotifications = { viewModel.loadNotifications(); showNotifications = true },
+                        onSettings = onNavigateToSettings,
+                        onNewSession = { showNewSessionDialog = true },
+                        phoneLayout = compactList,
+                        onApprovals = { viewModel.setApprovalsVisible(true) },
+                    )
+                }
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    DashboardSearchField(
+                        value = state.searchQuery, onValueChange = viewModel::setSearchQuery,
+                        placeholder = screenResources.getString(if (state.searchScope == DashboardSearchScope.MESSAGES) R.string.dashboard_search_messages_abea6 else R.string.dashboard_search_sessions_646db),
+                        showShortcutHint = false, modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (!compactList || state.searchScope == DashboardSearchScope.MESSAGES) item(span = { GridItemSpan(maxLineSpan) }) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item { FilterPill(screenResources.getString(R.string.dashboard_sessions_e11e3), state.searchScope == DashboardSearchScope.SESSIONS) { viewModel.setSearchScope(DashboardSearchScope.SESSIONS) } }
+                        item { FilterPill(screenResources.getString(R.string.dashboard_messages_f1702), state.searchScope == DashboardSearchScope.MESSAGES) { viewModel.setSearchScope(DashboardSearchScope.MESSAGES) } }
+                    }
+                }
+                if (state.searchScope == DashboardSearchScope.SESSIONS) {
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(if (embedded) listOf("All", "Attention") else if (compactList) listOf("All", "Attention", "Running") else listOf("All", "Attention", "Running", "Unread", "Starred", "Recent")) { filter ->
                                 FilterPill(
-                                    label = if (label == "All") screenResources.getString(R.string.dashboard_all_1_s_a86c9, state.sessions.size) else dashboardFilterLabel(label, screenResources),
-                                    selected = selectedFilter == label,
-                                    onClick = { selectedFilter = label },
+                                    label = when (filter) {
+                                        "All" -> screenResources.getString(R.string.dashboard_all_1_s_a86c9, state.filteredSessions.size)
+                                        "Attention" -> screenResources.getString(R.string.filter_attention)
+                                        "Unread" -> screenResources.getString(R.string.filter_unread)
+                                        else -> dashboardFilterLabel(filter, screenResources)
+                                    }, selected = selectedFilter == filter, onClick = { selectedFilter = filter },
                                 )
-                                }
-                                item {
-                                    FilterPill(
-                                        label = if (state.showArchived) screenResources.getString(R.string.dashboard_archive_2621c) else screenResources.getString(R.string.dashboard_archive_2621c),
-                                        selected = state.showArchived,
-                                        onClick = { viewModel.toggleArchiveView() },
-                                    )
-                                }
                             }
+                            if (compactList) item {
+                                val extraLabel = when {
+                                    state.showArchived -> screenResources.getString(R.string.dashboard_archive_2621c)
+                                    state.selectedCategoryId != null -> state.categories.firstOrNull { it.id == state.selectedCategoryId }?.name
+                                    selectedFilter in extraFilters -> dashboardFilterLabel(selectedFilter, screenResources)
+                                    else -> null
+                                }
+                                if (embedded) PlumIconButton(
+                                    Icons.Outlined.MoreVert,
+                                    extraLabel ?: screenResources.getString(R.string.dashboard_more_filters),
+                                    onClick = { showMoreFilters = true },
+                                    tint = if (extraLabel != null) PlumAccent else PlumText,
+                                )
+                                else FilterPill(extraLabel ?: screenResources.getString(R.string.dashboard_more_filters), extraLabel != null) { showMoreFilters = true }
+                            }
+                            else item { FilterPill(screenResources.getString(R.string.dashboard_archive_2621c), state.showArchived, viewModel::toggleArchiveView) }
                         }
                     }
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        CategoryFilterRow(
-                            categories = state.categories,
-                            selectedCategoryId = state.selectedCategoryId,
-                            onSelect = viewModel::filterByCategory,
-                            onManage = viewModel::onCategoryManagerTapped,
-                        )
+                    if (!compactList) item(span = { GridItemSpan(maxLineSpan) }) {
+                        CategoryFilterRow(state.categories, state.selectedCategoryId, viewModel::filterByCategory, viewModel::onCategoryManagerTapped)
                     }
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        DiscoveredProjectsRow(
-                            projects = state.discoveredProjects,
-                            expanded = state.showDiscoveredProjects,
+                    if (state.discoveredProjects.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                        DiscoveredProjectsRow(projects = state.discoveredProjects, expanded = state.showDiscoveredProjects,
                             onToggle = viewModel::toggleDiscoveredProjects,
-                            onOpen = { project ->
-                                viewModel.createSession(
-                                    name = project.name,
-                                    workingDirectory = project.path,
-                                    provider = state.availableProviders.firstOrNull()
-                                        ?: CLIProvider.active.first(),
-                                )
-                            },
-                        )
-                    }
-                } else {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        SessionsHeader(
-                            online = !state.isOffline,
-                            unreadNotifications = state.unreadNotifications,
-                            onNotifications = {
-                                viewModel.loadNotifications()
-                                showNotifications = true
-                            },
-                            onSettings = onNavigateToSettings,
-                        )
-                    }
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact),
-                        ) {
-                            WorkspaceHero(
-                                runningCount = runningCount,
-                                sessions = state.sessions,
-                                modifier = Modifier.weight(1.45f),
-                            )
-                            ApprovalHero(
-                                count = attentionCount,
-                                pendingCount = state.pendingApprovals.size,
-                                onClick = { viewModel.setApprovalsVisible(true) },
-                                modifier = Modifier.weight(.95f),
-                            )
-                        }
-                    }
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        DashboardSearchField(
-                            value = state.searchQuery,
-                            onValueChange = viewModel::setSearchQuery,
-                            placeholder = if (state.searchScope == DashboardSearchScope.MESSAGES) {
-                                screenResources.getString(R.string.dashboard_search_every_message_5f424)
-                            } else screenResources.getString(R.string.dashboard_search_sessions_folders_or_providers_a7ef1),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                            listOf("All", "Running", "Starred", "Recent").forEach { label ->
-                                FilterPill(
-                                    label = if (label == "All") screenResources.getString(R.string.dashboard_all_1_s_a86c9, state.sessions.size) else dashboardFilterLabel(label, screenResources),
-                                    selected = selectedFilter == label,
-                                    onClick = { selectedFilter = label },
-                                )
-                            }
-                        }
+                            onOpen = { project -> viewModel.createSession(name = project.name, workingDirectory = project.path, provider = state.availableProviders.firstOrNull() ?: CLIProvider.active.first()) })
                     }
                 }
                 if (state.isOffline && state.sessions.isNotEmpty()) {
@@ -414,17 +360,7 @@ fun DashboardScreen(
                         )
                     }
                 }
-                // Jumping back into the session you just left should not mean
-                // scrolling a grid sorted by everything at once.
-                if (quickSwitchSessions.isNotEmpty() && state.searchQuery.isBlank()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        QuickSwitchRow(
-                            sessions = quickSwitchSessions,
-                            onOpen = { onNavigateToChat(it) },
-                        )
-                    }
-                }
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                if (!compactList || state.searchScope == DashboardSearchScope.MESSAGES) item(span = { GridItemSpan(maxLineSpan) }) {
                     SectionHeading(
                         title = if (state.searchScope == DashboardSearchScope.MESSAGES) {
                             screenResources.getString(R.string.dashboard_message_results_c5e3f)
@@ -434,7 +370,7 @@ fun DashboardScreen(
                         // earns a line here — and it sits beside the title,
                         // because the trailing slot is exactly where the
                         // new-session button rests in landscape.
-                        caption = state.lastRefreshedAt?.let { screenResources.getString(R.string.dashboard_updated_1_s_66b44, refreshAgeLabel(it)) },
+                        caption = if (compactList) null else state.lastRefreshedAt?.let { screenResources.getString(R.string.dashboard_updated_1_s_66b44, refreshAgeLabel(it)) },
                     )
                 }
                 if (state.searchScope == DashboardSearchScope.MESSAGES) {
@@ -525,17 +461,41 @@ fun DashboardScreen(
                             key = "section_${section.group.name}",
                             span = { GridItemSpan(maxLineSpan) },
                         ) {
-                            SectionHeading(
-                                section.group.header,
-                                modifier = Modifier.padding(top = screenTokens.spacing.xs),
-                                caption = section.sessions.size.toString(),
-                            )
+                            if (embedded) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                ) {
+                                    Text(
+                                        section.group.header,
+                                        color = PlumText,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(section.sessions.size.toString(), color = PlumMuted, fontSize = 11.sp)
+                                }
+                            } else {
+                                SectionHeading(
+                                    section.group.header,
+                                    modifier = Modifier.padding(top = screenTokens.spacing.xs),
+                                    caption = section.sessions.size.toString(),
+                                )
+                            }
                         }
                         gridItems(section.sessions, key = { it.session.id }) { row ->
                             PlumSessionCard(
                                 session = row.session,
                                 state = row.state,
-                                onClick = { onNavigateToChat(row.session.id) },
+                                compact = compactList,
+                                narrow = denseRows,
+                                onClick = { if (selectionActive) viewModel.toggleSessionSelection(row.session.id) else onNavigateToChat(row.session.id) },
+                                selected = row.session.id in state.selectedSessionIds || row.session.id == selectedSessionId,
+                                onSelect = { viewModel.toggleSessionSelection(row.session.id) },
+                                onArchive = { viewModel.clearSelection(); viewModel.toggleSessionSelection(row.session.id); viewModel.bulkAction(if (state.showArchived) "unarchive" else "archive") },
+                                archived = state.showArchived,
                                 onToggleStar = { viewModel.toggleStar(row.session.id) },
                                 onRename = { renameTarget = row.session },
                                 onMove = { categoryTarget = row.session },
@@ -582,6 +542,42 @@ fun DashboardScreen(
         )
     }
 
+    if (showMoreFilters) {
+        ModalBottomSheet(
+            onDismissRequest = { showMoreFilters = false },
+            containerColor = PlumSurfaceStrong,
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(screenResources.getString(R.string.dashboard_more_filters), color = PlumText, style = MaterialTheme.typography.titleMedium)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(extraFilters) { filter ->
+                        FilterPill(dashboardFilterLabel(filter, screenResources), selectedFilter == filter) {
+                            selectedFilter = filter
+                            showMoreFilters = false
+                        }
+                    }
+                    item { FilterPill(screenResources.getString(R.string.dashboard_archive_2621c), state.showArchived) {
+                        viewModel.toggleArchiveView()
+                        showMoreFilters = false
+                    } }
+                }
+                Text(screenResources.getString(R.string.dashboard_categories_label), color = PlumMuted, style = MaterialTheme.typography.labelMedium)
+                CategoryFilterRow(state.categories, state.selectedCategoryId, { categoryId ->
+                    viewModel.filterByCategory(categoryId)
+                    showMoreFilters = false
+                }, { showMoreFilters = false; viewModel.onCategoryManagerTapped() })
+                TextButton(onClick = {
+                    showMoreFilters = false
+                    viewModel.setSearchScope(DashboardSearchScope.MESSAGES)
+                }) { Text(screenResources.getString(R.string.dashboard_search_messages_abea6)) }
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+
     if (state.showApprovals) {
         ModalBottomSheet(
             onDismissRequest = { viewModel.setApprovalsVisible(false) },
@@ -607,6 +603,8 @@ fun DashboardScreen(
         ) {
             NotificationFeedContent(
                 notifications = state.notifications,
+                pendingRequestIds = state.pendingApprovals.map { it.requestId }.toSet(),
+                respondingRequestIds = state.respondingApprovals,
                 unreadCount = state.unreadNotifications,
                 onOpenSession = { sessionId ->
                     showNotifications = false
@@ -656,6 +654,12 @@ fun DashboardScreen(
             },
         )
     }
+}
+
+@Composable
+private fun DashboardBackdrop(embedded: Boolean, content: @Composable () -> Unit) {
+    if (embedded) Box(Modifier.fillMaxSize(), content = { content() })
+    else PlumBackdrop(content = content)
 }
 
 @Composable
@@ -770,92 +774,30 @@ private fun DashboardStatePanel(
  * 126dp hero cards that would otherwise push the session list off screen.
  */
 @Composable
-private fun CompactSessionsHeader(
-    online: Boolean,
-    runningCount: Int,
-    approvals: Int,
-    showMetricPills: Boolean,
-    unreadNotifications: Int,
-    onNotifications: () -> Unit,
-    onSettings: () -> Unit,
+internal fun CompactSessionsHeader(
+    online: Boolean, runningCount: Int, approvals: Int, showMetricPills: Boolean,
+    unreadNotifications: Int, onNotifications: () -> Unit, onSettings: () -> Unit,
+    onNewSession: () -> Unit = {}, phoneLayout: Boolean = false,
+    onApprovals: () -> Unit = {},
 ) {
-    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
-
-    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
-    androidx.compose.ui.platform.LocalConfiguration.current
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.compact),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(RoundedCornerShape(11.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFFBF67F5), Color(0xFF2E7AEF)))),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Outlined.Check, null, tint = Color.White, modifier = Modifier.size(screenTokens.sizing.iconInline))
+    val resources = androidx.compose.ui.platform.LocalContext.current.resources
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(resources.getString(R.string.dashboard_sessions_e11e3), color = PlumText,
+                style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            NotificationBell(unreadNotifications, onNotifications)
+            if (phoneLayout) PlumIconButton(Icons.Default.Add, resources.getString(R.string.dashboard_new_session_5c881), onNewSession)
+            else PlumIconButton(Icons.Outlined.Settings, resources.getString(R.string.dashboard_settings_c7f73), onSettings)
         }
-        Column {
-            Text(screenResources.getString(R.string.dashboard_sessions_e11e3), color = PlumText, fontSize = 21.sp, fontWeight = FontWeight.Bold)
-            if (!showMetricPills) {
-                Text(
-                    screenResources.getString(R.string.dashboard_1_s_active_2_s_need_attention_29ba9, runningCount, approvals),
-                    color = PlumMuted,
-                    fontSize = 11.sp,
-                )
-            }
+        val summary = buildList {
+            add(resources.getString(if (online) R.string.dashboard_online_c3e83 else R.string.dashboard_offline_e01fa))
+            if (runningCount > 0) add(resources.getString(R.string.dashboard_working_count, runningCount))
+            if (approvals > 0) add(resources.getString(R.string.dashboard_attention_count, approvals))
+        }.joinToString(" · ")
+        Text(summary, color = PlumMuted, style = MaterialTheme.typography.bodyMedium)
+        if (approvals > 0) TextButton(onClick = onApprovals) {
+            Text(resources.getString(R.string.dashboard_1_s_approvals_tap_to_answer_fe3f9, approvals))
         }
-
-        if (showMetricPills) Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(15.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFFBB65EF), Color(0xFF2D7CE8))))
-                .padding(horizontal = screenTokens.spacing.md, vertical = 7.dp),
-        ) {
-            Text(
-                text = if (runningCount == 1) screenResources.getString(R.string.dashboard_1_active_session_050e7) else screenResources.getString(R.string.dashboard_1_s_active_sessions_9b1f6, runningCount),
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        if (showMetricPills) Row(
-            modifier = Modifier
-                .glassSurface(RoundedCornerShape(15.dp))
-                .padding(horizontal = 11.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-        ) {
-            Icon(
-                Icons.Outlined.WarningAmber,
-                contentDescription = null,
-                tint = if (approvals > 0) PlumAmber else PlumMuted,
-                modifier = Modifier.size(screenTokens.sizing.iconXs),
-            )
-            Text(
-                text = if (approvals == 1) screenResources.getString(R.string.dashboard_1_approval_b75cb) else screenResources.getString(R.string.dashboard_1_s_approvals_8eef1, approvals),
-                color = if (approvals > 0) PlumText else PlumMuted,
-                fontSize = 12.sp,
-            )
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).background(if (online) PlumGreen else PlumRed, CircleShape))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                if (online) screenResources.getString(R.string.dashboard_online_c3e83) else screenResources.getString(R.string.dashboard_offline_e01fa),
-                color = PlumMuted,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        NotificationBell(unreadNotifications, onNotifications)
-        PlumIconButton(Icons.Outlined.Brightness4, screenResources.getString(R.string.dashboard_settings_c7f73), onSettings)
     }
 }
 
@@ -1270,11 +1212,17 @@ internal fun FilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
 private fun PlumSessionCard(
     session: Session,
     state: SessionState,
+    compact: Boolean = false,
+    narrow: Boolean = false,
     onClick: () -> Unit,
     onToggleStar: () -> Unit,
     onRename: () -> Unit,
     onMove: () -> Unit,
     onDelete: () -> Unit,
+    selected: Boolean = false,
+    onSelect: () -> Unit = {},
+    onArchive: () -> Unit = {},
+    archived: Boolean = false,
 ) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
 
@@ -1283,33 +1231,108 @@ private fun PlumSessionCard(
 
     var showMenu by remember { mutableStateOf(false) }
     val accent = accentFor(state)
+    val stateLabel = state.localizedLabel(androidx.compose.ui.platform.LocalContext.current, session.facts())
     Box {
         GlassPanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .semantics {
                     role = Role.Button
+                    this.selected = selected
                     contentDescription = buildString {
                         append(session.name)
                         append(", ")
                         // The verdict, not the raw status: a screen reader
                         // announcing "running" for a session stuck waiting on
                         // an approval is the same lie the dot used to tell.
-                        append(state.label)
+                        append(stateLabel)
                         if (session.unreadCount > 0) append(screenResources.getString(R.string.dashboard_1_s_unread_4be87, session.unreadCount))
                     }
                 }
                 .combinedClickable(onClick = onClick, onLongClick = { showMenu = true }),
-            radius = 22.dp,
-            borderColor = accent,
+            radius = if (narrow) 17.dp else 22.dp,
+            borderColor = if (selected) PlumAccent else if (narrow) accent.copy(alpha = .48f) else accent,
         ) {
-        Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+        if (narrow) {
+            val activityLine = stateLabel.replace(Regex("\\s+"), " ").trim().let { label ->
+                if (label.startsWith("Running command:", ignoreCase = true)) {
+                    screenResources.getString(R.string.component_running_command)
+                } else label
+            }
+            // Dense row: the master list is ~300dp wide and used to show two
+            // sessions per screen (two-line names, a 48dp menu row, preview and
+            // activity on separate lines). Two lines — name, then status or
+            // preview with the provider tag — fit in about half the height.
+            // Long-press still opens the full menu.
+            val detailLine = when {
+                state.activity != com.claudewebui.app.ui.components.dashboard.SessionActivity.IDLE -> activityLine
+                !session.lastMessage.isNullOrBlank() -> com.claudewebui.app.ui.components.common.plainTextPreview(session.lastMessage!!)
+                else -> null
+            }
+            Column(
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp, top = 4.dp, bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).background(accent, CircleShape))
+                    Text(
+                        session.name,
+                        color = PlumText,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 8.dp).weight(1f),
+                    )
+                    if (session.unreadCount > 0) {
+                        Badge(containerColor = PlumAccent, modifier = Modifier.padding(start = 5.dp)) {
+                            Text(session.unreadCount.coerceAtMost(99).toString())
+                        }
+                    }
+                    if (session.starred) Icon(
+                        Icons.Filled.Star,
+                        contentDescription = screenResources.getString(R.string.dashboard_remove_favorite_8b9da),
+                        tint = PlumAmber,
+                        modifier = Modifier.padding(start = 4.dp).size(14.dp),
+                    )
+                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Outlined.MoreVert,
+                            contentDescription = screenResources.getString(R.string.dashboard_session_actions_b086c),
+                            tint = PlumMuted,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+                Row(
+                    Modifier.padding(start = 16.dp, end = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        detailLine ?: sessionModel(session),
+                        color = if (detailLine != null && state.flagged) accent else PlumMuted,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        providerLabel(session.cliProvider),
+                        color = providerColor(session.cliProvider).copy(alpha = .85f),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
+            }
+        } else Column(Modifier.padding(if (compact) 13.dp else 17.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 11.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(11.dp).background(accent, CircleShape))
                 Text(
                     session.name,
                     color = PlumText,
-                    fontSize = 19.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1323,15 +1346,6 @@ private fun PlumSessionCard(
                         Text(session.unreadCount.coerceAtMost(99).toString())
                     }
                 }
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(providerColor(session.cliProvider).copy(alpha = .16f))
-                        .border(1.dp, providerColor(session.cliProvider), RoundedCornerShape(11.dp))
-                        .padding(horizontal = 13.dp, vertical = screenTokens.spacing.inline),
-                ) {
-                    Text(providerLabel(session.cliProvider), color = providerColor(session.cliProvider), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
                 IconButton(onClick = onToggleStar, modifier = Modifier.size(screenTokens.sizing.touchTarget)) {
                     Icon(
                         if (session.starred) Icons.Filled.Star else Icons.Outlined.StarBorder,
@@ -1343,7 +1357,8 @@ private fun PlumSessionCard(
                     Icon(Icons.Outlined.MoreVert, contentDescription = screenResources.getString(R.string.dashboard_session_actions_b086c), tint = PlumMuted)
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(providerLabel(session.cliProvider) + " · " + sessionModel(session), color = PlumMuted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (!compact) Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.FolderOpen, null, tint = PlumMuted, modifier = Modifier.size(17.dp))
                 Text(
                     session.workingDirectory,
@@ -1356,16 +1371,15 @@ private fun PlumSessionCard(
             }
             session.lastMessage?.takeIf { it.isNotBlank() }?.let { message ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val flagged = state.flagged
                     Icon(
-                        if (flagged) Icons.Outlined.WarningAmber else Icons.Outlined.ChatBubbleOutline,
+                        Icons.Outlined.ChatBubbleOutline,
                         null,
-                        tint = if (flagged) accent else PlumMuted,
+                        tint = PlumMuted,
                         modifier = Modifier.size(screenTokens.sizing.iconInline),
                     )
                     Text(
-                        message,
-                        color = if (flagged) accent else PlumMuted,
+                        com.claudewebui.app.ui.components.common.plainTextPreview(message),
+                        color = PlumMuted,
                         fontSize = 13.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1373,27 +1387,21 @@ private fun PlumSessionCard(
                     )
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            if (!compact || state.activity != com.claudewebui.app.ui.components.dashboard.SessionActivity.IDLE) Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    state.label,
+                    stateLabel,
                     color = if (state.flagged) accent else PlumMuted,
                     fontSize = 12.sp,
                     modifier = Modifier.weight(1f),
                 )
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF232629))
-                        .border(1.dp, PlumBorder, RoundedCornerShape(14.dp))
-                        .padding(horizontal = screenTokens.spacing.md, vertical = screenTokens.spacing.inline),
-                ) {
-                    Text(sessionModel(session), color = PlumMuted, fontSize = 11.sp)
-                }
+
             }
         }
         }
 
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(text = { Text(screenResources.getString(R.string.action_select)) }, onClick = { showMenu = false; onSelect() })
+            DropdownMenuItem(text = { Text(screenResources.getString(if (archived) R.string.action_restore else R.string.action_archive)) }, onClick = { showMenu = false; onArchive() })
             DropdownMenuItem(
                 text = { Text(if (session.starred) screenResources.getString(R.string.dashboard_remove_favorite_8b9da) else screenResources.getString(R.string.dashboard_add_favorite_4914d)) },
                 leadingIcon = {
@@ -1439,7 +1447,7 @@ internal fun CategoryFilterRow(
     androidx.compose.ui.platform.LocalConfiguration.current
 
     LazyRow(
-        modifier = modifier.fadingEdges(start = 16.dp, end = 24.dp),
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
         contentPadding = PaddingValues(end = 12.dp),
     ) {
@@ -1500,7 +1508,7 @@ internal fun QuickSwitchRow(sessions: List<Session>, onOpen: (String) -> Unit) {
         LazyRow(
             // Chips scroll past both edges, so both edges fade: a chip cut
             // mid-word at a hard boundary reads as a rendering fault.
-            modifier = Modifier.fadingEdges(start = 16.dp, end = 24.dp),
+            modifier = Modifier,
             horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
             contentPadding = PaddingValues(end = 12.dp),
         ) {

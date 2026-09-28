@@ -11,11 +11,14 @@ import androidx.compose.ui.unit.sp
 // the `androidx.compose.ui:ui-text-google-fonts` dependency and the
 // font certificate resource array.
 
-val SpaceGroteskFamily = FontFamily.SansSerif
+val AppSansFamily = FontFamily.SansSerif
+val SpaceGroteskFamily = AppSansFamily // compatibility alias; no bundled Space Grotesk font
 
-val NewsreaderFamily = FontFamily.Serif
+val AppSerifFamily = FontFamily.Serif
+val NewsreaderFamily = AppSerifFamily // compatibility alias
 
-val JetBrainsMonoFamily = FontFamily.Monospace
+val AppMonoFamily = FontFamily.Monospace
+val JetBrainsMonoFamily = AppMonoFamily // compatibility alias; system monospace
 
 // ── Typography Scale ─────────────────────────────────────────────────────────
 

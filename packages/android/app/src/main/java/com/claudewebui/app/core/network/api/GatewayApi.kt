@@ -24,6 +24,18 @@ interface GatewayApi {
 
     /** DELETE /api/gateway/tokens/:id */
     suspend fun revokeGatewayToken(id: String): ApiResponse<JsonElement>
+
+    /** GET /api/browser-bridge/status — connected Firefox extensions. */
+    suspend fun getBrowserBridgeStatus(): ApiResponse<BrowserBridgeStatus>
+
+    /** GET /api/browser-bridge/tokens */
+    suspend fun getBrowserTokens(): ApiResponse<List<BrowserToken>>
+
+    /** POST /api/browser-bridge/tokens — the only response that carries the secret. */
+    suspend fun createBrowserToken(name: String): ApiResponse<BrowserToken>
+
+    /** DELETE /api/browser-bridge/tokens/:id */
+    suspend fun revokeBrowserToken(id: String): ApiResponse<JsonElement>
 }
 
 class GatewayApiImpl(private val http: ApiHttp) : GatewayApi {
@@ -44,4 +56,16 @@ class GatewayApiImpl(private val http: ApiHttp) : GatewayApi {
 
     override suspend fun revokeGatewayToken(id: String): ApiResponse<JsonElement> =
         http.delete("/api/gateway/tokens/$id")
+
+    override suspend fun getBrowserBridgeStatus(): ApiResponse<BrowserBridgeStatus> =
+        http.get("/api/browser-bridge/status")
+
+    override suspend fun getBrowserTokens(): ApiResponse<List<BrowserToken>> =
+        http.get("/api/browser-bridge/tokens")
+
+    override suspend fun createBrowserToken(name: String): ApiResponse<BrowserToken> =
+        http.post("/api/browser-bridge/tokens") { setBody(CreateBrowserTokenInput(name)) }
+
+    override suspend fun revokeBrowserToken(id: String): ApiResponse<JsonElement> =
+        http.delete("/api/browser-bridge/tokens/$id")
 }

@@ -104,10 +104,13 @@ fun GatewayTokensPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                 )
             }
 
-            if (state.gatewayTokens.isEmpty()) {
+            // Revoked tokens are history, not something to act on — the WebUI
+            // lists only live ones as well.
+            val liveGatewayTokens = state.gatewayTokens.filterNot { it.revoked }
+            if (liveGatewayTokens.isEmpty()) {
                 Text(screenResources.getString(R.string.settings_no_tokens_issued_5e7e8), color = PlumMuted, fontSize = 12.sp)
             } else {
-                state.gatewayTokens.forEach { token ->
+                liveGatewayTokens.forEach { token ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(
@@ -120,8 +123,7 @@ fun GatewayTokensPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                             Text(
                                 listOfNotNull(
                                     "${token.tokenPrefix}…",
-                                    if (token.scope == "read") "read-only" else screenResources.getString(R.string.settings_full_access_9e440),
-                                    "revoked".takeIf { token.revoked },
+                                    if (token.scope == "read") screenResources.getString(R.string.settings_read_only_short) else screenResources.getString(R.string.settings_full_access_9e440),
                                     token.lastUsedAt?.take(10)?.let { screenResources.getString(R.string.settings_last_used_1_s_1dd0c, it) },
                                 ).joinToString(" · "),
                                 color = PlumMuted,
@@ -135,6 +137,121 @@ fun GatewayTokensPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                                 viewModel.revokeGatewayToken(token.id)
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Pair the Plum Browser Firefox extension so agents can drive a desktop
+ * Firefox through the `firefox` MCP tools, one tab group per session. Mirrors
+ * the WebUI panel: live connections, pairing tokens (secret shown once), unpair.
+ */
+@Composable
+fun FirefoxBrowserPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+
+    var name by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        while (true) {
+            viewModel.loadBrowserBridge()
+            kotlinx.coroutines.delay(10_000)
+        }
+    }
+
+    GlassPanel(Modifier.fillMaxWidth(), radius = 18.dp) {
+        Column(
+            Modifier.fillMaxWidth().padding(screenTokens.spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            Text(screenResources.getString(R.string.settings_firefox_browser_title), color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(
+                screenResources.getString(R.string.settings_firefox_browser_description),
+                color = PlumMuted,
+                fontSize = 12.sp,
+            )
+
+            if (state.browserConnections.isEmpty()) {
+                Text(screenResources.getString(R.string.settings_firefox_browser_none_connected), color = PlumMuted, fontSize = 12.sp)
+            } else {
+                state.browserConnections.forEach { connection ->
+                    Column {
+                        Text(
+                            "● ${connection.client.label}",
+                            color = if (connection.paused) PlumAccent else PlumGreen,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            listOfNotNull(
+                                "${connection.client.name} ${connection.client.version}".trim(),
+                                screenResources.getString(R.string.settings_firefox_browser_paused).takeIf { connection.paused },
+                            ).joinToString(" · "),
+                            color = PlumMuted,
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
+            }
+
+            // The secret is returned exactly once; the server keeps only a hash.
+            state.newBrowserTokenSecret?.let { secret ->
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = screenTokens.spacing.xs),
+                    verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.xs),
+                ) {
+                    Text(
+                        screenResources.getString(R.string.settings_firefox_browser_paste_hint),
+                        color = PlumGreen,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(state.serverUrl, color = PlumText, fontSize = 12.sp)
+                    Text(secret, color = PlumText, fontSize = 12.sp)
+                    Row {
+                        ParityAction(screenResources.getString(R.string.settings_firefox_browser_copy_token), false) {
+                            clipboard.setText(androidx.compose.ui.text.AnnotatedString(secret))
+                        }
+                        ParityAction(screenResources.getString(R.string.settings_dismiss_70afe), false) { viewModel.dismissBrowserTokenSecret() }
+                    }
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(screenResources.getString(R.string.settings_firefox_browser_name)) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                ParityAction(screenResources.getString(R.string.settings_firefox_browser_pair), state.parityBusy) {
+                    viewModel.createBrowserToken(name)
+                    name = ""
+                }
+            }
+
+            state.browserTokens.filterNot { it.revoked }.forEach { token ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(token.name, color = PlumText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            listOfNotNull(
+                                "${token.tokenPrefix}…",
+                                token.lastUsedAt?.take(10)?.let { screenResources.getString(R.string.settings_last_used_1_s_1dd0c, it) },
+                            ).joinToString(" · "),
+                            color = PlumMuted,
+                            fontSize = 11.sp,
+                        )
+                    }
+                    ParityAction(screenResources.getString(R.string.settings_firefox_browser_unpair), state.parityBusy, destructive = true) {
+                        viewModel.revokeBrowserToken(token.id)
                     }
                 }
             }

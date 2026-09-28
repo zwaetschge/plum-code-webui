@@ -60,7 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,6 +72,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import com.claudewebui.app.ui.components.common.PlumBackdrop
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -103,7 +104,7 @@ fun LoginScreen(
     onNavigateToServerSetup: () -> Unit,
     authCallbackUri: String? = null,
 ) {
-    val authState by viewModel.authState.collectAsState()
+    val authState by viewModel.authState.collectAsStateWithLifecycle()
 
     // Forward terminal state to caller
     LaunchedEffect(authState) {
@@ -116,9 +117,10 @@ fun LoginScreen(
         authCallbackUri?.let(viewModel::handleMobileAuthCallback)
     }
 
+    PlumBackdrop {
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
+        color = Color.Transparent,
     ) {
         AnimatedContent(
             targetState = authState,
@@ -181,6 +183,7 @@ fun LoginScreen(
                 }
             }
         }
+    }
     }
 }
 
@@ -418,7 +421,7 @@ private fun BasicAuthForm(
     var passwordVisible by remember { mutableStateOf(false) }
     var rememberMe by remember { mutableStateOf(true) }
 
-    val authState by viewModel.authState.collectAsState()
+    val authState by viewModel.authState.collectAsStateWithLifecycle()
     val isLoading = authState is AuthState.Authenticating
     val errorMessage = (authState as? AuthState.Error)?.message
 

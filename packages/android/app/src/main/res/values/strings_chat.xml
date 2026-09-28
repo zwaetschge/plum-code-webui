@@ -42,6 +42,8 @@
     <string name="chat_dismiss">Dismiss</string>
     <string name="chat_session_details">Session details</string>
     <string name="chat_interrupt_run"> Interrupt &amp; run now</string>
+    <string name="chat_interrupt">Interrupt</string>
+    <string name="chat_restart_session">Restart</string>
     <string name="chat_outbox_title">Outbox · this session</string>
     <string name="chat_outbox_empty">No messages waiting to be sent</string>
     <string name="chat_original">Original chat</string>

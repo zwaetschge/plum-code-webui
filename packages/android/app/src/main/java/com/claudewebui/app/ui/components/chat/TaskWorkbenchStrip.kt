@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -43,7 +44,7 @@ import com.claudewebui.app.ui.components.common.PlumText
 /**
  * Compact run status above the message list: how far the agent's task list has
  * come, how many follow-ups are queued, and how full the context window is.
- * Mirrors the WebUI's TaskWorkbench header; collapsed it is a single line, and
+ * Shared with the normal chat; collapsed it is a single line, and
  * tapping expands the full todo list.
  *
  * Renders nothing when there is neither a task list, a queue, nor context
@@ -154,6 +155,41 @@ fun TaskWorkbenchStrip(
                     }
                 }
             }
+        }
+    }
+}
+
+/** Pending work stays reachable in the normal chat without a separate task mode. */
+@Composable
+fun TaskProgressSummary(todos: List<TodoItem>, onOpenTasks: () -> Unit) {
+    val active = todos.firstOrNull { it.status == TodoStatus.IN_PROGRESS }
+        ?: todos.firstOrNull { it.status == TodoStatus.PENDING }
+        ?: return
+    val t = PlumTheme.tokens
+    androidx.compose.material3.Surface(
+        onClick = onOpenTasks,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = t.spacing.md, vertical = t.spacing.xs),
+        shape = RoundedCornerShape(t.spacing.cozy),
+        color = PlumSurfaceStrong,
+    ) {
+        Row(
+            modifier = Modifier.heightIn(min = 48.dp).padding(horizontal = t.spacing.md, vertical = t.spacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(t.spacing.sm),
+        ) {
+            Text(
+                active.activeForm?.takeIf { active.status == TodoStatus.IN_PROGRESS && it.isNotBlank() } ?: active.content,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                color = PlumText,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                stringResource(R.string.component_tasks_count, todos.count { it.status == TodoStatus.COMPLETED }, todos.size),
+                style = MaterialTheme.typography.labelMedium,
+                color = PlumAccent,
+            )
         }
     }
 }

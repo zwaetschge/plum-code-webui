@@ -24,6 +24,47 @@ data class GatewayToken(
 @Serializable
 data class CreateGatewayTokenInput(val name: String, val scope: String = "write")
 
+/** Pairing token for the Plum Browser Firefox extension; opens only the browser bridge. */
+@Serializable
+data class BrowserToken(
+    val id: String,
+    val name: String = "",
+    val tokenPrefix: String = "",
+    val revoked: Boolean = false,
+    val lastUsedAt: String? = null,
+    val createdAt: String = "",
+    /** Returned once, on creation only. */
+    val token: String? = null,
+)
+
+@Serializable
+data class CreateBrowserTokenInput(val name: String)
+
+@Serializable
+data class BrowserClientInfo(
+    val name: String = "",
+    val version: String = "",
+    val extensionVersion: String = "",
+    val label: String = "",
+)
+
+@Serializable
+data class BrowserConnection(
+    val id: String,
+    val tokenName: String = "",
+    val client: BrowserClientInfo = BrowserClientInfo(),
+    val paused: Boolean = false,
+    val tabGroups: Boolean = false,
+    val connectedAt: String = "",
+    val lastSeenAt: String = "",
+)
+
+@Serializable
+data class BrowserBridgeStatus(
+    val connections: List<BrowserConnection> = emptyList(),
+    val extensionAvailable: Boolean = false,
+)
+
 @Serializable
 data class DiscoveredProject(
     val id: String,

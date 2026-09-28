@@ -23,6 +23,7 @@ private val SessionMode.descriptionResource: Int get() = when (this) {
 }
 private val ReasoningLevel.labelResource: Int get() = when (this) {
     ReasoningLevel.NONE -> R.string.component_none
+    ReasoningLevel.OFF -> R.string.component_reasoning_off
     ReasoningLevel.MINIMAL -> R.string.component_reasoning_minimal
     ReasoningLevel.LOW -> R.string.component_reasoning_low
     ReasoningLevel.MEDIUM -> R.string.component_reasoning_medium
@@ -30,6 +31,7 @@ private val ReasoningLevel.labelResource: Int get() = when (this) {
     ReasoningLevel.XHIGH -> R.string.component_reasoning_xhigh
     ReasoningLevel.MAX -> R.string.component_reasoning_max
     ReasoningLevel.ULTRA -> R.string.component_reasoning_ultra
+    ReasoningLevel.ULTRACODE -> R.string.component_reasoning_ultracode
 }
 private val ActiveFollowupMode.labelResource: Int get() = when (this) {
     ActiveFollowupMode.QUEUE -> R.string.component_followup_queue

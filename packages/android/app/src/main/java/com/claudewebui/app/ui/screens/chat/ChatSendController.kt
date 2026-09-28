@@ -5,30 +5,23 @@ import com.claudewebui.app.R
 import com.claudewebui.app.core.diagnostics.Breadcrumbs
 import android.content.Context
 import android.net.Uri
-import android.util.Base64
 import com.claudewebui.app.core.network.ApiClient
-import com.claudewebui.app.core.network.ApiHttpException
 import com.claudewebui.app.core.network.ConnectionState
 import com.claudewebui.app.core.network.SocketManager
 import com.claudewebui.app.data.local.entity.OutboxEntity
 import com.claudewebui.app.data.local.entity.OutboxStatus
 import com.claudewebui.app.data.local.entity.SessionReadStateEntity
-import com.claudewebui.app.data.model.CreateChatUploadInput
-import com.claudewebui.app.data.model.FileAttachmentData
 import com.claudewebui.app.data.model.Message
 import com.claudewebui.app.data.model.PersistedOutboxAttachment
 import com.claudewebui.app.data.model.SessionSendAck
 import com.claudewebui.app.data.repository.MessageRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import java.util.UUID
@@ -253,130 +246,13 @@ internal class ChatSendController(
         )
     }
 
-    private suspend fun prepareDelivery(item: OutboxEntity): PreparedDelivery = withContext(Dispatchers.IO) {
-        if (item.attachments.isEmpty()) return@withContext PreparedDelivery(emptyList(), emptyList())
-        var totalBytes = 0L
-        val allBytes = item.attachments.map { attachment ->
-            val remaining = (MAX_TOTAL_ATTACHMENT_BYTES - totalBytes).coerceAtLeast(0)
-            val bytes = readUriWithLimit(
-                appContext,
-                Uri.parse(attachment.uri),
-                minOf(MAX_ATTACHMENT_BYTES, remaining),
-            )
-            totalBytes += bytes.size
-            bytes
-        }
+    private val uploader = OutboxUploader(appContext, api, messageRepository)
 
-        var updatedAttachments = item.attachments
-        val uploadIds = mutableListOf<String>()
-        try {
-            item.attachments.forEachIndexed { attachmentIndex, original ->
-                val bytes = allBytes[attachmentIndex]
-                var upload = original.uploadId?.let { id ->
-                    runCatching { api.getChatUpload(sessionId, id) }.getOrNull()?.data
-                }
-                if (upload == null || upload.status == "cancelled" || upload.status == "failed") {
-                    val response = api.createChatUpload(
-                        sessionId,
-                        CreateChatUploadInput(
-                            filename = original.filename,
-                            mimeType = original.mimeType,
-                            byteSize = bytes.size.toLong(),
-                            sha256 = sha256Hex(bytes),
-                        ),
-                    )
-                    if (!response.success || response.data == null) {
-                        error(response.error?.message ?: appContext.getString(R.string.chat_upload_start_failed))
-                    }
-                    upload = response.data
-                }
-
-                val initial = requireNotNull(upload)
-                val missing = when {
-                    initial.status == "complete" -> emptyList()
-                    initial.missingChunks.isNotEmpty() -> initial.missingChunks
-                    else -> (0 until initial.totalChunks).toList()
-                }
-                var latest = initial
-                for (chunkIndex in missing) {
-                    ensureActive()
-                    val range = chunkByteRange(chunkIndex, initial.chunkSize, bytes.size) ?: continue
-                    val start = range.first
-                    val end = range.last + 1
-                    val response = api.putChatUploadChunk(
-                        sessionId = sessionId,
-                        uploadId = initial.id,
-                        index = chunkIndex,
-                        bytes = bytes.copyOfRange(start, end),
-                        byteOffset = start.toLong(),
-                        totalBytes = bytes.size.toLong(),
-                    )
-                    if (!response.success || response.data == null) {
-                        error(response.error?.message ?: appContext.getString(R.string.chat_upload_named_failed, original.filename))
-                    }
-                    latest = response.data
-                    val overallProgress = (
-                        attachmentIndex + latest.progress.coerceIn(0f, 1f)
-                    ) / item.attachments.size.toFloat()
-                    updatedAttachments = updatedAttachments.toMutableList().also { list ->
-                        list[attachmentIndex] = original.copy(
-                            uploadId = latest.id,
-                            progress = latest.progress,
-                            uploadedChunks = latest.receivedChunks,
-                            totalChunks = latest.totalChunks,
-                            error = latest.error,
-                        )
-                    }
-                    val persisted = (messageRepository.getOutboxItem(item.clientMessageId) ?: item).copy(
-                        attachmentsJson = OutboxEntity.attachmentsJson(updatedAttachments),
-                        uploadIdsJson = OutboxEntity.uploadIdsJson(uploadIds + latest.id),
-                        progress = overallProgress,
-                    )
-                    messageRepository.putOutbox(persisted)
-                    state.update {
-                        it.copy(attachmentPreparationProgress = overallProgress)
-                    }
-                }
-                if (latest.status != "complete") {
-                    val refreshed = api.getChatUpload(sessionId, latest.id)
-                    latest = refreshed.data ?: latest
-                }
-                if (latest.status != "complete") {
-                    error(latest.error ?: appContext.getString(R.string.chat_upload_incomplete))
-                }
-                uploadIds += latest.id
-                updatedAttachments = updatedAttachments.toMutableList().also { list ->
-                    list[attachmentIndex] = original.copy(
-                        uploadId = latest.id,
-                        progress = 1f,
-                        uploadedChunks = latest.receivedChunks,
-                        totalChunks = latest.totalChunks,
-                    )
-                }
-            }
-            messageRepository.putOutbox(
-                (messageRepository.getOutboxItem(item.clientMessageId) ?: item).copy(
-                    attachmentsJson = OutboxEntity.attachmentsJson(updatedAttachments),
-                    uploadIdsJson = OutboxEntity.uploadIdsJson(uploadIds),
-                    progress = 1f,
-                )
-            )
-            PreparedDelivery(uploadIds, emptyList())
-        } catch (failure: ApiHttpException) {
-            if (failure.status != 404 && failure.status != 405) throw failure
-            // Compatibility with servers predating staged uploads.
-            PreparedDelivery(
-                uploadIds = emptyList(),
-                legacyAttachments = item.attachments.mapIndexed { index, attachment ->
-                    FileAttachmentData(
-                        data = Base64.encodeToString(allBytes[index], Base64.NO_WRAP),
-                        mimeType = attachment.mimeType,
-                        filename = attachment.filename,
-                    )
-                },
-            )
+    /** Files first, over the shared resumable-upload path; see [OutboxUploader]. */
+    private suspend fun prepareDelivery(item: OutboxEntity): PreparedDelivery =
+        uploader.prepare(sessionId, item) { progress ->
+            state.update { it.copy(attachmentPreparationProgress = progress) }
         }
-    }
 }
 
 internal const val OUTBOX_ACCEPTED_RETENTION_MS = 24L * 60L * 60L * 1_000L
@@ -386,11 +262,6 @@ internal const val MAX_ATTACHMENT_COUNT = 8
 // raw total leaves room for filenames and protocol overhead.
 internal const val MAX_ATTACHMENT_BYTES = 25L * 1024L * 1024L
 internal const val MAX_TOTAL_ATTACHMENT_BYTES = 32L * 1024L * 1024L
-
-private data class PreparedDelivery(
-    val uploadIds: List<String>,
-    val legacyAttachments: List<FileAttachmentData>,
-)
 
 internal fun sha256Hex(bytes: ByteArray): String =
     MessageDigest.getInstance("SHA-256")

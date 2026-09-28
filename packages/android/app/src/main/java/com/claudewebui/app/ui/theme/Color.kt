@@ -36,6 +36,15 @@ val CodexColor = Color(0xFF10A37F)
 val OpenCodeColor = Color(0xFF7C3AED)
 val GoogleColor = Color(0xFF4285F4)
 
+/**
+ * Mistral orange for the Vibe harness.
+ *
+ * The Mistral *API* tracker in the analytics limits keeps its own historical
+ * red-orange (0xFFFA520F); Vibe is a separate allowance of the same plan, so
+ * it uses the brand orange and the two rows stay distinguishable.
+ */
+val VibeColor = Color(0xFFFF7000)
+
 // ── Light Theme Palette ──────────────────────────────────────────────────────
 
 val LightBackground = Color(0xFFF0EFEA)

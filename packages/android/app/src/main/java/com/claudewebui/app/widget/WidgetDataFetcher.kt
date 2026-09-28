@@ -51,7 +51,7 @@ object WidgetDataFetcher {
                 val today = async { runCatching { parsePeriod("24h", tz) }.getOrNull() }
                 val weekly = async { runCatching { parseWeek(tz) }.getOrNull() }
                 val limits = async { runCatching { fetchLimits() }.getOrNull() }
-                val live = async { runCatching { fetchLive() }.getOrNull() }
+                val live = async { runCatching { fetchLive(com.claudewebui.app.ui.screens.monitor.MonitorSlotsStore.load(context)) }.getOrNull() }
 
                 val weekParsed = weekly.await()
                 val liveParsed = live.await()
@@ -65,6 +65,7 @@ object WidgetDataFetcher {
                     days = weekParsed?.days ?: previous.days,
                     limits = limits.await() ?: previous.limits,
                     sessions = liveParsed?.sessions ?: previous.sessions,
+                    monitorSessions = liveParsed?.monitorSessions ?: previous.monitorSessions,
                     approvals = liveParsed?.approvals ?: previous.approvals,
                     questions = liveParsed?.questions ?: previous.questions,
                     sessionTotal = liveParsed?.sessionTotal ?: previous.sessionTotal,
@@ -159,10 +160,17 @@ object WidgetDataFetcher {
                     UsageLimitProvider.ZAI -> 0xFF14B8A6L
                     UsageLimitProvider.KIMI -> 0xFF2582EDL
                     UsageLimitProvider.ALIBABA -> 0xFFFF8A3DL
+                    UsageLimitProvider.MISTRAL -> 0xFFFA520FL
+                    // Mistral orange, one shade apart from the API allowance so
+                    // the two plan ledgers stay distinguishable in one list.
+                    UsageLimitProvider.VIBE -> 0xFFFF7000L
                 }
                 buildList {
                     data.fiveHour?.let { add(WLimit(provider.label, "5h", it.utilization, color)) }
-                    data.sevenDay?.let { add(WLimit(provider.label, "Weekly", it.utilization, color)) }
+                    data.sevenDay?.let {
+                        val window = if (provider.isMonthlyPlan) "Month" else "Weekly"
+                        add(WLimit(provider.label, window, it.utilization, color))
+                    }
                     data.sevenDaySonnet?.let { add(WLimit(provider.label, "Weekly Sonnet", it.utilization, color)) }
                 }
             }
@@ -179,6 +187,7 @@ object WidgetDataFetcher {
         val questionTotal: Int,
         val busyTotal: Int,
         val needsYouTotal: Int,
+        val monitorSessions: List<WSession> = emptyList(),
     )
 
     /**
@@ -192,7 +201,7 @@ object WidgetDataFetcher {
      * every session at once, so the widget can reach the same verdict the
      * dashboard reaches.
      */
-    private suspend fun fetchLive(): Live {
+    private suspend fun fetchLive(monitorSlots: List<String?> = emptyList()): Live {
         val overview = api.getGatewayOverview().data
             ?: return Live(emptyList(), emptyList(), emptyList(), 0, 0, 0, 0, 0)
         val now = Instant.now()
@@ -221,8 +230,18 @@ object WidgetDataFetcher {
 
         val questions = overview.pendingQuestions.map { it.toWidget(names) }
 
+        // The widget mirrors the Monitor tab's slots; before the user ever
+        // chose any, it shows what the tab would default to.
+        val byId = live.associateBy { it.id }
+        val chosen = monitorSlots.mapNotNull { id -> id?.let(byId::get) }
+        val monitorSessions = (
+            if (chosen.isNotEmpty()) chosen
+            else ranked.sortedByDescending { it.first.busy }.take(com.claudewebui.app.ui.screens.monitor.MONITOR_SLOT_COUNT).map { it.first }
+        ).map { it.toWidget() }
+
         return Live(
             sessions = ranked.take(MAX_ROWS).map { (session, _) -> session.toWidget() },
+            monitorSessions = monitorSessions,
             approvals = approvals.take(MAX_ROWS),
             questions = questions.take(MAX_ROWS),
             sessionTotal = live.size,

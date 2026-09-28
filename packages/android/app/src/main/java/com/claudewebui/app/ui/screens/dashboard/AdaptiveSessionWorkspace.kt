@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.automirrored.outlined.MenuOpen
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.HorizontalDivider
@@ -27,7 +29,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -92,35 +94,26 @@ fun AdaptiveSessionWorkspace(
     val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
     androidx.compose.ui.platform.LocalConfiguration.current
 
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     var selectedSessionId by rememberSaveable { mutableStateOf(initialSessionId) }
     var selectedMessageId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedChatId by rememberSaveable { mutableStateOf<String?>(null) }
-    var showCreate by rememberSaveable { mutableStateOf(false) }
-    var showNotifications by rememberSaveable { mutableStateOf(false) }
-    var showCategoryManager by rememberSaveable { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        viewModel.events.collect { event ->
-            when (event) {
-                is DashboardEvent.NavigateToChat -> {
-                    selectedSessionId = event.sessionId
-                    selectedMessageId = null
-                    selectedChatId = null
-                }
-                is DashboardEvent.NavigateToMessage -> {
-                    selectedSessionId = event.sessionId
-                    selectedMessageId = event.messageId
-                    selectedChatId = event.chatId
-                }
-                is DashboardEvent.SessionCreated -> showCreate = false
-                DashboardEvent.ShowNewSessionDialog -> showCreate = true
-                DashboardEvent.ShowCategoryManager -> showCategoryManager = true
-                DashboardEvent.NavigateToSettings -> onNavigateToSettings()
-                else -> Unit
-            }
+    var listVisible by rememberSaveable { mutableStateOf(true) }
+    // Two thirds of the screen used to say "select a session" on every
+    // launch. Open the most recent one once; clearing the selection later
+    // (e.g. after deleting it) still shows the empty state.
+    var autoSelected by rememberSaveable { mutableStateOf(initialSessionId != null) }
+    LaunchedEffect(state.sessions, autoSelected) {
+        if (!autoSelected && selectedSessionId == null && state.sessions.isNotEmpty()) {
+            selectedSessionId = state.sessions.maxByOrNull { it.updatedAt }?.id
+            autoSelected = true
         }
     }
+
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    // Keep the chat readable on unfolded phones; the embedded list has its
+    // own compact controls and does not need dashboard-card width.
+    val listWidth = (configuration.screenWidthDp * .30f).coerceIn(270f, 320f).dp
 
     PlumBackdrop {
         // The rail is what makes Activity, Analytics and Library reachable at
@@ -129,115 +122,26 @@ fun AdaptiveSessionWorkspace(
         PlumNavScaffold(
             selected = MainDestination.SESSIONS,
             onNavigate = onNavigateMain,
-            badgeCount = state.sessions.count { it.status == SessionStatus.ERROR },
+            badgeCount = state.attentionCount,
         ) { padding ->
-        Row(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
-            Column(
-                // No opaque panel here: a filled rectangle cuts a hard edge into
-                // the backdrop at the top and bottom of the pane. The list floats
-                // on the same atmosphere as every other Plum surface.
-                modifier = Modifier
-                    .width(380.dp)
-                    .fillMaxHeight()
-                    // The pane has no background of its own, so it takes the
-                    // status bar inset here; the chat pane handles its own.
-                    .padding(top = padding.calculateTopPadding())
-                    .padding(horizontal = screenTokens.spacing.lg, vertical = screenTokens.spacing.md),
-                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.md),
+        // The chat composer owns the system navigation inset. Applying it to
+        // the whole row as well leaves an empty footer beneath the detail pane.
+        Row(Modifier.fillMaxSize()) {
+            // The workspace paints behind the transparent status bar, but the
+            // scrolling master list must begin below it. The chat pane manages
+            // its own header inset independently.
+            if (listVisible || selectedSessionId == null) Box(
+                Modifier.width(listWidth).fillMaxHeight()
+                    .padding(top = padding.calculateTopPadding()),
             ) {
-                // Title row. The actions used to share a row with the search field,
-                // which squeezed it to about 150dp and wrapped its placeholder onto
-                // a second line. They get their own row; the search gets the pane.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        screenResources.getString(R.string.dashboard_sessions_e11e3),
-                        color = PlumText,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.size(9.dp))
-                    Text(
-                        "${state.sessions.size}",
-                        color = PlumMuted,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    // Approvals block the agent, so the feed has to be one tap
-                    // away on the tablet too, not only in the phone header.
-                    NotificationBell(
-                        unreadCount = state.unreadNotifications,
-                        onClick = {
-                            viewModel.loadNotifications()
-                            showNotifications = true
-                        },
-                        modifier = Modifier.size(38.dp),
-                    )
-                    Spacer(Modifier.size(4.dp))
-                    PlumIconButton(Icons.Outlined.Add, screenResources.getString(R.string.dashboard_new_session_5c881), onClick = { showCreate = true })
-                    Spacer(Modifier.size(4.dp))
-                    PlumIconButton(Icons.Outlined.Settings, screenResources.getString(R.string.dashboard_settings_c7f73), onClick = onNavigateToSettings)
-                }
-                DashboardSearchField(
-                    value = state.searchQuery,
-                    onValueChange = viewModel::setSearchQuery,
-                    placeholder = if (state.searchScope == DashboardSearchScope.MESSAGES) {
-                        screenResources.getString(R.string.dashboard_search_messages_abea6)
-                    } else screenResources.getString(R.string.dashboard_search_sessions_646db),
-                    showShortcutHint = false,
-                    modifier = Modifier.fillMaxWidth(),
+                DashboardScreen(
+                    onNavigateToChat = { selectedSessionId = it; selectedMessageId = null; selectedChatId = null },
+                    onNavigateToMessage = { sessionId, messageId, chatId -> selectedSessionId = sessionId; selectedMessageId = messageId; selectedChatId = chatId },
+                    onNavigateToSettings = onNavigateToSettings,
+                    viewModel = viewModel, embedded = true, selectedSessionId = selectedSessionId,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm)) {
-                    FilterPill(
-                        label = screenResources.getString(R.string.dashboard_sessions_e11e3),
-                        selected = state.searchScope == DashboardSearchScope.SESSIONS,
-                        onClick = { viewModel.setSearchScope(DashboardSearchScope.SESSIONS) },
-                    )
-                    FilterPill(
-                        label = screenResources.getString(R.string.dashboard_messages_f1702),
-                        selected = state.searchScope == DashboardSearchScope.MESSAGES,
-                        onClick = { viewModel.setSearchScope(DashboardSearchScope.MESSAGES) },
-                    )
-                }
-                CategoryFilterRow(
-                    categories = state.categories,
-                    selectedCategoryId = state.selectedCategoryId,
-                    onSelect = viewModel::filterByCategory,
-                    onManage = { showCategoryManager = true },
-                )
-                if (state.searchQuery.isBlank() && state.sessions.isNotEmpty()) {
-                    QuickSwitchRow(
-                        sessions = remember(state.sessions) {
-                            state.sessions.sortedByDescending { it.updatedAt }.take(5)
-                        },
-                        onOpen = { viewModel.onSessionTapped(it) },
-                    )
-                }
-                HorizontalDivider(color = PlumBorder)
-                LazyColumn(
-                    // Cards dissolve at both ends instead of being sliced by
-                    // the divider above and the screen edge below.
-                    modifier = Modifier.fillMaxSize().fadingEdges(top = 14.dp, bottom = 40.dp),
-                    verticalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    if (state.searchScope == DashboardSearchScope.MESSAGES) {
-                        items(state.messageSearchResults, key = { "${it.sessionId}_${it.id}" }) { result ->
-                            SplitMessageRow(result, state.searchQuery) {
-                                viewModel.onMessageResultTapped(result)
-                            }
-                        }
-                    } else {
-                        items(state.filteredSessions, key = { it.id }) { session ->
-                            SplitSessionRow(
-                                session = session,
-                                selected = session.id == selectedSessionId,
-                                onClick = { viewModel.onSessionTapped(session.id) },
-                            )
-                        }
-                    }
-                }
             }
-            VerticalDivider(
+            if (listVisible || selectedSessionId == null) VerticalDivider(
                 modifier = Modifier.fillMaxHeight(),
                 color = PlumBorder,
             )
@@ -256,6 +160,14 @@ fun AdaptiveSessionWorkspace(
                             modifier = Modifier.size(34.dp),
                         )
                         Text(screenResources.getString(R.string.dashboard_select_a_session_2f0b7), color = PlumText, fontSize = 15.sp)
+                        androidx.compose.material3.TextButton(onClick = { viewModel.requestNewSession() }) {
+                            Text(screenResources.getString(R.string.dashboard_new_session_5c881))
+                        }
+                        state.sessions.maxByOrNull { it.updatedAt }?.let { latest ->
+                            androidx.compose.material3.TextButton(onClick = { selectedSessionId = latest.id }) {
+                                Text(screenResources.getString(R.string.continue_latest))
+                            }
+                        }
                         Text(
                             screenResources.getString(R.string.dashboard_pick_one_on_the_left_or_start_a_new_session_e1876),
                             color = PlumMuted,
@@ -269,13 +181,16 @@ fun AdaptiveSessionWorkspace(
                     key(selected) {
                         ChatScreen(
                             sessionId = selected,
+                            // The header's leading button collapses the list so
+                            // the chat gets the full width, and brings it back.
+                            showBackButton = true,
+                            navigationIcon = if (listVisible) Icons.AutoMirrored.Outlined.MenuOpen else Icons.Outlined.Menu,
+                            navigationLabel = screenResources.getString(
+                                if (listVisible) R.string.workspace_hide_session_list else R.string.workspace_show_session_list,
+                            ),
                             initialMessageId = selectedMessageId,
                             initialChatId = selectedChatId,
-                            onNavigateBack = {
-                                selectedSessionId = null
-                                selectedMessageId = null
-                                selectedChatId = null
-                            },
+                            onNavigateBack = { listVisible = !listVisible },
                             onNavigateToFiles = { directory ->
                                 onNavigateToFiles(selected, directory)
                             },
@@ -294,140 +209,4 @@ fun AdaptiveSessionWorkspace(
         }
     }
 
-    if (showNotifications) {
-        ModalBottomSheet(
-            onDismissRequest = { showNotifications = false },
-            containerColor = PlumSurfaceStrong,
-        ) {
-            NotificationFeedContent(
-                notifications = state.notifications,
-                unreadCount = state.unreadNotifications,
-                onOpenSession = { sessionId ->
-                    showNotifications = false
-                    selectedSessionId = sessionId
-                    selectedMessageId = null
-                    selectedChatId = null
-                },
-                onMarkAllRead = { viewModel.markNotificationsRead() },
-                onClearAll = { viewModel.clearNotifications() },
-                onRespond = { item, allow -> viewModel.respondToApproval(item, allow) },
-            )
-        }
-    }
-
-    if (showCategoryManager) {
-        CategoryManager(
-            categories = state.categories,
-            onDismiss = { showCategoryManager = false },
-            onCreate = viewModel::createCategory,
-            onUpdate = viewModel::updateCategory,
-            onDelete = viewModel::deleteCategory,
-            onReorder = viewModel::reorderCategories,
-        )
-    }
-
-    if (showCreate) {
-        NewSessionDialog(
-            categories = state.categories,
-            providers = state.availableProviders,
-            presets = state.sessionPresets,
-            lastSetup = state.lastSessionSetup,
-            isCreating = state.isCreatingSession,
-            creationError = state.creationError,
-            onDismiss = { if (!state.isCreatingSession) showCreate = false },
-            onCreate = { name, provider, directory, mode, categoryId ->
-                viewModel.createSession(name, directory, provider, mode, categoryId)
-            },
-        )
-    }
-}
-
-@Composable
-private fun SplitSessionRow(session: Session, selected: Boolean, onClick: () -> Unit) {
-    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
-    androidx.compose.ui.platform.LocalConfiguration.current
-
-    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
-
-    val statusColor = when (session.status) {
-        SessionStatus.RUNNING -> PlumGreen
-        SessionStatus.ERROR -> PlumAmber
-        SessionStatus.STOPPED -> PlumBorder
-    }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .glassSurface(
-                RoundedCornerShape(14.dp),
-                borderColor = if (selected) PlumAccent.copy(alpha = .55f) else null,
-            )
-            .background(if (selected) PlumAccent.copy(alpha = .14f) else Color.Transparent)
-            .clickable(onClick = onClick)
-            .semantics {
-                role = Role.Button
-                this.selected = selected
-            }
-            .padding(screenTokens.spacing.md),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(statusColor))
-                Spacer(Modifier.size(7.dp))
-                Text(
-                    session.name,
-                    color = PlumText,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (session.unreadCount > 0) {
-                    Text(screenResources.getString(R.string.dashboard_1_s_new_f595b, session.unreadCount), color = PlumAccent, fontSize = 11.sp)
-                }
-            }
-            Text(
-                session.lastMessage ?: session.workingDirectory,
-                color = PlumMuted,
-                fontSize = 12.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SplitMessageRow(result: MessageSearchResult, query: String, onClick: () -> Unit) {
-    val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
-    androidx.compose.ui.platform.LocalConfiguration.current
-
-    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .glassSurface(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .semantics { role = Role.Button }
-            .padding(screenTokens.spacing.md),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                result.sessionName ?: screenResources.getString(R.string.dashboard_session_f7f19),
-                color = PlumText,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                dashboardSearchSnippet(result.content, query),
-                color = PlumMuted,
-                fontSize = 12.sp,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
 }

@@ -22,6 +22,9 @@ sealed class Routes(val route: String) {
     /** Realtime sessions, tools and permission activity */
     object Activity : Routes("activity")
 
+    /** Up to four sessions side by side, live. */
+    object Monitor : Routes("monitor")
+
     /** Shared agents, skills, plugins, MCP servers and commands */
     object Library : Routes("library")
 

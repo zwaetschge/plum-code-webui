@@ -197,6 +197,7 @@ private fun UserBubble(
             Box(
                 modifier = Modifier
                     .wrapContentWidth()
+                    .widthIn(max = 480.dp)
                     .clip(bubbleShape)
                     .background(
                         Brush.verticalGradient(
@@ -253,6 +254,7 @@ private fun AssistantBubble(
     val componentTokens = PlumTheme.tokens
     Row(
         modifier = modifier
+            .widthIn(max = 520.dp)
             .fillMaxWidth()
             .padding(
                 start = componentTokens.spacing.md,

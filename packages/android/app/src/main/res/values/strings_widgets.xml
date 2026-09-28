@@ -40,6 +40,8 @@
     <string name="native_input">input</string>
     <string name="native_limits">Provider Limits</string>
     <string name="native_models">Models</string>
+    <string name="native_monitor">Monitor</string>
+    <string name="native_monitor_empty">No sessions in the monitor yet</string>
     <string name="native_more">+%1$d more</string>
     <string name="native_need_you">%1$d need you</string>
     <string name="native_needs_working">%1$d need you · %2$d working</string>
@@ -101,6 +103,7 @@
     <string name="native_week_title">This week</string>
     <string name="native_widget_options">Widget options</string>
     <string name="native_window_five_hours">5 hours</string>
+    <string name="native_window_month">Month</string>
     <string name="native_window_week">7 days</string>
     <string name="native_window_week_sonnet">7 days Sonnet</string>
     <string name="native_working">%1$d working</string>

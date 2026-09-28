@@ -23,6 +23,7 @@ fun WidgetKind.providerClass(): Class<out AppWidgetProvider> = when (this) {
     WidgetKind.LIMITS -> LimitsWidgetReceiver::class.java
     WidgetKind.CHART -> WeekChartWidgetReceiver::class.java
     WidgetKind.TOP_SESSIONS -> TopSessionsWidgetReceiver::class.java
+    WidgetKind.MONITOR -> MonitorWidgetReceiver::class.java
 }
 
 /**
@@ -148,4 +149,8 @@ class WeekChartWidgetReceiver : BaseWidgetProvider() {
 
 class TopSessionsWidgetReceiver : BaseWidgetProvider() {
     override val kind = WidgetKind.TOP_SESSIONS
+}
+
+class MonitorWidgetReceiver : BaseWidgetProvider() {
+    override val kind = WidgetKind.MONITOR
 }

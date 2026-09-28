@@ -2,6 +2,7 @@ package com.claudewebui.app.ui.screens.chat
 
 import com.claudewebui.app.core.diagnostics.Breadcrumbs
 import com.claudewebui.app.core.network.ThinkingEvent
+import com.claudewebui.app.data.model.mergeSubagentRuns
 import com.claudewebui.app.data.model.AgentEvent
 import com.claudewebui.app.data.model.ToolExecution
 import com.claudewebui.app.data.model.ToolExecutionEvent
@@ -128,21 +129,9 @@ internal class ChatStreamingController(
     }
 
     fun onAgentEvent(event: AgentEvent) {
-        when (event.status) {
-            ToolStatus.STARTED -> state.update { current ->
-                current.copy(
-                    streamingState = StreamingState.AgentRunning(
-                        event.agentType,
-                        event.description,
-                    ),
-                    isThinking = false,
-                )
-            }
-            ToolStatus.COMPLETED, ToolStatus.ERROR -> state.update { current ->
-                if (current.streamingState is StreamingState.AgentRunning)
-                    current.copy(streamingState = StreamingState.Idle)
-                else current
-            }
+        state.update { current ->
+            if (event.chatId != current.activeChatId) current
+            else current.copy(agentRuns = mergeSubagentRuns(current.agentRuns, listOf(event)))
         }
     }
 

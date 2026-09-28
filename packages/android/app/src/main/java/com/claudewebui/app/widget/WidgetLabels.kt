@@ -8,5 +8,7 @@ fun WLimit.localizedWindow(context: Context): String = when (window) {
     "5h" -> context.getString(R.string.native_window_five_hours)
     "Weekly" -> context.getString(R.string.native_window_week)
     "Weekly Sonnet" -> context.getString(R.string.native_window_week_sonnet)
+    // The Mistral plan ledgers (API/Studio and Vibe Code) report a billing month.
+    "Month" -> context.getString(R.string.native_window_month)
     else -> window
 }

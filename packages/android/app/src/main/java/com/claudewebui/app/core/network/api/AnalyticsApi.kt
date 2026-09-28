@@ -33,6 +33,16 @@ interface AnalyticsApi {
      * [UsageLimitsResponse.supported] rather than treating it as a failure.
      */
     suspend fun getUsageLimits(provider: String): UsageLimitsResponse
+
+    /** PUT /api/usage/plan/mistral — Mistral's monthly budget and billing day. */
+    suspend fun putMistralPlan(config: MistralPlanConfig): ApiResponse<MistralPlanConfig>
+
+    /**
+     * PUT /api/usage/plan/vibe — the Vibe Code allowance of the same Mistral
+     * plan. Kept apart server-side so a Vibe sign-in and an API key never share
+     * one budget.
+     */
+    suspend fun putVibePlan(config: MistralPlanConfig): ApiResponse<MistralPlanConfig>
 }
 
 class AnalyticsApiImpl(private val http: ApiHttp) : AnalyticsApi {
@@ -66,4 +76,10 @@ class AnalyticsApiImpl(private val http: ApiHttp) : AnalyticsApi {
 
     override suspend fun getUsageLimits(provider: String): UsageLimitsResponse =
         http.get("/api/usage/limits") { parameter("provider", provider) }
+
+    override suspend fun putMistralPlan(config: MistralPlanConfig): ApiResponse<MistralPlanConfig> =
+        http.put("/api/usage/plan/mistral") { setBody(config) }
+
+    override suspend fun putVibePlan(config: MistralPlanConfig): ApiResponse<MistralPlanConfig> =
+        http.put("/api/usage/plan/vibe") { setBody(config) }
 }
