@@ -14,6 +14,8 @@ import {
   getModelDisplayLabels,
   getProviderCapabilities,
   parseClaudeCliModelCatalog,
+  withClaude1mVariants,
+  claudeContextWindowEnv,
   resetDiscovery,
   resolveCliProviderSelectedModel,
   resolveOpenCodeConfiguredModel,
@@ -109,7 +111,11 @@ useTestSchema();
 const { get: pgGet, run: pgRun } = await import('../src/db/pg.js');
 await createTestSchema();
 import { syncCodexConfig } from '../src/utils/codexConfigSync.js';
-import { lookupContextWindow, resolveContextWindow } from '../src/utils/contextWindow.js';
+import {
+  claudeCliContextWindow,
+  lookupContextWindow,
+  resolveContextWindow,
+} from '../src/utils/contextWindow.js';
 import { mapKimiUsage } from '../src/utils/kimiUsage.js';
 import {
   captureKimiUsageCursor,
@@ -2377,6 +2383,58 @@ function testClaudeCurrentModelCatalog() {
   assert.equal(catalog.labels.sonnet, 'Sonnet 5');
 }
 
+function testClaudeContextWindowVariants() {
+  // Every 1M-capable model is offered with and without the 1M window.
+  assert.deepEqual(
+    withClaude1mVariants(['claude-fable-5', 'claude-opus-5-5', 'claude-haiku-4-5', 'sonnet']),
+    [
+      'claude-fable-5[1m]',
+      'claude-fable-5',
+      'claude-opus-5-5[1m]',
+      'claude-opus-5-5',
+      'claude-haiku-4-5',
+      'sonnet',
+    ]
+  );
+  assert.deepEqual(withClaude1mVariants(['claude-opus-5[1m]']), ['claude-opus-5[1m]']);
+
+  // Plain ids disable the 1M window; `[1m]` ids must clear an inherited flag.
+  assert.deepEqual(claudeContextWindowEnv('claude-opus-5-5'), {
+    CLAUDE_CODE_DISABLE_1M_CONTEXT: '1',
+  });
+  const oneM = claudeContextWindowEnv('claude-opus-5-5[1m]');
+  assert.equal('CLAUDE_CODE_DISABLE_1M_CONTEXT' in oneM, true);
+  assert.equal(oneM.CLAUDE_CODE_DISABLE_1M_CONTEXT, undefined);
+  assert.deepEqual(claudeContextWindowEnv('claude-haiku-4-5'), {});
+  assert.deepEqual(claudeContextWindowEnv('sonnet'), {});
+  assert.deepEqual(claudeContextWindowEnv(null), {});
+
+  assert.equal(claudeCliContextWindow('claude-opus-5-5[1m]'), 1_000_000);
+  assert.equal(claudeCliContextWindow('claude-opus-5-5'), 200_000);
+  assert.equal(claudeCliContextWindow('claude-sonnet-5'), 200_000);
+  assert.equal(claudeCliContextWindow('claude-haiku-4-5'), null);
+  assert.equal(claudeCliContextWindow('sonnet'), null);
+  assert.equal(lookupContextWindow('claude-opus-5-5[1m]'), 1_000_000);
+  // Other providers (Pi, OpenCode) keep the native 1M window for bare ids.
+  assert.equal(lookupContextWindow('anthropic/claude-opus-5'), 1_000_000);
+
+  const pinned = normalizeUsageSnapshot({
+    sessionId: 's',
+    inputTokens: 150_000,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    totalTokens: 150_000,
+    contextWindow: 200_000,
+    contextUsedPercent: 75,
+    contextWindowPinned: true,
+    totalCostUsd: 0,
+    model: 'claude-opus-5-5',
+  });
+  assert.equal(pinned?.contextWindow, 200_000);
+  assert.equal(pinned?.contextUsedPercent, 75);
+}
+
 function testCodexFastTierArgs() {
   assert.deepEqual(CLI_PROVIDERS.codex.models.slice(0, 5), [
     'gpt-6-astra',
@@ -3007,6 +3065,34 @@ function testPiMergesModelSourcesAndSurvivesWithoutOpenCodeConfig() {
   assert.deepEqual(Object.keys(registryOnly.piProviders), ['alibaba-token-plan']);
 }
 
+function testPiSkipsMistral() {
+  const mistral = (baseUrl?: string): Parameters<typeof buildPiModelCatalog>[0][number] => ({
+    id: 'mistral',
+    name: 'Mistral',
+    apiKey: 'encrypted',
+    ...(baseUrl ? { baseUrl } : {}),
+    enabled: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+  const catalog = {
+    mistral: {
+      name: 'Mistral',
+      models: ['mistral-medium-latest'],
+      description: 'test',
+      env: ['MISTRAL_API_KEY'],
+      source: 'config' as const,
+    },
+  };
+
+  // Mistral runs in the Vibe harness; Pi lists none of its models, proxied or not.
+  for (const connection of [mistral(), mistral('https://mistral-proxy.example/v1')]) {
+    const result = buildPiModelCatalog([connection], catalog, {});
+    assert.deepEqual(result.models, []);
+    assert.deepEqual(Object.keys(result.piProviders), []);
+  }
+}
+
 function testOpenCodeAllowedDirectories() {
   const rules = buildOpenCodePermissionRules('manual', {
     workingDirectory: '/workspace/project',
@@ -3536,9 +3622,16 @@ function testSettingsThemeSchemaAcceptsEink() {
   assert.equal(parsed.success, true);
 }
 
-function testVibeProviderIsRemoved() {
-  assert.equal(Object.hasOwn(CLI_PROVIDERS, 'vibe'), false);
-  assert.equal(updateSettingsSchema.safeParse({ defaultCliProvider: 'vibe' }).success, false);
+/**
+ * `vibe` used to be a removed legacy provider; it is now the Mistral Vibe ACP
+ * harness, so the removal assertions are inverted. Its own contract (modes,
+ * thinking levels, VIBE_HOME, the separate Mistral allowance) lives in
+ * scripts/vibe-provider-regression-tests.ts. The Pi half of this function is
+ * unchanged and only shares the "a provider registry entry exists" shape.
+ */
+function testVibeProviderIsRegistered() {
+  assert.equal(Object.hasOwn(CLI_PROVIDERS, 'vibe'), true);
+  assert.equal(CLI_PROVIDERS.vibe.name, 'Mistral Vibe');
   assert.equal(Object.hasOwn(CLI_PROVIDERS, 'pi'), true);
   assert.equal(updateSettingsSchema.safeParse({ defaultCliProvider: 'pi' }).success, true);
 
@@ -4820,13 +4913,14 @@ async function testDefaultMcpServerSeeding() {
       env?: Record<string, string>;
     };
 
-    assert.deepEqual(first.added, ['blender', 'subagents']);
+    assert.deepEqual(first.added, ['blender', 'subagents', 'firefox']);
     assert.equal(parsed.mcpServers.godot.command, 'custom-godot-wrapper');
     assert.deepEqual(parsed.mcpServers.godot.args, ['--keep-me']);
     assert.equal(parsed.mcpServers.blender.command, 'node');
     assert.deepEqual(parsed.mcpServers.blender.args, ['/app/scripts/mcp-servers/blender.mjs']);
     assert.equal(parsed.mcpServers.subagents.command, 'node');
     assert.deepEqual(parsed.mcpServers.subagents.args, ['/app/scripts/mcp-servers/subagents.mjs']);
+    assert.deepEqual(parsed.mcpServers.firefox.args, ['/app/scripts/mcp-servers/firefox.mjs']);
     assert.equal(parsed.env?.KEEP, '1');
 
     const second = await ensureDefaultClaudeMcpServers({ settingsPath });
@@ -5468,6 +5562,22 @@ function testPricingTable() {
     source: 'OpenAI API pricing, 2026-09-04',
     label: 'GPT-6 Astra',
   });
+  assert.deepEqual(resolveModelPricing('gpt-6-sol'), {
+    input: 2,
+    output: 10,
+    cacheRead: 0.2,
+    cacheWrite: 2.5,
+    source: 'OpenAI API pricing, 2026-09-22',
+    label: 'GPT-6 Sol',
+  });
+  assert.deepEqual(resolveModelPricing('openai/gpt-6-luna'), {
+    input: 0.1,
+    output: 0.5,
+    cacheRead: 0.01,
+    cacheWrite: 0.125,
+    source: 'OpenAI API pricing, 2026-09-22',
+    label: 'GPT-6 Luna',
+  });
   assert.deepEqual(resolveModelPricing('gpt-5.6-sol')?.input, 4);
   assert.deepEqual(resolveModelPricing('gpt-5.6-terra'), {
     input: 2,
@@ -5527,17 +5637,28 @@ function testPricingTable() {
   assert.deepEqual(resolveModelPricing('opencode-go/glm-5.1')?.input, 1.4);
   assert.deepEqual(resolveModelPricing('opencode-go/qwen3.7-max')?.output, 7.5);
   assert.deepEqual(resolveModelPricing('alibaba-token-plan/qwen3.8-max-preview'), {
-    input: 2.5,
-    output: 7.5,
-    cacheRead: 0.5,
-    cacheWrite: 3.125,
-    source: 'Alibaba Model Studio Qwen3.7 Max list-price proxy, 2026-07-27',
-    label: 'Qwen3.8 Max Preview (Qwen3.7 Max proxy)',
+    input: 2,
+    output: 6,
+    cacheRead: 0.25,
+    cacheWrite: 2.5,
+    source: 'Alibaba Model Studio Qwen3.8 Max pay-as-you-go pricing, 2026-08-03',
+    label: 'Qwen3.8 Max Preview',
   });
   assert.deepEqual(resolveModelPricing('opencode-go/mimo-v2.5-pro')?.input, 1.74);
   assert.deepEqual(resolveModelPricing('opencode-go/mimo-v2.5-pro')?.cacheRead, 0.0145);
   assert.deepEqual(resolveModelPricing('opencode-go/minimax-m3')?.cacheRead, 0.06);
   assert.equal(resolveModelPricing('ollama-cloud/devstral-small-2:24b'), null);
+  // Own hardware: a known zero, so it no longer counts as a missing price.
+  assert.deepEqual(resolveModelPricing('qwen-local/qwen3.8-flash-next'), {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    source: 'Local inference on own hardware',
+    label: 'Local model',
+  });
+  assert.equal(resolveModelPricing('llama-local/qwopus')?.output, 0);
+  assert.equal(resolveModelPricing('kimi-code/kimi-for-coding')?.label, 'Kimi K2.7 Code');
 
   const estimate = estimateModelCost(
     'gpt-5.5',
@@ -5675,6 +5796,7 @@ await testCodexImplicitCompactDetectedFromContextDrop();
 await testCodexImplicitCompactDetectedFromMidWindowReset();
 testProviderCapabilities();
 testClaudeCurrentModelCatalog();
+testClaudeContextWindowVariants();
 testCodexFastTierArgs();
 testSolUsesSingleAgentPolicyUnlessParallelismIsExplicit();
 testNativeCodexResumeDoesNotRepeatStaticBootstrap();
@@ -5691,6 +5813,7 @@ testPiSharesOpenCodeProviderConfigWithoutPersistingSecrets();
 testPiModelsCarryContextWindow();
 testPiUsesOnlyEnabledUserProviderModels();
 testPiMergesModelSourcesAndSurvivesWithoutOpenCodeConfig();
+testPiSkipsMistral();
 testOpenCodeAllowedDirectories();
 testAttachmentNormalization();
 testOpenCodePromptContext();
@@ -5708,7 +5831,7 @@ await testOpenCodeZaiTurnsAreSerializedByProviderGate();
 await testOpenCodeQueuedProviderTurnCancellationDoesNotHang();
 await testOpenCodeProviderTurnGateShutdownCancelsAllWaiters();
 testSettingsThemeSchemaAcceptsEink();
-testVibeProviderIsRemoved();
+testVibeProviderIsRegistered();
 testKimiCliArgsMatchInstalledContract();
 testSessionSchemasAcceptKimi();
 testKimiMissingSessionRecoveryClassification();

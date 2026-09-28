@@ -1,3 +1,4 @@
+import { getSubagentHistory } from '../services/subagentHistory.js';
 import {
   get as pgGet,
   all as pgAll,
@@ -26,7 +27,10 @@ import { isAllowedBasePath } from '../utils/allowedPaths.js';
 import { sanitizeFilename, ALLOWED_UPLOAD_MIME_TYPES } from '../utils/sanitize.js';
 import { resolveConfigHome } from '../utils/configPaths.js';
 import { readSkillLibraryItem } from '../utils/skillLibrary.js';
-import { resolveContextWindow as contextWindowFor } from '../utils/contextWindow.js';
+import {
+  claudeCliContextWindow,
+  resolveContextWindow as contextWindowFor,
+} from '../utils/contextWindow.js';
 import { CLI_PROVIDERS, type CLIProvider } from '../services/cli-providers.js';
 import { readLatestCodexContextSnapshot } from '../services/claude/ClaudeProcessManager.js';
 import { scanProject } from '../utils/projectScanner.js';
@@ -67,12 +71,28 @@ const projectDescriptionCache = new Map<
   }
 >();
 
+// Auth and session ownership apply equally to persisted history and live agents.
+router.get('/:id/agents', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const owned = (await pgGet(
+    'SELECT id, active_chat_id FROM sessions WHERE id=? AND user_id=?',
+    req.params.id,
+    userId
+  )) as { id: string; active_chat_id: string | null } | undefined;
+  if (!owned) throw new AppError('Session not found', 404, 'NOT_FOUND');
+  const chatId =
+    typeof req.query.chatId === 'string' ? req.query.chatId || null : owned.active_chat_id;
+  const offset = Math.max(0, Math.min(100000, Math.floor(Number(req.query.offset) || 0)));
+  const live = () => getProcessManager().getSessionRuntimeSnapshot(owned.id).subagents;
+  res.json({ success: true, data: await getSubagentHistory(owned.id, chatId, live, offset) });
+});
+
 // Validation schemas
 export const createSessionSchema = z.object({
   name: z.string().min(1).max(100),
   workingDirectory: z.string().optional(), // Optional - will be auto-generated from name
   cliProvider: z
-    .enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi'])
+    .enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe'])
     .optional()
     .default('codex'),
   cliModel: z.string().trim().min(1).max(200).nullable().optional(),
@@ -89,7 +109,7 @@ const updateSessionSchema = z.object({
 });
 
 export const updateProviderSchema = z.object({
-  cliProvider: z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi']),
+  cliProvider: z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe']),
 });
 
 const updateSessionModelSchema = z.object({
@@ -741,6 +761,7 @@ interface SessionUsageSnapshot {
   contextUsedPercent: number;
   contextUsedPercentRaw?: number;
   contextExceeded?: boolean;
+  contextWindowPinned?: boolean;
   totalCostUsd: number;
   model: string;
   recordedAt?: string;
@@ -834,7 +855,12 @@ async function getSessionTelemetrySnapshot(
     (session.cliProvider ? CLI_PROVIDERS[session.cliProvider]?.defaultModel : null) ||
     null;
   const normalizedModel = fallbackModel || 'unknown';
-  const fallbackContextWindow = contextWindowFor(fallbackModel);
+  // Claude Code's 200k/1M variant lives only in the selected model id; the
+  // stored snapshots carry the bare API id.
+  const pinnedContextWindow =
+    session.cliProvider === 'claude' ? claudeCliContextWindow(sessionModel) : null;
+  const pinnedUsage = pinnedContextWindow ? { contextWindowPinned: true } : {};
+  const fallbackContextWindow = pinnedContextWindow ?? contextWindowFor(fallbackModel);
   const latestMetadata = safeJsonParse<Record<string, unknown>>(latestContext?.metadataJson, {});
   const latestTotalCost =
     typeof latestMetadata.totalCostUsd === 'number' ? latestMetadata.totalCostUsd : 0;
@@ -885,13 +911,15 @@ async function getSessionTelemetrySnapshot(
         cacheReadTokens: latestContext.cacheReadTokens || 0,
         cacheCreationTokens: latestContext.cacheCreationTokens || 0,
         totalTokens: latestContext.totalTokens || 0,
-        contextWindow: latestContext.contextWindow || fallbackContextWindow,
+        contextWindow:
+          pinnedContextWindow ?? (latestContext.contextWindow || fallbackContextWindow),
         contextUsedPercent: Math.max(0, Math.min(100, latestContext.contextUsedPercent || 0)),
         contextUsedPercentRaw: latestContext.contextUsedPercent || 0,
         contextExceeded: Boolean(latestContext.contextExceeded),
         totalCostUsd: latestTotalCost,
         model: normalizedModel,
         recordedAt: latestRecordedAt,
+        ...pinnedUsage,
       }
     : fallbackContextWindow > 0
       ? {
@@ -908,6 +936,7 @@ async function getSessionTelemetrySnapshot(
           totalCostUsd: 0,
           model: normalizedModel,
           recordedAt: undefined,
+          ...pinnedUsage,
         }
       : null;
 

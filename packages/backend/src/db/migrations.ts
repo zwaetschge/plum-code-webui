@@ -125,6 +125,44 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_usage_limit_snapshots_recorded ON usage_limit_snapshots (recorded_at)`,
     ],
   },
+  {
+    id: '007-session-agent-runs',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS session_agent_runs (
+ session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+ id TEXT NOT NULL, chat_id TEXT, updated_at BIGINT NOT NULL, payload JSONB NOT NULL,
+ PRIMARY KEY (session_id, id)
+)`,
+      `CREATE INDEX IF NOT EXISTS idx_session_agent_runs_chat ON session_agent_runs(session_id, chat_id, updated_at DESC)`,
+    ],
+  },
+  {
+    /**
+     * Bare Fable/Opus/Sonnet ids now mean "200k" (CLAUDE_CODE_DISABLE_1M_CONTEXT=1)
+     * and `[1m]` means "1M". Sessions stored before that split ran the CLI's
+     * native 1M window; forcing them to 200k makes a long session autocompact
+     * in a loop. Keep them on the window they were created with.
+     */
+    id: '008-claude-legacy-models-keep-1m',
+    statements: [
+      `UPDATE sessions SET cli_model = cli_model || '[1m]'
+ WHERE cli_provider = 'claude' AND cli_model ~ '^claude-(fable|opus|sonnet)-' AND cli_model NOT LIKE '%[1m]'`,
+    ],
+  },
+  {
+    // Pairing tokens for the Firefox browser-control extension. Kept apart
+    // from gateway_tokens so they can never authenticate against the REST API.
+    id: '009-browser-tokens',
+    statements: [
+      `CREATE TABLE IF NOT EXISTS browser_tokens (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL,
+ token_hash TEXT NOT NULL, token_prefix TEXT NOT NULL, revoked BIGINT NOT NULL DEFAULT 0,
+ last_used_at TEXT,
+ created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+)`,
+      `CREATE INDEX IF NOT EXISTS idx_browser_tokens_user ON browser_tokens(user_id)`,
+    ],
+  },
 ];
 
 async function ensureTable(): Promise<void> {

@@ -1,7 +1,7 @@
 import type { CLIProvider, CodexServiceTier } from './session.js';
 
 export type Theme = 'dark' | 'light' | 'system' | 'eink';
-export type UiProvider = 'plum' | 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi';
+export type UiProvider = 'plum' | 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi' | 'vibe';
 export type BackgroundAnimation = 'glass' | 'aurora' | 'ribbons' | 'still';
 export type CodexWebSearchMode = 'auto' | 'cached' | 'live' | 'disabled';
 export type OracleBrowserMode = 'profile' | 'manual' | 'remote';

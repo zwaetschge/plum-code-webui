@@ -18,3 +18,5 @@ export type * from './types/operations.js';
 export type * from './types/discord.js';
 export type * from './types/home-assistant.js';
 export * from './utils/contextWindow.js';
+
+export * from './utils/subagents.js';

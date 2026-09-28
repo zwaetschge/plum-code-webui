@@ -1067,3 +1067,18 @@ DROP TRIGGER IF EXISTS trg_session_categories_after_delete ON session_categories
 CREATE TRIGGER trg_session_categories_after_delete
   AFTER DELETE ON session_categories
   FOR EACH ROW EXECUTE FUNCTION clear_deleted_session_category();
+
+CREATE TABLE IF NOT EXISTS session_agent_runs (
+ session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+ id TEXT NOT NULL, chat_id TEXT, updated_at BIGINT NOT NULL, payload JSONB NOT NULL,
+ PRIMARY KEY (session_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_session_agent_runs_chat ON session_agent_runs(session_id, chat_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS browser_tokens (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL,
+ token_hash TEXT NOT NULL, token_prefix TEXT NOT NULL, revoked BIGINT NOT NULL DEFAULT 0,
+ last_used_at TEXT,
+ created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+CREATE INDEX IF NOT EXISTS idx_browser_tokens_user ON browser_tokens(user_id);

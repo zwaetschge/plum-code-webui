@@ -38,6 +38,21 @@ export const REGRESSION_SUITES = [
     args: ['--filter', '@plum-code-webui/backend', 'run', 'test:providers'],
   },
   {
+    name: 'vibe provider',
+    command: 'pnpm',
+    args: ['--filter', '@plum-code-webui/backend', 'run', 'test:vibe-provider'],
+  },
+  {
+    name: 'Claude/Z.AI effort parity',
+    command: 'pnpm',
+    args: ['--filter', '@plum-code-webui/backend', 'run', 'test:claude-effort'],
+  },
+  {
+    name: 'subagent-visibility',
+    command: 'pnpm',
+    args: ['--filter', '@plum-code-webui/backend', 'run', 'test:subagents'],
+  },
+  {
     name: 'chat media',
     command: 'pnpm',
     args: ['--filter', '@plum-code-webui/backend', 'run', 'test:chat-media'],

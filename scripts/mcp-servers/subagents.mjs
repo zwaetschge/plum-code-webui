@@ -81,7 +81,7 @@ function asText(payload, isError = false) {
 // ---------------------------------------------------------------------------
 // Configuration
 
-const KNOWN_PROVIDERS = ['codex', 'claude', 'opencode', 'pi', 'zai'];
+const KNOWN_PROVIDERS = ['codex', 'claude', 'opencode', 'pi', 'zai', 'vibe'];
 
 // Which binary a provider actually spawns. Only `zai` differs from its name.
 const PROVIDER_BINARY = { zai: 'claude' };
@@ -188,6 +188,25 @@ function buildInvocation(provider, prompt, model) {
       return {
         command: 'pi',
         args: ['-p', '--no-session', ...(model ? ['--model', model] : []), prompt],
+      };
+    case 'vibe':
+      // Mistral Vibe's programmatic mode. It spends the plan's Vibe Code
+      // allowance, which is why a swarm can delegate to it at all. --trust
+      // skips the interactive workspace-trust prompt (a headless child cannot
+      // answer it) and --auto-approve replaces tool approvals. Vibe picks its
+      // model from its own config, so `model` is reported but not passed.
+      return {
+        command: 'vibe',
+        args: [
+          '--prompt',
+          prompt,
+          '--output',
+          'json',
+          '--auto-approve',
+          '--trust',
+          '--max-turns',
+          '40',
+        ],
       };
     default:
       return null;
@@ -342,6 +361,7 @@ function parseClaudeJson(stdout) {
     const rawUsage = parsed?.usage;
     return {
       text: typeof parsed?.result === 'string' ? parsed.result : '',
+      isError: parsed?.is_error === true,
       model: typeof parsed?.modelUsage === 'object' ? Object.keys(parsed.modelUsage)[0] : undefined,
       usage:
         rawUsage && typeof rawUsage === 'object'
@@ -358,6 +378,32 @@ function parseClaudeJson(stdout) {
   }
 }
 
+function parseVibeJson(stdout) {
+  // `vibe --output json` prints the whole session history as one JSON array.
+  // The answer is the last assistant message entry; reasoning entries are
+  // separate and stay out of the result.
+  const start = stdout.indexOf('[');
+  if (start < 0) return { text: stdout.trim(), usage: null };
+  try {
+    const parsed = JSON.parse(stdout.slice(start));
+    const entries = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.history) ? parsed.history : [];
+    let text = '';
+    for (const entry of entries) {
+      if (entry?.type !== 'message' || entry?.role !== 'assistant') continue;
+      const content = Array.isArray(entry.content) ? entry.content : [];
+      const parts = content
+        .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+        .map((block) => block.text);
+      if (parts.length > 0) text = parts.join('\n');
+    }
+    // Vibe reports no token counters in programmatic mode, so nothing is
+    // booked: an estimate would corrupt the plan ledger.
+    return { text: text || stdout.trim(), usage: null };
+  } catch {
+    return { text: stdout.trim(), usage: null };
+  }
+}
+
 // Identifies one subagent run for the whole life of this MCP process. The
 // backend deduplicates usage rows on (session, provider, turn id), so the id has
 // to survive a retry of the booking call — a fresh one per attempt would charge
@@ -369,6 +415,25 @@ let runCounter = 0;
 function nextRunId() {
   runCounter += 1;
   return `${RUN_ID_PREFIX}-${runCounter}`;
+}
+
+async function reportActivity(data) {
+  if (!HOOK_SECRET || !SESSION_ID) return;
+  try {
+    const response = await fetch(`${BACKEND}/api/settings/internal/cli-subagents/activity`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-webui-hook-secret': HOOK_SECRET,
+        'x-webui-session-id': SESSION_ID,
+      },
+      body: JSON.stringify(data),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) throw new Error(`backend responded ${response.status}`);
+  } catch (error) {
+    log('activity reporting failed:', String(error));
+  }
 }
 
 async function bookUsage(provider, model, usage, runId) {
@@ -504,14 +569,35 @@ async function handleRunSubagent(args) {
   const runId = nextRunId();
   log(`spawning ${entry.provider}${model ? ` (${model})` : ''} in ${cwd}`);
   const startedAt = Date.now();
+  await reportActivity({
+    id: runId,
+    provider: entry.provider,
+    model,
+    description: prompt.slice(0, 2000),
+    status: 'started',
+  });
   const result = await runChild(invocation, {
     cwd,
     env: buildChildEnv(entry.provider, providerEnv),
     timeoutMs,
+  }).catch(async (error) => {
+    await reportActivity({
+      id: runId,
+      provider: entry.provider,
+      status: 'error',
+      error: String(error).slice(0, 2000),
+    });
+    throw error;
   });
   const durationS = Math.round((Date.now() - startedAt) / 1000);
 
   if (result.timedOut) {
+    await reportActivity({
+      id: runId,
+      provider: entry.provider,
+      status: 'error',
+      error: 'Zeitlimit erreicht',
+    });
     return asText(
       `Subagent ${entry.label} timed out after ${Math.round(timeoutMs / 1000)}s.\nPartial output:\n${truncate(result.stdout || result.stderr)}`,
       true
@@ -521,6 +607,8 @@ async function handleRunSubagent(args) {
   let text = '';
   let usage = null;
   let usageModel = model;
+  let observedModel = model;
+  let failed = result.code !== 0;
   if (entry.provider === 'codex') {
     const parsed = parseCodexJsonl(result.stdout);
     text = parsed.text;
@@ -530,6 +618,8 @@ async function handleRunSubagent(args) {
     const parsed = parseClaudeJson(result.stdout);
     text = parsed.text;
     usage = parsed.usage;
+    observedModel = parsed.model || model;
+    failed ||= parsed.isError === true;
     // An empty model still lands on GLM: the Z.AI env maps the opus/sonnet/haiku
     // aliases. Report the mapped id so the usage row is priced as GLM instead of
     // being attributed to Anthropic.
@@ -538,9 +628,25 @@ async function handleRunSubagent(args) {
       providerEnv?.zai?.ANTHROPIC_DEFAULT_OPUS_MODEL ||
       'glm';
     usageModel = model || parsed.model || (entry.provider === 'zai' ? zaiDefault : 'claude');
+  } else if (entry.provider === 'vibe') {
+    const parsed = parseVibeJson(result.stdout);
+    text = parsed.text;
+    usage = parsed.usage;
+    usageModel = model || 'mistral-medium-3.5';
   } else {
     text = result.stdout.trim();
   }
+
+  await reportActivity({
+    id: runId,
+    provider: entry.provider,
+    model: observedModel,
+    status: failed ? 'error' : 'completed',
+    result: failed ? undefined : text.slice(0, 12000),
+    error: failed
+      ? (text || result.stderr || `CLI beendet mit Code ${result.code}`).slice(0, 2000)
+      : undefined,
+  });
 
   if (result.code !== 0 && !text) {
     return asText(
@@ -554,7 +660,7 @@ async function handleRunSubagent(args) {
   const header = `[subagent ${entry.label} · ${entry.provider}${model ? ` · ${model}` : ''} · ${durationS}s${
     usage ? ` · ${usage.inputTokens} in / ${usage.outputTokens} out tokens` : ''
   }]`;
-  return asText(`${header}\n\n${truncate(text || result.stdout.trim())}`);
+  return asText(`${header}\n\n${truncate(text || result.stdout.trim())}`, failed);
 }
 
 // ---------------------------------------------------------------------------

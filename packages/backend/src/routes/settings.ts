@@ -1,3 +1,4 @@
+import { getProcessManager } from '../websocket/index.js';
 import { maskSecret } from '../utils/maskSecret.js';
 import { get as pgGet, run as pgRun } from '../db/pg.js';
 import { Router } from 'express';
@@ -33,6 +34,7 @@ import { buildOpenCodeProviderCredentialEnv } from '../utils/opencodeProviderKey
 import { mergeUserSettings, removeUserSettings } from '../utils/userSettings.js';
 import { syncProviderLinks } from '../utils/providerLinks.js';
 import { syncPiConfig } from '../utils/piConfig.js';
+import { buildVibeEnv, isProviderAvailable } from '../services/cli-providers.js';
 
 const router = Router();
 
@@ -56,6 +58,7 @@ export const DEFAULT_ENABLED_CLI_PROVIDERS: CLIProvider[] = [
   'opencode',
   'pi',
   'kimi',
+  'vibe',
 ];
 
 export type ClaudeApiEndpointKind = 'anthropic' | 'z-ai' | 'custom';
@@ -133,11 +136,15 @@ export const updateSettingsSchema = z.object({
   defaultWorkingDir: z.string().nullable().optional(),
   allowedTools: z.array(z.string()).optional(),
   customSystemPrompt: z.string().nullable().optional(),
-  uiProvider: z.enum(['plum', 'claude', 'zai', 'codex', 'opencode', 'pi', 'kimi']).optional(),
+  uiProvider: z
+    .enum(['plum', 'claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe'])
+    .optional(),
   backgroundAnimation: z.enum(['glass', 'aurora', 'ribbons', 'still']).optional(),
-  defaultCliProvider: z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi']).optional(),
+  defaultCliProvider: z
+    .enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe'])
+    .optional(),
   enabledCliProviders: z
-    .array(z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi']))
+    .array(z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe']))
     .min(1)
     .optional(),
   cliProviderModels: z
@@ -148,6 +155,7 @@ export const updateSettingsSchema = z.object({
       opencode: z.string().optional(),
       pi: z.string().optional(),
       kimi: z.string().optional(),
+      vibe: z.string().optional(),
     })
     .partial()
     .optional(),
@@ -159,6 +167,7 @@ export const updateSettingsSchema = z.object({
       opencode: z.array(z.string()).optional(),
       pi: z.array(z.string()).optional(),
       kimi: z.array(z.string()).optional(),
+      vibe: z.array(z.string()).optional(),
     })
     .partial()
     .optional(),
@@ -170,6 +179,7 @@ export const updateSettingsSchema = z.object({
       opencode: z.string().optional(),
       pi: z.string().optional(),
       kimi: z.string().optional(),
+      vibe: z.string().optional(),
     })
     .partial()
     .optional(),
@@ -268,7 +278,8 @@ function parseUiProvider(value: unknown): UiProvider {
     value === 'codex' ||
     value === 'opencode' ||
     value === 'pi' ||
-    value === 'kimi'
+    value === 'kimi' ||
+    value === 'vibe'
     ? value
     : 'plum';
 }
@@ -279,7 +290,8 @@ function parseCliProvider(value: unknown): CLIProvider {
     value === 'codex' ||
     value === 'opencode' ||
     value === 'pi' ||
-    value === 'kimi'
+    value === 'kimi' ||
+    value === 'vibe'
     ? value
     : 'codex';
 }
@@ -370,6 +382,7 @@ const VALID_REASONING_LEVELS = new Set([
   'xhigh',
   'max',
   'ultra',
+  'ultracode',
 ]);
 
 function normalizeReasoningLevel(value: unknown): string | undefined {
@@ -1144,7 +1157,7 @@ router.get('/subagent-models', requireAuth, async (req, res) => {
  * the user's Z.AI endpoint — the same second Claude transport a Z.AI session
  * uses — so its endpoint and token are injected as env below.
  */
-export type CliSubagentProvider = 'codex' | 'claude' | 'opencode' | 'pi' | 'zai';
+export type CliSubagentProvider = 'codex' | 'claude' | 'opencode' | 'pi' | 'zai' | 'vibe';
 
 const CLI_SUBAGENT_PROVIDERS = new Set<CliSubagentProvider>([
   'codex',
@@ -1152,6 +1165,7 @@ const CLI_SUBAGENT_PROVIDERS = new Set<CliSubagentProvider>([
   'opencode',
   'pi',
   'zai',
+  'vibe',
 ]);
 
 export interface CliSubagentEntry {
@@ -1174,12 +1188,15 @@ const DEFAULT_CLI_SUBAGENTS: CliSubagentEntry[] = [
   // Dropped again by the internal route when the user has no Z.AI endpoint,
   // so an unconfigured account never gets a GLM-labelled Anthropic worker.
   { id: 'zai', label: 'Z.AI', provider: 'zai', model: '', enabled: true },
+  // Dropped again by the internal route while Vibe has no key, so a swarm never
+  // offers a worker that cannot authenticate.
+  { id: 'vibe', label: 'Vibe', provider: 'vibe', model: '', enabled: true },
 ];
 
 const cliSubagentSchema = z.object({
   id: z.string().min(1).max(64).optional(),
   label: z.string().trim().min(1).max(40),
-  provider: z.enum(['codex', 'claude', 'opencode', 'pi', 'zai']),
+  provider: z.enum(['codex', 'claude', 'opencode', 'pi', 'zai', 'vibe']),
   model: z.string().trim().max(120).optional().default(''),
   enabled: z.boolean().optional().default(true),
 });
@@ -1330,11 +1347,26 @@ router.get('/internal/cli-subagents', requireHookSecret, async (req, res) => {
     }
   }
 
+  // Vibe spends the plan's separate Vibe Code allowance, so a swarm worker must
+  // run with the key Vibe itself signed in with. buildVibeEnv() points the child
+  // at VIBE_HOME and blanks an inherited MISTRAL_API_KEY only when Vibe's own
+  // .env carries a key (an empty value makes Vibe prefer the file). Without any
+  // credential the entry is dropped instead of failing inside the child.
+  if (entries.some((entry) => entry.provider === 'vibe')) {
+    if (await isProviderAvailable('vibe')) {
+      env.vibe = Object.fromEntries(
+        Object.entries(buildVibeEnv()).map(([key, value]) => [key, value ?? ''])
+      );
+    } else {
+      entries = entries.filter((entry) => entry.provider !== 'vibe');
+    }
+  }
+
   res.json({ success: true, data: { entries, env } });
 });
 
 const cliSubagentUsageSchema = z.object({
-  provider: z.enum(['codex', 'claude', 'opencode', 'pi', 'zai']),
+  provider: z.enum(['codex', 'claude', 'opencode', 'pi', 'zai', 'vibe']),
   model: z.string().trim().min(1).max(120),
   // Identifies the subagent run, not the request. `insertUsageHistoryTurn`
   // deduplicates on `(session_id, provider, turn_id)`, so the sender has to
@@ -1350,6 +1382,31 @@ const cliSubagentUsageSchema = z.object({
 // One usage row per completed CLI-subagent run, attributed to the calling
 // session's owner. The spawned CLI is not a WebUI session, so this is the only
 // place its tokens can enter the analytics.
+router.post('/internal/cli-subagents/activity', requireHookSecret, async (req, res) => {
+  const resolved = await resolveInternalSessionUser(req);
+  if (!resolved) {
+    res.status(403).json({ success: false });
+    return;
+  }
+  const input = z
+    .object({
+      id: z.string().min(1).max(200),
+      provider: z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe']),
+      model: z.string().max(200).optional(),
+      description: z.string().max(2000).optional(),
+      status: z.enum(['started', 'completed', 'error']),
+      result: z.string().max(12000).optional(),
+      error: z.string().max(2000).optional(),
+    })
+    .safeParse(req.body);
+  if (!input.success) {
+    res.status(400).json({ success: false });
+    return;
+  }
+  getProcessManager().reportCliSubagent(resolved.sessionId, input.data);
+  res.json({ success: true });
+});
+
 router.post('/internal/cli-subagents/usage', requireHookSecret, async (req, res) => {
   const resolved = await resolveInternalSessionUser(req);
   if (!resolved) {

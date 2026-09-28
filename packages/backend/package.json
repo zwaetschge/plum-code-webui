@@ -12,6 +12,11 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "fix:esm-imports": "node scripts/normalize-esm-imports.mjs",
+    "test:claude-effort": "pnpm --filter @plum-code-webui/shared run build && tsx scripts/claude-effort-regression-tests.ts",
+    "test:claude-thinking": "tsx scripts/claude-thinking-regression-tests.ts",
+    "test:claude-context-limit": "tsx scripts/claude-context-limit-regression-tests.ts",
+    "test:claude-hook": "node scripts/claude-hook-regression-tests.mjs",
+    "test:subagents": "pnpm --filter @plum-code-webui/shared run build && tsx scripts/subagent-visibility-tests.ts && node scripts/subagent-bridge-tests.mjs",
     "test:providers": "pnpm --filter @plum-code-webui/shared run build && tsx scripts/provider-regression-tests.ts",
     "test:design-md": "tsx scripts/design-md-regression-tests.ts",
     "test:style-previews": "tsx scripts/style-preview-regression-tests.ts",
@@ -40,7 +45,9 @@
     "test:message-pagination": "tsx scripts/message-pagination-regression-tests.ts",
     "test:analytics-settings": "pnpm --filter @plum-code-webui/shared run build && tsx scripts/analytics-settings-regression-tests.ts",
     "clean": "rm -rf dist",
-    "db:migrate": "tsx src/db/migrate.ts"
+    "db:migrate": "tsx src/db/migrate.ts",
+    "test:mistral-plan": "tsx scripts/mistral-plan-usage-tests.ts",
+    "test:vibe-provider": "pnpm --filter @plum-code-webui/shared run build && tsx scripts/vibe-provider-regression-tests.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.23.0",
@@ -68,6 +75,7 @@
     "pg": "^8.23.0",
     "simple-git": "^3.36.0",
     "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
     "uuid": "^11.1.1",
     "ws": "^8.21.0",
     "zod": "^3.24.1"
@@ -91,7 +99,6 @@
     "@types/passport-google-oauth20": "^2.0.16",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.1",
-    "socket.io-client": "^4.8.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

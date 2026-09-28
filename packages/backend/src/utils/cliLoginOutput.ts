@@ -7,7 +7,11 @@ const ANSI_ESCAPE_REGEX =
 const OSC_SEQUENCE_REGEX = /\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g;
 // Control characters end a URL as surely as a space does.
 const URL_REGEX = /(https?:\/\/[^\s"'<>\u0000-\u001f]+)/i;
-const DEVICE_CODE_REGEX = /\b[A-Z0-9]{4}(?:-[A-Z0-9]{4})+\b/;
+// OpenAI's device codes are dash-separated uppercase segments, but the lengths
+// differ between CLI releases (0.153.x prints 4-5 like "LLOC-FSBO4", classic
+// device codes are 4-4 like "WDJB-MJHT"). Segment lengths ≥4/≥3 keep ISO dates
+// ("2026-09-19") and lowercase URLs out of the match.
+const DEVICE_CODE_REGEX = /\b[A-Z0-9]{4,}(?:-[A-Z0-9]{3,})+\b/;
 
 const CLI_LOGIN_INVOCATIONS = {
   claude: ['auth', 'login'],

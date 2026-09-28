@@ -27,7 +27,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
 const MAX_WINDOW_OFFSET = 520;
 
-type AnalyticsPeriod = '24h' | '7d' | '30d' | 'all';
+type AnalyticsPeriod = '24h' | '7d' | '30d' | '90d' | 'all';
 type AnalyticsWindowSource = 'rolling' | 'calendar-week' | 'calendar-month' | 'all';
 
 interface AnalyticsWindow {
@@ -51,7 +51,8 @@ interface AnalyticsWindow {
 
 function normalizePeriod(raw: unknown): AnalyticsPeriod {
   const value = typeof raw === 'string' ? raw : '';
-  if (value === '24h' || value === '7d' || value === '30d' || value === 'all') return value;
+  if (value === '24h' || value === '7d' || value === '30d' || value === '90d' || value === 'all')
+    return value;
   return '7d';
 }
 
@@ -192,6 +193,21 @@ async function resolveAnalyticsWindow(
     };
   }
 
+  if (period === '90d') {
+    const endsAt = new Date(now.getTime() - offset * 90 * DAY_MS);
+    const startsAt = new Date(endsAt.getTime() - 90 * DAY_MS);
+    return {
+      period,
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      source: 'rolling',
+      label: offset === 0 ? 'Last 90 days' : `90-day window ${offset} back`,
+      ...navigation,
+      timezoneOffsetMinutes,
+      limit: null,
+    };
+  }
+
   if (period === '7d') {
     const weeklyLimit = await fetchCodexWeeklyLimit();
     const week = localWeekWindow(now, timezoneOffsetMinutes, offset);
@@ -296,6 +312,100 @@ function enrichModelRow(row: ModelSummaryRow) {
           cacheWrite: estimate.pricing.cacheWrite,
         }
       : null,
+  };
+}
+
+/**
+ * The window a period is compared against: the previous one, cut to the same
+ * elapsed time. A Tuesday "this week" compared with all of last week would
+ * always look like a collapse; compared with last Monday–Tuesday it is fair.
+ */
+function previousWindowRange(window: AnalyticsWindow): { startsAt: Date; endsAt: Date } | null {
+  if (!window.startsAt || !window.endsAt) return null;
+  const start = new Date(window.startsAt).getTime();
+  const end = new Date(window.endsAt).getTime();
+  const elapsed = Math.max(0, Math.min(Date.now(), end) - start);
+  if (window.period === '30d') {
+    const previous = localMonthWindow(new Date(), window.timezoneOffsetMinutes, window.offset + 1);
+    const previousEnd = Math.min(previous.startsAt.getTime() + elapsed, previous.endsAt.getTime());
+    return { startsAt: previous.startsAt, endsAt: new Date(previousEnd) };
+  }
+  const length = end - start;
+  return { startsAt: new Date(start - length), endsAt: new Date(start - length + elapsed) };
+}
+
+async function summariseRange(userId: string, range: { startsAt: Date; endsAt: Date }) {
+  const rows = (await pgAll(
+    `
+    SELECT
+      model,
+      provider,
+      COALESCE(SUM(input_tokens), 0) as input_tokens,
+      COALESCE(SUM(output_tokens), 0) as output_tokens,
+      COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
+      COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
+      COALESCE(SUM(total_tokens), 0) as total_tokens,
+      COALESCE(SUM(cost_usd), 0) as cost,
+      COUNT(*) as requests,
+      MIN(created_at) as first_seen,
+      MAX(created_at) as last_seen
+    FROM usage_history
+    WHERE user_id = ? AND created_at >= ? AND created_at < ?
+    GROUP BY provider, model
+  `,
+    userId,
+    toSqlTimestamp(range.startsAt.toISOString()),
+    toSqlTimestamp(range.endsAt.toISOString())
+  )) as unknown as ModelSummaryRow[];
+  const byProvider = new Map<
+    string,
+    {
+      provider: string;
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_creation_tokens: number;
+      total_tokens: number;
+      cost: number;
+      requests: number;
+    }
+  >();
+  for (const row of rows.map(enrichModelRow)) {
+    const current = byProvider.get(row.provider) || {
+      provider: row.provider,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      total_tokens: 0,
+      cost: 0,
+      requests: 0,
+    };
+    current.input_tokens += Number(row.input_tokens) || 0;
+    current.output_tokens += Number(row.output_tokens) || 0;
+    current.cache_read_tokens += Number(row.cache_read_tokens) || 0;
+    current.cache_creation_tokens += Number(row.cache_creation_tokens) || 0;
+    current.total_tokens += Number(row.total_tokens) || 0;
+    current.cost += row.api_equivalent_cost;
+    current.requests += Number(row.requests) || 0;
+    byProvider.set(row.provider, current);
+  }
+  const providers = [...byProvider.values()];
+  const sum = (key: keyof (typeof providers)[number]) =>
+    providers.reduce((total, entry) => total + (Number(entry[key]) || 0), 0);
+  return {
+    startsAt: range.startsAt.toISOString(),
+    endsAt: range.endsAt.toISOString(),
+    totals: {
+      inputTokens: sum('input_tokens'),
+      outputTokens: sum('output_tokens'),
+      cacheReadTokens: sum('cache_read_tokens'),
+      cacheCreationTokens: sum('cache_creation_tokens'),
+      totalTokens: sum('total_tokens'),
+      totalCost: sum('cost'),
+      totalRequests: sum('requests'),
+    },
+    byProvider: providers,
   };
 }
 
@@ -445,6 +555,8 @@ router.get('/summary', async (req: Request, res: Response) => {
         uh.session_id,
         s.name as session_name,
         uh.model,
+        uh.provider,
+        strftime('%Y-%m-%dT%H:%M:%SZ', MAX(uh.created_at)) as last_active,
         COALESCE(SUM(uh.input_tokens), 0) as input_tokens,
         COALESCE(SUM(uh.output_tokens), 0) as output_tokens,
         COALESCE(SUM(uh.cache_read_tokens), 0) as cache_read_tokens,
@@ -455,7 +567,7 @@ router.get('/summary', async (req: Request, res: Response) => {
       FROM usage_history uh
       LEFT JOIN sessions s ON s.id = uh.session_id
       WHERE uh.user_id = ? ${sessionDateFilter.sql}
-      GROUP BY uh.session_id, s.name, uh.model
+      GROUP BY uh.session_id, s.name, uh.model, uh.provider
     `,
       authReq.userId,
       ...sessionDateFilter.params
@@ -463,6 +575,8 @@ router.get('/summary', async (req: Request, res: Response) => {
       TokenCostRow & {
         session_id: string;
         session_name: string | null;
+        provider: string | null;
+        last_active: string | null;
         total_tokens: number;
         cost: number;
         requests: number;
@@ -481,6 +595,9 @@ router.get('/summary', async (req: Request, res: Response) => {
         recorded_cost: number;
         cost_delta: number;
         requests: number;
+        provider: string | null;
+        last_active: string | null;
+        providerCost: Map<string, number>;
       }
     >();
     for (const row of sessionRows) {
@@ -495,6 +612,9 @@ router.get('/summary', async (req: Request, res: Response) => {
         recorded_cost: 0,
         cost_delta: 0,
         requests: 0,
+        provider: null,
+        last_active: null,
+        providerCost: new Map<string, number>(),
       };
       current.total_tokens += row.total_tokens;
       current.cost += apiEquivalentCost;
@@ -503,13 +623,28 @@ router.get('/summary', async (req: Request, res: Response) => {
       current.recorded_cost += row.cost;
       current.cost_delta += row.cost - apiEquivalentCost;
       current.requests += row.requests;
+      // The provider that did most of the (API-equivalent) work is the one
+      // shown for the session; ties go to token volume via the cost floor.
+      const label = getProviderLabelForUsage(row.provider, row.model);
+      current.providerCost.set(
+        label,
+        (current.providerCost.get(label) || 0) + apiEquivalentCost + row.total_tokens * 1e-12
+      );
+      current.provider = [...current.providerCost.entries()].sort((a, b) => b[1] - a[1])[0]![0];
+      if (row.last_active && (!current.last_active || row.last_active > current.last_active)) {
+        current.last_active = row.last_active;
+      }
       bySessionMap.set(row.session_id, current);
     }
     const bySession = [...bySessionMap.values()]
+      .map(({ providerCost: _providerCost, ...session }) => session)
       .sort(
         (a, b) => b.api_equivalent_cost - a.api_equivalent_cost || b.total_tokens - a.total_tokens
       )
       .slice(0, 50);
+
+    const previousRange = previousWindowRange(window);
+    const comparison = previousRange ? await summariseRange(authReq.userId, previousRange) : null;
 
     const eventRows = (await pgAll(
       `
@@ -589,6 +724,7 @@ router.get('/summary', async (req: Request, res: Response) => {
         byModel,
         byProvider,
         bySession,
+        comparison,
         events: {
           contextSnapshots: eventCounts.get('context_snapshot') || 0,
           compactEvents: eventCounts.get('compact') || 0,

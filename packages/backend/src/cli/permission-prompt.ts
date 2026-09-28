@@ -25,9 +25,9 @@
  *   ...
  * }
  *
- * Output (stdout JSON) - empty object to allow, or with decision to control:
- * {} - allow tool to proceed
- * {"decision": "block", "reason": "User denied"} - block the tool
+ * Output (stdout JSON) uses Claude Code's PreToolUse hookSpecificOutput:
+ * {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}
+ * A denied tool uses permissionDecision "deny" and a permissionDecisionReason.
  */
 
 import * as readline from 'readline';
@@ -212,6 +212,7 @@ interface BackendResponse {
 function outputDecision(decision: 'allow' | 'deny', reason?: string): void {
   const output = {
     hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
       permissionDecision: decision,
       ...(reason && { permissionDecisionReason: reason }),
     },

@@ -8,7 +8,7 @@ import { getCliEnv, getNpmPrefix } from '../utils/cliPaths.js';
 
 const execAsync = promisify(exec);
 
-export const CLI_UPDATE_PROVIDERS = ['claude', 'codex', 'opencode', 'pi', 'kimi'] as const;
+export const CLI_UPDATE_PROVIDERS = ['claude', 'codex', 'opencode', 'pi', 'kimi', 'vibe'] as const;
 
 const CLI_UPDATE_COMMANDS: Record<CLIProvider, string> = {
   // npm 12 can leave Claude Code's executable placeholder in place even when
@@ -23,10 +23,13 @@ const CLI_UPDATE_COMMANDS: Record<CLIProvider, string> = {
   opencode: 'npm install -g opencode-ai@latest',
   pi: 'npm install -g @earendil-works/pi-coding-agent@latest pi-mcp-adapter@latest',
   kimi: 'npm install -g @moonshot-ai/kimi-code@latest',
+  // Vibe is a Python CLI installed with pipx into ~/.local (node-writable, on
+  // PATH ahead of the image's /opt/plum-cli copy), so an in-app update survives
+  // without root and the symlink in /opt/plum-cli/bin keeps resolving.
+  vibe: 'pipx upgrade mistral-vibe || pipx install mistral-vibe',
 };
 
-let updateInFlight: Promise<CliProviderUpdateResponse> | null =
-  await await await await await await await await null;
+let updateInFlight: Promise<CliProviderUpdateResponse> | null = null;
 
 async function runUpdateCommand(command: string, env: NodeJS.ProcessEnv, timeoutMs: number) {
   try {

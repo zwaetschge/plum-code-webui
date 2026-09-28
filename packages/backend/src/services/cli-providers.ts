@@ -7,6 +7,7 @@
  * - Codex CLI (codex) - OpenAI
  * - OpenCode CLI (opencode) - Multi-provider (75+ LLM backends)
  * - Pi (pi) - Alternative harness sharing OpenCode provider connections
+ * - Kimi Code (kimi) and Mistral Vibe (vibe) - persistent ACP agents
  */
 
 import os from 'os';
@@ -30,7 +31,7 @@ import {
 const execFileAsync = promisify(execFile);
 const CODEX_UNRAID_DEFAULT_ALLOWED_DIRS = ['/mnt/user', '/mnt/cache'];
 
-export type CLIProvider = 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi';
+export type CLIProvider = 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi' | 'vibe';
 
 export interface CLIProviderConfig {
   id: CLIProvider;
@@ -48,8 +49,93 @@ export interface CLIProviderConfig {
 
 // Fallback models - used when CLI discovery fails or CLI not installed
 // Can be overridden via CLI_PROVIDER_<PROVIDER>_MODELS env var
+// Claude Code runs Fable/Opus/Sonnet with a 1M window on first-party logins.
+// The WebUI offers every such model twice: the `[1m]` ID keeps the 1M window,
+// the plain ID runs with the standard 200k window (the spawn sets
+// CLAUDE_CODE_DISABLE_1M_CONTEXT, see claudeContextWindowEnv). Haiku has no
+// 1M form.
+const CLAUDE_1M_SUFFIX = '[1m]';
+const CLAUDE_1M_FAMILIES = /^claude-(fable|opus|sonnet)-/;
+
+export function isClaude1mModel(model: string | null | undefined): boolean {
+  return typeof model === 'string' && model.trim().toLowerCase().endsWith(CLAUDE_1M_SUFFIX);
+}
+
+export function withClaude1mVariants(models: string[]): string[] {
+  return models.flatMap((model) =>
+    CLAUDE_1M_FAMILIES.test(model) && !isClaude1mModel(model)
+      ? [`${model}${CLAUDE_1M_SUFFIX}`, model]
+      : [model]
+  );
+}
+
+/**
+ * Harnesses that speak ACP (Agent Client Protocol) over stdio as one persistent
+ * process per session: Kimi Code and Mistral Vibe. They share the spawn, turn
+ * queue, permission and cancellation plumbing in ClaudeProcessManager.
+ */
+export function isAcpProvider(provider: CLIProvider | null | undefined): boolean {
+  return provider === 'kimi' || provider === 'vibe';
+}
+
+/** Absolute VIBE_HOME for this deployment (`~/.vibe` unless overridden). */
+export function resolveVibeHome(): string {
+  return (
+    process.env.CLI_PROVIDER_VIBE_CREDENTIALS_PATH ||
+    process.env.VIBE_HOME ||
+    CLI_PROVIDERS.vibe.credentialsPath
+  ).replace('~', os.homedir());
+}
+
+/**
+ * Env for a `vibe-acp` child.
+ *
+ * Vibe loads `$VIBE_HOME/.env` but an existing process value wins over it, so
+ * an inherited `MISTRAL_API_KEY` (the container's regular API key, which draws
+ * on the plan's small API allowance) would silently shadow the key the user
+ * signed in with through Mistral AI Studio (the €255 Vibe Code allowance).
+ * When Vibe's own `.env` carries a key, the inherited one is dropped.
+ * `VIBE_TEST_DISABLE_KEYRING=1` keeps Vibe off the desktop keyring, which does
+ * not exist in a headless container.
+ */
+export function buildVibeEnv(): Record<string, string | undefined> {
+  const home = resolveVibeHome();
+  const env: Record<string, string | undefined> = {
+    VIBE_HOME: home,
+    VIBE_TEST_DISABLE_KEYRING: '1',
+  };
+  try {
+    const dotEnv = fs.readFileSync(path.join(home, '.env'), 'utf-8');
+    if (/^\s*MISTRAL_API_KEY\s*=\s*['"]?[^'"\s]+/m.test(dotEnv)) {
+      env.MISTRAL_API_KEY = undefined;
+    }
+  } catch {
+    // No Vibe home yet: keep whatever the deployment provides.
+  }
+  return env;
+}
+
+/**
+ * Env for the context-window choice of a Claude Code session. An explicit
+ * canonical model without `[1m]` gets the 200k window; `[1m]` and aliases or
+ * the default model keep the CLI's own 1M behaviour.
+ */
+export function claudeContextWindowEnv(
+  model: string | null | undefined
+): Record<string, string | undefined> {
+  const trimmed = typeof model === 'string' ? model.trim() : '';
+  if (isClaude1mModel(trimmed)) return { CLAUDE_CODE_DISABLE_1M_CONTEXT: undefined };
+  if (CLAUDE_1M_FAMILIES.test(trimmed)) return { CLAUDE_CODE_DISABLE_1M_CONTEXT: '1' };
+  return {};
+}
+
 const CLI_PROVIDER_MODELS: Record<CLIProvider, string[]> = {
-  claude: ['claude-fable-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5'],
+  claude: withClaude1mVariants([
+    'claude-fable-5',
+    'claude-opus-5',
+    'claude-sonnet-5',
+    'claude-haiku-4-5',
+  ]),
   zai: ['opus', 'sonnet', 'haiku'],
   // Fallback only — runtime list comes from ~/.codex/models_cache.json (filtered to
   // visibility=list, sorted by priority). Cache refreshes via the codex CLI itself;
@@ -91,6 +177,13 @@ const CLI_PROVIDER_MODELS: Record<CLIProvider, string[]> = {
   // managed Kimi provider that `kimi login` populates. Fallback only — the
   // runtime list should come from the CLI's configured providers after login.
   kimi: ['kimi-code/kimi-for-coding', 'kimi-code/kimi-for-coding-highspeed', 'kimi-code/k3'],
+  // Mistral Vibe ships exactly one hosted model: the alias `mistral-medium-3.5`
+  // for `mistral-vibe-cli-latest`, which is the model the plan's Vibe Code
+  // allowance pays for. Its second built-in entry (`local`) points at a
+  // llama.cpp server on 127.0.0.1:8080 and is not offered here. Operators can
+  // list more ids through CLI_PROVIDER_VIBE_MODELS; Vibe only accepts what its
+  // own config.toml defines, so an unknown id fails at session start.
+  vibe: ['mistral-medium-3.5'],
 };
 
 // Display labels — enhanced at startup by CLI discovery. Claude aliases stay
@@ -102,6 +195,11 @@ const MODEL_DISPLAY_LABELS: Record<string, string> = {
   'claude-opus-5': 'Opus 5',
   'claude-sonnet-5': 'Sonnet 5',
   'claude-haiku-4-5': 'Haiku 4.5',
+  ...claude1mLabels({
+    'claude-fable-5': 'Fable 5',
+    'claude-opus-5': 'Opus 5',
+    'claude-sonnet-5': 'Sonnet 5',
+  }),
   // Legacy aliases remain labelled for existing sessions and Z.AI mappings.
   opus: 'Opus 5',
   sonnet: 'Sonnet 5',
@@ -133,6 +231,15 @@ const MODEL_DISPLAY_LABELS: Record<string, string> = {
   'kimi-code/kimi-for-coding': 'Kimi K2.7 Code',
   'kimi-code/kimi-for-coding-highspeed': 'Kimi K2.7 Code HighSpeed',
   'kimi-code/k3': 'Kimi K3',
+  // Mistral Vibe aliases. `mistral-medium-3.5` is the alias Vibe exposes for
+  // `mistral-vibe-cli-latest`; the others come from a deployment's own
+  // config.toml (see discoverVibe) or from Mistral API traffic through Pi.
+  'mistral-medium-3.5': 'Mistral Medium 3.5',
+  'mistral-vibe-cli-latest': 'Mistral Medium 3.5',
+  'devstral-small': 'Devstral Small 2',
+  'devstral-2': 'Devstral 2',
+  'glm-5.3': 'GLM-5.3',
+  'mistral-large-3': 'Mistral Large 3',
 };
 
 function normalizeAllowedDirectory(dir: string): string | null {
@@ -368,6 +475,16 @@ export function parseClaudeCliModelCatalog(source: string): ClaudeCliModelCatalo
   return { models, labels };
 }
 
+function claude1mLabels(labels: Record<string, string>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [model, label] of Object.entries(labels)) {
+    if (!CLAUDE_1M_FAMILIES.test(model)) continue;
+    result[model] = `${label} · 200k`;
+    result[`${model}${CLAUDE_1M_SUFFIX}`] = `${label} · 1M`;
+  }
+  return result;
+}
+
 /**
  * Claude: read the current model catalog from the installed CLI. Claude Code
  * moved from cli.js to a native executable in 2.1.x, so both formats are
@@ -389,8 +506,8 @@ function discoverClaude(): void {
 
     const catalog = parseClaudeCliModelCatalog(source);
     if (catalog.models.length === 0) return;
-    discoveredModels.claude = catalog.models;
-    Object.assign(MODEL_DISPLAY_LABELS, catalog.labels);
+    discoveredModels.claude = withClaude1mVariants(catalog.models);
+    Object.assign(MODEL_DISPLAY_LABELS, catalog.labels, claude1mLabels(catalog.labels));
     console.log(
       `[CLI-PROVIDERS] claude: discovered ${catalog.models.length} models:`,
       catalog.models
@@ -719,12 +836,72 @@ function readCodexModelsCacheFingerprint(cachePath = getCodexModelsCachePath()):
   }
 }
 
+/**
+ * Vibe only accepts models its own `config.toml` defines: a fresh install ships
+ * `mistral-medium-3.5` (the alias of `mistral-vibe-cli-latest`, paid from the
+ * plan's Vibe Code allowance) plus a `local` llama.cpp entry, and operators add
+ * hosted models themselves. Parse that file so the menu follows the deployment
+ * instead of a guess. Exported for the regression suite.
+ */
+export function parseVibeModelCatalog(source: string): {
+  models: string[];
+  labels: Record<string, string>;
+} {
+  const models: string[] = [];
+  const labels: Record<string, string> = {};
+  let inModels = false;
+  let entry: { alias?: string; provider?: string; displayName?: string } = {};
+
+  const flush = () => {
+    const alias = entry.alias;
+    // The `llamacpp` provider needs a local server on 127.0.0.1:8080, so it is
+    // not offered as a Plum model; hosted Mistral models are.
+    if (alias && (entry.provider || 'mistral') === 'mistral' && !models.includes(alias)) {
+      models.push(alias);
+      if (entry.displayName) labels[alias] = entry.displayName;
+    }
+    entry = {};
+  };
+
+  for (const rawLine of source.split('\n')) {
+    const line = rawLine.trim();
+    if (line.startsWith('[')) {
+      flush();
+      inModels = line.replace(/\s+/g, '') === '[[models]]';
+      continue;
+    }
+    if (!inModels) continue;
+    const match = /^([A-Za-z0-9_-]+)\s*=\s*"([^"]*)"/.exec(line);
+    if (!match) continue;
+    const [, key, value] = match;
+    if (key === 'alias') entry.alias = value;
+    else if (key === 'provider') entry.provider = value;
+    else if (key === 'display_name') entry.displayName = value;
+  }
+  flush();
+  return { models, labels };
+}
+
+function discoverVibe(): void {
+  try {
+    const source = fs.readFileSync(path.join(resolveVibeHome(), 'config.toml'), 'utf-8');
+    const catalog = parseVibeModelCatalog(source);
+    if (catalog.models.length === 0) return;
+    discoveredModels.vibe = catalog.models;
+    Object.assign(MODEL_DISPLAY_LABELS, catalog.labels);
+    console.log(`[CLI-PROVIDERS] vibe: discovered ${catalog.models.length} models:`, catalog.models);
+  } catch {
+    /* No Vibe home yet: keep the built-in default. */
+  }
+}
+
 function ensureDiscovery(): void {
   if (discoveryDone) return;
   discoveryDone = true;
   discoverClaude();
   discoverCodex();
   discoverOpenCode();
+  discoverVibe();
 }
 
 /**
@@ -738,6 +915,7 @@ export function resetDiscovery(): void {
   delete discoveredModels.codex;
   delete discoveredModels.opencode;
   delete discoveredModels.pi;
+  delete discoveredModels.vibe;
 }
 
 // Single shared promise so concurrent callers don't spawn multiple Codex processes
@@ -1063,6 +1241,38 @@ export const CLI_PROVIDERS: Record<CLIProvider, CLIProviderConfig> = {
     defaultModel: getProviderEnv('kimi', 'DEFAULT_MODEL') || 'kimi-code/kimi-for-coding',
     models: parseEnvModels('kimi') ?? CLI_PROVIDER_MODELS.kimi,
   },
+  vibe: {
+    id: 'vibe',
+    name: 'Mistral Vibe',
+    command: defaultCliCommand('vibe', 'vibe-acp'),
+    icon: '🧡',
+    // Vibe keeps its config, sessions and the plan key (`.env`) under
+    // VIBE_HOME. Signing in through Mistral stores a key that draws on the
+    // plan's Vibe allowance rather than the API allowance.
+    credentialsPath: envOr('vibe', 'CREDENTIALS_PATH', '~/.vibe'),
+    // Persistent `vibe-acp` over stdio, like Kimi: streaming, native resume,
+    // cancellation and queued follow-ups.
+    supportsStreamJson: true,
+    supportsResume: true,
+    supportsModes: true,
+    capabilities: {
+      streaming: true,
+      resume: true,
+      modes: true,
+      approvals: true,
+      nativeVision: true,
+      imageBridge: false,
+      mcp: true,
+      mcpSessionAttribution: 'native',
+      usageLimits: 'local-budget',
+      reasoning: true,
+      serviceTier: false,
+      webSearch: true,
+      allowedDirectories: true,
+    },
+    defaultModel: getProviderEnv('vibe', 'DEFAULT_MODEL') || 'mistral-medium-3.5',
+    models: parseEnvModels('vibe') ?? CLI_PROVIDER_MODELS.vibe,
+  },
 };
 
 export function getProviderCapabilities(provider: CLIProvider): ProviderCapabilities {
@@ -1293,6 +1503,10 @@ export function getCLIArgs(
       // we leave the model alias untouched here.
       break;
     }
+    case 'vibe':
+      // `vibe-acp` takes no arguments; model, mode and thinking are ACP
+      // session config options set after the session opens.
+      break;
   }
 
   return args;
@@ -1306,6 +1520,8 @@ function normalizePiThinking(reasoningLevel: string): string {
   if (normalized === 'none') return 'off';
   if (normalized === 'extra_high') return 'xhigh';
   if (normalized === 'ultra') return 'max';
+  // Ultracode is xhigh thinking plus the workflow tool (PI_ULTRACODE, set at spawn).
+  if (normalized === 'ultracode') return 'xhigh';
   return normalized;
 }
 
@@ -1596,6 +1812,18 @@ export async function isProviderAvailable(
         tokens?: { access_token?: string | null };
       };
       return !!(auth.tokens?.access_token || auth.OPENAI_API_KEY);
+    }
+    if (provider === 'vibe') {
+      // Signing in (browser or pasted key) writes MISTRAL_API_KEY to
+      // VIBE_HOME/.env. A key in the process environment counts too: Vibe
+      // itself accepts it and reports `authState: process_env`.
+      const dotEnv = await fs
+        .readFile(path.join(resolveVibeHome(), '.env'), 'utf-8')
+        .catch(() => '');
+      if (/^\s*MISTRAL_API_KEY\s*=\s*['"]?[^'"\s]+/m.test(dotEnv)) {
+        return true;
+      }
+      return Boolean(process.env.MISTRAL_API_KEY && process.env.MISTRAL_API_KEY.trim());
     }
     if (provider === 'kimi') {
       // Kimi Code CLI only creates ~/.kimi-code/credentials/ after a successful

@@ -162,7 +162,8 @@ const BUILTIN_COMMAND_DEFS: Record<BuiltinCommandName, Omit<Command, 'name' | 's
 const CLI_FORWARDED_DESCRIPTIONS: Record<string, string> = {
   btw: 'Ask a quick side question without adding to the conversation',
   debug: 'Enable debug logging and troubleshoot',
-  effort: 'Set the model effort level (none|minimal|low|medium|high|xhigh|max|ultra|auto)',
+  effort:
+    'Set the model effort level (none|minimal|low|medium|high|xhigh|max|ultra|ultracode|auto)',
   plan: 'Enter plan mode',
   init: 'Initialize project with an AGENTS.md guide',
   review: 'Review a pull request locally',
@@ -188,6 +189,7 @@ const PROVIDER_LABELS: Record<CLIProvider, string> = {
   opencode: 'OpenCode',
   pi: 'Pi',
   kimi: 'Kimi Code',
+  vibe: 'Mistral Vibe',
 };
 
 const OPENCODE_FORWARDED_COMMANDS = new Set(['init', 'review', 'security-review', 'plan']);

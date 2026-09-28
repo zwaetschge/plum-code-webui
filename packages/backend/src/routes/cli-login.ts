@@ -21,6 +21,14 @@ import {
   stripCliLoginAnsi,
 } from '../utils/cliLoginOutput.js';
 import { getRunnerAccessDecision } from '../utils/runnerAccess.js';
+import { hasPiAntigravityLogin } from '../utils/piConfig.js';
+import {
+  clearVibeApiKey,
+  readVibeAuthStateFromAgent,
+  startVibeBrowserLogin,
+  writeVibeApiKey,
+  type VibeBrowserLogin,
+} from '../services/vibe/vibeAuth.js';
 
 const router = Router();
 
@@ -52,10 +60,82 @@ const MAX_LOGIN_SESSIONS_PER_USER = 2;
 const MAX_LOGIN_SESSIONS_TOTAL = 10;
 const CODE_PROMPT_REGEX = /(enter|paste|type).*(code|verification|authorization)|device.*code/i;
 const ALREADY_LOGGED_REGEX = /already\s+logged\s+in|already\s+signed\s+in/i;
-const LOGIN_SUCCESS_REGEX =
-  /successfully\s+(logged|signed|authenticated)|welcome|logged\s+in\s+as/i;
+// "welcome" must never be part of this: `codex login --device-auth` prints a
+// "Welcome to Codex" banner before the device flow even starts, and matching
+// it flips the login to completed within the first output chunk — the dialog
+// then claims saved credentials exist, closes, and kills the still-waiting
+// OAuth process before auth.json is ever written.
+const LOGIN_SUCCESS_REGEX = /successfully\s+(logged|signed|authenticated)|logged\s+in\s+as/i;
 
 const loginSessions = new Map<string, LoginSession>();
+
+function markPiLoginIfSaved(session: LoginSession): boolean {
+  if (session.provider !== 'pi') return false;
+  if (
+    session.status !== 'completed' &&
+    piAntigravityLoginSince(session.userId, session.createdAt)
+  ) {
+    session.status = 'completed';
+    session.error = undefined;
+    // Pi's TUI keeps running after /login; the credentials are on disk now.
+    try {
+      session.proc?.kill();
+    } catch {
+      // Already gone.
+    }
+  }
+  return session.status === 'completed';
+}
+
+function piAntigravityLoginSince(userId: string, since: number): boolean {
+  if (!hasPiAntigravityLogin(userId)) return false;
+  const segment = userId.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) || 'default';
+  try {
+    const authFile = path.join(os.homedir(), '.pi', 'webui-users', segment, 'agent', 'auth.json');
+    return fs.statSync(authFile).mtimeMs >= since;
+  } catch {
+    return false;
+  }
+}
+
+/** Live Vibe browser sign-ins, keyed by the login session id. */
+const vibeLogins = new Map<string, VibeBrowserLogin>();
+
+// Codex device-auth banners and status lines change between CLI releases, so
+// the only trustworthy "completed" signal is the auth.json the CLI writes
+// after a successful token exchange — the same file isProviderAvailable()
+// checks. Output regexes stay as a fast path for the other providers.
+function hasCodexCredentials(): boolean {
+  try {
+    const authPath = path.join(
+      CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir()),
+      'auth.json'
+    );
+    const auth = JSON.parse(fs.readFileSync(authPath, 'utf-8')) as {
+      OPENAI_API_KEY?: string | null;
+      tokens?: { access_token?: string | null };
+    };
+    return !!(auth.tokens?.access_token || auth.OPENAI_API_KEY);
+  } catch {
+    return false;
+  }
+}
+
+function loginOutputSignalsSuccess(session: LoginSession): boolean {
+  if (session.provider === 'pi') {
+    // Pi's TUI prints no stable success line; auth.json is rewritten on success.
+    return piAntigravityLoginSince(session.userId, session.createdAt);
+  }
+  if (session.provider === 'codex') {
+    // File-backed: a matching line alone can come from banners or re-login
+    // notices while the token exchange has not happened yet.
+    return (
+      (ALREADY_LOGGED_REGEX.test(session.output) || LOGIN_SUCCESS_REGEX.test(session.output)) &&
+      hasCodexCredentials()
+    );
+  }
+  return ALREADY_LOGGED_REGEX.test(session.output) || LOGIN_SUCCESS_REGEX.test(session.output);
+}
 
 function appendOutput(session: LoginSession, chunk: string): void {
   const cleaned = stripCliLoginAnsi(chunk);
@@ -93,7 +173,7 @@ function appendOutput(session: LoginSession, chunk: string): void {
     }
   }
 
-  if (ALREADY_LOGGED_REGEX.test(session.output) || LOGIN_SUCCESS_REGEX.test(session.output)) {
+  if (loginOutputSignalsSuccess(session)) {
     session.status = 'completed';
   }
 }
@@ -156,8 +236,39 @@ const startSchema = z.object({
 // Cap at 256 chars: real OAuth codes are <200. An upper bound here prevents an
 // authed user from piping arbitrary multi-KB payloads into the PTY stdin.
 const codeSchema = z.object({
-  code: z.string().min(1).max(256),
+  // Pi's Antigravity login takes the whole Google redirect URL, scopes included.
+  code: z.string().min(1).max(4096),
 });
+
+/** Pi's Antigravity extension listens here for Google's OAuth redirect. */
+const PI_ANTIGRAVITY_CALLBACK = 'http://127.0.0.1:51121/oauth-callback';
+
+/**
+ * Google sends the browser to http://localhost:51121/oauth-callback — the
+ * user's own machine, not this container, so the page fails to load there.
+ * The user pastes that URL (or just its query) and Plum replays it against
+ * the callback server Pi opened inside the container.
+ */
+async function forwardPiOAuthCallback(pasted: string): Promise<string | null> {
+  const query = pasted.includes('?') ? pasted.slice(pasted.indexOf('?') + 1) : pasted;
+  const params = new URLSearchParams(query.replace(/^[?&]+/, '').split('#')[0]);
+  const code = params.get('code');
+  const state = params.get('state');
+  const error = params.get('error');
+  if (error) return `Google meldet: ${error}`;
+  if (!code || !state) {
+    return 'Bitte die vollständige Adresse aus der Browserzeile einfügen (sie enthält code= und state=).';
+  }
+  const target = new URL(PI_ANTIGRAVITY_CALLBACK);
+  target.search = new URLSearchParams({ code, state }).toString();
+  try {
+    const response = await fetch(target, { signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) return (await response.text()).slice(0, 300) || `HTTP ${response.status}`;
+    return null;
+  } catch (fetchError) {
+    return `Pi wartet nicht mehr auf den Login (${fetchError instanceof Error ? fetchError.message : fetchError}). Login neu starten.`;
+  }
+}
 
 function serializeLoginSession(session: LoginSession) {
   return {
@@ -182,6 +293,54 @@ router.post('/:provider/start', requireAuth, async (req, res) => {
       403,
       'RUNNER_ACCESS_DENIED'
     );
+  }
+
+  // Vibe has no interactive login TUI to scrape: its ACP agent hands out a
+  // sign-in URL and exchanges it for a key it persists itself.
+  if (provider === 'vibe') {
+    const loginId = nanoid();
+    const session: LoginSession = {
+      id: loginId,
+      userId,
+      provider,
+      proc: null,
+      status: 'starting',
+      output: 'Starting Mistral sign-in…\n',
+      rawOutput: '',
+      createdAt: Date.now(),
+      waiters: [],
+    };
+    loginSessions.set(loginId, session);
+    try {
+      const login = await startVibeBrowserLogin();
+      vibeLogins.set(loginId, login);
+      session.loginUrl = login.signInUrl;
+      session.status = 'awaiting_code';
+      appendOutput(
+        session,
+        `Open the sign-in page in your browser. The link expires at ${login.expiresAt || 'unknown'}.\n`
+      );
+      void login.completed
+        .then(() => {
+          session.status = 'completed';
+          appendOutput(session, 'Signed in. Mistral Vibe stored the key.\n');
+          finalizeSession(session, 0);
+        })
+        .catch((error: unknown) => {
+          session.status = 'error';
+          session.error = error instanceof Error ? error.message : String(error);
+          appendOutput(session, `${session.error}\n`);
+          finalizeSession(session, 1);
+        })
+        .finally(() => vibeLogins.delete(loginId));
+      return res.json({ success: true, data: serializeLoginSession(session) });
+    } catch (error) {
+      session.status = 'error';
+      session.error = error instanceof Error ? error.message : String(error);
+      appendOutput(session, `${session.error}\n`);
+      finalizeSession(session, 1);
+      return res.json({ success: true, data: serializeLoginSession(session) });
+    }
   }
 
   // Claude and OpenCode expose dedicated auth commands. Codex uses its
@@ -340,6 +499,7 @@ router.get('/:id', requireAuth, (req, res) => {
   if (!session || session.userId !== userId) {
     throw new AppError('Login session not found', 404, 'NOT_FOUND');
   }
+  markPiLoginIfSaved(session);
 
   res.json({
     success: true,
@@ -369,7 +529,33 @@ router.post('/:id/code', requireAuth, async (req, res) => {
   }
 
   const code = parsed.data.code.trim();
-  session.proc.write(code + '\r');
+  if (session.provider === 'pi') {
+    const forwardError = await forwardPiOAuthCallback(code);
+    if (forwardError) {
+      session.error = forwardError;
+      res.json({ success: true, data: serializeLoginSession(session) });
+      return;
+    }
+    session.error = undefined;
+    // Pi exchanges the code for tokens and then writes auth.json; no output
+    // chunk is guaranteed to follow, so watch the file.
+    const outputBefore = session.output.length;
+    let failure: string | undefined;
+    for (let i = 0; i < 40 && !markPiLoginIfSaved(session); i += 1) {
+      failure = session.output.slice(outputBefore).match(/Failed to login[^\n]*/i)?.[0];
+      if (failure) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (session.status !== 'completed') {
+      session.error = failure
+        ? `${failure.trim()} — Login neu starten und die Adresse direkt danach einfügen.`
+        : 'Pi hat noch keine Zugangsdaten gespeichert. Details unten prüfen.';
+    }
+    res.json({ success: true, data: serializeLoginSession(session) });
+    return;
+  } else {
+    session.proc.write(code + '\r');
+  }
 
   try {
     await waitForCompletion(session, 60 * 1000);
@@ -393,6 +579,8 @@ router.delete('/:id', requireAuth, (req, res) => {
   }
 
   try {
+    vibeLogins.get(session.id)?.cancel();
+    vibeLogins.delete(session.id);
     session.proc?.kill();
   } catch {
     // The process may already have exited between the lookup and cancellation.
@@ -400,6 +588,67 @@ router.delete('/:id', requireAuth, (req, res) => {
   loginSessions.delete(session.id);
 
   res.json({ success: true, data: { id: session.id, cancelled: true } });
+});
+
+/**
+ * Mistral Vibe credentials. The browser sign-in above is the path that draws on
+ * the plan's Vibe Code allowance; a key pasted from Code › Vibe CLI does too,
+ * while a regular console key spends the much smaller API allowance.
+ */
+router.get('/vibe/status', requireAuth, async (_req, res) => {
+  const state = await readVibeAuthStateFromAgent();
+  res.json({
+    success: true,
+    data: {
+      installed: state.installed,
+      authenticated: state.authenticated,
+      source: state.source,
+      authState: state.authState ?? null,
+    },
+  });
+});
+
+router.post('/vibe/key', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const runnerAccess = await getRunnerAccessDecision(userId);
+  if (!runnerAccess.allowed) {
+    throw new AppError(
+      runnerAccess.reason || 'CLI runner access is not allowed for this account.',
+      403,
+      'RUNNER_ACCESS_DENIED'
+    );
+  }
+  const body = (req.body && typeof req.body === 'object' ? req.body : {}) as {
+    apiKey?: unknown;
+  };
+  const apiKey = typeof body.apiKey === 'string' ? body.apiKey : '';
+  if (!apiKey.trim()) {
+    throw new AppError('An API key is required.', 400, 'VALIDATION_ERROR');
+  }
+  try {
+    writeVibeApiKey(apiKey);
+  } catch (error) {
+    throw new AppError(
+      error instanceof Error ? error.message : 'Failed to store the key.',
+      400,
+      'VIBE_KEY_INVALID'
+    );
+  }
+  res.json({ success: true, data: { authenticated: true, source: 'dot-env' } });
+});
+
+router.delete('/vibe/key', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const runnerAccess = await getRunnerAccessDecision(userId);
+  if (!runnerAccess.allowed) {
+    throw new AppError(
+      runnerAccess.reason || 'CLI runner access is not allowed for this account.',
+      403,
+      'RUNNER_ACCESS_DENIED'
+    );
+  }
+  const removed = clearVibeApiKey();
+  res.json({ success: true, data: { removed } });
 });
 
 export default router;

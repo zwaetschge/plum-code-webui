@@ -1,4 +1,5 @@
 export {
+  claudeCliContextWindow,
   DEFAULT_CONTEXT_WINDOW,
   lookupContextWindow,
   resolveContextWindow,

@@ -66,6 +66,8 @@ import codexRoutes from './routes/codex.js';
 import opencodeRoutes from './routes/opencode.js';
 import setupRoutes from './routes/setup.js';
 import gatewayRoutes from './routes/gateway.js';
+import browserBridgeRoutes from './routes/browserBridge.js';
+import { browserBridge } from './services/browserBridge/bridge.js';
 import memoriesRoutes from './routes/memories.js';
 import androidRoutes from './routes/android.js';
 import appRoutes from './routes/app.js';
@@ -249,6 +251,8 @@ async function main() {
 
   // Setup WebSocket
   const io = setupWebSocket(httpServer);
+  // Firefox extension relay; its own upgrade path and token auth.
+  browserBridge.attach(httpServer);
   attachNotificationIo(io);
 
   // Initialize task delegation system
@@ -420,6 +424,7 @@ async function main() {
   app.use('/api/cli-login', cliLoginRoutes);
   app.use('/api/setup', setupRoutes);
   app.use('/api/gateway', gatewayRoutes);
+  app.use('/api/browser-bridge', browserBridgeRoutes);
   app.use('/api/codex', codexRoutes);
   app.use('/api/opencode', opencodeRoutes);
   app.use('/api/memories', memoriesRoutes);

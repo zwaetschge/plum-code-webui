@@ -1,3 +1,6 @@
+import { persistSubagentRun } from '../subagentHistory.js';
+import { subagentWaitOutcomes } from '../../utils/subagentStatus.js';
+import { normalizeReasoningLevel } from '../../utils/reasoningLevel.js';
 import { createHash } from 'crypto';
 
 import {
@@ -60,8 +63,11 @@ import SQLiteDatabase from 'better-sqlite3';
 import { config } from '../../config.js';
 import {
   CLI_PROVIDERS,
+  buildVibeEnv,
+  claudeContextWindowEnv,
   getCLIArgs,
   formatInputMessage,
+  isAcpProvider,
   resolveCliProviderSelectedModel,
   type CLIProvider,
 } from '../cli-providers.js';
@@ -79,6 +85,7 @@ import { safeJsonParse } from '../../utils/json.js';
 import {
   DEFAULT_CONTEXT_WINDOW,
   resolveContextWindow as contextWindowFor,
+  claudeCliContextWindow,
 } from '../../utils/contextWindow.js';
 import {
   buildClaudeApiEnv,
@@ -201,6 +208,31 @@ const __dirname = path.dirname(__filename);
 const BUFFER_SIZE = 5000;
 const HANDOFF_CONTEXT_MAX_CHARS = 60000;
 const HANDOFF_CONTEXT_MAX_MESSAGES = 80;
+// Claude Code can surface this API rejection as a complete assistant message,
+// without its usual "API Error" prefix or a stream-json error event.
+const CLAUDE_PROMPT_TOO_LONG = /^(?:API Error:\s*)?prompt is too long[.!]?$/i;
+
+export function isClaudeContextLimitErrorText(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return (
+    normalized.includes('context window') ||
+    normalized.includes('context limit') ||
+    normalized.includes('context length') ||
+    normalized.includes('maximum context') ||
+    normalized.includes('token limit') ||
+    CLAUDE_PROMPT_TOO_LONG.test(normalized)
+  );
+}
+
+export function isClaudeContextLimitAssistantReply(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    trimmed.length < 400 &&
+    (CLAUDE_PROMPT_TOO_LONG.test(trimmed) ||
+      (/\bAPI Error\b/i.test(trimmed) && isClaudeContextLimitErrorText(trimmed)))
+  );
+}
+
 // Guards against the historical cumulative-counter bug, where a lost delta
 // baseline booked a whole session's counters (hundreds of millions) as one
 // turn. Cache reads legitimately re-send the cached prefix on every model
@@ -550,39 +582,6 @@ async function getCliModelForSession(
   }
 
   return resolveCliProviderSelectedModel(provider, null, configuredModels, sessionSelectedModel);
-}
-
-const REASONING_LEVELS_BY_PROVIDER: Record<CLIProvider, Set<string>> = {
-  claude: new Set(['low', 'medium', 'high', 'max']),
-  zai: new Set(['low', 'medium', 'high', 'max']),
-  codex: new Set([
-    'none',
-    'minimal',
-    'low',
-    'medium',
-    'high',
-    'xhigh',
-    'extra_high',
-    'max',
-    'ultra',
-  ]),
-  opencode: new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'extra_high', 'max']),
-  pi: new Set(['off', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'extra_high', 'max']),
-  kimi: new Set(['minimal', 'low', 'medium', 'high']),
-};
-
-function normalizeReasoningLevel(provider: CLIProvider, value: unknown): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, '_');
-  if (!normalized) {
-    return null;
-  }
-  return REASONING_LEVELS_BY_PROVIDER[provider].has(normalized) ? normalized : null;
 }
 
 async function getCliReasoningForSession(
@@ -2507,7 +2506,7 @@ export function shouldRecordProviderUserMessage(provider: CLIProvider, message: 
 }
 
 export function appliesModeOnNextTurnWithoutRestart(provider: CLIProvider): boolean {
-  return provider === 'codex' || provider === 'kimi';
+  return provider === 'codex' || isAcpProvider(provider);
 }
 
 export function kimiAcpModeForSessionMode(mode: SessionMode): string {
@@ -2515,6 +2514,25 @@ export function kimiAcpModeForSessionMode(mode: SessionMode): string {
   if (mode === 'danger') return 'yolo';
   if (mode === 'manual') return 'default';
   return 'auto';
+}
+
+/** Short provider name for ACP log lines and user-visible errors. */
+export function acpProviderLabel(provider: CLIProvider | null | undefined): string {
+  return provider === 'vibe' ? 'Vibe' : 'Kimi';
+}
+
+/**
+ * Map a Plum session mode onto the ACP mode id the harness actually offers.
+ * Kimi: default/auto/plan/yolo. Vibe: ask/accept-edits/plan/auto-approve.
+ */
+export function acpModeForSessionMode(provider: CLIProvider, mode: SessionMode): string {
+  if (provider === 'vibe') {
+    if (mode === 'planning') return 'plan';
+    if (mode === 'danger') return 'auto-approve';
+    if (mode === 'manual') return 'ask';
+    return 'accept-edits';
+  }
+  return kimiAcpModeForSessionMode(mode);
 }
 
 export function resolveSessionStartMode(
@@ -2530,7 +2548,7 @@ export function shouldRecoverInterruptedKimiTurn(
   status: string | null,
   latestRole?: string
 ): boolean {
-  return provider === 'kimi' && status === 'stopped' && latestRole === 'user';
+  return isAcpProvider(provider) && status === 'stopped' && latestRole === 'user';
 }
 
 function kimiAcpConfigSupports(
@@ -2791,6 +2809,9 @@ interface ClaudeProcess {
   // Usage tracking
   model: string;
   contextWindow: number;
+  // Claude Code window fixed by the selected 200k/1M variant; the CLI reports
+  // the bare model id either way, so `model` cannot tell them apart.
+  pinnedContextWindow?: number;
   totalInputTokens: number;
   totalOutputTokens: number;
   cacheReadTokens: number;
@@ -2891,6 +2912,10 @@ interface ClaudeProcess {
   kimiQueueDraining?: boolean;
   kimiCompletedTools?: Set<string>;
   kimiThinkingText?: string;
+  /** Reasoning/thinking choice for ACP harnesses that expose it as a config
+   * option (Vibe: off/low/medium/high/max). Kimi encodes effort in the model
+   * alias instead, so this stays unset there. */
+  acpThinking?: string | null;
   // Server-backed providers (opencode in HTTP/SSE mode) have no child process.
   // `process` is a no-op stub; all lifecycle goes through HTTP + SSE subscription.
   serverBacked?: boolean;
@@ -3307,12 +3332,27 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
   }
 
   private getStringField(source: unknown, keys: string[]): string | undefined {
+    if (typeof source === 'string') {
+      try {
+        return this.getStringField(JSON.parse(source), keys);
+      } catch {
+        return undefined;
+      }
+    }
     if (!source || typeof source !== 'object') return undefined;
     const record = source as Record<string, unknown>;
     for (const key of keys) {
       const value = record[key];
       if (typeof value === 'string' && value.trim()) return value.trim();
     }
+    const content = (source as { content?: unknown }).content;
+    if (Array.isArray(content))
+      for (const block of content) {
+        if (isRecordValue(block) && typeof block.text === 'string') {
+          const found = this.getStringField(block.text, keys);
+          if (found) return found;
+        }
+      }
     return undefined;
   }
 
@@ -3341,20 +3381,11 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
   }
 
   private emitSubagentRun(sessionId: string, run: SubagentRun): void {
-    const event = {
-      sessionId,
-      agentId: run.id,
-      agentType: run.agentType,
-      description: run.description,
-      status: run.status,
-      startedAt: run.startedAt,
-      completedAt: run.completedAt,
-      result: run.result,
-      error: run.error,
-      toolId: run.toolId,
-      externalAgentId: run.externalAgentId,
-      timestamp: run.completedAt ?? run.startedAt,
-    };
+    const now = Date.now();
+    run.updatedAt = now;
+    run.revision = Math.max(now, (run.revision ?? 0) + 1);
+    persistSubagentRun(sessionId, run);
+    const event = { ...run, sessionId, agentId: run.id, timestamp: now };
     this.emitBufferedEvent(sessionId, 'agent', event, (sequenced) => {
       this.io.to(`session:${sessionId}`).emit('session:agent', sequenced);
     });
@@ -3367,7 +3398,12 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
       if (a.status !== 'started' && b.status === 'started') return 1;
       return (b.completedAt ?? b.startedAt) - (a.completedAt ?? a.startedAt);
     });
-    const keepIds = new Set(runs.slice(0, keep).map((run) => run.id));
+    const keepIds = new Set(
+      [
+        ...runs.filter((r) => r.status === 'started'),
+        ...runs.filter((r) => r.status !== 'started').slice(0, keep),
+      ].map((run) => run.id)
+    );
     for (const id of proc.subagentRuns.keys()) {
       if (!keepIds.has(id)) proc.subagentRuns.delete(id);
     }
@@ -3384,11 +3420,16 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
       externalAgentId?: string;
       startedAt?: number;
       background?: boolean;
+      provider?: CLIProvider;
+      model?: string;
+      parentRunId?: string;
+      lifecycle?: 'queued' | 'running';
     }
   ): SubagentRun {
     const now = input.startedAt ?? Date.now();
     const id = input.agentId || input.toolId || `${input.agentType}-${nanoid(8)}`;
     const existing = proc.subagentRuns.get(id);
+    if (existing && existing.status !== 'started') return existing;
     const run: SubagentRun = {
       ...existing,
       id,
@@ -3398,7 +3439,13 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
       startedAt: existing?.startedAt ?? now,
       toolId: input.toolId || existing?.toolId,
       externalAgentId: input.externalAgentId || existing?.externalAgentId,
-      provider: proc.cliProvider,
+      provider: input.provider ?? existing?.provider ?? proc.cliProvider,
+      model: input.model ?? existing?.model,
+      chatId: existing?.chatId ?? proc.currentChatId,
+      turnId: existing?.turnId ?? proc.currentUsageTurnId,
+      parentRunId: input.parentRunId ?? existing?.parentRunId,
+      lifecycle: input.lifecycle ?? existing?.lifecycle ?? 'running',
+      activity: existing?.activity ?? 'starting',
       background: input.background ?? existing?.background,
     };
     proc.subagentRuns.set(id, run);
@@ -3437,12 +3484,16 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
     );
     for (const match of notifications) {
       const [, taskId, status] = match;
-      if (!taskId) continue;
+      if (!taskId || !['completed', 'failed', 'stopped', 'cancelled'].includes(status!)) continue;
       this.completeSubagentRun(
         sessionId,
         proc,
         { externalAgentId: taskId },
-        { status: status === 'failed' ? 'error' : 'completed' }
+        {
+          status: status === 'completed' ? 'completed' : 'error',
+          lifecycle:
+            status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : 'cancelled',
+        }
       );
     }
   }
@@ -3461,9 +3512,16 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
       if (byTool) return byTool;
     }
     if (match?.externalAgentId) {
-      const byExternal = runs.find((run) => run.externalAgentId === match.externalAgentId);
+      const byExternal = runs
+        .filter((run) => run.externalAgentId === match.externalAgentId)
+        .sort(
+          (a, b) =>
+            Number(b.status === 'started') - Number(a.status === 'started') ||
+            b.startedAt - a.startedAt
+        )[0];
       if (byExternal) return byExternal;
     }
+    if (match?.agentId || match?.toolId || match?.externalAgentId) return undefined;
     return runs
       .filter(
         (run) =>
@@ -3481,14 +3539,21 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
       result?: unknown;
       error?: unknown;
       completedAt?: number;
+      lifecycle?: SubagentRun['lifecycle'];
     } = {}
   ): void {
     const existing = this.findSubagentRun(proc, match);
     if (!existing) return;
     const status = update.status ?? (update.error ? 'error' : 'completed');
+    if (
+      existing.status !== 'started' &&
+      (update.lifecycle ?? (status === 'error' ? 'failed' : 'completed')) !== existing.lifecycle
+    )
+      return;
     const run: SubagentRun = {
       ...existing,
       status,
+      lifecycle: update.lifecycle ?? (status === 'error' ? 'failed' : 'completed'),
       completedAt: update.completedAt ?? Date.now(),
       result: this.serializeResult(update.result) ?? existing.result,
       error: this.serializeResult(update.error) ?? existing.error,
@@ -3513,18 +3578,284 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
       (run) => run.status === 'started' && (!run.background || update.includeBackground === true)
     );
     for (const run of activeRuns) {
-      this.completeSubagentRun(sessionId, proc, { agentId: run.id }, update);
+      this.completeSubagentRun(
+        sessionId,
+        proc,
+        { agentId: run.id },
+        {
+          ...update,
+          status: 'error',
+          lifecycle: update.status === 'error' ? 'failed' : 'interrupted',
+        }
+      );
     }
   }
 
   private snapshotSubagentRuns(proc: ClaudeProcess): SubagentRun[] {
-    return Array.from(proc.subagentRuns.values())
-      .sort((a, b) => {
-        if (a.status === 'started' && b.status !== 'started') return -1;
-        if (a.status !== 'started' && b.status === 'started') return 1;
-        return (b.completedAt ?? b.startedAt) - (a.completedAt ?? a.startedAt);
-      })
-      .slice(0, 30);
+    const runs = Array.from(proc.subagentRuns.values());
+    return [
+      ...runs.filter((r) => r.status === 'started'),
+      ...runs
+        .filter((r) => r.status !== 'started')
+        .sort((a, b) => (b.completedAt ?? b.startedAt) - (a.completedAt ?? a.startedAt))
+        .slice(0, 30),
+    ];
+  }
+
+  private trackKimiSubagent(
+    sessionId: string,
+    proc: ClaudeProcess,
+    toolId: string,
+    title: string,
+    input: unknown,
+    status?: string | null,
+    result?: string
+  ): void {
+    if (!isRecordValue(input)) return;
+    const isAgent = title === 'Agent' || /^Launching (?:background )?.+ agent:/.test(title);
+    let run = this.findSubagentRun(proc, { toolId });
+    if (!run && isAgent && typeof input.prompt === 'string')
+      run = this.startSubagentRun(sessionId, proc, {
+        agentId: toolId,
+        toolId,
+        agentType:
+          typeof input.subagent_type === 'string'
+            ? input.subagent_type
+            : `${acpProviderLabel(proc.cliProvider)} subagent`,
+        description: typeof input.description === 'string' ? input.description : input.prompt,
+        model: typeof input.model === 'string' ? input.model : undefined,
+        background: input.run_in_background === true,
+      });
+    if (!run) return;
+    if (status === 'failed')
+      this.completeSubagentRun(
+        sessionId,
+        proc,
+        { agentId: run.id },
+        { status: 'error', error: result }
+      );
+    else if (status === 'completed' && !run.background)
+      this.completeSubagentRun(sessionId, proc, { agentId: run.id }, { result });
+    else if (status === 'completed' && run.background)
+      this.updateSubagentActivity(
+        sessionId,
+        proc,
+        run.id,
+        'Hintergrundstart bestätigt · keine weiteren ACP-Agentenereignisse verfügbar'
+      );
+  }
+
+  private applyPiSubagentResults(
+    sessionId: string,
+    proc: ClaudeProcess,
+    toolId: string,
+    raw: unknown,
+    complete: boolean
+  ): void {
+    if (!isRecordValue(raw) || !isRecordValue(raw.details) || !Array.isArray(raw.details.results))
+      return;
+    const details = raw.details;
+    const results = details.results as unknown[];
+    results.forEach((value, index) => {
+      if (!isRecordValue(value)) return;
+      const run = proc.subagentRuns.get(`${toolId}:${index}`);
+      if (!run || run.status !== 'started') return;
+      if (typeof value.model === 'string') run.model = value.model;
+      const messages = Array.isArray(value.messages) ? value.messages.filter(isRecordValue) : [];
+      if (run.model || messages.length || complete) {
+        run.lifecycle = 'running';
+        run.activity = 'working';
+        this.emitSubagentRun(sessionId, run);
+      }
+      const last = messages[messages.length - 1];
+      const blocks = last && Array.isArray(last.content) ? last.content.filter(isRecordValue) : [];
+      const tool = [...blocks]
+        .reverse()
+        .find((block) => block.type === 'toolCall' && typeof block.name === 'string');
+      if (tool)
+        this.updateSubagentActivity(
+          sessionId,
+          proc,
+          run.id,
+          `Tool: ${tool.name}`,
+          String(tool.name)
+        );
+      // Partial SingleResult.exitCode starts at zero while a child is still running.
+      // Only a final tool result or a following chain step establishes completion.
+      if (complete || (details.mode === 'chain' && index < results.length - 1)) {
+        const failed =
+          value.exitCode !== 0 || value.stopReason === 'error' || value.stopReason === 'aborted';
+        const text = blocks
+          .filter((block) => block.type === 'text')
+          .map((block) => block.text)
+          .join('\n');
+        this.completeSubagentRun(
+          sessionId,
+          proc,
+          { agentId: run.id },
+          {
+            status: failed ? 'error' : 'completed',
+            error: failed ? value.errorMessage || value.stderr || 'Pi subagent failed' : undefined,
+            result: text || undefined,
+          }
+        );
+      }
+    });
+  }
+
+  /**
+   * Mirror an Ultracode workflow's agents (tool `details.agents`) into
+   * subagent cards, children of the workflow's own card.
+   */
+  private applyPiWorkflowAgents(
+    sessionId: string,
+    proc: ClaudeProcess,
+    toolId: string,
+    raw: unknown,
+    complete: boolean,
+    isError = false
+  ): void {
+    const details = isRecordValue(raw) && isRecordValue(raw.details) ? raw.details : null;
+    const agents =
+      details?.kind === 'ultracode' && Array.isArray(details.agents) ? details.agents : [];
+    for (const value of agents) {
+      if (!isRecordValue(value) || typeof value.id !== 'string') continue;
+      const id = `${toolId}:wf:${value.id}`;
+      const status = typeof value.status === 'string' ? value.status : 'queued';
+      const run =
+        proc.subagentRuns.get(id) ??
+        this.startSubagentRun(sessionId, proc, {
+          agentId: id,
+          toolId,
+          parentRunId: toolId,
+          agentType:
+            typeof value.agent === 'string' && value.agent ? value.agent : 'workflow-agent',
+          description: [value.phase, value.label]
+            .filter((part) => typeof part === 'string' && part)
+            .join(' · '),
+          model: typeof value.model === 'string' ? value.model : undefined,
+          lifecycle: status === 'queued' ? 'queued' : 'running',
+        });
+      if (run.status !== 'started') continue;
+      if (status === 'running' && run.lifecycle !== 'running') {
+        run.lifecycle = 'running';
+        run.activity = 'working';
+        if (typeof value.model === 'string') run.model = value.model;
+        this.emitSubagentRun(sessionId, run);
+      }
+      if (typeof value.activity === 'string' && value.activity) {
+        this.updateSubagentActivity(sessionId, proc, id, value.activity);
+      }
+      if (status === 'completed' || status === 'cached') {
+        this.completeSubagentRun(
+          sessionId,
+          proc,
+          { agentId: id },
+          {
+            result:
+              typeof value.output === 'string'
+                ? value.output
+                : status === 'cached'
+                  ? 'Aus Cache'
+                  : undefined,
+          }
+        );
+      } else if (status === 'failed') {
+        this.completeSubagentRun(
+          sessionId,
+          proc,
+          { agentId: id },
+          {
+            status: 'error',
+            error: typeof value.error === 'string' ? value.error : 'Agent fehlgeschlagen',
+          }
+        );
+      }
+    }
+    if (!complete) return;
+    for (const run of proc.subagentRuns.values()) {
+      if (run.parentRunId === toolId && run.status === 'started') {
+        this.completeSubagentRun(
+          sessionId,
+          proc,
+          { agentId: run.id },
+          { status: 'error', error: 'Workflow beendet' }
+        );
+      }
+    }
+    this.completeSubagentRun(
+      sessionId,
+      proc,
+      { agentId: toolId },
+      isError
+        ? { status: 'error', error: 'Workflow fehlgeschlagen' }
+        : { result: `${agents.length} Agenten` }
+    );
+  }
+
+  private updateSubagentActivity(
+    sessionId: string,
+    proc: ClaudeProcess,
+    id: string,
+    text: string,
+    toolName?: string
+  ): void {
+    const run =
+      this.findSubagentRun(proc, { agentId: id }) ??
+      this.findSubagentRun(proc, { toolId: id }) ??
+      this.findSubagentRun(proc, { externalAgentId: id });
+    if (!run || run.status !== 'started') return;
+    const summary = text.slice(0, 240);
+    if (run.activitySummary === summary && !toolName) return;
+    run.activity =
+      toolName === 'AskUserQuestion' || toolName === 'ExitPlanMode' ? 'waiting' : 'working';
+    run.waitingReason =
+      run.activity === 'waiting'
+        ? toolName === 'AskUserQuestion'
+          ? 'Nutzereingabe'
+          : 'Planfreigabe'
+        : undefined;
+    run.activitySummary = summary;
+    run.activities = [...(run.activities ?? []), { at: Date.now(), text: summary, toolName }].slice(
+      -80
+    );
+    this.emitSubagentRun(sessionId, run);
+  }
+
+  /** Authenticated internal bridge reports actual worker identity, not its parent's provider. */
+  reportCliSubagent(
+    sessionId: string,
+    input: {
+      id: string;
+      provider: CLIProvider;
+      model?: string;
+      description?: string;
+      status: 'started' | 'completed' | 'error';
+      result?: string;
+      error?: string;
+    }
+  ): void {
+    const proc = this.processes.get(sessionId);
+    if (!proc) return;
+    const id = `cli-${input.id}`;
+    if (input.status === 'started')
+      this.startSubagentRun(sessionId, proc, {
+        agentId: id,
+        agentType: 'CLI subagent',
+        description: input.description,
+        provider: input.provider,
+        model: input.model,
+      });
+    else {
+      const run = proc.subagentRuns.get(id);
+      if (run && input.model) run.model = input.model;
+      this.completeSubagentRun(
+        sessionId,
+        proc,
+        { agentId: id },
+        { status: input.status, result: input.result, error: input.error }
+      );
+    }
   }
 
   private describeToolActivity(toolName: string, input?: unknown): string {
@@ -4494,10 +4825,11 @@ Discord Main Gateway:
   }
 
   /**
-   * A container restart cannot keep the in-flight ACP request alive. When a Kimi
-   * chat is opened again and its persisted transcript ends with a user turn,
-   * resume the native ACP session and continue that interrupted turn once. The
-   * recovery hint is transport-only and must not create a duplicate chat row.
+   * A container restart cannot keep the in-flight ACP request alive. When a
+   * Kimi or Vibe chat is opened again and its persisted transcript ends with a
+   * user turn, resume the native ACP session and continue that interrupted turn
+   * once. The recovery hint is transport-only and must not create a duplicate
+   * chat row.
    */
   async recoverInterruptedKimiTurn(sessionId: string, userId: string): Promise<boolean> {
     if (this.processes.has(sessionId)) return false;
@@ -4526,7 +4858,8 @@ Discord Main Gateway:
     }
 
     await this.startSession(sessionId, userId);
-    console.log(`[KIMI ACP] Recovering interrupted user turn [${sessionId}]`);
+    const acpLabel = acpProviderLabel(session.cli_provider);
+    console.log(`[${acpLabel.toUpperCase()} ACP] Recovering interrupted user turn [${sessionId}]`);
     void this.sendMessage(
       sessionId,
       userId,
@@ -4534,10 +4867,13 @@ Discord Main Gateway:
       undefined,
       { recordMessage: false, updateLastMessage: false }
     ).catch((error) => {
-      console.error(`[KIMI ACP] Interrupted-turn recovery failed [${sessionId}]:`, error);
+      console.error(
+        `[${acpLabel.toUpperCase()} ACP] Interrupted-turn recovery failed [${sessionId}]:`,
+        error
+      );
       this.io.to(`session:${sessionId}`).emit('session:error', {
         sessionId,
-        error: `Kimi recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+        error: `${acpLabel} recovery failed: ${error instanceof Error ? error.message : String(error)}`,
       });
     });
     return true;
@@ -4575,6 +4911,7 @@ Discord Main Gateway:
           active_chat_id: string | null;
           cli_provider: CLIProvider | null;
           mode: SessionMode | null;
+          last_message: string | null;
         }
       | undefined;
 
@@ -4603,6 +4940,41 @@ Discord Main Gateway:
     }
     if (cliProvider === 'zai' && !(await getZaiApiConfigForUser(userId))) {
       throw new Error('Configure Z.AI in Settings before starting this session');
+    }
+    // Older CLI runs could persist this exact provider rejection as assistant
+    // text. Recover it through the existing summary/reminder path before
+    // choosing --resume, or the next prompt replays the oversized transcript.
+    if (
+      isClaudeTransportProvider(cliProvider) &&
+      session.last_message &&
+      isClaudeContextLimitAssistantReply(session.last_message)
+    ) {
+      const summary = await this.buildContextSummary(
+        sessionId,
+        HANDOFF_CONTEXT_MAX_MESSAGES,
+        HANDOFF_CONTEXT_MAX_CHARS,
+        session.active_chat_id
+      );
+      const recovered = await pgRun(
+        "UPDATE sessions SET claude_session_id = NULL, last_message = 'Context compacted after limit reached', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND last_message = ?",
+        sessionId,
+        userId,
+        session.last_message
+      );
+      if (recovered.changes === 1) {
+        session.claude_session_id = null;
+        if (summary) {
+          this.pendingContextReminders.set(sessionId, { summary, reason: 'context-limit' });
+        }
+        await this.emitCompact(sessionId, {
+          sessionId,
+          message: 'Context limit reached. Auto-compacting context to continue.',
+          summary: summary || undefined,
+          clear: true,
+          reason: 'context-limit',
+          error: session.last_message,
+        });
+      }
     }
     const configHome = resolveConfigHome(cliProvider);
     if (isClaudeTransportProvider(cliProvider)) {
@@ -4765,19 +5137,24 @@ Discord Main Gateway:
       return;
     }
 
-    if (cliProvider === 'kimi') {
-      const providerConfig = CLI_PROVIDERS.kimi;
+    if (isAcpProvider(cliProvider)) {
+      const providerConfig = CLI_PROVIDERS[cliProvider];
+      const acpLabel = acpProviderLabel(cliProvider);
       const persistedSessionId = session.claude_session_id || undefined;
       const shouldInjectStaticBootstrap = shouldInjectCodexStaticBootstrap(persistedSessionId);
       const extraEnv: Record<string, string> = {
         ...(await buildIntegrationEnv()),
         ...(await buildAndroidDeviceEnvForSession(sessionId, userId)),
       };
-      const child = spawnManagedProcess(providerConfig.command, ['acp'], {
+      // Kimi exposes its ACP agent as a subcommand (`kimi acp`); Vibe ships a
+      // dedicated `vibe-acp` entry point that takes no arguments.
+      const acpArgs = cliProvider === 'kimi' ? ['acp'] : [];
+      const child = spawnManagedProcess(providerConfig.command, acpArgs, {
         cwd: session.working_directory,
         env: {
           ...process.env,
           ...extraEnv,
+          ...(cliProvider === 'vibe' ? buildVibeEnv() : {}),
           WEBUI_SESSION_ID: sessionId,
           WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
           WEBUI_PROJECT_PATH: session.working_directory,
@@ -4788,7 +5165,7 @@ Discord Main Gateway:
 
       if (!child.stdin || !child.stdout) {
         terminateManagedProcess(child);
-        throw new Error('Kimi ACP process did not expose stdin/stdout');
+        throw new Error(`${acpLabel} ACP process did not expose stdin/stdout`);
       }
 
       const claudeProcess: ClaudeProcess = {
@@ -4840,6 +5217,7 @@ Discord Main Gateway:
         kimiQueuedTurns: [],
         kimiQueueDraining: false,
         kimiCompletedTools: new Set(),
+        acpThinking: cliProvider === 'vibe' ? selectedReasoning : undefined,
         emittedTools: new Set(),
       };
 
@@ -4847,10 +5225,10 @@ Discord Main Gateway:
       this.processes.set(sessionId, claudeProcess);
 
       child.stderr?.on('data', (data: Buffer) => {
-        console.error(`Kimi ACP stderr [${sessionId}]:`, data.toString());
+        console.error(`${acpLabel} ACP stderr [${sessionId}]:`, data.toString());
       });
       child.on('exit', async (exitCode) => {
-        console.log(`[KIMI ACP] Process for session ${sessionId} exited with code ${exitCode}`);
+        console.log(`[${acpLabel.toUpperCase()} ACP] Process for session ${sessionId} exited with code ${exitCode}`);
         const managedProc = this.processes.get(sessionId);
         if (managedProc !== claudeProcess) return;
         if (managedProc.streamingText.trim()) {
@@ -4864,17 +5242,17 @@ Discord Main Gateway:
         if (exitCode !== 0 && exitCode !== null) {
           this.io.to(`session:${sessionId}`).emit('session:error', {
             sessionId,
-            error: `Kimi ACP exited unexpectedly (code ${exitCode}).`,
+            error: `${acpLabel} ACP exited unexpectedly (code ${exitCode}).`,
           });
         }
         await this.cleanupProcess(sessionId, claudeProcess);
       });
       child.on('error', async (error) => {
-        console.error(`[KIMI ACP] Process error [${sessionId}]:`, error);
+        console.error(`[${acpLabel.toUpperCase()} ACP] Process error [${sessionId}]:`, error);
         if (this.processes.get(sessionId) !== claudeProcess) return;
         this.io.to(`session:${sessionId}`).emit('session:error', {
           sessionId,
-          error: `Kimi ACP failed: ${error.message}`,
+          error: `${acpLabel} ACP failed: ${error.message}`,
         });
         await this.cleanupProcess(sessionId, claudeProcess);
       });
@@ -4898,8 +5276,12 @@ Discord Main Gateway:
           clientCapabilities: {},
         });
         console.log(
-          `[KIMI ACP] Connected [${sessionId}] agent=${initialized.agentInfo?.name || 'Kimi'} version=${initialized.agentInfo?.version || 'unknown'}`
+          `[${acpLabel.toUpperCase()} ACP] Connected [${sessionId}] agent=${initialized.agentInfo?.name || acpLabel} version=${initialized.agentInfo?.version || 'unknown'}`
         );
+
+        if (cliProvider === 'vibe') {
+          await this.trustVibeWorkspace(connection, session.working_directory, sessionId);
+        }
 
         let nativeSessionId = persistedSessionId;
         let configOptions: AcpSessionConfigOption[] | null | undefined;
@@ -4915,7 +5297,7 @@ Discord Main Gateway:
           } catch (error) {
             if (!isKimiSessionNotFoundError(String(error))) throw error;
             console.warn(
-              `[KIMI ACP] Native session ${nativeSessionId} is missing; creating a fresh session [${sessionId}]`
+              `[${acpLabel.toUpperCase()} ACP] Native session ${nativeSessionId} is missing; creating a fresh session [${sessionId}]`
             );
             nativeSessionId = undefined;
           }
@@ -4948,9 +5330,9 @@ Discord Main Gateway:
         );
         this.emitStatus(sessionId, { sessionId, status: 'running' });
 
-        console.log(`[SESSION] ========== Starting Session (kimi ACP) ==========`);
+        console.log(`[SESSION] ========== Starting Session (${acpLabel} ACP) ==========`);
         console.log(`[SESSION] Session ID: ${sessionId}`);
-        console.log(`[SESSION] Kimi session ID: ${nativeSessionId}`);
+        console.log(`[SESSION] ${acpLabel} session ID: ${nativeSessionId}`);
         console.log(`[SESSION] Working directory: ${session.working_directory}`);
         console.log(`[SESSION] Mode: ${effectiveMode}`);
         console.log(`[SESSION] Model: ${claudeProcess.model}`);
@@ -5142,6 +5524,9 @@ Discord Main Gateway:
       extraEnv.PI_CODING_AGENT_DIR = piAgentDir;
       extraEnv.PI_TELEMETRY = '0';
       extraEnv.PI_SKIP_VERSION_CHECK = '1';
+      // The ultracode effort keeps the workflow tool on for every turn; without
+      // it the extension still enables it for a prompt that says "ultracode".
+      extraEnv.PI_ULTRACODE = selectedReasoning === 'ultracode' ? '1' : '0';
       Object.assign(extraEnv, await buildOpenCodeProviderCredentialEnv(userId));
     }
     extraEnv.WEBUI_SESSION_MODE = effectiveMode;
@@ -5156,6 +5541,7 @@ Discord Main Gateway:
           ? await buildClaudeTransportEnv(cliProvider, userId, configHome, sessionId)
           : process.env),
         ...extraEnv,
+        ...(cliProvider === 'claude' ? claudeContextWindowEnv(selectedModel) : {}),
         // Pass session ID so provider integrations can attribute image generation and permissions.
         WEBUI_SESSION_ID: sessionId,
         // Pass backend URL for permission-prompt script
@@ -5196,6 +5582,8 @@ Discord Main Gateway:
       // Usage tracking defaults
       model: selectedModel || CLI_PROVIDERS[cliProvider]?.defaultModel || 'unknown',
       contextWindow: contextWindowFor(selectedModel || CLI_PROVIDERS[cliProvider]?.defaultModel),
+      pinnedContextWindow:
+        cliProvider === 'claude' ? (claudeCliContextWindow(selectedModel) ?? undefined) : undefined,
       // Per-turn usage (for context display)
       turnInputTokens: 0,
       turnCacheReadTokens: 0,
@@ -5390,7 +5778,7 @@ Discord Main Gateway:
           proc.cliProvider !== 'codex' &&
           proc.cliProvider !== 'opencode' &&
           proc.cliProvider !== 'pi' &&
-          proc.cliProvider !== 'kimi'
+          !isAcpProvider(proc.cliProvider)
         ) {
           this.io.to(`session:${sessionId}`).emit('session:output', {
             sessionId,
@@ -5426,7 +5814,7 @@ Discord Main Gateway:
           }
           continue;
         }
-        if (proc.cliProvider === 'kimi') {
+        if (isAcpProvider(proc.cliProvider)) {
           await this.processKimiLine(sessionId, proc, raw);
           continue;
         }
@@ -5549,30 +5937,49 @@ Discord Main Gateway:
       proc.currentToolName = toolName;
       proc.pendingToolResults.set(toolCallId, { toolName, input: args });
 
-      if (toolName.toLowerCase() === 'subagent' && isRecordValue(args)) {
-        const firstTask =
-          Array.isArray(args.tasks) && isRecordValue(args.tasks[0]) ? args.tasks[0] : null;
-        const agentType =
-          typeof args.agent === 'string'
-            ? args.agent
-            : firstTask && typeof firstTask.agent === 'string'
-              ? firstTask.agent
-              : 'subagent';
-        const description =
-          typeof args.task === 'string'
-            ? args.task
-            : firstTask && typeof firstTask.task === 'string'
-              ? firstTask.task
-              : undefined;
+      if (toolName === 'workflow' && isRecordValue(args)) {
+        // Ultracode (scripts/pi-ultracode-extension.ts): the workflow is the
+        // parent card; its agents appear as the tool streams progress.
+        const script = typeof args.script === 'string' ? args.script : '';
+        const name = /\bname\s*:\s*['"`]([^'"`]{1,120})/.exec(script)?.[1];
         this.startSubagentRun(sessionId, proc, {
           agentId: toolCallId,
-          agentType,
-          description,
           toolId: toolCallId,
+          agentType: 'workflow',
+          description: name ? `Ultracode · ${name}` : 'Ultracode-Workflow',
+        });
+      }
+
+      if (toolName.toLowerCase() === 'subagent' && isRecordValue(args)) {
+        const tasks = Array.isArray(args.tasks)
+          ? args.tasks
+          : Array.isArray(args.chain)
+            ? args.chain
+            : [args];
+        tasks.forEach((task, index) => {
+          if (!isRecordValue(task)) return;
+          this.startSubagentRun(sessionId, proc, {
+            lifecycle: tasks.length > 1 ? 'queued' : 'running',
+            agentId: `${toolCallId}:${index}`,
+            toolId: toolCallId,
+            agentType: typeof task.agent === 'string' ? task.agent : 'subagent',
+            description: typeof task.task === 'string' ? task.task : undefined,
+          });
         });
       }
 
       return { type: 'tool_use', tool_use: { id: toolCallId, name: toolName } };
+    }
+
+    if (type === 'tool_execution_update') {
+      const callId = typeof event.toolCallId === 'string' ? event.toolCallId : '';
+      const pendingName = proc.pendingToolResults.get(callId)?.toolName;
+      if (pendingName?.toLowerCase() === 'subagent') {
+        this.applyPiSubagentResults(sessionId, proc, callId, event.partialResult, false);
+      } else if (pendingName === 'workflow') {
+        this.applyPiWorkflowAgents(sessionId, proc, callId, event.partialResult, false);
+      }
+      return null;
     }
 
     if (type === 'tool_execution_end') {
@@ -5589,13 +5996,24 @@ Discord Main Gateway:
         input: pending?.input,
         result: result || undefined,
       });
+      if (pending?.toolName === 'workflow') {
+        this.applyPiWorkflowAgents(sessionId, proc, toolCallId, event.result, true, isError);
+      }
       if (pending?.toolName.toLowerCase() === 'subagent') {
-        this.completeSubagentRun(
-          sessionId,
-          proc,
-          { toolId: toolCallId },
-          isError ? { error: result || 'Pi subagent failed' } : { result }
-        );
+        this.applyPiSubagentResults(sessionId, proc, toolCallId, event.result, true);
+        for (const run of proc.subagentRuns.values()) {
+          if (run.toolId === toolCallId && run.status === 'started')
+            this.completeSubagentRun(
+              sessionId,
+              proc,
+              { agentId: run.id },
+              {
+                status: 'error',
+                lifecycle: isError ? 'failed' : 'interrupted',
+                error: isError ? result : undefined,
+              }
+            );
+        }
       }
       if (toolCallId) proc.pendingToolResults.delete(toolCallId);
       proc.currentToolId = null;
@@ -6438,6 +6856,11 @@ Discord Main Gateway:
         path?: string;
         summary?: string;
         content?: string;
+        prompt?: string;
+        model?: string;
+        sender_thread_id?: string;
+        receiver_thread_ids?: string[];
+        agents_states?: Record<string, { status: string; message?: string }>;
       };
     },
     isCompleted: boolean
@@ -6447,8 +6870,9 @@ Discord Main Gateway:
     // Codex item types may be camelCase (`commandExecution`) or snake_case
     // (`command_execution`) — normalize for switching.
     const itemType = (item.type || '').replace(/_/g, '').toLowerCase();
-    const itemId = item.id || `codex-${itemType}-${Date.now()}`;
     const proc = this.processes.get(sessionId);
+    const rawItemId = item.id || `codex-${itemType}-${Date.now()}`;
+    const itemId = proc?.currentUsageTurnId ? `${proc.currentUsageTurnId}:${rawItemId}` : rawItemId;
 
     // Skip duplicate started events; track which item ids we've emitted started for.
     if (proc) {
@@ -6544,6 +6968,73 @@ Discord Main Gateway:
         return null;
       }
 
+      // Native exec collaboration items are not MCP calls. The item finishing
+      // reports the tool's lifecycle; agents_states reports each worker's lifecycle.
+      case 'collabtoolcall':
+      case 'collabagenttoolcall': {
+        if (!proc) return null;
+        const targets = item.receiver_thread_ids ?? [];
+        const action = item.tool ?? '';
+        if (['spawn_agent', 'send_input', 'resume_agent'].includes(action)) {
+          for (const target of targets) {
+            const previous = this.findSubagentRun(proc, { externalAgentId: target });
+            if (item.status === 'failed') continue;
+            const invocationId =
+              previous?.status === 'started' ? previous.id : `${itemId}:${target}`;
+            this.startSubagentRun(sessionId, proc, {
+              agentId: invocationId,
+              externalAgentId: target,
+              toolId: itemId,
+              agentType: previous?.agentType ?? 'Codex subagent',
+              description: item.prompt || previous?.description,
+              model: item.model ?? previous?.model,
+              background: true,
+              parentRunId: item.sender_thread_id
+                ? this.findSubagentRun(proc, { externalAgentId: item.sender_thread_id })?.id
+                : undefined,
+            });
+          }
+        }
+        for (const [target, state] of Object.entries(item.agents_states ?? {})) {
+          const run = this.findSubagentRun(proc, { externalAgentId: target });
+          if (!run) continue;
+          const terminal = subagentWaitOutcomes({ agents_states: { [target]: state } })[target];
+          if (terminal)
+            this.completeSubagentRun(
+              sessionId,
+              proc,
+              { agentId: run.id },
+              {
+                status: terminal === 'completed' ? 'completed' : 'error',
+                lifecycle: terminal,
+                result: terminal === 'completed' ? state.message : undefined,
+                error: terminal === 'failed' ? state.message : undefined,
+              }
+            );
+          else if (run.status === 'started' && state.status === 'running') {
+            this.updateSubagentActivity(
+              sessionId,
+              proc,
+              run.id,
+              'Läuft · Status vom Provider bestätigt'
+            );
+          }
+        }
+        if (action === 'close_agent' && isCompleted && item.status === 'completed') {
+          for (const target of targets) {
+            const run = this.findSubagentRun(proc, { externalAgentId: target });
+            if (run?.status === 'started')
+              this.completeSubagentRun(
+                sessionId,
+                proc,
+                { agentId: run.id },
+                { status: 'error', lifecycle: 'cancelled' }
+              );
+          }
+        }
+        return null;
+      }
+
       case 'mcptoolcall':
       case 'mcp_tool_call': {
         const toolName = `${item.server || 'mcp'}.${item.tool || 'tool'}`;
@@ -6551,6 +7042,8 @@ Discord Main Gateway:
         const isSpawnAgentTool = normalizedToolName.includes('spawnagent');
         const isWaitAgentTool = normalizedToolName.includes('waitagent');
         const isCloseAgentTool = normalizedToolName.includes('closeagent');
+        const isFollowupTool =
+          normalizedToolName.includes('followuptask') || normalizedToolName.includes('sendinput');
         if (isSpawnAgentTool && proc) {
           const agentType =
             this.getStringField(item.arguments, [
@@ -6575,32 +7068,56 @@ Discord Main Gateway:
             externalAgentId,
           });
         }
+        if (isSpawnAgentTool && isCompleted && item.error && proc) {
+          this.completeSubagentRun(
+            sessionId,
+            proc,
+            { toolId: itemId },
+            { status: 'error', error: item.error }
+          );
+        }
+        if (isFollowupTool && isCompleted && !item.error && proc) {
+          for (const target of this.getStringListField(item.arguments, ['target', 'id'])) {
+            const previous = this.findSubagentRun(proc, { externalAgentId: target });
+            this.startSubagentRun(sessionId, proc, {
+              agentId: previous?.status === 'started' ? previous.id : itemId,
+              externalAgentId: target,
+              toolId: itemId,
+              agentType: previous?.agentType ?? 'subagent',
+              model: previous?.model,
+              description: this.getStringField(item.arguments, ['message', 'prompt']),
+              background: true,
+            });
+          }
+        }
         if (isCompleted && proc && (isWaitAgentTool || isCloseAgentTool)) {
-          const targets = this.getStringListField(item.arguments, [
-            'targets',
-            'target',
-            'ids',
-            'id',
-          ]);
-          if (targets.length > 0) {
-            for (const target of targets) {
+          if (isCloseAgentTool && !item.error) {
+            for (const target of this.getStringListField(item.arguments, [
+              'targets',
+              'target',
+              'ids',
+              'id',
+            ])) {
+              this.completeSubagentRun(
+                sessionId,
+                proc,
+                { externalAgentId: target },
+                { status: 'error', lifecycle: 'cancelled' }
+              );
+            }
+          } else if (!item.error) {
+            for (const [target, state] of Object.entries(subagentWaitOutcomes(item.result))) {
               this.completeSubagentRun(
                 sessionId,
                 proc,
                 { externalAgentId: target },
                 {
+                  status: state === 'completed' ? 'completed' : 'error',
+                  lifecycle: state,
                   result: item.result,
-                  error: item.error,
-                  status: item.error ? 'error' : 'completed',
                 }
               );
             }
-          } else {
-            this.completeActiveSubagents(sessionId, proc, {
-              result: item.result,
-              error: item.error,
-              status: item.error ? 'error' : 'completed',
-            });
           }
         }
         if (!isCompleted) {
@@ -7170,6 +7687,35 @@ Discord Main Gateway:
             | { status?: string; input?: unknown; output?: string; error?: string }
             | undefined;
           if (!toolName || !state) return;
+          if (toolName === 'task') {
+            const input = isRecordValue(state.input) ? state.input : {};
+            if (!this.findSubagentRun(proc, { toolId: callId }))
+              this.startSubagentRun(sessionId, proc, {
+                agentId: callId,
+                toolId: callId,
+                agentType:
+                  typeof input.subagent_type === 'string'
+                    ? input.subagent_type
+                    : 'OpenCode subagent',
+                description:
+                  typeof input.description === 'string'
+                    ? input.description
+                    : typeof input.prompt === 'string'
+                      ? input.prompt
+                      : undefined,
+              });
+            if (state.status === 'completed' || state.status === 'error')
+              this.completeSubagentRun(
+                sessionId,
+                proc,
+                { toolId: callId },
+                {
+                  status: state.status === 'error' ? 'error' : 'completed',
+                  result: state.output,
+                  error: state.error,
+                }
+              );
+          }
           const emittedTools = (proc.emittedTools ??= new Set());
 
           if (state.status === 'pending' || state.status === 'running') {
@@ -7685,8 +8231,10 @@ Discord Main Gateway:
     totalCostUsd: number;
     model: string;
     recordedAt: string;
+    contextWindowPinned?: boolean;
   } {
-    const contextWindow = this.resolveObservedContextWindow(proc.model, proc.contextWindow);
+    const contextWindow =
+      proc.pinnedContextWindow ?? this.resolveObservedContextWindow(proc.model, proc.contextWindow);
     const contextInputTokens = proc.contextInputTokens ?? proc.turnInputTokens;
     const contextCacheReadTokens = proc.contextCacheReadTokens ?? proc.turnCacheReadTokens;
     const contextCacheCreationTokens =
@@ -7723,6 +8271,7 @@ Discord Main Gateway:
       totalCostUsd: proc.totalCostUsd,
       model: proc.model,
       recordedAt: new Date().toISOString(),
+      ...(proc.pinnedContextWindow ? { contextWindowPinned: true } : {}),
     };
   }
 
@@ -7914,14 +8463,7 @@ Discord Main Gateway:
   }
 
   private isContextLimitError(text: string): boolean {
-    const normalized = text.toLowerCase();
-    return (
-      normalized.includes('context window') ||
-      normalized.includes('context limit') ||
-      normalized.includes('context length') ||
-      normalized.includes('maximum context') ||
-      normalized.includes('token limit')
-    );
+    return isClaudeContextLimitErrorText(text);
   }
 
   private async handleContextLimit(
@@ -7958,6 +8500,25 @@ Discord Main Gateway:
       isThinking: false,
     });
 
+    // The resident claude-transport CLI still holds the oversized conversation
+    // in memory, and --resume would reload the same transcript from disk: every
+    // follow-up and every restart hit the identical limit again. Drop the
+    // resume id so the next start is a fresh CLI session that continues from
+    // the summary above, and stop the resident child so the next message
+    // respawns instead of writing into the dead-end process.
+    if (isClaudeTransportProvider(proc.cliProvider)) {
+      try {
+        await pgRun(
+          'UPDATE sessions SET claude_session_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          sessionId
+        );
+      } catch (error) {
+        console.error(`[CONTEXT-LIMIT] Failed to drop resume id for ${sessionId}:`, error);
+      }
+      proc.claudeSessionId = null;
+      terminateManagedProcess(proc.process);
+    }
+
     await this.emitCompact(sessionId, {
       sessionId,
       message: `Context limit reached. Auto-compacting context to continue.`,
@@ -7972,6 +8533,97 @@ Discord Main Gateway:
   private async processStreamMessage(sessionId: string, msg: StreamJsonMessage): Promise<void> {
     const proc = this.processes.get(sessionId);
     if (!proc) return;
+
+    const native = msg as unknown as {
+      parent_tool_use_id?: string;
+      task_id?: string;
+      task_type?: string;
+      tool_use_id?: string;
+      description?: string;
+      summary?: string;
+      status?: string;
+      last_tool_name?: string;
+      message?: { model?: string; content?: Array<{ type: string; name?: string }> };
+    };
+    if (
+      msg.type === 'system' &&
+      ['task_started', 'task_progress', 'task_notification'].includes(msg.subtype || '')
+    ) {
+      const run =
+        (native.tool_use_id
+          ? this.findSubagentRun(proc, { toolId: native.tool_use_id })
+          : undefined) ??
+        (native.task_id
+          ? this.findSubagentRun(proc, { externalAgentId: native.task_id })
+          : undefined);
+      if (msg.subtype === 'task_started') {
+        if (run) {
+          run.externalAgentId = native.task_id;
+          this.emitSubagentRun(sessionId, run);
+        } else if (native.task_id && ['local_agent', 'agent'].includes(native.task_type || ''))
+          this.startSubagentRun(sessionId, proc, {
+            agentId: native.task_id,
+            externalAgentId: native.task_id,
+            toolId: native.tool_use_id,
+            agentType: 'workflow',
+            description: native.description,
+            background: true,
+          });
+      } else if (run && msg.subtype === 'task_progress') {
+        this.updateSubagentActivity(
+          sessionId,
+          proc,
+          run.id,
+          native.description || native.last_tool_name || 'Aktivitätsmeldung',
+          native.last_tool_name
+        );
+      } else if (
+        run &&
+        ['completed', 'failed', 'stopped', 'cancelled'].includes(native.status || '')
+      ) {
+        this.completeSubagentRun(
+          sessionId,
+          proc,
+          { agentId: run.id },
+          {
+            status: native.status === 'completed' ? 'completed' : 'error',
+            lifecycle:
+              native.status === 'completed'
+                ? 'completed'
+                : native.status === 'failed'
+                  ? 'failed'
+                  : 'cancelled',
+            result: native.summary,
+          }
+        );
+      }
+      return;
+    }
+    if (native.parent_tool_use_id) {
+      const childRun = this.findSubagentRun(proc, { toolId: native.parent_tool_use_id });
+      if (childRun && native.message?.model && childRun.model !== native.message.model) {
+        childRun.model = native.message.model;
+        this.emitSubagentRun(sessionId, childRun);
+      }
+      if (
+        childRun?.activity === 'waiting' &&
+        native.message?.content?.some((block) => block.type === 'tool_result')
+      ) {
+        this.updateSubagentActivity(sessionId, proc, childRun.id, 'Antwort empfangen');
+      }
+      const block = (msg.event as unknown as { content_block?: { type?: string; name?: string } })
+        ?.content_block;
+      const tool = block?.name || native.message?.content?.find((c) => c.type === 'tool_use')?.name;
+      if (tool)
+        this.updateSubagentActivity(
+          sessionId,
+          proc,
+          native.parent_tool_use_id,
+          `Tool: ${tool}`,
+          tool
+        );
+      return; // Child output must never replace the parent assistant stream.
+    }
 
     console.log(
       `[MSG] type=${msg.type} subtype=${msg.subtype || ''} event.type=${msg.event?.type || ''}`
@@ -8015,11 +8667,12 @@ Discord Main Gateway:
       // message_start contains initial usage and model - also means new response is starting
       if (event.type === 'message_start') {
         console.log(`[MSG] message_start - new response beginning`);
-        proc.currentActivitySummary = 'Writing response';
-        // A new message is starting, Claude is responding
+        proc.currentActivitySummary = 'Thinking';
+        // Opus 5.5 can spend minutes in a thinking block before its first text
+        // or tool call. Keep the live activity visible until actual text arrives.
         this.io.to(`session:${sessionId}`).emit('session:thinking', {
           sessionId,
-          isThinking: false,
+          isThinking: true,
         });
         if (event.message) {
           if (event.message.model) {
@@ -8083,7 +8736,19 @@ Discord Main Gateway:
               status: 'started',
             });
           }
-        } else {
+        } else if (
+          contentBlock?.type === 'thinking' ||
+          contentBlock?.type === 'redacted_thinking'
+        ) {
+          // Thinking is not assistant text. Newer Claude models send progress
+          // between tool calls in these blocks, often without readable text.
+          proc.isStreaming = false;
+          proc.currentActivitySummary = 'Thinking';
+          this.io.to(`session:${sessionId}`).emit('session:thinking', {
+            sessionId,
+            isThinking: true,
+          });
+        } else if (contentBlock?.type === 'text') {
           // Text block - start streaming
           proc.isStreaming = true;
           proc.streamingText = '';
@@ -8094,10 +8759,9 @@ Discord Main Gateway:
           // Safety net: if a provider did not send a tool_result for an agent,
           // mark outstanding subagent work complete when assistant text resumes.
           this.completeActiveSubagents(sessionId, proc);
-          this.io.to(`session:${sessionId}`).emit('session:thinking', {
-            sessionId,
-            isThinking: false,
-          });
+          // Wait for the first text delta before clearing thinking. A text
+          // block may open well before its content arrives; clearing here can
+          // trigger a false completion notification in the WebUI.
         }
       }
 
@@ -8109,6 +8773,7 @@ Discord Main Gateway:
 
         // Handle text streaming
         if (delta?.type === 'text_delta' && delta.text) {
+          const firstText = proc.streamingText.length === 0;
           proc.streamingText += delta.text;
           console.log(
             `[STREAM] Emitting session:output with text: "${delta.text.substring(0, 50)}..."`
@@ -8119,6 +8784,12 @@ Discord Main Gateway:
             content: delta.text,
             isComplete: false,
           });
+          if (firstText) {
+            this.io.to(`session:${sessionId}`).emit('session:thinking', {
+              sessionId,
+              isThinking: false,
+            });
+          }
         }
 
         // Handle tool input JSON streaming
@@ -8228,19 +8899,23 @@ The planning phase is complete. You are now in Auto-Accept mode.
             try {
               const taskInput = JSON.parse(proc.currentToolInput) as {
                 subagent_type?: string;
+                model?: string;
+                prompt?: string;
                 description?: string;
                 run_in_background?: boolean;
               };
               const agentType = taskInput.subagent_type || 'general-purpose';
               const background =
-                normalizedToolName === 'agent' && taskInput.run_in_background !== false;
+                taskInput.run_in_background === true ||
+                (normalizedToolName === 'agent' && taskInput.run_in_background !== false);
               console.log(
                 `[AGENT] Agent starting: ${agentType}${background ? ' (background)' : ''} - ${taskInput.description || ''}`
               );
               this.startSubagentRun(sessionId, proc, {
                 agentId: proc.currentToolId || undefined,
                 agentType,
-                description: taskInput.description,
+                description: taskInput.description || taskInput.prompt,
+                model: taskInput.model,
                 toolId: proc.currentToolId,
                 background,
               });
@@ -8334,7 +9009,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
       // Get context window from modelUsage if available
       if (msg.modelUsage) {
         const primaryModel = Object.entries(msg.modelUsage).find(
-          ([key]) => key.includes('opus') || key.includes('sonnet')
+          ([key]) => key.includes('fable') || key.includes('opus') || key.includes('sonnet')
         );
         if (primaryModel && primaryModel[1].contextWindow) {
           proc.contextWindow = primaryModel[1].contextWindow;
@@ -8447,6 +9122,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
           content?: Array<{
             type: string;
             tool_use_id?: string;
+            is_error?: boolean;
             content?: string | Array<{ type: string; text?: string }>;
           }>;
         };
@@ -8476,7 +9152,14 @@ The planning phase is complete. You are now in Auto-Accept mode.
                 .toLowerCase();
               if (normalizedPendingTool === 'task' || normalizedPendingTool === 'agent') {
                 const run = this.findSubagentRun(proc, { toolId: block.tool_use_id });
-                if (run?.background) {
+                if (block.is_error) {
+                  this.completeSubagentRun(
+                    sessionId,
+                    proc,
+                    { toolId: block.tool_use_id },
+                    { status: 'error', error: resultText }
+                  );
+                } else if (run?.background) {
                   // The result only acknowledges the launch; the run is still
                   // going. Capture its id so the completion notification can
                   // find it later.
@@ -8588,6 +9271,21 @@ The planning phase is complete. You are now in Auto-Accept mode.
       for (const pending of explicitWorkspaceMedia.media) {
         appendPendingChatMedia(proc, pending);
       }
+    }
+
+    // A claude-transport CLI (claude/zai) surfaces provider API errors as plain
+    // assistant text — "API Error: The model has reached its context window
+    // limit." — rather than as a type:'error' stream message. Saving that as a
+    // reply fakes a model answer and skips the auto-compact recovery, so a
+    // session over the endpoint's limit kept erroring on every retry. Route it
+    // to the context-limit handler instead.
+    if (
+      proc &&
+      isClaudeTransportProvider(proc.cliProvider) &&
+      isClaudeContextLimitAssistantReply(deliveredContent)
+    ) {
+      await this.handleContextLimit(sessionId, proc, deliveredContent.trim());
+      return;
     }
     const hasPendingMedia = (proc?.pendingChatMedia.length ?? 0) > 0;
     const now = Date.now();
@@ -8759,7 +9457,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     if (proc.cliProvider === 'opencode') {
       return proc.opencodeQueuedTurns ?? [];
     }
-    if (proc.cliProvider === 'kimi') {
+    if (isAcpProvider(proc.cliProvider)) {
       return proc.kimiQueuedTurns ?? [];
     }
     if (isClaudeTransportProvider(proc.cliProvider)) {
@@ -8823,7 +9521,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
             ? !proc.opencodeIdle || items.length > 0
             : isClaudeTransportProvider(proc.cliProvider)
               ? proc.claudeIdle === false || items.length > 0
-              : proc.cliProvider === 'kimi'
+              : isAcpProvider(proc.cliProvider)
                 ? proc.kimiIdle === false || items.length > 0
                 : proc.isStreaming || !!proc.currentToolName,
       preempting: !!proc.codexPreemptingForSteer,
@@ -8871,20 +9569,64 @@ The planning phase is complete. You are now in Auto-Accept mode.
    */
   /**
    * Run a settings reload that was parked because a turn was still running.
-   * Queued follow-ups win: restarting with turns still waiting would drop them,
-   * so this waits for the queue to drain as well.
+   *
+   * Queued follow-ups are carried over rather than waited for: draining them
+   * first sent every "continue" to the old process, so a model switch (e.g.
+   * 200k -> 1M while autocompact was thrashing) never took effect as long as
+   * the user kept a message queued. The follow-ups were already recorded when
+   * they were queued, so they are re-sent to the new process without a second
+   * user message.
    */
   private applyDeferredRestart(sessionId: string): void {
     const proc = this.processes.get(sessionId);
     const deferred = proc?.deferredRestart;
     if (!proc || !deferred) return;
-    if (this.getSessionRuntimeSnapshot(sessionId).busy) return;
+    const carried = this.getQueuedTurnItems(proc).map((turn) => ({
+      message: turn.originalMessage,
+      attachments: turn.attachments,
+      chatId: turn.chatId,
+      updateLastMessage: turn.updateLastMessage,
+    }));
+    if (
+      this.getSessionRuntimeSnapshot(sessionId).busy &&
+      !(carried.length > 0 && this.isTurnSettled(proc))
+    ) {
+      return;
+    }
 
     proc.deferredRestart = undefined;
-    console.log(`[SESSION] Applying deferred settings reload for ${sessionId}`);
-    void this.restartSession(sessionId, deferred.userId, deferred.options).catch((error) => {
+    // Clear synchronously: the drain microtask queued right behind this one
+    // must not hand the next follow-up to the process about to be replaced.
+    if (carried.length > 0) this.discardQueuedTurns(sessionId, proc);
+    console.log(
+      `[SESSION] Applying deferred settings reload for ${sessionId}` +
+        (carried.length > 0 ? ` (carrying ${carried.length} queued turn(s))` : '')
+    );
+    void (async () => {
+      await this.restartSession(sessionId, deferred.userId, deferred.options);
+      for (const turn of carried) {
+        await this.sendMessage(sessionId, deferred.userId, turn.message, turn.attachments, {
+          chatId: turn.chatId,
+          recordMessage: false,
+          updateLastMessage: turn.updateLastMessage,
+        });
+      }
+    })().catch((error) => {
       console.error(`[SESSION] Deferred settings reload failed for ${sessionId}:`, error);
     });
+  }
+
+  /** The running turn is over; only queued follow-ups may still be waiting. */
+  private isTurnSettled(proc: ClaudeProcess): boolean {
+    const hasActiveSubagents = Array.from(proc.subagentRuns.values()).some(
+      (run) => run.status === 'started' && !run.background
+    );
+    if (hasActiveSubagents) return false;
+    if (proc.cliProvider === 'codex') return proc.codexIdle !== false;
+    if (proc.cliProvider === 'opencode') return proc.opencodeIdle !== false;
+    if (isAcpProvider(proc.cliProvider)) return proc.kimiIdle !== false;
+    if (isClaudeTransportProvider(proc.cliProvider)) return proc.claudeIdle !== false;
+    return !proc.isStreaming && !proc.currentToolName;
   }
 
   private async applyDeferredModeRestart(sessionId: string, proc: ClaudeProcess): Promise<void> {
@@ -8984,24 +9726,62 @@ The planning phase is complete. You are now in Auto-Accept mode.
     const nativeSessionId = proc.kimiAcpSessionId;
     if (!connection || !nativeSessionId) return;
 
-    const options = proc.kimiAcpConfigOptions;
-    if (proc.model && kimiAcpConfigSupports(options, 'model', proc.model)) {
-      const result = await connection.setSessionConfigOption({
-        sessionId: nativeSessionId,
-        configId: 'model',
-        value: proc.model,
-      });
-      proc.kimiAcpConfigOptions = result.configOptions;
-    }
+    const applyOption = async (configId: string, value: string | null | undefined) => {
+      if (!value) return;
+      // Advertised options are authoritative. Vibe answers a resumed session
+      // without configOptions, so an unadvertised value is probed instead of
+      // skipped; a rejection just leaves the harness default in place.
+      const options = proc.kimiAcpConfigOptions;
+      if (options?.length && !kimiAcpConfigSupports(options, configId, value)) return;
+      try {
+        const result = await connection.setSessionConfigOption({
+          sessionId: nativeSessionId,
+          configId,
+          value,
+        });
+        proc.kimiAcpConfigOptions = result.configOptions;
+      } catch (error) {
+        console.warn(
+          `[${acpProviderLabel(proc.cliProvider).toUpperCase()} ACP] setSessionConfigOption(${configId}=${value}) failed [${proc.sessionId}]:`,
+          error
+        );
+      }
+    };
 
-    const mode = kimiAcpModeForSessionMode(proc.mode);
-    if (kimiAcpConfigSupports(proc.kimiAcpConfigOptions || options, 'mode', mode)) {
-      const result = await connection.setSessionConfigOption({
-        sessionId: nativeSessionId,
-        configId: 'mode',
-        value: mode,
-      });
-      proc.kimiAcpConfigOptions = result.configOptions;
+    await applyOption('model', proc.model);
+    await applyOption('mode', acpModeForSessionMode(proc.cliProvider, proc.mode));
+    await applyOption('thinking', proc.acpThinking);
+  }
+
+  /**
+   * Vibe runs tools only in a workspace it trusts (any repo containing AGENTS.md
+   * or a `.vibe`/`.agents` directory starts untrusted). Plum sessions are
+   * created by the operator, so trust the workspace the way `vibe --trust`
+   * does, preferring the repository root when Vibe offers that decision.
+   */
+  private async trustVibeWorkspace(
+    connection: ClientSideConnection,
+    cwd: string,
+    sessionId: string
+  ): Promise<void> {
+    const ext = connection as unknown as {
+      extMethod?: (
+        method: string,
+        params: Record<string, unknown>
+      ) => Promise<Record<string, unknown>>;
+    };
+    if (typeof ext.extMethod !== 'function') return;
+    for (const decision of ['trust_repo', 'trust_cwd']) {
+      try {
+        const result = (await ext.extMethod('_trust/decision', { cwd, decision })) as {
+          trust_status?: string;
+        };
+        if (result?.trust_status === 'trusted') return;
+      } catch (error) {
+        // `trust_repo` is only a valid decision when Vibe found a repo root;
+        // an already trusted workspace rejects both. Neither is fatal.
+        console.warn(`[VIBE ACP] trust/decision ${decision} [${sessionId}]:`, error);
+      }
     }
   }
 
@@ -9060,12 +9840,20 @@ The planning phase is complete. You are now in Auto-Accept mode.
       this.io.to(`session:${sessionId}`).emit('session:thinking', {
         sessionId,
         isThinking: true,
-        message: proc.currentActivitySummary || 'Kimi is reasoning…',
+        message: proc.currentActivitySummary || `${acpProviderLabel(proc.cliProvider)} is reasoning…`,
       });
       return;
     }
 
     if (update.sessionUpdate === 'tool_call') {
+      this.trackKimiSubagent(
+        sessionId,
+        proc,
+        update.toolCallId,
+        update.title,
+        update.rawInput,
+        update.status
+      );
       proc.pendingToolResults.set(update.toolCallId, {
         toolName: update.title,
         input: update.rawInput,
@@ -9085,8 +9873,18 @@ The planning phase is complete. You are now in Auto-Accept mode.
 
     if (update.sessionUpdate === 'tool_call_update') {
       const pending = proc.pendingToolResults.get(update.toolCallId);
-      const toolName = update.title || pending?.toolName || 'Kimi tool';
+      const toolName =
+        update.title || pending?.toolName || `${acpProviderLabel(proc.cliProvider)} tool`;
       const input = update.rawInput ?? pending?.input;
+      this.trackKimiSubagent(
+        sessionId,
+        proc,
+        update.toolCallId,
+        toolName,
+        input,
+        update.status,
+        kimiAcpToolResultText(update)
+      );
       if (!proc.emittedTools?.has(update.toolCallId)) {
         proc.emittedTools?.add(update.toolCallId);
         proc.pendingToolResults.set(update.toolCallId, { toolName, input });
@@ -9139,7 +9937,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     proc.kimiQueuedTurns ??= [];
     proc.kimiQueuedTurns.push(turn);
     console.log(
-      `[KIMI ACP] Queued user turn while current turn is running [${sessionId}], depth=${proc.kimiQueuedTurns.length}`
+      `[${acpProviderLabel(proc.cliProvider).toUpperCase()} ACP] Queued user turn while current turn is running [${sessionId}], depth=${proc.kimiQueuedTurns.length}`
     );
     this.emitQueueState(sessionId, proc);
   }
@@ -9151,8 +9949,9 @@ The planning phase is complete. You are now in Auto-Accept mode.
   ): Promise<void> {
     const connection = proc.kimiAcpConnection;
     const nativeSessionId = proc.kimiAcpSessionId;
+    const acpLabel = acpProviderLabel(proc.cliProvider);
     if (!connection || !nativeSessionId) {
-      throw new Error('Kimi ACP session is not ready');
+      throw new Error(`${acpLabel} ACP session is not ready`);
     }
 
     proc.currentChatId = turn.chatId;
@@ -9176,24 +9975,30 @@ The planning phase is complete. You are now in Auto-Accept mode.
     this.io.to(`session:${sessionId}`).emit('session:thinking', {
       sessionId,
       isThinking: true,
-      message: 'Kimi is working…',
+      message: `${acpLabel} is working…`,
     });
     this.emitQueueState(sessionId, proc);
 
     let response: AcpPromptResponse | null = null;
-    const kimiHome = CLI_PROVIDERS.kimi.credentialsPath.replace('~', os.homedir());
     // Kimi 0.31 writes exact per-model-call counters to its native ledger but
     // does not currently attach the optional ACP PromptResponse.usage payload.
     // Snapshot the append-only ledgers while the persistent session is idle so
     // this WebUI turn can book only the records written by the prompt below.
-    const usageCursor = captureKimiUsageCursor(kimiHome, nativeSessionId);
+    // Vibe has no such ledger: it answers with the ACP usage payload.
+    const usageCursor =
+      proc.cliProvider === 'kimi'
+        ? captureKimiUsageCursor(
+            CLI_PROVIDERS.kimi.credentialsPath.replace('~', os.homedir()),
+            nativeSessionId
+          )
+        : null;
     try {
       response = await connection.prompt({
         sessionId: nativeSessionId,
         prompt: [{ type: 'text', text: turn.messageForClaude }],
       });
-      const nativeUsage = readKimiUsageSince(usageCursor);
-      if (nativeUsage.totalTokens > 0) {
+      const nativeUsage = usageCursor ? readKimiUsageSince(usageCursor) : null;
+      if (nativeUsage && nativeUsage.totalTokens > 0) {
         proc.turnInputTokens = nativeUsage.inputTokens;
         proc.turnOutputTokens = nativeUsage.outputTokens;
         proc.turnCacheReadTokens = nativeUsage.cacheReadTokens;
@@ -9203,8 +10008,8 @@ The planning phase is complete. You are now in Auto-Accept mode.
         )[0]?.[0];
         if (dominantModel) proc.model = dominantModel;
       } else if (response.usage) {
-        // Protocol fallback for a future Kimi build that starts returning ACP
-        // usage before/without a local native ledger.
+        // ACP usage payload: Vibe reports it per turn, and it stays the
+        // fallback for a future Kimi build that starts returning it too.
         const cacheRead = Math.max(0, response.usage.cachedReadTokens || 0);
         proc.turnInputTokens = Math.max(0, response.usage.inputTokens - cacheRead);
         proc.turnCacheReadTokens = cacheRead;
@@ -9222,15 +10027,17 @@ The planning phase is complete. You are now in Auto-Accept mode.
       const text = proc.streamingText.trim();
       if (text) await this.saveAssistantMessage(sessionId, text);
       await this.saveUsageToDatabase(sessionId, proc);
-      console.log(`[KIMI ACP] Turn completed [${sessionId}] reason=${response.stopReason}`);
+      console.log(
+        `[${acpLabel.toUpperCase()} ACP] Turn completed [${sessionId}] reason=${response.stopReason}`
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[KIMI ACP] Prompt failed [${sessionId}]:`, error);
+      console.error(`[${acpLabel.toUpperCase()} ACP] Prompt failed [${sessionId}]:`, error);
       const partial = proc.streamingText.trim();
       if (partial) await this.saveAssistantMessage(sessionId, `${partial}\n\n[Interrupted]`);
       this.io.to(`session:${sessionId}`).emit('session:error', {
         sessionId,
-        error: `Kimi failed: ${message}`,
+        error: `${acpLabel} failed: ${message}`,
       });
     } finally {
       proc.streamingText = '';
@@ -9256,7 +10063,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
   }
 
   private async drainKimiQueuedTurns(sessionId: string, proc: ClaudeProcess): Promise<void> {
-    if (proc.cliProvider !== 'kimi' || !proc.kimiIdle || proc.kimiQueueDraining) return;
+    if (!isAcpProvider(proc.cliProvider) || !proc.kimiIdle || proc.kimiQueueDraining) return;
     proc.kimiQueueDraining = true;
     try {
       while (proc.kimiIdle) {
@@ -10348,7 +11155,7 @@ ${proc.contextReminder.summary}
       };
     }
 
-    if (proc.cliProvider === 'kimi') {
+    if (isAcpProvider(proc.cliProvider)) {
       const kimiTurn: CodexPreparedTurn = {
         queueId: recordedMessageId,
         chatId: recordedChatId,
@@ -10511,10 +11318,15 @@ ${proc.contextReminder.summary}
       return;
     }
 
-    if (proc.cliProvider === 'kimi' && proc.kimiAcpConnection && proc.kimiAcpSessionId) {
+    if (isAcpProvider(proc.cliProvider) && proc.kimiAcpConnection && proc.kimiAcpSessionId) {
       void proc.kimiAcpConnection
         .cancel({ sessionId: proc.kimiAcpSessionId })
-        .catch((error) => console.error(`[KIMI ACP] Cancel failed [${sessionId}]:`, error));
+        .catch((error) =>
+          console.error(
+            `[${acpProviderLabel(proc.cliProvider).toUpperCase()} ACP] Cancel failed [${sessionId}]:`,
+            error
+          )
+        );
       return;
     }
 
@@ -10640,6 +11452,7 @@ ${proc.contextReminder.summary}
       // Stop the provider transport immediately. Server-backed OpenCode sessions
       // need an HTTP abort plus handler cleanup; their virtual child kill is a no-op.
       this.detachProcessForRestart(proc);
+      this.completeActiveSubagents(sessionId, proc, { includeBackground: true });
       this.processes.delete(sessionId);
     }
 
@@ -10688,6 +11501,9 @@ ${proc.contextReminder.summary}
 
     const formatted = rows
       .reverse()
+      .filter(
+        (row) => !(row.role === 'assistant' && isClaudeContextLimitAssistantReply(row.content))
+      )
       .map((row) => {
         const role =
           row.role === 'assistant' ? 'Assistant' : row.role === 'user' ? 'User' : row.role;
@@ -10792,8 +11608,8 @@ ${proc.contextReminder.summary}
     proc.mode = mode;
     this.emitModeChange(sessionId, mode);
 
-    if (proc.cliProvider === 'kimi' && proc.kimiAcpConnection && proc.kimiAcpSessionId) {
-      const acpMode = kimiAcpModeForSessionMode(mode);
+    if (isAcpProvider(proc.cliProvider) && proc.kimiAcpConnection && proc.kimiAcpSessionId) {
+      const acpMode = acpModeForSessionMode(proc.cliProvider, mode);
       void proc.kimiAcpConnection
         .setSessionConfigOption({
           sessionId: proc.kimiAcpSessionId,
@@ -10802,15 +11618,20 @@ ${proc.contextReminder.summary}
         })
         .then((result) => {
           proc.kimiAcpConfigOptions = result.configOptions;
-          console.log(`[MODE] Applied ${mode} through Kimi ACP [${sessionId}]`);
+          console.log(
+            `[MODE] Applied ${mode} through ${acpProviderLabel(proc.cliProvider)} ACP [${sessionId}]`
+          );
         })
         .catch((error) => {
-          console.error(`[MODE] Failed to apply Kimi ACP mode [${sessionId}]:`, error);
+          console.error(
+            `[MODE] Failed to apply ${acpProviderLabel(proc.cliProvider)} ACP mode [${sessionId}]:`,
+            error
+          );
           proc.mode = previousMode;
           this.emitModeChange(sessionId, previousMode);
           this.io.to(`session:${sessionId}`).emit('session:error', {
             sessionId,
-            error: `Kimi mode change failed: ${error instanceof Error ? error.message : String(error)}`,
+            error: `${acpProviderLabel(proc.cliProvider)} mode change failed: ${error instanceof Error ? error.message : String(error)}`,
           });
         });
       return;
@@ -10866,6 +11687,7 @@ ${proc.contextReminder.summary}
       // within the grace period starts a replacement, and deleting that one
       // orphans a live CLI while the session shows as stopped.
       if (this.processes.get(sessionId) === proc) {
+        this.completeActiveSubagents(sessionId, proc, { includeBackground: true });
         this.processes.delete(sessionId);
       }
       try {
@@ -10906,6 +11728,7 @@ ${proc.contextReminder.summary}
       opencodeServer.unsubscribe(proc.claudeSessionId, proc.userId);
     }
 
+    this.completeActiveSubagents(sessionId, proc, { includeBackground: true });
     this.processes.delete(sessionId);
 
     // Runs from child 'exit'/'error' handlers: a DB throw here would become an
@@ -10973,7 +11796,7 @@ ${proc.contextReminder.summary}
           ? !proc.opencodeIdle || queueItems.length > 0 || hasActiveSubagents
           : isClaudeTransportProvider(proc.cliProvider)
             ? proc.claudeIdle === false || queueItems.length > 0 || hasActiveSubagents
-            : proc.cliProvider === 'kimi'
+            : isAcpProvider(proc.cliProvider)
               ? proc.kimiIdle === false || queueItems.length > 0 || hasActiveSubagents
               : proc.isStreaming || !!proc.currentToolName || hasActiveSubagents;
     const activitySummary = this.getActivitySummary(proc, busy, queueItems.length);
@@ -11067,6 +11890,7 @@ ${proc.contextReminder.summary}
       } catch {
         // Process may already have exited.
       }
+      this.completeActiveSubagents(sessionId, proc, { includeBackground: true });
       this.processes.delete(sessionId);
     }
     await opencodeServer.shutdownAll();
@@ -11151,6 +11975,7 @@ ${proc.contextReminder.summary}
 
     // Kill current process
     terminateManagedProcess(proc.process);
+    this.completeActiveSubagents(sessionId, proc, { includeBackground: true });
     this.processes.delete(sessionId);
 
     // Wait for process to terminate
@@ -11177,12 +12002,17 @@ ${proc.contextReminder.summary}
     const allowedDirs: string[] = safeJsonParse<string[]>(session.allowed_directories, []);
 
     let args: string[] = [];
+    // Claude Code reports the bare model id, which would drop a `[1m]`
+    // selection on restart; take the session's stored choice first.
     const requestedModel =
       cliProvider === 'opencode'
         ? await getCliModelForSession(userId, cliProvider, sessionId)
-        : proc.model && proc.model !== 'unknown'
-          ? proc.model
-          : await getCliModelForSession(userId, cliProvider, sessionId);
+        : cliProvider === 'claude'
+          ? ((await getCliModelForSession(userId, cliProvider, sessionId)) ??
+            (proc.model && proc.model !== 'unknown' ? proc.model : null))
+          : proc.model && proc.model !== 'unknown'
+            ? proc.model
+            : await getCliModelForSession(userId, cliProvider, sessionId);
     const requestedReasoning = await getCliReasoningForSession(userId, cliProvider, sessionId);
     const requestedServiceTier = await getCliServiceTierForSession(userId, cliProvider, sessionId);
     if (isClaudeTransportProvider(cliProvider)) {
@@ -11259,6 +12089,7 @@ ${proc.contextReminder.summary}
           ? await buildClaudeTransportEnv(cliProvider, userId, configHome, sessionId)
           : process.env),
         ...(await buildAndroidDeviceEnvForSession(sessionId, userId)),
+        ...(cliProvider === 'claude' ? claudeContextWindowEnv(requestedModel) : {}),
         WEBUI_SESSION_ID: sessionId,
         WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
         WEBUI_PROJECT_PATH: workingDirectory,
@@ -11292,6 +12123,10 @@ ${proc.contextReminder.summary}
       subagentRuns: new Map(),
       model: proc.model || 'unknown',
       contextWindow: this.resolveObservedContextWindow(proc.model, proc.contextWindow),
+      pinnedContextWindow:
+        cliProvider === 'claude'
+          ? (claudeCliContextWindow(requestedModel) ?? undefined)
+          : undefined,
       turnInputTokens: 0,
       turnCacheReadTokens: 0,
       turnCacheCreationTokens: 0,

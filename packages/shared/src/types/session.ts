@@ -1,7 +1,7 @@
 export type SessionStatus = 'running' | 'stopped' | 'error';
 export type SessionSurface = 'code' | 'task';
 
-export type CLIProvider = 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi';
+export type CLIProvider = 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi' | 'vibe';
 export type CodexServiceTier = 'fast';
 export type SessionIconSource = 'upload' | 'project' | 'generated';
 
@@ -20,6 +20,9 @@ export interface UsageSnapshot {
   contextUsedPercent: number;
   contextUsedPercentRaw?: number;
   contextExceeded?: boolean;
+  // The window comes from the session's model selection (Claude Code 200k/1M
+  // variant) and must not be re-derived from `model`.
+  contextWindowPinned?: boolean;
   // Cost
   totalCostUsd: number;
   // Model info
@@ -28,9 +31,32 @@ export interface UsageSnapshot {
   recordedAt?: string;
 }
 
+export type SubagentLifecycle =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted';
+export interface SubagentActivity {
+  at: number;
+  text: string;
+  toolName?: string;
+}
 export interface SubagentRun {
   id: string;
   agentType: string;
+  chatId?: string | null;
+  turnId?: string;
+  parentRunId?: string;
+  model?: string;
+  lifecycle?: SubagentLifecycle;
+  activity?: 'starting' | 'working' | 'waiting';
+  activitySummary?: string;
+  waitingReason?: string;
+  updatedAt?: number;
+  revision?: number;
+  activities?: SubagentActivity[];
   description?: string;
   status: SubagentRunStatus;
   startedAt: number;

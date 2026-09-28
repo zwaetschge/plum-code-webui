@@ -1,6 +1,6 @@
 import type { Message, StreamingMessage } from './message.js';
 import type { SessionPresenceSnapshot, SessionSendAck } from './chat-delivery.js';
-import type { SessionStatus, SubagentRunStatus, UsageSnapshot } from './session.js';
+import type { SessionStatus, UsageSnapshot } from './session.js';
 
 // Session permission mode
 export type SessionMode = 'planning' | 'auto-accept' | 'manual' | 'danger';
@@ -272,21 +272,15 @@ export interface ServerToClientEvents {
     timestamp?: number;
     eventSequence?: number;
   }) => void;
-  'session:agent': (data: {
-    sessionId: string;
-    agentId?: string;
-    agentType: string;
-    description?: string;
-    status: SubagentRunStatus;
-    startedAt?: number;
-    completedAt?: number;
-    result?: string;
-    error?: string;
-    toolId?: string;
-    externalAgentId?: string;
-    timestamp?: number;
-    eventSequence?: number;
-  }) => void;
+  'session:agent': (
+    data: Omit<import('./session.js').SubagentRun, 'id' | 'startedAt'> & {
+      sessionId: string;
+      agentId?: string;
+      startedAt?: number;
+      timestamp?: number;
+      eventSequence?: number;
+    }
+  ) => void;
   'session:thinking': (data: { sessionId: string; isThinking: boolean; message?: string }) => void;
   'session:todos': (data: { sessionId: string; todos: TodoItem[]; eventSequence?: number }) => void;
   'session:usage': (data: UsageData) => void;
@@ -341,4 +335,7 @@ export interface InterServerEvents {
 export interface SocketData {
   userId: string;
   subscribedSessions: Set<string>;
+  /** Set when the socket authenticated with a `plum_gw_` control-gateway token. */
+  viaGateway?: boolean;
+  gatewayScope?: 'read' | 'write';
 }

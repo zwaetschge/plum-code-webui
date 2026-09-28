@@ -476,6 +476,26 @@ router.get('/kimi', async (req, res) => {
   }
 });
 
+// Mistral Vibe credentials login (browser sign-in writes $VIBE_HOME/.env).
+router.get('/vibe', async (req, res) => {
+  try {
+    const user = await getAuthenticatedCliLinkUser(req);
+    if (!user) return redirectCliIdentityRequired(res);
+
+    const available = await isProviderAvailable('vibe');
+    if (!available) {
+      return res.redirect(`${config.frontendUrl}/connect?error=vibe_not_logged_in`);
+    }
+
+    await stampLogin(user.id, 'vibe', req);
+    const token = generateUserToken(user.id);
+    res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
+  } catch (error) {
+    console.error('Vibe auth error:', error);
+    res.redirect(`${config.frontendUrl}/connect?error=vibe`);
+  }
+});
+
 // Dev login (only in development mode)
 if (config.isDevelopment) {
   router.post('/dev-login', rateLimiters.strict, async (req, res) => {
@@ -655,14 +675,16 @@ router.get('/providers', async (req, res) => {
   } catch {
     cliLinkAuthorized = false;
   }
-  const [codexAvailable, opencodeAvailable, piAvailable, kimiAvailable] = cliLinkAuthorized
-    ? await Promise.all([
-        isProviderAvailable('codex'),
-        isProviderAvailable('opencode'),
-        isProviderAvailable('pi'),
-        isProviderAvailable('kimi'),
-      ])
-    : [false, false, false, false];
+  const [codexAvailable, opencodeAvailable, piAvailable, kimiAvailable, vibeAvailable] =
+    cliLinkAuthorized
+      ? await Promise.all([
+          isProviderAvailable('codex'),
+          isProviderAvailable('opencode'),
+          isProviderAvailable('pi'),
+          isProviderAvailable('kimi'),
+          isProviderAvailable('vibe'),
+        ])
+      : [false, false, false, false, false];
   res.json({
     success: true,
     data: {
@@ -673,6 +695,7 @@ router.get('/providers', async (req, res) => {
       opencode: opencodeAvailable && cliLinkAuthorized,
       pi: piAvailable && cliLinkAuthorized,
       kimi: kimiAvailable && cliLinkAuthorized,
+      vibe: vibeAvailable && cliLinkAuthorized,
       proxy: config.proxyAuth.enabled,
     },
   });

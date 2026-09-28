@@ -51,6 +51,11 @@ export const WEBUI_DEFAULT_MCP_SERVERS: Record<string, ClaudeMcpServer> = {
     command: 'node',
     args: ['/app/scripts/mcp-servers/subagents.mjs'],
   },
+  firefox: {
+    type: 'stdio',
+    command: 'node',
+    args: ['/app/scripts/mcp-servers/firefox.mjs'],
+  },
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

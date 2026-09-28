@@ -25,6 +25,13 @@ import { requestClaudeOAuthTokenRefresh } from '../utils/claudeOauth.js';
 import { fetchKimiUsage } from '../utils/kimiUsage.js';
 import { getZaiApiConfigForUser } from './settings.js';
 import {
+  buildMistralLimitResponse,
+  getMistralPlanConfig,
+  getVibePlanConfig,
+  saveMistralPlanConfig,
+  saveVibePlanConfig,
+} from '../services/mistralPlanUsage.js';
+import {
   normalizeUsageLimitHistoryRange,
   queryUsageLimitHistory,
   recordUsageLimitSnapshots,
@@ -562,6 +569,8 @@ function providerSqlPredicate(provider: CLIProvider): string {
       return "lower(provider) = 'pi'";
     case 'kimi':
       return "lower(provider) = 'kimi'";
+    case 'vibe':
+      return "lower(provider) = 'vibe'";
     default: {
       // The predicate is interpolated straight into SQL, so a provider this
       // switch does not know about used to become the literal `undefined` in a
@@ -1576,6 +1585,50 @@ router.get('/limit-history', requireAuth, async (req, res) => {
   }
 });
 
+// Read/write the declared Mistral monthly budget and billing day.
+router.get('/plan/mistral', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  return res.json({ success: true, data: await getMistralPlanConfig(userId) });
+});
+
+router.put('/plan/mistral', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).userId;
+    const body = asRecord(req.body) || {};
+    return res.json({
+      success: true,
+      data: await saveMistralPlanConfig(userId, body),
+    });
+  } catch (error) {
+    console.error('[USAGE LIMITS] Failed to save Mistral plan:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'MISTRAL_PLAN_SAVE_FAILED', message: 'Failed to save Mistral plan' },
+    });
+  }
+});
+
+// The Vibe Code allowance of the same plan, tracked on its own so an API key
+// and a Vibe sign-in do not share one budget.
+router.get('/plan/vibe', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  return res.json({ success: true, data: await getVibePlanConfig(userId) });
+});
+
+router.put('/plan/vibe', requireAuth, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).userId;
+    const body = asRecord(req.body) || {};
+    return res.json({ success: true, data: await saveVibePlanConfig(userId, body) });
+  } catch (error) {
+    console.error('[USAGE LIMITS] Failed to save Vibe plan:', error);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'VIBE_PLAN_SAVE_FAILED', message: 'Failed to save Vibe plan' },
+    });
+  }
+});
+
 // Read/write the locally configured prepaid token plan (Alibaba Token Plan).
 router.get('/token-plan', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
@@ -1661,6 +1714,18 @@ router.get('/limits', requireAuth, rateLimiters.usageLimits, async (req, res) =>
       return res.json(await buildAlibabaLimitResponse((req as AuthenticatedRequest).userId));
     }
 
+    if (providerParam === 'mistral') {
+      return res.json(await buildMistralLimitResponse((req as AuthenticatedRequest).userId));
+    }
+
+    if (providerParam === 'vibe') {
+      // Vibe is a Mistral harness, but its turns draw on the plan's separate
+      // Vibe Code allowance, so it gets its own monthly ledger view.
+      return res.json(
+        await buildMistralLimitResponse((req as AuthenticatedRequest).userId, 'vibe')
+      );
+    }
+
     const accountProviders: UsageProviderId[] = ['claude', 'zai', 'codex', 'kimi', 'z-ai'];
     if (!accountProviders.includes(providerParam as UsageProviderId)) {
       return res.status(400).json({
@@ -1671,7 +1736,7 @@ router.get('/limits', requireAuth, rateLimiters.usageLimits, async (req, res) =>
         error: {
           code: 'UNKNOWN_LIMIT_PROVIDER',
           message:
-            'Account limits are available for Codex, Claude, Kimi, Z.AI, and the Alibaba Token Plan.',
+            'Account limits are available for Codex, Claude, Kimi, Z.AI, Mistral, and the Alibaba Token Plan.',
         },
       });
     }

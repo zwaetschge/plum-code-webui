@@ -1,5 +1,17 @@
 import type { CLIProvider } from './session.js';
 
+/** Claude Code transport options, shared by Anthropic and Z.AI sessions.
+ * `ultracode` is Pi-only (it turns on Pi's workflow tool) and must not appear
+ * here, or Claude and Z.AI sessions would offer an effort their CLI rejects.
+ */
+export const CLAUDE_CODE_EFFORT_OPTIONS = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'X-High' },
+  { value: 'max', label: 'Max' },
+] as const;
+
 export interface ProviderCapabilities {
   streaming: boolean;
   resume: boolean;

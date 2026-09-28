@@ -20,7 +20,7 @@ export interface ModelCostEstimate {
   known: boolean;
 }
 
-export const LLM_PRICING_RATE_CARD_VERSION = '2026-09-06-standard-api-equivalent-v11';
+export const LLM_PRICING_RATE_CARD_VERSION = '2026-09-27-standard-api-equivalent-v15';
 
 export const DEFAULT_MODEL_PRICING: ModelPricing = {
   input: 5,
@@ -163,14 +163,19 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
   if (!raw) return null;
   const { provider, id: providerId } = splitProviderPrefix(raw);
 
-  // These providers expose subscription, local, quota, or provider-specific
-  // billing that is not a stable per-token API rate card.
+  // Models served from the user's own hardware (llama.cpp via LLM-Hub, LM
+  // Studio, local Ollama) cost nothing per token. Known zero, not unknown, so
+  // they stop showing up under "Missing model prices".
   if (
-    provider === 'ollama-cloud' ||
-    provider === 'ollama' ||
+    provider === 'qwen-local' ||
     provider === 'llama-local' ||
-    provider === 'lmstudio'
+    provider === 'lmstudio' ||
+    provider === 'ollama'
   ) {
+    return price(0, 0, 0, 0, 'Local inference on own hardware', 'Local model');
+  }
+  // Ollama Cloud is a subscription, not a stable per-token API rate card.
+  if (provider === 'ollama-cloud') {
     return null;
   }
 
@@ -183,6 +188,14 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
 
   // OpenAI, USD per 1M tokens. Standard tier, short context (the long-context
   // surcharge above 272k input tokens is not modelled).
+  // GPT-6 Sol and Luna launched 2026-09-22 at permanent (non-promotional)
+  // prices; cache writes are 1.25x input, cache reads 10%.
+  if (id.startsWith('gpt-6-sol')) {
+    return price(2, 10, 0.2, 2.5, 'OpenAI API pricing, 2026-09-22', 'GPT-6 Sol');
+  }
+  if (id.startsWith('gpt-6-luna')) {
+    return price(0.1, 0.5, 0.01, 0.125, 'OpenAI API pricing, 2026-09-22', 'GPT-6 Luna');
+  }
   if (id.startsWith('gpt-6-astra') || id === 'gpt-6') {
     return price(10, 50, 1, 12.5, 'OpenAI API pricing, 2026-09-04', 'GPT-6 Astra');
   }
@@ -265,26 +278,44 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
   if (id === 'k3' || id === 'kimi-k3') {
     return price(3, 15, 0.3, 0, 'Kimi K3 API pricing, 2026-07-18', 'Kimi K3');
   }
-  if (id === 'kimi-k2.7-code' || id === 'kimi-k2.7-code-highspeed' || id === 'kimi-k2.7') {
+  // `kimi-for-coding` is the Kimi Code CLI alias for K2.7 Code (cli-providers labels it so).
+  if (
+    id === 'kimi-k2.7-code' ||
+    id === 'kimi-k2.7-code-highspeed' ||
+    id === 'kimi-k2.7' ||
+    id === 'kimi-for-coding' ||
+    id === 'kimi-for-coding-highspeed'
+  ) {
     return price(0.95, 4, 0.19, 0, 'Kimi K2.7 Code API pricing, 2026-06-17', 'Kimi K2.7 Code');
   }
 
-  // Alibaba Token Plan is Credits-based and does not publish a separate
-  // pay-as-you-go USD rate for Qwen3.8 Max Preview yet. Use the official
-  // Qwen3.7 Max list price as a clearly labelled API-equivalent proxy until
-  // Alibaba publishes a model-specific rate.
-  if (id === 'qwen3.8-max-preview') {
+  // Qwen3.8 Max went pay-as-you-go on Alibaba Model Studio (Singapore) on
+  // 2026-08-03: one flat tier across the 1M context, USD 2 / 6 per 1M tokens,
+  // implicit cache reads 0.25, explicit cache writes 2.5. Thinking tokens bill
+  // as output. The Token Plan is credit-based, so this is the API-equivalent
+  // rate the rest of the card uses. The preview id gets the same rate: the
+  // earlier Qwen3.7 Max proxy overstated it once the real price was public.
+  if (id === 'qwen3.8-max' || id === 'qwen3.8-max-preview') {
     return price(
+      2,
+      6,
+      0.25,
       2.5,
-      7.5,
-      0.5,
-      3.125,
-      'Alibaba Model Studio Qwen3.7 Max list-price proxy, 2026-07-27',
-      'Qwen3.8 Max Preview (Qwen3.7 Max proxy)'
+      'Alibaba Model Studio Qwen3.8 Max pay-as-you-go pricing, 2026-08-03',
+      id === 'qwen3.8-max' ? 'Qwen3.8 Max' : 'Qwen3.8 Max Preview'
     );
   }
 
-  // Z.AI, USD per 1M tokens.
+  // Z.AI, USD per 1M tokens. Mistral serves the same models under its own ids
+  // (zai-glm-5-3, glm-5-2, zai-glm-latest); they are priced like Z.AI's.
+  const mistralGlm = /^(?:zai-)?glm-(\d+)-(\d+)$/.exec(id);
+  const glmId = mistralGlm
+    ? `glm-${mistralGlm[1]}.${mistralGlm[2]}`
+    : id === 'zai-glm-5'
+      ? 'glm-5'
+      : id === 'zai-glm-latest'
+        ? 'glm-5.3'
+        : id;
   if (id === 'glm-5.3-flash') {
     // Standard API-equivalent list rates; the launch promotion is 50% off
     // through 2026-09-09 24:00 UTC+8 (2026-09-09 16:00 UTC).
@@ -297,16 +328,16 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
       'GLM-5.3-Flash'
     );
   }
-  if (id === 'glm-5.3') {
+  if (glmId === 'glm-5.3') {
     return price(1.4, 4.4, 0.26, 0, 'Z.AI pricing, 2026-09-06', 'GLM-5.3');
   }
-  if (raw === 'z-ai/glm-5.2' || raw === 'zai/glm-5.2' || id === 'glm-5.2') {
+  if (raw === 'z-ai/glm-5.2' || raw === 'zai/glm-5.2' || glmId === 'glm-5.2') {
     return price(1.4, 4.4, 0.26, 0, 'Z.AI pricing, 2026-06-17', 'GLM-5.2');
   }
-  if (raw === 'z-ai/glm-5.1' || raw === 'zai/glm-5.1' || id === 'glm-5.1') {
+  if (raw === 'z-ai/glm-5.1' || raw === 'zai/glm-5.1' || glmId === 'glm-5.1') {
     return price(1.4, 4.4, 0.26, 0, 'Z.AI pricing, 2026-06-01', 'GLM-5.1');
   }
-  if (raw === 'z-ai/glm-5' || raw === 'zai/glm-5' || id === 'glm-5') {
+  if (raw === 'z-ai/glm-5' || raw === 'zai/glm-5' || glmId === 'glm-5') {
     return price(1, 3.2, 0.2, 0, 'Z.AI pricing, 2026-06-01', 'GLM-5');
   }
   if (raw === 'z-ai/glm-4.7' || raw === 'zai/glm-4.7' || id === 'glm-4.7') {
@@ -334,29 +365,39 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
     return price(2, 12, 0.2, 0, 'Google Gemini API pricing, 2026-06-01', 'Gemini 3.1 Pro Preview');
   }
 
-  // Mistral, USD per 1M tokens. The public table does not expose prompt-cache
-  // discounts for these text models, so cached tokens are priced as normal input.
+  // Mistral, USD per 1M tokens. Cached input is billed at a tenth of the input
+  // rate — the rates Mistral's own Vibe CLI and models.dev carry. The bare
+  // aliases (`mistral-medium-3.5`, `devstral-2`, `mistral-large-3`) are the
+  // model names Plum runs Mistral Vibe with.
   if (
     id === 'mistral-vibe-cli-latest' ||
     id === 'mistral-medium-3.5' ||
-    id === 'mistral-medium-latest'
+    id === 'mistral-medium-latest' ||
+    id === 'mistral-medium-2604'
   ) {
-    return price(1.5, 7.5, 1.5, 1.5, 'Mistral API pricing, 2026-06-01', 'Mistral Medium 3.5');
+    return price(1.5, 7.5, 0.15, 0, 'Mistral API pricing, 2026-09-27', 'Mistral Medium 3.5');
   }
   if (id === 'devstral-small-latest' || id.includes('devstral-small')) {
     return price(0.1, 0.3, 0.1, 0.1, 'Mistral API pricing, 2026-06-01', 'Devstral Small 2');
   }
-  if (id === 'devstral-medium-latest' || id.includes('devstral-medium')) {
-    return price(0.4, 2, 0.4, 0.4, 'Mistral API pricing, 2026-06-01', 'Devstral 2');
+  // Pi's native Mistral catalog uses the dated ids and `devstral-latest`.
+  if (
+    id === 'devstral-medium-latest' ||
+    id.includes('devstral-medium') ||
+    id === 'devstral-latest' ||
+    id === 'devstral-2512' ||
+    id === 'devstral-2'
+  ) {
+    return price(0.4, 2, 0.04, 0, 'Mistral API pricing, 2026-09-27', 'Devstral 2');
   }
   if (id === 'codestral-latest') {
     return price(0.3, 0.9, 0.3, 0.3, 'Mistral API pricing, 2026-06-01', 'Codestral');
   }
-  if (id === 'mistral-small-latest') {
+  if (id === 'mistral-small-latest' || id === 'mistral-small-2603') {
     return price(0.1, 0.3, 0.1, 0.1, 'Mistral API pricing, 2026-06-01', 'Mistral Small 4');
   }
-  if (id === 'mistral-large-latest') {
-    return price(0.5, 1.5, 0.5, 0.5, 'Mistral API pricing, 2026-06-01', 'Mistral Large 3');
+  if (id === 'mistral-large-latest' || id === 'mistral-large-2512' || id === 'mistral-large-3') {
+    return price(0.5, 1.5, 0.05, 0, 'Mistral API pricing, 2026-09-27', 'Mistral Large 3');
   }
 
   return null;

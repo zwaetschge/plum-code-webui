@@ -2,6 +2,8 @@ import type { UsageSnapshot } from '../types/session.js';
 
 export const DEFAULT_CONTEXT_WINDOW = 200_000;
 
+const CLAUDE_1M_SUFFIX = /\[1m\]$/;
+
 /** `provider/model` → `model`. Pi and OpenCode ids carry the provider prefix. */
 function stripProviderPrefix(model: string): string {
   const slash = model.lastIndexOf('/');
@@ -21,6 +23,7 @@ export function lookupContextWindow(model: string | null | undefined): number | 
   if (!model) return null;
   const id = stripProviderPrefix(model.trim().toLowerCase());
   if (!id) return null;
+  if (CLAUDE_1M_SUFFIX.test(id)) return 1_000_000;
 
   // Anthropic's current Fable, Opus, and Sonnet families use the 1M-token
   // window. Haiku 4.5 remains at 200k.
@@ -59,6 +62,23 @@ export function lookupContextWindow(model: string | null | undefined): number | 
   return null;
 }
 
+/**
+ * Window Claude Code runs a WebUI-selected model with, or `null` when the
+ * selection does not decide it. `[1m]` ids keep the 1M window; plain
+ * Fable/Opus/Sonnet ids are spawned with CLAUDE_CODE_DISABLE_1M_CONTEXT and
+ * stay at 200k. Aliases such as `sonnet` follow {@link lookupContextWindow}.
+ *
+ * Only valid for the Claude Code provider: the CLI reports the bare API model
+ * id in both cases, so the window has to come from the selection.
+ */
+export function claudeCliContextWindow(model: string | null | undefined): number | null {
+  if (!model) return null;
+  const id = model.trim().toLowerCase();
+  if (CLAUDE_1M_SUFFIX.test(id)) return 1_000_000;
+  if (/^claude-(fable|opus|sonnet)-/.test(id)) return 200_000;
+  return null;
+}
+
 export function resolveContextWindow(model: string | null | undefined): number {
   return lookupContextWindow(model) ?? DEFAULT_CONTEXT_WINDOW;
 }
@@ -68,7 +88,9 @@ export function normalizeUsageSnapshot(
 ): UsageSnapshot | undefined {
   if (!usage) return undefined;
 
-  const resolvedWindow = resolveContextWindow(usage.model);
+  const resolvedWindow = usage.contextWindowPinned
+    ? usage.contextWindow
+    : resolveContextWindow(usage.model);
   const contextWindow =
     resolvedWindow !== DEFAULT_CONTEXT_WINDOW && resolvedWindow !== usage.contextWindow
       ? resolvedWindow

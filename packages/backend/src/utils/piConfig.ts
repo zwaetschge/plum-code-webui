@@ -198,6 +198,13 @@ function readPiProviderModelsForUser(userId: string): Record<string, string[]> {
   return parsePiProviderModels(config);
 }
 
+/**
+ * OpenCode connections Pi does not list. Mistral's account runs in the Mistral
+ * Vibe harness; through Pi it put the provider's whole catalog (32 models,
+ * legacy and specialised ones included) into the picker.
+ */
+const PI_SKIPPED_PROVIDERS = new Set(['mistral']);
+
 export function buildPiModelCatalog(
   storedProviders: OpenCodeProvider[],
   catalog: OpenCodeProviderCatalog,
@@ -210,6 +217,7 @@ export function buildPiModelCatalog(
   const models: string[] = [];
 
   for (const provider of storedProviders.filter((entry) => entry.enabled)) {
+    if (PI_SKIPPED_PROVIDERS.has(provider.id)) continue;
     const entry = buildPiProviderConfig(provider, catalog, configuredModels[provider.id]);
     if (!entry) continue;
     piProviders[provider.id] = entry;
@@ -369,6 +377,12 @@ export function resolvePiExtensionPaths(): string[] {
     path.resolve(process.cwd(), 'scripts', 'pi-webui-extension.ts'),
     '/app/scripts/pi-webui-extension.ts',
   ]);
+  // Ultracode for Pi: the `workflow` tool, active for the `ultracode` effort
+  // or a prompt that says "ultracode".
+  const ultracode = firstExisting([
+    path.resolve(process.cwd(), 'scripts', 'pi-ultracode-extension.ts'),
+    '/app/scripts/pi-ultracode-extension.ts',
+  ]);
   // Pi removed built-in Google Antigravity in 0.71.0. The extension registers
   // the provider again, with its own OAuth flow; Pi stores the tokens in the
   // per-user agent dir like any other login.
@@ -383,7 +397,9 @@ export function resolvePiExtensionPaths(): string[] {
         path.join(prefix, 'lib', 'node_modules', 'pi-antigravity', 'src', 'index.ts')
       )
   );
-  return [mcp, subagent, permission, antigravity].filter((value): value is string => !!value);
+  return [mcp, subagent, permission, ultracode, antigravity].filter(
+    (value): value is string => !!value
+  );
 }
 
 /**
@@ -477,7 +493,8 @@ export async function syncPiConfig(userId: string): Promise<PiConfigSyncResult> 
   return {
     agentDir,
     modelCount: models.length,
-    providerCount: Object.keys(piProviders).length,
+    // Native providers (Mistral) have models but no models.json entry.
+    providerCount: new Set(models.map((model) => model.split('/')[0])).size,
     mcpCount: Object.keys(mcpServers).length,
     agentCount,
     extensions,

@@ -12,6 +12,7 @@ import type {
   SessionSendPayload,
 } from '@plum-code-webui/shared';
 import { config } from '../config.js';
+import { GATEWAY_TOKEN_PREFIX, resolveGatewayToken } from '../services/gateway/tokens.js';
 import { ClaudeProcessManager } from '../services/claude/ClaudeProcessManager.js';
 import { getRunnerAccessDecision } from '../utils/runnerAccess.js';
 import {
@@ -129,6 +130,14 @@ async function controlDenialReason(sessionId: string, userId: string): Promise<s
 // Module-level processManager reference for external access
 let _processManager: ClaudeProcessManager | null = null;
 let _io: Server | null = null;
+
+/** Events a read-scope gateway token may emit: subscribing and catching up. */
+const GATEWAY_READ_EVENTS = new Set([
+  'session:subscribe',
+  'session:subscribe-all',
+  'session:unsubscribe',
+  'session:reconnect',
+]);
 
 async function isActiveUser(userId: string): Promise<boolean> {
   if (!userId) return false;
@@ -277,6 +286,26 @@ export function setupWebSocket(httpServer: HttpServer): Server {
       return next(new Error('Authentication required'));
     }
 
+    // Control-gateway tokens resolve to their owner exactly as on REST
+    // (middleware/auth.ts): the socket is the user's endpoint for sending,
+    // answering approvals and interrupting, so a supervisor needs it too.
+    if (typeof token === 'string' && token.startsWith(GATEWAY_TOKEN_PREFIX)) {
+      try {
+        const resolved = await resolveGatewayToken(token);
+        if (!resolved) return next(new Error('Invalid token'));
+        if (!(await isActiveUser(resolved.userId))) {
+          return next(new Error('Account unavailable'));
+        }
+        socket.data.userId = resolved.userId;
+        socket.data.subscribedSessions = new Set();
+        socket.data.viaGateway = true;
+        socket.data.gatewayScope = resolved.scope;
+        return next();
+      } catch {
+        return next(new Error('Invalid token'));
+      }
+    }
+
     try {
       const decoded = jwt.verify(token, config.jwtSecret) as { userId: string };
       if (!(await isActiveUser(decoded.userId))) {
@@ -307,14 +336,58 @@ export function setupWebSocket(httpServer: HttpServer): Server {
     // directly when a user is suspended.
     let lifecycleCheckedAt = 0;
     let lifecycleOk = false;
-    socket.use(async (_event, next) => {
+    socket.use(async (packet, next) => {
+      const [event, payload] = packet;
       const now = Date.now();
       if (now - lifecycleCheckedAt > 5_000) {
         lifecycleOk = await isActiveUser(socket.data.userId);
+        // A revoked gateway token must not live on in an open socket: it is
+        // re-resolved with the same cadence as the account check.
+        if (lifecycleOk && socket.data.viaGateway) {
+          const resolved = await resolveGatewayToken(String(socket.handshake.auth.token ?? ''));
+          lifecycleOk = resolved?.userId === socket.data.userId;
+          if (resolved) socket.data.gatewayScope = resolved.scope;
+        }
         lifecycleCheckedAt = now;
       }
-      if (lifecycleOk) return next();
-      socket.disconnect(true);
+      if (!lifecycleOk) {
+        socket.disconnect(true);
+        return;
+      }
+      // Read-only tokens stay read-only here as on REST (SAFE_METHODS):
+      // watching is allowed, anything that changes a session is not.
+      if (
+        socket.data.viaGateway &&
+        socket.data.gatewayScope !== 'write' &&
+        !GATEWAY_READ_EVENTS.has(String(event))
+      ) {
+        const sessionId =
+          typeof payload === 'string'
+            ? payload
+            : ((payload as { sessionId?: unknown } | undefined)?.sessionId as string | undefined);
+        console.warn(
+          `[WS] DENIED ${String(event)} (read-only gateway token) userId=${socket.data.userId}`
+        );
+        socket.emit('session:error', {
+          sessionId: typeof sessionId === 'string' ? sessionId : '',
+          error: 'This gateway token is read-only',
+        });
+        // Callers waiting on an acknowledgement (session:send) get a verdict
+        // instead of a timeout.
+        const acknowledge = packet[packet.length - 1];
+        if (typeof acknowledge === 'function') {
+          const clientMessageId = (payload as { clientMessageId?: unknown } | undefined)
+            ?.clientMessageId;
+          (acknowledge as SessionSendAcknowledge)({
+            clientMessageId: typeof clientMessageId === 'string' ? clientMessageId : '',
+            status: 'rejected',
+            error: 'This gateway token is read-only',
+            retryable: false,
+          });
+        }
+        return;
+      }
+      next();
     });
 
     const rateLimited = (sessionId: string, event: string): boolean => {

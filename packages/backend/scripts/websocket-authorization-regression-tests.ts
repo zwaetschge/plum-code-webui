@@ -22,6 +22,8 @@ const { run: pgRun } = await import('../src/db/pg.js');
 await createTestSchema();
 const { disconnectUserSockets, setupWebSocket } = await import('../src/websocket/index.js');
 const { revokeUserHttpSessions } = await import('../src/services/SqliteSessionStore.js');
+const { createGatewayToken, revokeGatewayToken } =
+  await import('../src/services/gateway/tokens.js');
 
 for (const [id, email, name, status] of [
   ['user-a', 'a@example.test', 'A', 'active'],
@@ -42,6 +44,10 @@ await pgRun(
   `INSERT INTO sessions (id, user_id, name, working_directory, status)
    VALUES ('session-a', 'user-a', 'A session', '/tmp', 'stopped')`
 );
+await pgRun(
+  `INSERT INTO sessions (id, user_id, name, working_directory, status)
+   VALUES ('session-b', 'user-b', 'B session', '/tmp', 'stopped')`
+);
 
 const httpServer = createServer();
 const ioServer = setupWebSocket(httpServer);
@@ -54,10 +60,10 @@ function tokenFor(userId: string): string {
   return jwt.sign({ userId }, jwtSecret, { expiresIn: '5m' });
 }
 
-function connect(userId: string): Promise<Socket> {
+function connect(userId: string, token = tokenFor(userId)): Promise<Socket> {
   return new Promise((resolve, reject) => {
     const client = createClient(url, {
-      auth: { token: tokenFor(userId) },
+      auth: { token },
       forceNew: true,
       reconnection: false,
       transports: ['websocket'],
@@ -92,6 +98,62 @@ const runnerDenied = new Promise<{ sessionId: string; error: string }>((resolve)
 });
 owner.emit('session:set-mode', { sessionId: 'session-a', mode: 'manual' });
 assert.match((await runnerDenied).error, /admin-only/);
+
+// Control-gateway tokens authenticate the socket like a JWT of their owner.
+const writeToken = await createGatewayToken('user-b', 'swarm bridge', 'write');
+const readToken = await createGatewayToken('user-b', 'watcher', 'read');
+const gatewayWriter = await connect('user-b', writeToken.token);
+gatewayWriter.emit('session:subscribe', 'session-b');
+await waitUntil(() => (ioServer.sockets.adapter.rooms.get('session:session-b')?.size ?? 0) === 1);
+const gatewayForbidden = new Promise<{ error: string }>((resolve) =>
+  gatewayWriter.once('session:error', resolve)
+);
+gatewayWriter.emit('session:subscribe', 'session-a');
+assert.match((await gatewayForbidden).error, /Forbidden/, 'gateway tokens keep ownership checks');
+
+// Read scope: may watch, may not act. A denied send still gets its ack.
+const gatewayReader = await connect('user-b', readToken.token);
+gatewayReader.emit('session:subscribe', 'session-b');
+await waitUntil(() => (ioServer.sockets.adapter.rooms.get('session:session-b')?.size ?? 0) === 2);
+const readOnlyError = new Promise<{ sessionId: string; error: string }>((resolve) =>
+  gatewayReader.once('session:error', resolve)
+);
+gatewayReader.emit('session:interrupt', 'session-b');
+const readOnly = await readOnlyError;
+assert.equal(readOnly.sessionId, 'session-b');
+assert.match(readOnly.error, /read-only/);
+const sendAck = (await gatewayReader.timeout(2_000).emitWithAck('session:send', {
+  sessionId: 'session-b',
+  message: 'hello',
+  clientMessageId: 'gw-read-1',
+})) as { status: string; clientMessageId: string; retryable: boolean };
+assert.equal(sendAck.status, 'rejected');
+assert.equal(sendAck.clientMessageId, 'gw-read-1');
+assert.equal(sendAck.retryable, false);
+
+const bogusError = await new Promise<Error>((resolve) => {
+  const bogus = createClient(url, {
+    auth: { token: 'plum_gw_not-a-real-token' },
+    forceNew: true,
+    reconnection: false,
+    transports: ['websocket'],
+  });
+  bogus.once('connect_error', (error) => {
+    bogus.close();
+    resolve(error);
+  });
+});
+assert.match(bogusError.message, /Invalid token/);
+
+// Revocation reaches an open socket at the next event after the 5 s cache.
+assert.equal(await revokeGatewayToken('user-b', writeToken.row.id), true);
+const writerGone = new Promise<void>((resolve) =>
+  gatewayWriter.once('disconnect', () => resolve())
+);
+await new Promise((resolve) => setTimeout(resolve, 5_200));
+gatewayWriter.emit('session:unsubscribe', 'session-b');
+await writerGone;
+gatewayReader.close();
 
 const suspendedError = await new Promise<Error>((resolve) => {
   const suspended = createClient(url, {

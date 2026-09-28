@@ -181,6 +181,70 @@ try {
         }
       }
     }
+
+    // Summary: the comparison window is the previous one cut to the same
+    // elapsed time, and each session names the provider that did its work.
+    const sqlTime = (msAgo: number) =>
+      new Date(Date.now() - msAgo).toISOString().slice(0, 19).replace('T', ' ');
+    await pgRun(
+      "UPDATE usage_history SET created_at = ? WHERE provider = 'pi'",
+      sqlTime(60 * 60 * 1000)
+    );
+    await pgRun(
+      "UPDATE usage_history SET created_at = ? WHERE provider = 'opencode'",
+      sqlTime(25 * 60 * 60 * 1000)
+    );
+    const summaryResponse = await fetch(
+      `http://127.0.0.1:${address.port}/api/analytics/summary?period=24h&tz=0`,
+      { headers }
+    );
+    const summary = (await summaryResponse.json()) as {
+      data: {
+        totals: { totalTokens: number };
+        comparison: {
+          startsAt: string;
+          endsAt: string;
+          totals: { totalTokens: number; totalRequests: number };
+          byProvider: Array<{ provider: string; total_tokens: number }>;
+        } | null;
+        bySession: Array<{
+          session_id: string;
+          provider: string | null;
+          last_active: string | null;
+        }>;
+      };
+    };
+    assert.equal(summaryResponse.status, 200, JSON.stringify(summary));
+    assert.equal(summary.data.totals.totalTokens, 175, 'only the Pi turn is in the last 24h');
+    assert.ok(summary.data.comparison, '24h has a comparison window');
+    assert.equal(summary.data.comparison.totals.totalTokens, 20, 'the OpenCode turn is 24–48h ago');
+    assert.equal(summary.data.comparison.byProvider[0]?.provider, 'OpenCode');
+    assert.equal(
+      Date.parse(summary.data.comparison.endsAt) - Date.parse(summary.data.comparison.startsAt),
+      24 * 60 * 60 * 1000,
+      'a rolling window compares against a full previous window'
+    );
+    const piSession = summary.data.bySession.find((row) => row.session_id === 'pi-session');
+    assert.equal(piSession?.provider, 'Pi');
+    assert.match(piSession?.last_active ?? '', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+
+    const allResponse = await fetch(
+      `http://127.0.0.1:${address.port}/api/analytics/summary?period=all&tz=0`,
+      { headers }
+    );
+    const all = (await allResponse.json()) as { data: { comparison: unknown } };
+    assert.equal(all.data.comparison, null, '"all" has nothing to compare against');
+
+    const quarterResponse = await fetch(
+      `http://127.0.0.1:${address.port}/api/analytics/summary?period=90d&tz=0`,
+      { headers }
+    );
+    const quarter = (await quarterResponse.json()) as {
+      data: { window: { period: string; source: string }; totals: { totalTokens: number } };
+    };
+    assert.equal(quarter.data.window.period, '90d');
+    assert.equal(quarter.data.window.source, 'rolling');
+    assert.equal(quarter.data.totals.totalTokens, 195);
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve()))
