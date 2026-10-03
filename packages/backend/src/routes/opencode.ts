@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { execFileSync } from 'child_process';
 import { clearPendingQuestion } from '../services/pendingQuestions.js';
+import { getProcessManager } from '../websocket/index.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import {
   buildOpenCodeCommandEnv,
@@ -298,6 +299,12 @@ router.post('/questions/respond', requireAuth, async (req, res) => {
     });
   }
 
+  // Questions from Vibe (ACP elicitation) are answered in the running process.
+  if (getProcessManager().respondAcpQuestion(result.data.requestId, result.data.answers)) {
+    clearPendingQuestion(result.data.requestId);
+    return res.json({ success: true });
+  }
+
   try {
     const userId = (req as AuthenticatedRequest).userId;
     const handled = await opencodeServer.replyQuestion(
@@ -332,6 +339,11 @@ router.post('/questions/reject', requireAuth, async (req, res) => {
       success: false,
       error: { code: 'VALIDATION_ERROR', message: JSON.stringify(result.error.flatten()) },
     });
+  }
+
+  if (getProcessManager().respondAcpQuestion(result.data.requestId, null)) {
+    clearPendingQuestion(result.data.requestId);
+    return res.json({ success: true });
   }
 
   try {

@@ -52,6 +52,9 @@ import {
   PROTOCOL_VERSION as ACP_PROTOCOL_VERSION,
   ndJsonStream,
   type Client as AcpClient,
+  type ContentBlock as AcpContentBlock,
+  type CreateElicitationRequest,
+  type CreateElicitationResponse,
   type PromptResponse as AcpPromptResponse,
   type RequestPermissionRequest as AcpRequestPermissionRequest,
   type RequestPermissionResponse as AcpRequestPermissionResponse,
@@ -63,8 +66,11 @@ import SQLiteDatabase from 'better-sqlite3';
 import { config } from '../../config.js';
 import {
   CLI_PROVIDERS,
+  ULTRACODE_SETTINGS,
   buildVibeEnv,
   claudeContextWindowEnv,
+  claudeEffortLaunch,
+  vibeThinkingLevel,
   getCLIArgs,
   formatInputMessage,
   isAcpProvider,
@@ -108,6 +114,23 @@ import { onSessionCompacted } from '../memoryOptimizer.js';
 import { persistMessageMedia, type PendingChatMedia } from '../chatMedia.js';
 import { recordAudit } from '../../utils/auditLog.js';
 import { getFallbackToolActionSummary } from '../tool-action-summarizer.js';
+import {
+  buildVibeMcpServers,
+  buildVibeUltracodeEnv,
+  isVibeUltracodeTool,
+  isVibeCompaction,
+  normalizeVibeInput,
+  readVibeSessionStats,
+  vibeElicitationContent,
+  vibeElicitationQuestions,
+  vibeTodos,
+  vibeToolKey,
+  vibeToolName,
+  vibeToolResult,
+  vibeTurnUsage,
+  type VibeQuestion,
+  type VibeSessionStats,
+} from '../vibe/vibeAcp.js';
 import { discordIntegrationService, discordNotifier } from '../discord/index.js';
 import {
   homeAssistantStatusForSessionEvent,
@@ -2912,10 +2935,36 @@ interface ClaudeProcess {
   kimiQueueDraining?: boolean;
   kimiCompletedTools?: Set<string>;
   kimiThinkingText?: string;
+  /** Vibe: running usage totals at the last booked turn (Vibe reports totals). */
+  vibeUsageBaseline?: VibeSessionStats | null;
+  /** Vibe: canonical tool name per toolCallId (the name only arrives once). */
+  vibeToolNames?: Map<string, string>;
+  /** ACP permission prompts waiting for the user (manual mode). */
+  acpPendingPermissions?: Map<
+    string,
+    {
+      resolve: (optionId: string | null) => void;
+      options: Array<{ optionId: string; kind: string }>;
+    }
+  >;
+  /** ACP elicitations (Vibe's ask_user_question) waiting for the user. */
+  acpPendingQuestions?: Map<
+    string,
+    {
+      resolve: (content: Record<string, string | string[]> | null) => void;
+      keys: string[];
+      questions: VibeQuestion[];
+    }
+  >;
   /** Reasoning/thinking choice for ACP harnesses that expose it as a config
    * option (Vibe: off/low/medium/high/max). Kimi encodes effort in the model
    * alias instead, so this stays unset there. */
   acpThinking?: string | null;
+  /** Claude/Z.AI `ultrathink` effort: every prompt carries the keyword. */
+  claudeUltrathink?: boolean;
+  /** Vibe Ultracode: the running `ultracode_workflow` call and its agents' usage. */
+  vibeWorkflowToolId?: string | null;
+  vibeWorkflowUsage?: { input: number; output: number; cached: number };
   // Server-backed providers (opencode in HTTP/SSE mode) have no child process.
   // `process` is a no-op stub; all lifecycle goes through HTTP + SSE subscription.
   serverBacked?: boolean;
@@ -3111,6 +3160,16 @@ export interface SessionRuntimeSnapshot {
     model: string;
     recordedAt: string;
   } | null;
+}
+
+/**
+ * The `ultrathink` effort is Claude Code's prompt keyword: it adds a per-turn
+ * "reason as thoroughly as the task warrants" note on top of max effort.
+ * Slash commands stay untouched, the CLI parses them itself.
+ */
+function withUltrathink(proc: { claudeUltrathink?: boolean }, message: string): string {
+  if (!proc.claudeUltrathink || message.trimStart().startsWith('/')) return message;
+  return /\bultrathink\b/i.test(message) ? message : `${message}\n\nultrathink`;
 }
 
 export class ClaudeProcessManager {
@@ -3791,6 +3850,38 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
         ? { status: 'error', error: 'Workflow fehlgeschlagen' }
         : { result: `${agents.length} Agenten` }
     );
+  }
+
+  /**
+   * Progress of a Vibe Ultracode workflow (scripts/mcp-servers/vibe-ultracode.mjs):
+   * agent cards under the running workflow call, and on the final report the
+   * agents' token usage for this turn.
+   */
+  applyVibeWorkflowProgress(
+    sessionId: string,
+    report: {
+      details: Record<string, unknown>;
+      usage?: { input: number; output: number; cached: number };
+    }
+  ): boolean {
+    const proc = this.processes.get(sessionId);
+    if (!proc || proc.cliProvider !== 'vibe') return false;
+    if (report.usage) {
+      const total = (proc.vibeWorkflowUsage ??= { input: 0, output: 0, cached: 0 });
+      total.input += Math.max(0, report.usage.input);
+      total.output += Math.max(0, report.usage.output);
+      total.cached += Math.max(0, report.usage.cached);
+    }
+    const toolId = proc.vibeWorkflowToolId;
+    if (!toolId) return Boolean(report.usage);
+    this.applyPiWorkflowAgents(
+      sessionId,
+      proc,
+      toolId,
+      { details: { ...report.details, kind: 'ultracode' } },
+      false
+    );
+    return true;
   }
 
   private updateSubagentActivity(
@@ -5149,19 +5240,49 @@ Discord Main Gateway:
       // Kimi exposes its ACP agent as a subcommand (`kimi acp`); Vibe ships a
       // dedicated `vibe-acp` entry point that takes no arguments.
       const acpArgs = cliProvider === 'kimi' ? ['acp'] : [];
+      const vibeEnv = cliProvider === 'vibe' ? buildVibeEnv() : {};
+      // Ultracode for Vibe: the workflow server (scripts/mcp-servers/vibe-ultracode.mjs).
+      const vibeUltracodeEnv =
+        cliProvider === 'vibe' && selectedReasoning === 'ultracode'
+          ? buildVibeUltracodeEnv({
+              sessionId,
+              model: selectedModel,
+              vibeEnv,
+              extraEnv: {
+                WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
+                WEBUI_HOOK_SECRET: config.hookSecret,
+                WEBUI_PROJECT_PATH: session.working_directory,
+                WEBUI_SESSION_MODE: effectiveMode,
+              },
+            })
+          : {};
       const child = spawnManagedProcess(providerConfig.command, acpArgs, {
         cwd: session.working_directory,
         env: {
           ...process.env,
           ...extraEnv,
-          ...(cliProvider === 'vibe' ? buildVibeEnv() : {}),
+          ...vibeEnv,
+          ...vibeUltracodeEnv,
           WEBUI_SESSION_ID: sessionId,
+          WEBUI_SESSION_MODE: effectiveMode,
           WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
           WEBUI_PROJECT_PATH: session.working_directory,
           WEBUI_HOOK_SECRET: config.hookSecret,
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+      // Vibe gets Plum's MCP servers (browser, images, Android, subagents …)
+      // through ACP; Kimi keeps its own configuration.
+      const acpMcpServers =
+        cliProvider === 'vibe'
+          ? buildVibeMcpServers(sessionId, {
+              ...extraEnv,
+              WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
+              WEBUI_HOOK_SECRET: config.hookSecret,
+              WEBUI_PROJECT_PATH: session.working_directory,
+              WEBUI_SESSION_MODE: effectiveMode,
+            })
+          : [];
 
       if (!child.stdin || !child.stdout) {
         terminateManagedProcess(child);
@@ -5217,7 +5338,10 @@ Discord Main Gateway:
         kimiQueuedTurns: [],
         kimiQueueDraining: false,
         kimiCompletedTools: new Set(),
-        acpThinking: cliProvider === 'vibe' ? selectedReasoning : undefined,
+        acpThinking:
+          cliProvider === 'vibe' && selectedReasoning
+            ? vibeThinkingLevel(selectedReasoning)
+            : undefined,
         emittedTools: new Set(),
       };
 
@@ -5228,7 +5352,9 @@ Discord Main Gateway:
         console.error(`${acpLabel} ACP stderr [${sessionId}]:`, data.toString());
       });
       child.on('exit', async (exitCode) => {
-        console.log(`[${acpLabel.toUpperCase()} ACP] Process for session ${sessionId} exited with code ${exitCode}`);
+        console.log(
+          `[${acpLabel.toUpperCase()} ACP] Process for session ${sessionId} exited with code ${exitCode}`
+        );
         const managedProc = this.processes.get(sessionId);
         if (managedProc !== claudeProcess) return;
         if (managedProc.streamingText.trim()) {
@@ -5259,9 +5385,16 @@ Discord Main Gateway:
 
       const acpClient: AcpClient = {
         requestPermission: async (params) =>
-          await this.handleKimiAcpPermission(claudeProcess, params),
+          await this.handleKimiAcpPermission(sessionId, claudeProcess, params),
         sessionUpdate: async (params) =>
           await this.handleKimiAcpUpdate(sessionId, claudeProcess, params),
+        // Vibe's ask_user_question (and leaving plan mode) needs form elicitation.
+        ...(cliProvider === 'vibe'
+          ? {
+              unstable_createElicitation: async (params: CreateElicitationRequest) =>
+                await this.handleAcpElicitation(sessionId, claudeProcess, params),
+            }
+          : {}),
       };
       const connection = new ClientSideConnection(
         () => acpClient,
@@ -5273,7 +5406,7 @@ Discord Main Gateway:
         const initialized = await connection.initialize({
           protocolVersion: ACP_PROTOCOL_VERSION,
           clientInfo: { name: 'Plum Code WebUI', version: '1' },
-          clientCapabilities: {},
+          clientCapabilities: cliProvider === 'vibe' ? { elicitation: { form: {} } } : {},
         });
         console.log(
           `[${acpLabel.toUpperCase()} ACP] Connected [${sessionId}] agent=${initialized.agentInfo?.name || acpLabel} version=${initialized.agentInfo?.version || 'unknown'}`
@@ -5291,7 +5424,7 @@ Discord Main Gateway:
               sessionId: nativeSessionId,
               cwd: session.working_directory,
               additionalDirectories: allowedDirs,
-              mcpServers: [],
+              mcpServers: acpMcpServers,
             });
             configOptions = resumed.configOptions;
           } catch (error) {
@@ -5307,7 +5440,7 @@ Discord Main Gateway:
           const created = await connection.newSession({
             cwd: session.working_directory,
             additionalDirectories: allowedDirs,
-            mcpServers: [],
+            mcpServers: acpMcpServers,
           });
           nativeSessionId = created.sessionId;
           configOptions = created.configOptions;
@@ -5315,6 +5448,17 @@ Discord Main Gateway:
 
         claudeProcess.kimiAcpSessionId = nativeSessionId;
         claudeProcess.claudeSessionId = nativeSessionId;
+        if (cliProvider === 'vibe') {
+          // A resumed session's running totals are the baseline for its next turn.
+          claudeProcess.vibeUsageBaseline = readVibeSessionStats(nativeSessionId) ?? {
+            prompt: 0,
+            completion: 0,
+            cached: 0,
+          };
+          claudeProcess.vibeToolNames = new Map();
+          claudeProcess.acpPendingPermissions = new Map();
+          claudeProcess.acpPendingQuestions = new Map();
+        }
         claudeProcess.kimiAcpConfigOptions = configOptions || [];
         await this.configureKimiAcpSession(claudeProcess);
 
@@ -5455,8 +5599,9 @@ Discord Main Gateway:
         args.push('--model', selectedModel);
       }
 
-      if (selectedReasoning) {
-        args.push('--effort', selectedReasoning);
+      const effortLaunch = selectedReasoning ? claudeEffortLaunch(selectedReasoning) : null;
+      if (effortLaunch) {
+        args.push('--effort', effortLaunch.effort);
       }
 
       for (const dir of allowedDirs) {
@@ -5465,10 +5610,14 @@ Discord Main Gateway:
 
       // Add permission hook settings for all modes except 'danger'
       // In danger mode, skip hooks entirely (tools run without any checks)
-      // In other modes, our hook surfaces permission requests to the UI
-      if (effectiveMode !== 'danger') {
-        const hookSettings = this.getHookSettings();
-        args.push('--settings', hookSettings);
+      // In other modes, our hook surfaces permission requests to the UI.
+      // Ultracode rides on the same --settings layer (the CLI takes one).
+      const launchSettings = {
+        ...(effectiveMode !== 'danger' ? JSON.parse(this.getHookSettings()) : {}),
+        ...(effortLaunch?.ultracode ? ULTRACODE_SETTINGS : {}),
+      };
+      if (Object.keys(launchSettings).length) {
+        args.push('--settings', JSON.stringify(launchSettings));
       }
 
       // The CLI does NOT auto-load mcpServers from ~/.claude/settings.json —
@@ -5569,6 +5718,8 @@ Discord Main Gateway:
       isStreaming: false,
       // Permission mode
       mode: effectiveMode,
+      claudeUltrathink:
+        isClaudeTransportProvider(cliProvider) && selectedReasoning === 'ultrathink',
       // Tool tracking
       currentToolName: null,
       currentToolId: null,
@@ -9550,7 +9701,9 @@ The planning phase is complete. You are now in Auto-Accept mode.
       isThinking: true,
     });
     if (proc.process.stdin?.writable) {
-      proc.process.stdin.write(formatInputMessage(proc.cliProvider, turn.messageForClaude));
+      proc.process.stdin.write(
+        formatInputMessage(proc.cliProvider, withUltrathink(proc, turn.messageForClaude))
+      );
       console.log(
         `Sent message [${sessionId}] via ${proc.cliProvider}: ${turn.messageForClaude.substring(0, 100)}...`
       );
@@ -9786,9 +9939,18 @@ The planning phase is complete. You are now in Auto-Accept mode.
   }
 
   private async handleKimiAcpPermission(
+    sessionId: string,
     proc: ClaudeProcess,
     params: AcpRequestPermissionRequest
   ): Promise<AcpRequestPermissionResponse> {
+    // Vibe in manual mode asks the user, like Claude's approval prompt. Every
+    // other mode answers automatically as before.
+    if (proc.cliProvider === 'vibe' && proc.mode === 'manual' && proc.acpPendingPermissions) {
+      const optionId = await this.askAcpPermission(sessionId, proc, params);
+      return optionId
+        ? { outcome: { outcome: 'selected', optionId } }
+        : { outcome: { outcome: 'cancelled' } };
+    }
     const preferredKinds =
       proc.mode === 'planning'
         ? ['reject_once', 'reject_always']
@@ -9805,6 +9967,136 @@ The planning phase is complete. You are now in Auto-Accept mode.
         optionId: selected.optionId,
       },
     };
+  }
+
+  /** Surface an ACP permission request as Plum's approval card and wait for the answer. */
+  private async askAcpPermission(
+    sessionId: string,
+    proc: ClaudeProcess,
+    params: AcpRequestPermissionRequest
+  ): Promise<string | null> {
+    const pendings = proc.acpPendingPermissions!;
+    const requestId = `acp-${nanoid()}`;
+    const toolCallId = params.toolCall?.toolCallId;
+    const pending = toolCallId ? proc.pendingToolResults.get(toolCallId) : undefined;
+    const toolName = pending?.toolName || params.toolCall?.title || 'Vibe tool';
+    const toolInput = pending?.input ?? params.toolCall?.rawInput ?? {};
+    const sessionOption = params.options.find((option) => option.kind === 'allow_always');
+    const patternMeta = (sessionOption?._meta as Record<string, unknown> | undefined)
+      ?.required_permissions;
+    const suggestedPattern =
+      Array.isArray(patternMeta) &&
+      patternMeta[0] &&
+      typeof (patternMeta[0] as Record<string, unknown>).label === 'string'
+        ? String((patternMeta[0] as Record<string, unknown>).label)
+        : toolName;
+    const answer = new Promise<string | null>((resolve) => {
+      pendings.set(requestId, {
+        resolve,
+        options: params.options.map((option) => ({ optionId: option.optionId, kind: option.kind })),
+      });
+    });
+    const permissionEvent = {
+      sessionId,
+      requestId,
+      toolName,
+      toolInput,
+      description: `Vibe möchte ${toolName} ausführen`,
+      suggestedPattern,
+    };
+    this.emitBufferedEvent(sessionId, 'permission_request', permissionEvent, (sequenced) => {
+      this.io.to(`session:${sessionId}`).emit('session:permission_request', sequenced);
+    });
+    this.io.to(`session:${sessionId}`).emit('session:thinking', { sessionId, isThinking: false });
+    void this.emitLifecycle(sessionId, 'approval');
+    await this.notifyDiscordSessionEvent(sessionId, {
+      eventType: 'session.permission_requested',
+      severity: 'warning',
+      title: 'Session needs permission',
+      summary: `Vibe requests ${toolName}`,
+      fields: [{ name: 'Request', value: requestId, inline: true }],
+    });
+    // A forgotten prompt must not hold the turn forever.
+    const timer = setTimeout(
+      () => this.respondAcpPermission(sessionId, requestId, 'deny'),
+      15 * 60_000
+    );
+    try {
+      return await answer;
+    } finally {
+      clearTimeout(timer);
+      pendings.delete(requestId);
+      void this.emitLifecycle(sessionId, 'busy');
+    }
+  }
+
+  /** Answer from the approval card (routes/permissions.ts). False if unknown. */
+  respondAcpPermission(
+    sessionId: string,
+    requestId: string,
+    action: 'allow_once' | 'allow_project' | 'allow_global' | 'deny'
+  ): boolean {
+    const pending = this.processes.get(sessionId)?.acpPendingPermissions?.get(requestId);
+    if (!pending) return false;
+    const want =
+      action === 'deny'
+        ? ['reject_once', 'reject_always']
+        : action === 'allow_once'
+          ? ['allow_once', 'allow_always']
+          : ['allow_always', 'allow_once'];
+    const option = want
+      .map((kind) => pending.options.find((candidate) => candidate.kind === kind))
+      .find(Boolean);
+    pending.resolve(option?.optionId ?? null);
+    return true;
+  }
+
+  /** Vibe's ask_user_question: Plum's question card, answered by the user. */
+  private async handleAcpElicitation(
+    sessionId: string,
+    proc: ClaudeProcess,
+    params: CreateElicitationRequest
+  ): Promise<CreateElicitationResponse> {
+    const { keys, questions } = vibeElicitationQuestions(params);
+    if (!keys.length || !proc.acpPendingQuestions) return { action: 'decline' };
+    const requestId = `acpq-${nanoid()}`;
+    const content = await new Promise<Record<string, string | string[]> | null>((resolve) => {
+      proc.acpPendingQuestions!.set(requestId, { resolve, keys, questions });
+      const questionEvent = { sessionId, requestId, questions };
+      this.emitBufferedEvent(sessionId, 'question', questionEvent, (sequenced) => {
+        this.io.to(`session:${sessionId}`).emit('session:question_request', sequenced);
+      });
+      this.io.to(`session:${sessionId}`).emit('session:thinking', { sessionId, isThinking: false });
+      void this.registerQuestion(sessionId, questionEvent).then(() =>
+        this.emitLifecycle(sessionId, 'question')
+      );
+      void this.notifyDiscordSessionEvent(sessionId, {
+        eventType: 'session.needs_input',
+        severity: 'warning',
+        title: 'Session needs input',
+        summary: questions.map((question) => question.question).join('\n'),
+        fields: [{ name: 'Request', value: requestId, inline: true }],
+      });
+    });
+    proc.acpPendingQuestions.delete(requestId);
+    void import('../pendingQuestions.js').then(({ clearPendingQuestion }) =>
+      clearPendingQuestion(requestId)
+    );
+    void this.emitLifecycle(sessionId, 'busy');
+    return content ? { action: 'accept', content } : { action: 'decline' };
+  }
+
+  /** Answer (or reject with null) a Vibe question by request id; false if unknown. */
+  respondAcpQuestion(requestId: string, answers: string[][] | null): boolean {
+    for (const proc of this.processes.values()) {
+      const pending = proc.acpPendingQuestions?.get(requestId);
+      if (!pending) continue;
+      pending.resolve(
+        answers ? vibeElicitationContent(pending.keys, pending.questions, answers) : null
+      );
+      return true;
+    }
+    return false;
   }
 
   private async handleKimiAcpUpdate(
@@ -9840,8 +10132,19 @@ The planning phase is complete. You are now in Auto-Accept mode.
       this.io.to(`session:${sessionId}`).emit('session:thinking', {
         sessionId,
         isThinking: true,
-        message: proc.currentActivitySummary || `${acpProviderLabel(proc.cliProvider)} is reasoning…`,
+        message:
+          proc.currentActivitySummary || `${acpProviderLabel(proc.cliProvider)} is reasoning…`,
       });
+      return;
+    }
+
+    if (
+      proc.cliProvider === 'vibe' &&
+      (update.sessionUpdate === 'tool_call' ||
+        update.sessionUpdate === 'tool_call_update' ||
+        update.sessionUpdate === 'plan')
+    ) {
+      await this.handleVibeToolUpdate(sessionId, proc, update);
       return;
     }
 
@@ -9933,6 +10236,147 @@ The planning phase is complete. You are now in Auto-Accept mode.
     }
   }
 
+  /**
+   * Vibe's tool stream. The bare tool name comes with `tool_call`; input, a
+   * readable title, diffs and locations follow in the first
+   * `tool_call_update`; the result in the last. Plum's cards need canonical
+   * names and Claude-style input keys, so the card is created on the first
+   * event and filled in as the details arrive.
+   */
+  private async handleVibeToolUpdate(
+    sessionId: string,
+    proc: ClaudeProcess,
+    update: AcpSessionUpdate
+  ): Promise<void> {
+    if (update.sessionUpdate === 'plan') {
+      const todos = vibeTodos(update.entries);
+      // Vibe announces each todo write with an empty plan first; skip it.
+      if (!todos.length) return;
+      this.emitBufferedEvent(sessionId, 'todos', { sessionId, todos }, (sequenced) => {
+        this.io.to(`session:${sessionId}`).emit('session:todos', sequenced);
+      });
+      return;
+    }
+    if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return;
+
+    const names = (proc.vibeToolNames ??= new Map());
+    const id = update.toolCallId;
+    const key = vibeToolKey(update);
+    if (!names.has(id)) names.set(id, vibeToolName(key, update.title));
+    const name = names.get(id)!;
+    const pending = proc.pendingToolResults.get(id);
+    const rawInput = update.rawInput ?? null;
+    const input = rawInput != null ? normalizeVibeInput(name, rawInput) : pending?.input;
+    // Later titles are prose ("Reading calc.py", "bash: ls"): the card's summary.
+    const title = update.title && update.title !== key ? update.title : null;
+
+    if (isVibeCompaction(update.title) || (pending && isVibeCompaction(pending.toolName))) {
+      if (update.status === 'completed') {
+        await this.emitCompact(sessionId, {
+          sessionId,
+          message: 'Vibe hat den bisherigen Verlauf komprimiert.',
+          reason: 'auto-compact',
+        });
+      }
+      proc.pendingToolResults.set(id, { toolName: update.title || 'compaction', input });
+      return;
+    }
+
+    if (!pending) {
+      // Text written before this tool belongs above it in the timeline.
+      const text = proc.streamingText.trim();
+      if (text) {
+        proc.streamingText = '';
+        proc.isStreaming = false;
+        await this.saveAssistantMessage(sessionId, text);
+      }
+    }
+    proc.pendingToolResults.set(id, { toolName: name, input });
+
+    const startedAgain = !pending || rawInput != null || title;
+    if (startedAgain && !proc.kimiCompletedTools?.has(id)) {
+      proc.emittedTools?.add(id);
+      this.emitToolUse(sessionId, {
+        sessionId,
+        toolName: name,
+        toolId: id,
+        status: 'started',
+        input: input ?? undefined,
+        ...(title
+          ? {
+              actionSummary: {
+                title: title.length > 90 ? `${title.slice(0, 87)}…` : title,
+                explanation: '',
+                source: 'agent' as const,
+                generatedAt: Date.now(),
+              },
+            }
+          : {}),
+      });
+      if (name === 'Task')
+        this.trackKimiSubagent(sessionId, proc, id, 'Agent', input, 'in_progress');
+      if (isVibeUltracodeTool(name)) {
+        // Ultracode workflow: the parent card; its agents arrive through
+        // POST /api/ultracode/internal/progress while the tool runs. The
+        // script (and so the workflow's name) comes in a later update.
+        const script = isRecordValue(input) && typeof input.script === 'string' ? input.script : '';
+        const workflowName = /\bname\s*:\s*['"`]([^'"`]{1,120})/.exec(script)?.[1];
+        const description = workflowName ? `Ultracode · ${workflowName}` : 'Ultracode-Workflow';
+        const run = proc.subagentRuns.get(id);
+        if (!run) {
+          proc.vibeWorkflowToolId = id;
+          this.startSubagentRun(sessionId, proc, {
+            agentId: id,
+            toolId: id,
+            agentType: 'workflow',
+            description,
+          });
+        } else if (workflowName && run.description !== description) {
+          run.description = description;
+          this.emitSubagentRun(sessionId, run);
+        }
+      }
+    }
+
+    if (
+      (update.status === 'completed' || update.status === 'failed') &&
+      !proc.kimiCompletedTools?.has(id)
+    ) {
+      proc.kimiCompletedTools?.add(id);
+      const result = vibeToolResult(name, {
+        rawOutput: update.rawOutput,
+        content: (update.content as Array<Record<string, unknown>> | null | undefined) ?? null,
+      }).slice(0, 20_000);
+      if (name === 'Task') {
+        this.trackKimiSubagent(sessionId, proc, id, 'Agent', input, update.status, result);
+      }
+      if (isVibeUltracodeTool(name)) {
+        const output = isRecordValue(update.rawOutput) ? update.rawOutput : null;
+        const details = output && isRecordValue(output.structured) ? output.structured : {};
+        if (proc.vibeWorkflowToolId === id) proc.vibeWorkflowToolId = null;
+        this.applyPiWorkflowAgents(
+          sessionId,
+          proc,
+          id,
+          { details: { kind: 'ultracode', ...details } },
+          true,
+          update.status === 'failed'
+        );
+      }
+      this.emitToolUse(sessionId, {
+        sessionId,
+        toolName: name,
+        toolId: id,
+        status: update.status === 'failed' ? 'error' : 'completed',
+        input: input ?? undefined,
+        ...(update.status === 'failed'
+          ? { error: result || `${name} fehlgeschlagen` }
+          : { result: result || undefined }),
+      });
+      proc.pendingToolResults.delete(id);
+    }
+  }
+
   private queueKimiTurn(sessionId: string, proc: ClaudeProcess, turn: CodexPreparedTurn): void {
     proc.kimiQueuedTurns ??= [];
     proc.kimiQueuedTurns.push(turn);
@@ -9993,9 +10437,30 @@ The planning phase is complete. You are now in Auto-Accept mode.
           )
         : null;
     try {
+      const promptBlocks: AcpContentBlock[] = [{ type: 'text', text: turn.messageForClaude }];
+      // Vibe sees images natively (promptCapabilities.image).
+      if (proc.cliProvider === 'vibe') {
+        for (const imagePath of turn.codexImagePaths) {
+          try {
+            const data = (await fs.readFile(imagePath)).toString('base64');
+            const ext = path.extname(imagePath).toLowerCase();
+            const mimeType =
+              ext === '.png'
+                ? 'image/png'
+                : ext === '.gif'
+                  ? 'image/gif'
+                  : ext === '.webp'
+                    ? 'image/webp'
+                    : 'image/jpeg';
+            promptBlocks.push({ type: 'image', data, mimeType });
+          } catch (error) {
+            console.warn(`[VIBE ACP] image ${imagePath} not readable [${sessionId}]:`, error);
+          }
+        }
+      }
       response = await connection.prompt({
         sessionId: nativeSessionId,
-        prompt: [{ type: 'text', text: turn.messageForClaude }],
+        prompt: promptBlocks,
       });
       const nativeUsage = usageCursor ? readKimiUsageSince(usageCursor) : null;
       if (nativeUsage && nativeUsage.totalTokens > 0) {
@@ -10007,9 +10472,39 @@ The planning phase is complete. You are now in Auto-Accept mode.
           (a, b) => b[1] - a[1]
         )[0]?.[0];
         if (dominantModel) proc.model = dominantModel;
+      } else if (proc.cliProvider === 'vibe') {
+        // Vibe reports the session's running totals, not this turn's usage:
+        // book the difference to the last turn (its meta.json also has the
+        // cached share, which the ACP payload lacks).
+        const totals =
+          readVibeSessionStats(nativeSessionId) ??
+          (response.usage
+            ? {
+                prompt: response.usage.inputTokens,
+                completion: response.usage.outputTokens + (response.usage.thoughtTokens || 0),
+                cached: 0,
+              }
+            : null);
+        if (totals) {
+          const turnUsage = vibeTurnUsage(totals, proc.vibeUsageBaseline);
+          proc.vibeUsageBaseline = totals;
+          proc.turnCacheReadTokens = Math.min(turnUsage.cached, turnUsage.prompt);
+          proc.turnInputTokens = turnUsage.prompt - proc.turnCacheReadTokens;
+          proc.turnCacheCreationTokens = 0;
+          proc.turnOutputTokens = turnUsage.completion;
+        }
+        // Ultracode workflow agents run as separate `vibe -p` processes; their
+        // tokens come from the workflow server (applyVibeWorkflowProgress).
+        const workflow = proc.vibeWorkflowUsage;
+        if (workflow) {
+          proc.turnCacheReadTokens += workflow.cached;
+          proc.turnInputTokens += Math.max(0, workflow.input - workflow.cached);
+          proc.turnOutputTokens += workflow.output;
+          proc.vibeWorkflowUsage = undefined;
+        }
       } else if (response.usage) {
-        // ACP usage payload: Vibe reports it per turn, and it stays the
-        // fallback for a future Kimi build that starts returning it too.
+        // ACP usage payload: the fallback for a future Kimi build that starts
+        // returning it.
         const cacheRead = Math.max(0, response.usage.cachedReadTokens || 0);
         proc.turnInputTokens = Math.max(0, response.usage.inputTokens - cacheRead);
         proc.turnCacheReadTokens = cacheRead;
@@ -10023,9 +10518,18 @@ The planning phase is complete. You are now in Auto-Accept mode.
       proc.totalOutputTokens += proc.turnOutputTokens;
       proc.cacheReadTokens += proc.turnCacheReadTokens;
       proc.cacheCreationTokens += proc.turnCacheCreationTokens;
+      if (proc.cliProvider === 'vibe') proc.totalCostUsd += this.calculateTurnCost(proc);
       await this.emitUsage(sessionId, proc);
       const text = proc.streamingText.trim();
-      if (text) await this.saveAssistantMessage(sessionId, text);
+      const stopNote =
+        response.stopReason === 'max_tokens'
+          ? '\n\n_[Antwort wegen Token-Limit abgeschnitten]_'
+          : response.stopReason === 'max_turn_requests'
+            ? '\n\n_[Angehalten: maximale Anzahl Arbeitsschritte erreicht – „weiter“ setzt fort]_'
+            : response.stopReason === 'refusal'
+              ? '\n\n_[Das Modell hat die Anfrage abgelehnt]_'
+              : '';
+      if (text || stopNote) await this.saveAssistantMessage(sessionId, `${text}${stopNote}`.trim());
       await this.saveUsageToDatabase(sessionId, proc);
       console.log(
         `[${acpLabel.toUpperCase()} ACP] Turn completed [${sessionId}] reason=${response.stopReason}`
@@ -10697,8 +11201,15 @@ The planning phase is complete. You are now in Auto-Accept mode.
     const piNativeSlashCommand = proc.cliProvider === 'pi' && message.trimStart().startsWith('/');
     const piCompactCommand =
       proc.cliProvider === 'pi' && /^\/compact(?:\s|$)/i.test(message.trim());
+    // Vibe recognises its commands and skills (/compact, /mcp, /<skill>) only
+    // at the very start of the prompt, so no reminders may go in front.
+    const vibeNativeSlashCommand =
+      proc.cliProvider === 'vibe' && /^\/[a-z][\w-]*(?:\s|$)/i.test(message.trimStart());
     const providerNativeSlashCommand =
-      codexNativeSlashCommand || Boolean(opencodeSlashCommand) || piNativeSlashCommand;
+      codexNativeSlashCommand ||
+      Boolean(opencodeSlashCommand) ||
+      piNativeSlashCommand ||
+      vibeNativeSlashCommand;
     let codexExecCommandForTurn: CodexPreparedTurn['codexExecCommand'];
     const codexImagePathsForTurn: string[] = [];
     if (codexReviewCommand) {
@@ -10865,7 +11376,8 @@ ${proc.contextReminder.summary}
                 `ask the user for a text description or switch to Codex/Claude for this image-specific turn.`
             );
           }
-        } else if (proc.cliProvider === 'codex') {
+        } else if (proc.cliProvider === 'codex' || proc.cliProvider === 'vibe') {
+          // Codex (--image) and Vibe (ACP image blocks) see images natively.
           // Codex supports native multimodal input via --image. Stage the paths for
           // this turn's respawn instead of asking the model to Read them — that wastes
           // a tool turn and the model can't actually see PNG bytes via fs reads anyway.
@@ -11164,7 +11676,7 @@ ${proc.contextReminder.summary}
         messageForClaude,
         attachments,
         updateLastMessage,
-        codexImagePaths: [],
+        codexImagePaths: proc.cliProvider === 'vibe' ? codexImagePathsForTurn : [],
         codexExecCommand: undefined,
         codexNativeSlashCommand: false,
       };
@@ -11251,7 +11763,10 @@ ${proc.contextReminder.summary}
       isThinking: true,
     });
 
-    const formattedMessage = formatInputMessage(proc.cliProvider, messageForClaude);
+    const formattedMessage = formatInputMessage(
+      proc.cliProvider,
+      withUltrathink(proc, messageForClaude)
+    );
     if (proc.process.stdin?.writable) {
       proc.process.stdin.write(formattedMessage);
       console.log(

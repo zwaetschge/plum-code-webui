@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Plum Browser",
-  "version": "0.5.1",
+  "version": "0.7.0",
   "description": "Lässt Plum-Code-Agents Firefox steuern – jede Session in ihrer eigenen Tab-Gruppe.",
   "author": "Plum Code",
   "browser_specific_settings": {
@@ -16,7 +16,7 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "permissions": ["tabs", "tabGroups", "storage", "<all_urls>"],
+  "permissions": ["tabs", "tabGroups", "storage", "<all_urls>", "menus"],
   "background": {
     "scripts": ["shared.js", "background.js"],
     "persistent": true

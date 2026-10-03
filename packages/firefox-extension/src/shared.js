@@ -28,7 +28,39 @@ const PLUM_DEFAULTS = Object.freeze({
   paused: false,
   allowJs: true,
   wsPath: '',
+  // Sites where the agent asks on the page before every click or input.
+  protectedSites: [
+    '*bank*',
+    'ubs.com',
+    'postfinance.ch',
+    'raiffeisen.ch',
+    'twint.ch',
+    'paypal.com',
+    'stripe.com',
+    'checkout.*',
+    'mail.google.com',
+    'outlook.live.com',
+    'outlook.office.com',
+    'accounts.google.com',
+  ].join('\n'),
 });
+
+/** Whether a hostname matches one of the protected-site patterns (glob, or domain + subdomains). */
+function plumIsProtected(hostname, patterns) {
+  const host = String(hostname || '').toLowerCase();
+  if (!host) return false;
+  return String(patterns || '')
+    .split(/[\n,]+/)
+    .map((pattern) => pattern.trim().toLowerCase())
+    .filter(Boolean)
+    .some((pattern) => {
+      if (!pattern.includes('*')) return host === pattern || host.endsWith(`.${pattern}`);
+      const regex = new RegExp(
+        `^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`
+      );
+      return regex.test(host);
+    });
+}
 
 /**
  * Connection defaults an administrator provisioned through managed storage
@@ -47,8 +79,9 @@ async function plumLoadSettings() {
   const stored = await browser.storage.local.get(Object.keys(PLUM_DEFAULTS));
   const settings = { ...PLUM_DEFAULTS, ...stored };
   // Priority: options page (storage) > administrator policy.
-  if (!settings.serverUrl || !settings.token) {
-    const provided = await plumManagedSettings();
+  for (const source of [plumManagedSettings]) {
+    if (settings.serverUrl && settings.token) break;
+    const provided = await source();
     for (const key of ['serverUrl', 'token', 'label']) {
       if (!settings[key] && typeof provided[key] === 'string') settings[key] = provided[key];
     }

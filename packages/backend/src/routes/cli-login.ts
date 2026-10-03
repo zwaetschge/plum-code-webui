@@ -137,7 +137,45 @@ function loginOutputSignalsSuccess(session: LoginSession): boolean {
   return ALREADY_LOGGED_REGEX.test(session.output) || LOGIN_SUCCESS_REGEX.test(session.output);
 }
 
+const lastOutputAt = new WeakMap<LoginSession, number>();
+
+/**
+ * Type a TUI login command (Pi's `/login antigravity`) once the interface has
+ * settled, and submit it until the CLI answers with a login URL. Fixed delays
+ * failed whenever startup was slow: the text sat in the composer and the
+ * Enter keys had gone in before the input handler existed.
+ */
+async function typeTuiLogin(session: LoginSession, proc: pty.IPty, command: string): Promise<void> {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const write = (value: string) => {
+    try {
+      proc.write(value);
+    } catch {
+      // The process may already be gone; onExit reports that.
+    }
+  };
+  const alive = () =>
+    loginSessions.get(session.id) === session &&
+    (session.status === 'starting' || session.status === 'awaiting_code');
+  const started = Date.now();
+  // Ready: at least 2 s in and 1.5 s without new output, at most 30 s.
+  await sleep(2_000);
+  while (alive() && Date.now() - started < 30_000) {
+    if (Date.now() - (lastOutputAt.get(session) ?? started) >= 1_500) break;
+    await sleep(250);
+  }
+  if (!alive()) return;
+  write(command);
+  // Submitting in the same write as the text does not register.
+  for (let attempt = 0; attempt < 8 && alive() && !session.loginUrl; attempt++) {
+    await sleep(attempt === 0 ? 800 : 2_500);
+    if (session.loginUrl) break;
+    write('\r');
+  }
+}
+
 function appendOutput(session: LoginSession, chunk: string): void {
+  lastOutputAt.set(session, Date.now());
   const cleaned = stripCliLoginAnsi(chunk);
   session.output = (session.output + cleaned).slice(-OUTPUT_LIMIT);
   // The URL has to be read from the untouched stream: a TUI publishes it as an
@@ -458,23 +496,13 @@ router.post('/:provider/start', requireAuth, async (req, res) => {
     });
 
     // Providers whose login is a TUI command need it typed after the
-    // interface has drawn; writing immediately lands before the input is
-    // wired and is swallowed.
+    // interface has drawn; writing earlier lands before the input is wired.
+    // Startup time varies a lot (Pi shows its changelog after an update and
+    // connects every MCP server first), so wait until the screen has been
+    // quiet, then keep pressing Enter until the login URL shows up.
     const tuiInput = CLI_LOGIN_TUI_INPUT[provider];
     if (tuiInput) {
-      const type = (value: string) => {
-        try {
-          proc.write(value);
-        } catch {
-          // The process may already be gone; onExit reports that.
-        }
-      };
-      // Three separate writes on purpose. The TUI needs to have drawn before
-      // it accepts input, and submitting in the same write as the text does
-      // not register — the command just sits in the composer.
-      setTimeout(() => type(tuiInput), 2000);
-      setTimeout(() => type('\r'), 3000);
-      setTimeout(() => type('\r'), 5000);
+      void typeTuiLogin(session, proc, tuiInput);
     }
   } catch (error) {
     session.status = 'error';

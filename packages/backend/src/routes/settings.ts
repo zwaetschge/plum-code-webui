@@ -382,6 +382,7 @@ const VALID_REASONING_LEVELS = new Set([
   'xhigh',
   'max',
   'ultra',
+  'ultrathink',
   'ultracode',
 ]);
 

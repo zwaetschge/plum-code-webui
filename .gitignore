@@ -133,3 +133,4 @@ packages/android/ui_dump*.xml
 
 # Postgres data directory (bind-mounted into the plum-postgres container)
 /postgres/
+.probe/

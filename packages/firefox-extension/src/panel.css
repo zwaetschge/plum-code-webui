@@ -467,3 +467,137 @@ body {
   margin: 0;
   box-shadow: var(--shadow);
 }
+
+/* ---------------------------------------------------------------- tutorial modes */
+
+.chat-modes {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mode-toggle {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.mode-toggle.record.on {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.mode-toggle.guide.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.mode-banner {
+  flex-shrink: 0;
+  display: grid;
+  gap: 6px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  background: var(--glass-strong);
+  border: 1px solid var(--border);
+}
+
+.mode-banner p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.mode-banner.recording {
+  border-color: rgba(234, 33, 67, 0.55);
+}
+
+.mode-banner.recording strong {
+  color: var(--danger);
+}
+
+.mode-banner.guide {
+  border-color: rgba(24, 86, 255, 0.5);
+}
+
+.mode-banner.review {
+  border-color: var(--warning);
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.mode-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 3px;
+  max-height: 180px;
+  overflow: auto;
+  font-size: 0.76rem;
+}
+
+.mode-steps li {
+  overflow-wrap: anywhere;
+}
+
+.mode-banner textarea {
+  width: 100%;
+  font: inherit;
+  padding: 7px 9px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(58, 52, 78, 0.2);
+  resize: vertical;
+}
+
+.mode-banner .row button {
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+/* ---------------------------------------------------------------- update + macros */
+
+.update-banner:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 8px 0;
+  padding: 7px 10px;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  background: rgba(24, 86, 255, 0.12);
+  border: 1px solid rgba(24, 86, 255, 0.4);
+}
+
+.update-banner span {
+  flex: 1;
+}
+
+.update-banner button {
+  padding: 5px 10px;
+  font-size: 0.78rem;
+}
+
+.list li.macro {
+  align-items: center;
+}
+
+.list li.macro .name {
+  flex: 1;
+}
+
+.list li.macro button {
+  padding: 3px 8px;
+}
+
+.composer-actions .mic.on {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.chat-head-actions .icon[aria-pressed='true'] {
+  background: rgba(24, 86, 255, 0.14);
+  border-color: var(--primary);
+}

@@ -161,6 +161,8 @@ enum class ReasoningLevel(val id: String, val label: String) {
     XHIGH("xhigh", "XHigh"),
     MAX("max", "Max"),
     ULTRA("ultra", "Ultra"),
+    /** Claude/Z.AI: max effort plus the "ultrathink" keyword on every prompt. */
+    ULTRATHINK("ultrathink", "Ultrathink"),
     ULTRACODE("ultracode", "Ultracode");
 
     companion object {
@@ -170,10 +172,10 @@ enum class ReasoningLevel(val id: String, val label: String) {
          * harness rejects silently downgrades the turn, so the lists must match.
          */
         fun forProvider(provider: CLIProvider): List<ReasoningLevel> = when (provider) {
-            CLIProvider.CLAUDE, CLIProvider.ZAI -> listOf(LOW, MEDIUM, HIGH, XHIGH, MAX, ULTRACODE)
+            CLIProvider.CLAUDE, CLIProvider.ZAI -> listOf(LOW, MEDIUM, HIGH, XHIGH, MAX, ULTRATHINK, ULTRACODE)
             CLIProvider.OPENCODE -> listOf(MINIMAL, LOW, MEDIUM, HIGH, MAX)
-            // Vibe calls the setting "Thinking" and accepts exactly these five.
-            CLIProvider.VIBE -> listOf(OFF, LOW, MEDIUM, HIGH, MAX)
+            // Vibe calls the setting "Thinking"; Ultracode runs Plum's workflow server.
+            CLIProvider.VIBE -> listOf(OFF, LOW, MEDIUM, HIGH, MAX, ULTRACODE)
             // Pi runs Ultracode workflows through the Plum pi-ultracode extension.
             CLIProvider.PI -> listOf(MINIMAL, LOW, MEDIUM, HIGH, MAX, ULTRACODE)
             else -> listOf(NONE, MINIMAL, LOW, MEDIUM, HIGH, XHIGH, MAX, ULTRA)

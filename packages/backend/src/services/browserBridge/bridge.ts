@@ -3,6 +3,7 @@ import type { Duplex } from 'node:stream';
 import { nanoid } from 'nanoid';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { ChatRelay } from './chatRelay.js';
+import { latestExtensionVersion } from './package.js';
 import { handleBridgeRpc } from './rpc.js';
 import { isBrowserTokenActive, resolveBrowserToken } from './tokens.js';
 
@@ -27,7 +28,11 @@ const TOKEN_RECHECK_MS = 60_000;
 /** A session leaves its browser once the user has been away from it this long and is active elsewhere. */
 const SWITCH_AFTER_IDLE_MS = 10 * 60_000;
 
+/** A browser extension, or the desktop companion that shows marks over native apps. */
+export type BridgeClientKind = 'browser' | 'desktop';
+
 export interface BrowserClientInfo {
+  kind: BridgeClientKind;
   name: string;
   version: string;
   extensionVersion: string;
@@ -200,9 +205,14 @@ export class BrowserBridge {
     return this.describeForSession(userId, sessionId);
   }
 
-  private openConnections(userId: string): Connection[] {
+  private openConnections(userId: string, kind: BridgeClientKind = 'browser'): Connection[] {
     return [...this.connections.values()]
-      .filter((conn) => conn.userId === userId && conn.ws.readyState === WebSocket.OPEN)
+      .filter(
+        (conn) =>
+          conn.userId === userId &&
+          conn.client.kind === kind &&
+          conn.ws.readyState === WebSocket.OPEN
+      )
       .sort((a, b) => b.activeAt.getTime() - a.activeAt.getTime());
   }
 
@@ -223,6 +233,17 @@ export class BrowserBridge {
     return leftIt && activeElsewhere ? recent : current;
   }
 
+  /** Pause or resume browser control everywhere (the live view's pause button). */
+  setPaused(userId: string, paused: boolean): number {
+    let reached = 0;
+    for (const conn of this.openConnections(userId)) {
+      conn.ws.send(JSON.stringify({ type: 'control', paused }));
+      conn.paused = paused;
+      reached += 1;
+    }
+    return reached;
+  }
+
   /** Drop live sockets opened with a token that was just revoked. */
   disconnectToken(tokenId: string): void {
     for (const conn of this.connections.values()) {
@@ -235,18 +256,27 @@ export class BrowserBridge {
     session: BrowserCallSession,
     tool: string,
     args: Record<string, unknown>,
-    opts: { connectionId?: string; timeoutMs?: number } = {}
+    opts: { connectionId?: string; timeoutMs?: number; kind?: BridgeClientKind } = {}
   ): Promise<BrowserCallResult> {
+    const kind = opts.kind ?? 'browser';
     const conn = opts.connectionId
-      ? this.openConnections(userId).find((candidate) => candidate.id === opts.connectionId)
-      : this.pickConnection(userId, session.id);
+      ? this.openConnections(userId, kind).find((candidate) => candidate.id === opts.connectionId)
+      : kind === 'desktop'
+        ? this.openConnections(userId, 'desktop')[0]
+        : this.pickConnection(userId, session.id);
+    if (!conn && kind === 'desktop') {
+      throw new BrowserBridgeError(
+        'The Plum desktop companion is not running. Start it on the computer (plum-desktop) to show marks over desktop apps.',
+        'DESKTOP_NOT_CONNECTED'
+      );
+    }
     if (!conn) {
       throw new BrowserBridgeError(
         'No browser is connected. Open the Plum Browser extension in Firefox or Chrome and connect it (Plum → Settings → Browser control).',
         'BROWSER_NOT_CONNECTED'
       );
     }
-    if (conn.paused && tool !== 'status') {
+    if (conn.paused && tool !== 'status' && tool !== 'peek') {
       throw new BrowserBridgeError(
         `Browser control is paused in the ${conn.client.name} extension. Ask the user to resume it.`,
         'BROWSER_PAUSED'
@@ -254,11 +284,12 @@ export class BrowserBridge {
     }
 
     const sticky = this.sessionBrowser.get(session.id);
-    this.sessionBrowser.set(session.id, {
-      connectionId: conn.id,
-      pinned: !!sticky?.pinned && sticky.connectionId === conn.id,
-      lastCallAt: Date.now(),
-    });
+    if (kind === 'browser')
+      this.sessionBrowser.set(session.id, {
+        connectionId: conn.id,
+        pinned: !!sticky?.pinned && sticky.connectionId === conn.id,
+        lastCallAt: Date.now(),
+      });
     const id = nanoid();
     const timeoutMs = Math.min(
       Math.max(opts.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS, 1_000),
@@ -359,6 +390,7 @@ export class BrowserBridge {
       tokenName: resolved.name,
       ws,
       client: {
+        kind: client.kind === 'desktop' ? 'desktop' : 'browser',
         name: text(client.name, 40) || 'Firefox',
         version: text(client.version, 40),
         extensionVersion: text(client.extensionVersion, 40),
@@ -377,7 +409,14 @@ export class BrowserBridge {
       chat: null,
     };
     this.connections.set(conn.id, conn);
-    ws.send(JSON.stringify({ type: 'welcome', connectionId: conn.id }));
+    ws.send(
+      JSON.stringify({
+        type: 'welcome',
+        connectionId: conn.id,
+        // Lets the extension offer an update when Plum ships a newer build.
+        latestVersion: latestExtensionVersion(),
+      })
+    );
     console.log(
       `[BROWSER] Firefox connected (${conn.client.label}, ${conn.client.name} ${conn.client.version}) user=${conn.userId}`
     );

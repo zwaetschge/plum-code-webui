@@ -31,6 +31,7 @@ private val ReasoningLevel.labelResource: Int get() = when (this) {
     ReasoningLevel.XHIGH -> R.string.component_reasoning_xhigh
     ReasoningLevel.MAX -> R.string.component_reasoning_max
     ReasoningLevel.ULTRA -> R.string.component_reasoning_ultra
+    ReasoningLevel.ULTRATHINK -> R.string.component_reasoning_ultrathink
     ReasoningLevel.ULTRACODE -> R.string.component_reasoning_ultracode
 }
 private val ActiveFollowupMode.labelResource: Int get() = when (this) {

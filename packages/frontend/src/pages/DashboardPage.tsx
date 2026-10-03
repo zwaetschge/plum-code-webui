@@ -152,13 +152,15 @@ function getDashboardReasoningOptions(provider: CLIProvider) {
     ];
   }
   if (provider === 'vibe') {
-    // Vibe calls this "Thinking"; the backend accepts only these five levels.
+    // Vibe calls this "Thinking"; the backend accepts only these levels.
     return [
       { value: 'off', label: 'Off' },
       { value: 'low', label: 'Low' },
       { value: 'medium', label: 'Medium' },
       { value: 'high', label: 'High' },
       { value: 'max', label: 'Max' },
+      // Workflows through scripts/mcp-servers/vibe-ultracode.mjs, at high thinking.
+      { value: 'ultracode', label: 'Ultracode (workflows)' },
     ];
   }
   return [

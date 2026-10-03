@@ -235,7 +235,7 @@ private fun OracleFrame(state: DevToolsUiState, viewModel: DevToolsViewModel) {
 }
 
 @Composable
-private fun OracleChip(
+internal fun OracleChip(
     label: String,
     disabled: Boolean,
     destructive: Boolean = false,

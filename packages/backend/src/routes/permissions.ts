@@ -301,6 +301,20 @@ router.post('/respond', requireAuth, async (req: Request, res: Response) => {
 
   const request = pendingRequests.get(requestId);
 
+  // Vibe (ACP) approvals live in the running process, not in this registry.
+  if (!request && session.cli_provider === 'vibe') {
+    if (getProcessManager().respondAcpPermission(sessionId, requestId, action)) {
+      await resolveApprovalNotification(requestId);
+      await auditFromRequest(req, 'permission.respond', {
+        resourceType: 'permission_request',
+        resourceId: requestId,
+        metadata: { provider: 'vibe', action },
+      });
+      return res.json({ success: true, action, provider: 'vibe' });
+    }
+    throw new AppError('Permission request not found or expired', 404, 'NOT_FOUND');
+  }
+
   if (!request) {
     if (session.cli_provider !== 'opencode' || !session.claude_session_id) {
       throw new AppError('Permission request not found or expired', 404, 'NOT_FOUND');

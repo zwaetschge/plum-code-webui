@@ -97,6 +97,8 @@ function publicState() {
     serverUrl: state.settings.serverUrl,
     label: state.settings.label,
     allowJs: state.settings.allowJs,
+    version: EXTENSION_VERSION,
+    latestVersion: state.latestVersion || null,
     tabGroups: HAS_TAB_GROUPS,
     sessions: [...state.sessions.entries()].map(([id, entry]) => ({
       id,
@@ -108,14 +110,34 @@ function publicState() {
       lastUsed: entry.lastUsed,
     })),
     recentActions: state.recentActions.slice(0, 12),
+    guides: [...state.sessions.entries()]
+      .filter(([, entry]) => entry.guideWindowId != null)
+      .map(([id, entry]) => ({ sessionId: id, windowId: entry.guideWindowId })),
+    // One demonstration per window, so parallel sessions each record their own.
+    recordings: [...state.recordings.values()].map(recordingSummary),
   };
 }
 
 function broadcastState() {
   const s = state.status;
   const paused = state.settings.paused;
-  const text = s === 'connected' ? (paused ? '❚❚' : 'ON') : s === 'error' ? '!' : '';
-  const color = paused ? '#E89558' : s === 'connected' ? '#07CA6B' : '#EA2143';
+  const recording = [...state.recordings.values()].some((rec) => !rec.stopped);
+  const text = recording
+    ? 'REC'
+    : s === 'connected'
+      ? paused
+        ? '❚❚'
+        : 'ON'
+      : s === 'error'
+        ? '!'
+        : '';
+  const color = recording
+    ? '#EA2143'
+    : paused
+      ? '#E89558'
+      : s === 'connected'
+        ? '#07CA6B'
+        : '#EA2143';
   actionApi.setBadgeText({ text }).catch(() => {});
   actionApi.setBadgeBackgroundColor({ color }).catch(() => {});
   actionApi
@@ -228,6 +250,8 @@ function tryEndpoint(candidate, generation) {
           }
           state.socket = socket;
           state.connectionId = frame.connectionId;
+          state.latestVersion =
+            typeof frame.latestVersion === 'string' ? frame.latestVersion : null;
           state.retryMs = 1_000;
           plumSaveSettings({ wsPath: candidate.path }).catch(() => {});
           state.settings.wsPath = candidate.path;
@@ -244,7 +268,10 @@ function tryEndpoint(candidate, generation) {
       }
       if (frame.type === 'call') void handleCall(socket, frame);
       else if (frame.type === 'rpcResult') settleRpc(frame);
-      else if (frame.type === 'event') {
+      else if (frame.type === 'control') {
+        // Paused or resumed from the WebUI / Android live view.
+        if (typeof frame.paused === 'boolean') void plumSaveSettings({ paused: frame.paused });
+      } else if (frame.type === 'event') {
         // Live session events for the chat panels (they filter by session).
         browser.runtime.sendMessage({ plumEvent: frame }).catch(() => {});
       }
@@ -500,10 +527,17 @@ async function liveGroup(entry) {
       entry.groupId = null;
     }
   }
-  // Group ids do not survive a browser restart; the restored group keeps its title.
-  const [byTitle] = await browser.tabGroups
-    .query({ title: groupTitle(entry.name) })
-    .catch(() => []);
+  // Group ids do not survive a browser restart; the restored group keeps its
+  // title. Parallel sessions may share a name, so a group another session
+  // already holds is never taken over.
+  const claimed = new Set(
+    [...state.sessions.values()]
+      .filter((other) => other !== entry && other.groupId != null)
+      .map((other) => other.groupId)
+  );
+  const byTitle = (
+    await browser.tabGroups.query({ title: groupTitle(entry.name) }).catch(() => [])
+  ).find((group) => !claimed.has(group.id));
   if (!byTitle) return null;
   entry.groupId = byTitle.id;
   return byTitle;
@@ -552,6 +586,7 @@ async function addTabToSession(entry, session, tab) {
 }
 
 async function resolveTab(entry, tabId) {
+  if (entry.guideWindowId != null) return guidedTab(entry);
   const tabs = await sessionTabs(entry);
   if (tabId != null) {
     const tab = tabs.find((candidate) => candidate.id === Number(tabId));
@@ -643,14 +678,17 @@ async function workArea() {
 
 async function createBackgroundWindow() {
   // focused:false keeps the user's current window in front. In Chrome the
-  // session window leaves room on the right for its chat window.
+  // session window leaves room on the right for its chat window. Parallel
+  // session windows are cascaded, so none sits exactly on top of another.
   const area = await workArea();
+  const open = [...state.sessions.values()].filter((entry) => entry.windowId != null).length;
+  const offset = (open % 6) * 32;
   const placement = area
     ? {
-        left: area.left,
-        top: area.top,
-        width: Math.max(800, area.width - CHAT_WINDOW_WIDTH),
-        height: area.height,
+        left: area.left + offset,
+        top: area.top + offset,
+        width: Math.max(800, area.width - CHAT_WINDOW_WIDTH - offset),
+        height: Math.max(600, area.height - offset),
       }
     : {};
   return browser.windows.create({ focused: false, url: 'about:blank', ...placement });
@@ -1066,10 +1104,18 @@ async function screenshot(tab, format) {
 // ---------------------------------------------------------------- tools
 
 async function toolStatus(session, entry) {
-  const tabs = await sessionTabs(entry);
+  const guided = entry.guideWindowId != null ? await guidedTab(entry).catch(() => null) : null;
+  const tabs = guided ? [guided] : await sessionTabs(entry);
   return [
     textContent({
       connected: true,
+      mode: guided ? 'guide' : 'control',
+      ...(guided
+        ? {
+            guide:
+              'Guide mode: the user wants to learn and does the work themselves. Watch their tab with screenshot/read_page/find/get_page_text and show with point, annotate and draw. Clicking, typing, scrolling and navigating are blocked; ask the user to do it.',
+          }
+        : {}),
       browser: `${BROWSER_NAME} ${BROWSER_VERSION}`,
       tabGroups: HAS_TAB_GROUPS
         ? `native ${BROWSER_NAME} tab groups`
@@ -1087,8 +1133,40 @@ const TOOLS = {
     return toolStatus(session, entry);
   },
 
+  async macros() {
+    const macros = await loadMacros();
+    if (!macros.length) {
+      return [
+        textContent('Noch keine Makros. Der Nutzer speichert sie im Panel nach „Vorführen“.'),
+      ];
+    }
+    return [
+      textContent({
+        macros: macros.map((macro) => ({
+          id: macro.id,
+          name: macro.name,
+          start: macro.startUrl,
+          steps: macro.steps.length,
+          params: macroParams(macro),
+        })),
+      }),
+    ];
+  },
+
+  async macro_run(session, entry, args) {
+    return runMacro(session, entry, args);
+  },
+
+  async download_file(session, entry, args) {
+    return downloadFile(session, entry, args);
+  },
+
+  async peek(_session, entry) {
+    return peek(entry);
+  },
+
   async tabs_list(_session, entry) {
-    const tabs = await sessionTabs(entry);
+    const tabs = entry.guideWindowId != null ? [await guidedTab(entry)] : await sessionTabs(entry);
     return [textContent({ tabs: tabs.map((tab) => describeTab(tab, entry.currentTabId)) })];
   },
 
@@ -1211,7 +1289,23 @@ const TOOLS = {
 };
 
 // Everything else is a DOM operation the content script handles.
+// MCP tool name → content-script operation where they differ.
+const CONTENT_OPS = { upload_file: 'upload' };
+
+// Tools that change something on the page; protected sites ask the user first.
+const WRITE_TOOLS = new Set([
+  'click',
+  'type',
+  'press_key',
+  'form_input',
+  'upload_file',
+  'navigate',
+  'evaluate_js',
+]);
+
 const CONTENT_TOOLS = new Set([
+  'guide_step',
+  'upload_file',
   'read_page',
   'find',
   'get_page_text',
@@ -1222,12 +1316,37 @@ const CONTENT_TOOLS = new Set([
   'scroll',
   'form_input',
   'read_console',
+  'point',
+  'annotate',
+  'draw',
+  'clear_annotations',
 ]);
 
-const VISIBLE_TOOLS = new Set(['click', 'hover', 'type', 'press_key', 'scroll', 'form_input']);
+const VISIBLE_TOOLS = new Set([
+  'guide_step',
+  'upload_file',
+  'click',
+  'hover',
+  'type',
+  'press_key',
+  'scroll',
+  'form_input',
+  'point',
+  'annotate',
+  'draw',
+]);
 
 async function runTool(tool, session, args) {
   const entry = sessionEntry(session);
+  const guiding = entry.guideWindowId != null;
+  if (guiding && GUIDE_BLOCKED.has(tool)) {
+    throw new Error(
+      `Anleitungsmodus: „${tool}“ ist gesperrt. Der Nutzer macht es selbst – zeige es mit point, annotate oder draw und sag, was zu tun ist.`
+    );
+  }
+  if (WRITE_TOOLS.has(tool) && !guiding) {
+    await guardProtected(session, entry, await resolveTab(entry, args.tabId), tool, args);
+  }
   if (TOOLS[tool]) return TOOLS[tool](session, entry, args);
   if (!CONTENT_TOOLS.has(tool)) throw new Error(`Unbekanntes Werkzeug: ${tool}`);
   let tab = await resolveTab(entry, args.tabId);
@@ -1244,8 +1363,12 @@ async function runTool(tool, session, args) {
     args = { ...args, x: args.x / factor, y: args.y / factor };
   }
   // Reported positions go back out in screenshot pixels too.
-  args = { ...args, _scale: factor };
-  const result = await contentCall(tab, tool, args, 25_000);
+  args = { ...args, _scale: factor, _guide: guiding };
+  if (tool === 'click' && args.trusted && typeof args.x === 'number' && !args.ref) {
+    if (PLUM_IS_CHROME && browser.debugger) return trustedClick(tab, args);
+  }
+  if (tool === 'guide_step') guideSteps.set(tab.id, session);
+  const result = await contentCall(tab, CONTENT_OPS[tool] || tool, args, 25_000);
   const content = [textContent(result)];
   // Clicks and Enter often navigate; report where the tab ended up.
   if (tool === 'click' || tool === 'press_key' || tool === 'type') {
@@ -1258,6 +1381,538 @@ async function runTool(tool, session, args) {
   }
   return content;
 }
+
+// ---------------------------------------------------------------- protected sites
+//
+// On banking, payment and mail sites the agent asks on the page before it
+// clicks, types, navigates or uploads. "Für diese Session" remembers the host.
+
+async function guardProtected(session, entry, tab, tool, args) {
+  let host = '';
+  try {
+    host = new URL(tool === 'navigate' && args.url ? String(args.url) : tab.url).hostname;
+  } catch {
+    return;
+  }
+  if (!plumIsProtected(host, state.settings.protectedSites)) return;
+  entry.allowedHosts = entry.allowedHosts || new Set();
+  if (entry.allowedHosts.has(host)) return;
+  if (!isScriptableUrl(tab.url)) {
+    throw new Error(`${host} ist geschützt; der Nutzer muss hier selbst handeln.`);
+  }
+  const what =
+    tool === 'type'
+      ? `Tippen: „${String(args.text || '').slice(0, 60)}“`
+      : tool === 'navigate'
+        ? `Öffnen: ${args.url}`
+        : tool === 'upload_file'
+          ? `Datei hochladen: ${args.name || ''}`
+          : `${tool}${args.ref ? ` auf ${args.ref}` : ''}`;
+  if (!tab.active) await browser.tabs.update(tab.id, { active: true }).catch(() => {});
+  // Flash the window in the taskbar without stealing focus.
+  browser.windows.update(tab.windowId, { drawAttention: true }).catch(() => {});
+  logAction(session.name, 'wartet auf Freigabe', host);
+  const answer = await contentCall(
+    tab,
+    'confirm',
+    { host, text: `Session „${session.name}“ – ${what}` },
+    45_000
+  ).catch(() => 'timeout');
+  if (answer === 'session') entry.allowedHosts.add(host);
+  if (answer !== 'once' && answer !== 'session') {
+    throw new Error(
+      answer === 'deny'
+        ? `Der Nutzer hat die Aktion auf ${host} abgelehnt.`
+        : `Keine Freigabe auf ${host} (geschützte Seite, 40 s ohne Antwort). Bitte den Nutzer, es selbst zu tun oder zu erlauben.`
+    );
+  }
+}
+
+// ---------------------------------------------------------------- real input (Chrome)
+//
+// Canvas apps and cross-origin frames ignore synthetic DOM events. Chrome's
+// debugger protocol produces real mouse input at a viewport position.
+
+async function trustedClick(tab, args) {
+  const x = Number(args.x);
+  const y = Number(args.y);
+  await contentCall(tab, 'point', { x, y, _scale: 1 }).catch(() => {});
+  const target = { tabId: tab.id };
+  await browser.debugger.attach(target, '1.3');
+  try {
+    const button = args.button || 'left';
+    const send = (type, clickCount) =>
+      browser.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+        type,
+        x,
+        y,
+        button: type === 'mouseMoved' ? 'none' : button,
+        clickCount,
+      });
+    await send('mouseMoved', 0);
+    for (let count = 1; count <= (args.double ? 2 : 1); count += 1) {
+      await send('mousePressed', count);
+      await send('mouseReleased', count);
+    }
+  } finally {
+    await browser.debugger.detach(target).catch(() => {});
+  }
+  await sleep(300);
+  return [
+    textContent(
+      `Echter ${args.double ? 'Doppelklick' : 'Klick'} @ ${Math.round(x)},${Math.round(y)} (Chrome-Eingabe)`
+    ),
+  ];
+}
+
+// ---------------------------------------------------------------- guided steps
+
+/** Tab → session that showed the step there; its completion goes back to that session. */
+const guideSteps = new Map();
+
+async function guideStepDone(tab, done) {
+  const session = guideSteps.get(tab.id);
+  if (!session) return;
+  const label = done.total ? `${done.step}/${done.total}` : String(done.step);
+  await rpc('chat.send', {
+    sessionId: session.id,
+    message: `✓ Schritt ${label} „${done.title}“ erledigt (${done.how === 'click' ? 'geklickt' : 'als erledigt markiert'}). Zeig mir den nächsten Schritt.`,
+    clientMessageId: `guide-${Date.now()}`,
+  }).catch((error) => console.warn('[plum] guide step report failed', error));
+}
+
+// ---------------------------------------------------------------- macros
+//
+// A demonstration saved under a name; the agent replays it deterministically
+// (macro_run) and only improvises where a step no longer fits.
+
+async function loadMacros() {
+  const { macros } = await browser.storage.local.get('macros');
+  return Array.isArray(macros) ? macros : [];
+}
+
+function macroParams(macro) {
+  return macro.steps
+    .filter((step) => (step.kind === 'type' || step.kind === 'select') && step.name)
+    .map((step) => ({ name: step.name, example: step.masked ? '(geheim)' : step.value }));
+}
+
+async function saveMacro(windowId, name) {
+  const rec = state.recordings.get(Number(windowId));
+  if (!rec) throw new Error('Keine Aufnahme in diesem Fenster.');
+  const clean = String(name || '')
+    .trim()
+    .slice(0, 80);
+  if (!clean) throw new Error('Name fehlt');
+  const start = rec.steps.find((step) => step.kind === 'start');
+  const macro = {
+    id: `m${Date.now().toString(36)}`,
+    name: clean,
+    createdAt: Date.now(),
+    startUrl: start ? start.url : rec.lastUrl,
+    startTitle: start ? start.title : '',
+    steps: rec.steps.map(({ shot: _shot, ...step }) => step),
+  };
+  const macros = (await loadMacros()).filter(
+    (entry) => entry.name.toLowerCase() !== clean.toLowerCase()
+  );
+  macros.unshift(macro);
+  await browser.storage.local.set({ macros: macros.slice(0, 100) });
+  broadcastState();
+  return { id: macro.id, name: macro.name, steps: macro.steps.length };
+}
+
+async function deleteMacro(id) {
+  await browser.storage.local.set({
+    macros: (await loadMacros()).filter((macro) => macro.id !== id),
+  });
+  broadcastState();
+  return { deleted: id };
+}
+
+async function settle(tab) {
+  await sleep(400);
+  const fresh = await browser.tabs.get(tab.id);
+  if (fresh.status === 'loading') await waitForLoad(tab.id, 20_000);
+  return browser.tabs.get(tab.id);
+}
+
+async function runMacro(session, entry, args) {
+  const wanted = String(args.name || '')
+    .trim()
+    .toLowerCase();
+  const macro = (await loadMacros()).find(
+    (candidate) => candidate.id === args.name || candidate.name.toLowerCase() === wanted
+  );
+  if (!macro) throw new Error(`Makro „${args.name}“ nicht gefunden. Liste: macros.`);
+  const params = args.params && typeof args.params === 'object' ? args.params : {};
+  const lowerParams = Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [key.toLowerCase(), value])
+  );
+  const valueFor = (step, number) => {
+    const given =
+      params[String(number)] ?? (step.name ? lowerParams[step.name.toLowerCase()] : undefined);
+    if (given !== undefined) return String(given);
+    return step.masked ? null : step.value;
+  };
+  if (args.startFresh !== false) await TOOLS.tab_open(session, entry, { url: macro.startUrl });
+  let tab = await resolveTab(entry);
+  const log = [];
+  for (let index = 0; index < macro.steps.length; index += 1) {
+    const step = macro.steps[index];
+    const number = index + 1;
+    try {
+      if (['start', 'navigate', 'switch_tab', 'scroll'].includes(step.kind)) continue;
+      if (!tab.active) await browser.tabs.update(tab.id, { active: true });
+      const locateArgs = { id: step.id, css: step.css, role: step.role, name: step.name };
+      if (step.kind === 'key') {
+        await guardProtected(session, entry, tab, 'press_key', {});
+        await contentCall(tab, 'press_key', { keys: step.keys });
+        tab = await settle(tab);
+      } else {
+        const ref = await contentCall(tab, 'locate', locateArgs);
+        if (step.kind === 'click') {
+          await guardProtected(session, entry, tab, 'click', { ref });
+          await contentCall(tab, 'click', { ref });
+          tab = await settle(tab);
+        } else if (step.kind === 'check') {
+          await guardProtected(session, entry, tab, 'form_input', { ref });
+          await contentCall(tab, 'form_input', { ref, value: !!step.checked });
+        } else {
+          const value = valueFor(step, number);
+          if (value == null) {
+            throw new Error(`Wert für das geheime Feld „${step.name}“ fehlt (params).`);
+          }
+          await guardProtected(session, entry, tab, 'type', { ref, text: value });
+          await contentCall(tab, 'form_input', { ref, value });
+        }
+      }
+      log.push(`${number}. ✓ ${stepLine(step)}`);
+    } catch (error) {
+      log.push(`${number}. ✗ ${stepLine(step)} – ${error.message || error}`);
+      return [
+        textContent(
+          `Makro „${macro.name}“ bei Schritt ${number} von ${macro.steps.length} angehalten. Mach von hier aus von Hand weiter.\n${log.join('\n')}`
+        ),
+      ];
+    }
+  }
+  logAction(session.name, 'macro_run', macro.name);
+  return [textContent(`Makro „${macro.name}“ fertig.\n${log.join('\n')}`)];
+}
+
+// ---------------------------------------------------------------- downloads
+
+const DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024;
+
+function filenameFrom(response, url) {
+  const disposition = response.headers.get('content-disposition') || '';
+  const star = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(disposition);
+  const plain = /filename="?([^";]+)"?/i.exec(disposition);
+  try {
+    if (star) return decodeURIComponent(star[1].trim().replace(/^"|"$/g, ''));
+  } catch {
+    /* fall through */
+  }
+  if (plain) return plain[1].trim();
+  try {
+    return (
+      decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || '') || 'download'
+    );
+  } catch {
+    return 'download';
+  }
+}
+
+async function downloadFile(session, entry, args) {
+  let url = args.url ? String(args.url) : '';
+  if (!url && args.ref) {
+    url = await contentCall(await resolveTab(entry, args.tabId), 'link_url', { ref: args.ref });
+  }
+  if (!/^https?:/i.test(url)) throw new Error('url (http/https) oder ref eines Links angeben');
+  const response = await fetch(url, { credentials: 'include' });
+  if (!response.ok) throw new Error(`Download fehlgeschlagen: HTTP ${response.status}`);
+  if (Number(response.headers.get('content-length') || 0) > DOWNLOAD_MAX_BYTES) {
+    throw new Error('Datei ist größer als 25 MB');
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.length > DOWNLOAD_MAX_BYTES) throw new Error('Datei ist größer als 25 MB');
+  logAction(session.name, 'download_file', url);
+  return [
+    {
+      type: 'file',
+      name: String(args.filename || filenameFrom(response, url)).slice(0, 120),
+      mimeType: (response.headers.get('content-type') || '').split(';')[0] || null,
+      data: bytesToBase64(bytes),
+      url,
+    },
+  ];
+}
+
+// ---------------------------------------------------------------- live view
+
+/** A picture of the session's tab as the user would see it: cursor and marks included. */
+async function peek(entry) {
+  const tab = await resolveTab(entry);
+  let dataUrl;
+  if (typeof browser.tabs.captureTab === 'function') {
+    dataUrl = await browser.tabs.captureTab(tab.id, { format: 'jpeg', quality: 70, scale: 1 });
+  } else {
+    if (!tab.active) await browser.tabs.update(tab.id, { active: true });
+    dataUrl = await chromeCapture(tab, 'jpeg');
+  }
+  const { base64 } = await fitScreenshot(dataUrl, 'jpeg', null);
+  return [
+    { type: 'image', data: base64, mimeType: 'image/jpeg' },
+    textContent(`${tab.title} – ${tab.url}`),
+  ];
+}
+
+// ---------------------------------------------------------------- guide mode
+//
+// The user learns something in their own tab and the agent coaches: it sees
+// that tab and may point, mark and draw, but never click, type, scroll or
+// navigate. The session follows whichever tab is active in the guided window.
+
+const GUIDE_BLOCKED = new Set([
+  'click',
+  'hover',
+  'type',
+  'press_key',
+  'scroll',
+  'form_input',
+  'navigate',
+  'tab_open',
+  'tab_close',
+  'tab_activate',
+  'evaluate_js',
+  'resize_window',
+]);
+
+async function guidedTab(entry) {
+  const [tab] = await browser.tabs.query({ active: true, windowId: entry.guideWindowId });
+  if (!tab) throw new Error('Im Anleitungsfenster ist kein Tab offen.');
+  entry.currentTabId = tab.id;
+  return tab;
+}
+
+async function setGuide(session, windowId, on) {
+  const entry = sessionEntry(session);
+  if (on) {
+    // The agent's browser tools must land in this browser, not another paired one.
+    await rpc('session.attach', { sessionId: session.id });
+    entry.guideWindowId = Number(windowId);
+  } else {
+    delete entry.guideWindowId;
+  }
+  broadcastState();
+  return { on: entry.guideWindowId != null };
+}
+
+// ---------------------------------------------------------------- demonstration recording
+//
+// The user shows a task in their own window; the steps, plus a screenshot per
+// click with the click circled, go to the session as one message it can learn
+// from and replay.
+
+const RECORD_MAX_STEPS = 300;
+const RECORD_MAX_SHOTS = 12;
+const RECORD_SHOT_EDGE = 1280;
+state.recordings = new Map();
+
+function recordingSummary(rec) {
+  if (!rec) return null;
+  return {
+    sessionId: rec.session.id,
+    sessionName: rec.session.name,
+    windowId: rec.windowId,
+    active: !rec.stopped,
+    steps: rec.steps.length,
+    shots: rec.shots.length,
+    preview: rec.steps.slice(-40).map(stepLine),
+  };
+}
+
+function pushStep(rec, step) {
+  if (!rec || rec.stopped || rec.steps.length >= RECORD_MAX_STEPS) return;
+  const last = rec.steps[rec.steps.length - 1];
+  // Consecutive scrolls collapse into the final position.
+  if (step.kind === 'scroll' && last && last.kind === 'scroll') rec.steps.pop();
+  rec.steps.push(step);
+  broadcastState();
+}
+
+async function markedShot(tab, step) {
+  const dataUrl =
+    typeof browser.tabs.captureTab === 'function'
+      ? await browser.tabs.captureTab(tab.id, { format: 'jpeg', quality: 75 })
+      : await browser.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 75 });
+  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const factor = Math.min(1, RECORD_SHOT_EDGE / Math.max(bitmap.width, bitmap.height));
+  const width = Math.round(bitmap.width * factor);
+  const height = Math.round(bitmap.height * factor);
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  if (typeof step.x === 'number' && step.vw) {
+    const x = (step.x / step.vw) * width;
+    const y = (step.y / step.vh) * height;
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#ea2143';
+    ctx.beginPath();
+    ctx.arc(x, y, 22, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(234, 33, 67, 0.25)';
+    ctx.fill();
+  }
+  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+  return bytesToBase64(new Uint8Array(await blob.arrayBuffer()));
+}
+
+async function recordClick(rec, tab, step) {
+  if (rec.shots.length >= RECORD_MAX_SHOTS) return;
+  const slot = rec.shots.length;
+  rec.shots.push(null);
+  step.shot = slot + 1;
+  try {
+    rec.shots[slot] = await markedShot(tab, step);
+  } catch (error) {
+    console.warn('[plum] recording screenshot failed', error);
+  }
+}
+
+async function recordOnTab(tab, on) {
+  if (!tab || !isScriptableUrl(tab.url)) return;
+  const count = state.recordings.get(tab.windowId)?.steps.length || 0;
+  await contentCall(tab, 'record', { on, count }, 5_000).catch(() => {});
+}
+
+async function startRecording(session, windowId) {
+  const [tab] = await browser.tabs.query({ active: true, windowId: Number(windowId) });
+  if (!tab) throw new Error('Kein offener Tab zum Aufnehmen.');
+  if (state.recordings.get(Number(windowId))?.stopped === false) {
+    throw new Error('In diesem Fenster läuft schon eine Aufnahme.');
+  }
+  const rec = {
+    session,
+    windowId: Number(windowId),
+    steps: [],
+    shots: [],
+    stopped: false,
+    lastUrl: tab.url,
+  };
+  state.recordings.set(rec.windowId, rec);
+  pushStep(rec, { kind: 'start', url: tab.url, title: tab.title, at: Date.now() });
+  await recordOnTab(tab, true);
+  return recordingSummary(rec);
+}
+
+async function stopRecording(windowId) {
+  const rec = state.recordings.get(Number(windowId));
+  if (!rec) return null;
+  rec.stopped = true;
+  const tabs = await browser.tabs.query({ windowId: rec.windowId }).catch(() => []);
+  await Promise.all(tabs.map((tab) => recordOnTab(tab, false)));
+  broadcastState();
+  return recordingSummary(rec);
+}
+
+function stepLine(step) {
+  const quote = (value) => `„${String(value ?? '').slice(0, 160)}“`;
+  switch (step.kind) {
+    case 'start':
+      return `Start auf ${quote(step.title)} – ${step.url}`;
+    case 'navigate':
+      return `Seite geladen: ${quote(step.title)} – ${step.url}`;
+    case 'switch_tab':
+      return `Tab gewechselt zu ${quote(step.title)} – ${step.url}`;
+    case 'click':
+      return `Klick auf ${step.what}${step.shot ? ` [Bild ${step.shot}]` : ''}`;
+    case 'type':
+      return `Eingabe in ${step.what}: ${step.masked ? '(geheim, nicht aufgezeichnet)' : quote(step.value)}`;
+    case 'select':
+      return `Auswahl in ${step.what}: ${quote(step.value)}`;
+    case 'check':
+      return `${step.checked ? 'Angehakt' : 'Abgehakt'}: ${step.what}`;
+    case 'key':
+      return `Taste ${step.keys}${step.what ? ` (in ${step.what})` : ''}`;
+    case 'scroll':
+      return `Gescrollt bis y=${step.scrollY}`;
+    default:
+      return step.kind;
+  }
+}
+
+function recordingMessage(rec, note) {
+  const lines = rec.steps.map((step, index) => {
+    const detail =
+      step.css || step.id
+        ? `\n   ↳ ${[
+            step.role && `Rolle ${step.role}`,
+            step.name && `Name „${step.name}“`,
+            step.id && `id #${step.id}`,
+            step.css && `CSS \`${step.css}\``,
+          ]
+            .filter(Boolean)
+            .join(' · ')}`
+        : '';
+    return `${index + 1}. ${stepLine(step)}${detail}`;
+  });
+  const shots = rec.shots.filter(Boolean).length;
+  return [
+    `🎬 **Vorführung aus dem Browser** – ${rec.steps.length} Schritte${shots ? `, ${shots} Screenshots` : ''}`,
+    note ? `\n**Hinweis:** ${note}` : '',
+    '',
+    'Ich habe dir diese Abfolge im Browser vorgeführt. Lerne daraus, wie die Aufgabe geht. Du kannst sie mit den Browser-Werkzeugen nachspielen (tab_open, find, click, type …); Element-Name und CSS-Pfad helfen beim Wiederfinden. Die angehängten Bilder sind in der Reihenfolge der Markierungen [Bild n], der rote Kreis zeigt die Klickstelle.',
+    '',
+    ...lines,
+  ]
+    .join('\n')
+    .slice(0, 38_000);
+}
+
+async function sendRecording(windowId, note) {
+  const rec = state.recordings.get(Number(windowId));
+  if (!rec) throw new Error('Keine Aufnahme vorhanden.');
+  if (!rec.stopped) await stopRecording(rec.windowId);
+  const images = rec.shots
+    .map((data, index) =>
+      data ? { data, mimeType: 'image/jpeg', filename: `vorfuehrung-bild-${index + 1}.jpg` } : null
+    )
+    .filter(Boolean);
+  const ack = await rpc('chat.send', {
+    sessionId: rec.session.id,
+    message: recordingMessage(rec, String(note || '').trim()),
+    clientMessageId: `rec-${Date.now()}`,
+    images,
+  });
+  if (ack && ack.status === 'rejected') throw new Error(ack.error || 'Abgelehnt');
+  state.recordings.delete(rec.windowId);
+  broadcastState();
+  return { sent: true };
+}
+
+browser.tabs.onUpdated.addListener((tabId, info, tab) => {
+  const rec = state.recordings.get(tab.windowId);
+  if (!rec || rec.stopped || !tab.active) return;
+  if (info.status !== 'complete') return;
+  if (tab.url !== rec.lastUrl) {
+    rec.lastUrl = tab.url;
+    pushStep(rec, { kind: 'navigate', url: tab.url, title: tab.title, at: Date.now() });
+  }
+  void recordOnTab(tab, true);
+});
+
+browser.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  const rec = state.recordings.get(windowId);
+  if (!rec || rec.stopped) return;
+  void browser.tabs.get(tabId).then((tab) => {
+    rec.lastUrl = tab.url;
+    pushStep(rec, { kind: 'switch_tab', url: tab.url, title: tab.title, at: Date.now() });
+    return recordOnTab(tab, true);
+  });
+});
 
 async function handleCall(socket, frame) {
   const session = {
@@ -1318,6 +1973,68 @@ function routeMessage(message, sender) {
   }
   if (message.plumRpc) {
     return rpc(message.plumRpc, message.params || {}).then(
+      (data) => ({ ok: true, data }),
+      (error) => ({ ok: false, error: String(error.message || error) })
+    );
+  }
+  if (message.plumGuideDone && sender.tab) {
+    void guideStepDone(sender.tab, message.plumGuideDone);
+    return undefined;
+  }
+  if (message.plumMacroSave || message.plumMacroDelete || message.plumMacroList) {
+    const run = message.plumMacroSave
+      ? saveMacro(message.windowId, message.plumMacroSave)
+      : message.plumMacroDelete
+        ? deleteMacro(message.plumMacroDelete)
+        : loadMacros().then((macros) =>
+            macros.map((macro) => ({
+              id: macro.id,
+              name: macro.name,
+              startUrl: macro.startUrl,
+              steps: macro.steps.length,
+              params: macroParams(macro),
+            }))
+          );
+    return run.then(
+      (data) => ({ ok: true, data }),
+      (error) => ({ ok: false, error: String(error.message || error) })
+    );
+  }
+  if (message.plumRecordStep && sender.tab) {
+    const rec = state.recordings.get(sender.tab.windowId);
+    if (rec && !rec.stopped) {
+      const step = message.plumRecordStep;
+      pushStep(rec, step);
+      if (step.kind === 'click') void recordClick(rec, sender.tab, step);
+    }
+    return undefined;
+  }
+  if (message.plumRecordingState && sender.tab) {
+    const rec = state.recordings.get(sender.tab.windowId);
+    const on = !!rec && !rec.stopped;
+    return Promise.resolve({ recording: on, count: on ? rec.steps.length : 0 });
+  }
+  if (
+    message.plumRecordStart ||
+    message.plumRecordStop ||
+    message.plumRecordSend ||
+    message.plumRecordDiscard ||
+    message.plumGuide
+  ) {
+    const run = message.plumRecordStart
+      ? startRecording(message.plumRecordStart.session, message.plumRecordStart.windowId)
+      : message.plumRecordStop
+        ? stopRecording(message.windowId)
+        : message.plumRecordSend
+          ? sendRecording(message.windowId, message.note)
+          : message.plumRecordDiscard
+            ? stopRecording(message.windowId).then(() => {
+                state.recordings.delete(Number(message.windowId));
+                broadcastState();
+                return null;
+              })
+            : setGuide(message.plumGuide.session, message.plumGuide.windowId, message.plumGuide.on);
+    return run.then(
       (data) => ({ ok: true, data }),
       (error) => ({ ok: false, error: String(error.message || error) })
     );
@@ -1461,10 +2178,139 @@ if (PLUM_IS_CHROME) {
   });
 }
 
+// ---------------------------------------------------------------- "An Plum senden" (context menu)
+//
+// Selection, link, image, the page or its visible part go to the session the
+// panel showed last. Without one, the share waits until a session is picked.
+
+const menus = browser.menus || browser.contextMenus;
+const SHARE_ITEMS = [
+  { id: 'plum-selection', title: 'Auswahl an Plum senden', contexts: ['selection'] },
+  { id: 'plum-link', title: 'Link an Plum senden', contexts: ['link'] },
+  { id: 'plum-image', title: 'Bild an Plum senden', contexts: ['image'] },
+  { id: 'plum-page', title: 'Seite an Plum senden', contexts: ['page'] },
+  {
+    id: 'plum-shot',
+    title: 'Sichtbaren Bereich an Plum senden',
+    contexts: ['page', 'image', 'link', 'selection'],
+  },
+];
+
+function setupShareMenu() {
+  if (!menus) return;
+  menus.removeAll(() => {
+    for (const item of SHARE_ITEMS) {
+      try {
+        menus.create(item, () => void browser.runtime.lastError);
+      } catch {
+        /* already there */
+      }
+    }
+  });
+}
+
+async function imagePayload(url) {
+  const blob = await (await fetch(url, { credentials: 'include' })).blob();
+  const bitmap = await createImageBitmap(blob);
+  const factor = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+  const canvas = new OffscreenCanvas(
+    Math.round(bitmap.width * factor),
+    Math.round(bitmap.height * factor)
+  );
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const jpeg = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+  return bytesToBase64(new Uint8Array(await jpeg.arrayBuffer()));
+}
+
+async function buildShare(info, tab) {
+  const source = `Seite: ${tab.title || ''} – ${tab.url || ''}`;
+  const images = [];
+  let message;
+  if (info.menuItemId === 'plum-selection') {
+    const quote = String(info.selectionText || '')
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n');
+    message = `📎 Aus dem Browser – markierter Text\n${source}\n\n${quote}`;
+  } else if (info.menuItemId === 'plum-link') {
+    message = `📎 Link aus dem Browser: ${info.linkUrl}\n${info.linkText ? `Text: ${info.linkText}\n` : ''}${source}`;
+  } else if (info.menuItemId === 'plum-image') {
+    images.push({
+      data: await imagePayload(info.srcUrl),
+      mimeType: 'image/jpeg',
+      filename: 'bild.jpg',
+    });
+    message = `📎 Bild aus dem Browser (${info.srcUrl})\n${source}`;
+  } else if (info.menuItemId === 'plum-shot') {
+    const dataUrl =
+      typeof browser.tabs.captureTab === 'function'
+        ? await browser.tabs.captureTab(tab.id, { format: 'jpeg', quality: 80 })
+        : await browser.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 80 });
+    images.push({
+      data: await imagePayload(dataUrl),
+      mimeType: 'image/jpeg',
+      filename: 'ausschnitt.jpg',
+    });
+    message = `📎 Sichtbarer Bereich aus dem Browser\n${source}`;
+  } else {
+    const text = isScriptableUrl(tab.url)
+      ? await contentCall(tab, 'get_page_text', { maxChars: 15000 }).catch(() => '')
+      : '';
+    message = `📎 Seite aus dem Browser\n${source}${text ? `\n\n\`\`\`\n${text}\n\`\`\`` : ''}`;
+  }
+  return { message: message.slice(0, 38_000), images };
+}
+
+async function deliverShare(share) {
+  const { panelSessionId } = await browser.storage.local.get('panelSessionId');
+  if (!panelSessionId) {
+    await browser.storage.local.set({ pendingShare: share });
+    browser.runtime
+      .sendMessage({ plumToast: 'Wähle im Panel eine Session – dann wird gesendet.' })
+      .catch(() => {});
+    return;
+  }
+  const ack = await rpc('chat.send', {
+    sessionId: panelSessionId,
+    message: share.message,
+    clientMessageId: `share-${Date.now()}`,
+    ...(share.images.length ? { images: share.images } : {}),
+  });
+  if (ack && ack.status === 'rejected') throw new Error(ack.error || 'Abgelehnt');
+  browser.runtime.sendMessage({ plumToast: 'An die Session gesendet.' }).catch(() => {});
+}
+
+if (menus) {
+  menus.onClicked.addListener((info, tab) => {
+    if (!SHARE_ITEMS.some((item) => item.id === info.menuItemId) || !tab) return;
+    // Opening the panel needs the click's user gesture, so it happens first.
+    try {
+      if (browser.sidePanel?.open) void browser.sidePanel.open({ windowId: tab.windowId });
+      else if (browser.sidebarAction?.open) void browser.sidebarAction.open();
+    } catch {
+      /* panel stays closed */
+    }
+    void buildShare(info, tab)
+      .then(deliverShare)
+      .catch((error) =>
+        browser.runtime
+          .sendMessage({
+            plumToast: `Senden fehlgeschlagen: ${error.message || error}`,
+            error: true,
+          })
+          .catch(() => {})
+      );
+  });
+  setupShareMenu();
+}
+
 // ---------------------------------------------------------------- startup
 
 browser.windows.onRemoved.addListener((windowId) => {
+  if (state.recordings.delete(windowId)) broadcastState();
   for (const entry of state.sessions.values()) {
+    if (entry.guideWindowId === windowId) delete entry.guideWindowId;
     if (entry.windowId === windowId) entry.windowId = null;
     if (entry.chatWindowId === windowId) entry.chatWindowId = null;
   }

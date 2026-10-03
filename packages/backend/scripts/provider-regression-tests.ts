@@ -45,6 +45,7 @@ import {
 import { getOpenCodeCredentialEnvVars } from '../src/utils/opencodeProviderKeys.js';
 import {
   buildPiModelCatalog,
+  readPiNativeModelIds,
   buildPiProviderConfig,
   isPiRunnableModel,
   parsePiProviderModels,
@@ -3065,7 +3066,7 @@ function testPiMergesModelSourcesAndSurvivesWithoutOpenCodeConfig() {
   assert.deepEqual(Object.keys(registryOnly.piProviders), ['alibaba-token-plan']);
 }
 
-function testPiSkipsMistral() {
+function testPiUsesNativeMistralProvider() {
   const mistral = (baseUrl?: string): Parameters<typeof buildPiModelCatalog>[0][number] => ({
     id: 'mistral',
     name: 'Mistral',
@@ -3084,12 +3085,35 @@ function testPiSkipsMistral() {
       source: 'config' as const,
     },
   };
+  const nativeIds = (id: string) =>
+    id === 'mistral' ? ['devstral-latest', 'mistral-medium-3.5'] : [];
 
-  // Mistral runs in the Vibe harness; Pi lists none of its models, proxied or not.
-  for (const connection of [mistral(), mistral('https://mistral-proxy.example/v1')]) {
-    const result = buildPiModelCatalog([connection], catalog, {});
-    assert.deepEqual(result.models, []);
-    assert.deepEqual(Object.keys(result.piProviders), []);
+  // No base URL anywhere for Mistral: Pi's own provider serves it, and only
+  // its models reach the picker (no models.json override).
+  const native = buildPiModelCatalog([mistral()], catalog, {}, nativeIds);
+  assert.deepEqual(native.models, ['mistral/devstral-latest', 'mistral/mistral-medium-3.5']);
+  assert.deepEqual(Object.keys(native.piProviders), [], 'no models.json override for Mistral');
+
+  // An explicit base URL (proxy, self-hosted) keeps the generic provider.
+  const proxied = buildPiModelCatalog(
+    [mistral('https://mistral-proxy.example/v1')],
+    catalog,
+    {},
+    nativeIds
+  );
+  assert.deepEqual(Object.keys(proxied.piProviders), ['mistral']);
+  assert.deepEqual(proxied.models, ['mistral/mistral-medium-latest']);
+
+  // Against the catalog shipped with Pi: the curated chat and code models only.
+  const shipped = readPiNativeModelIds('mistral');
+  if (shipped.length > 0) {
+    assert.ok(shipped.includes('devstral-latest'), 'Pi offers Devstral 2');
+    assert.ok(shipped.includes('zai-glm-5-3'), 'Mistral serves GLM-5.3; Pi offers it');
+    assert.ok(shipped.length <= 8, 'curated, not the whole Mistral catalog');
+    assert.equal(
+      shipped.some((id) => /^(voxtral|open-|ministral)/.test(id)),
+      false
+    );
   }
 }
 
@@ -5813,7 +5837,7 @@ testPiSharesOpenCodeProviderConfigWithoutPersistingSecrets();
 testPiModelsCarryContextWindow();
 testPiUsesOnlyEnabledUserProviderModels();
 testPiMergesModelSourcesAndSurvivesWithoutOpenCodeConfig();
-testPiSkipsMistral();
+testPiUsesNativeMistralProvider();
 testOpenCodeAllowedDirectories();
 testAttachmentNormalization();
 testOpenCodePromptContext();

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="browser_live_title">Mein Browser · live</string>
+    <string name="browser_live_hint">Sieh zu, was die Session in deinem Firefox oder Chrome macht.</string>
+    <string name="browser_live_loading">Lade …</string>
+    <string name="browser_live_watch">Zusehen</string>
+    <string name="browser_live_stop">Nicht mehr zusehen</string>
+    <string name="browser_live_pause">Steuerung pausieren</string>
+    <string name="browser_live_resume">Fortsetzen</string>
+    <string name="browser_live_paused">Browser-Steuerung ist pausiert – Agents können gerade nichts tun.</string>
+    <string name="browser_live_image">Browser-Tab der Session: %1$s</string>
+</resources>

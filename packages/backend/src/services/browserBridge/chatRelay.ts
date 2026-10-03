@@ -82,6 +82,7 @@ export class ChatRelay {
     message: string;
     clientMessageId: string;
     activeFollowupMode?: 'queue' | 'steer';
+    images?: Array<{ data: string; mimeType: string; filename: string }>;
   }): Promise<unknown> {
     this.watch(payload.sessionId);
     const socket = this.connection();

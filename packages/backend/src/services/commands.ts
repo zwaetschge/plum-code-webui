@@ -409,6 +409,14 @@ export class CommandService {
           error: `/${parsed.name} is a Claude Code native command and is not available in OpenCode. Use /init, /review, /security-review, /plan, a WebUI command, or ask OpenCode in plain language.`,
         };
       }
+      if (provider === 'vibe') {
+        // Vibe answers its own versions (/help, /compact, /mcp …).
+        return {
+          success: true,
+          action: 'forward_to_cli',
+          response: `/${parsed.name}${parsed.rawArgs ? ' ' + parsed.rawArgs : ''}`,
+        };
+      }
       if (provider !== 'claude' && provider !== 'zai') {
         return {
           success: false,
@@ -428,6 +436,15 @@ export class CommandService {
     const command = commands.find((c) => c.name === parsed.name && c.scope !== 'builtin');
 
     if (!command || !command.content) {
+      // Vibe has its own commands and exposes every skill as /<name>; let it
+      // answer anything Plum does not know itself.
+      if (context.provider === 'vibe') {
+        return {
+          success: true,
+          action: 'forward_to_cli',
+          response: `/${parsed.name}${parsed.rawArgs ? ' ' + parsed.rawArgs : ''}`,
+        };
+      }
       return {
         success: false,
         error: `Unknown command: /${parsed.name}. Type /help for available commands.`,
@@ -874,7 +891,8 @@ export class CommandService {
         if (
           context.provider === 'codex' ||
           context.provider === 'opencode' ||
-          context.provider === 'pi'
+          context.provider === 'pi' ||
+          context.provider === 'vibe'
         ) {
           const rawArgs = parsed.rawArgs.trim();
           return {

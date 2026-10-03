@@ -42,6 +42,7 @@ import { resetDiscovery } from './services/cli-providers.js';
 // Routes
 import authRoutes from './routes/auth.js';
 import basicAuthRoutes from './routes/basic-auth.js';
+import ultracodeRoutes from './routes/ultracode.js';
 import sessionRoutes from './routes/sessions.js';
 import filesRoutes from './routes/files.js';
 import gitRoutes from './routes/git.js';
@@ -357,6 +358,8 @@ async function main() {
     })
   );
 
+  // Agents upload files into web forms through the browser bridge (hook-secret only).
+  app.use('/api/browser-bridge/internal', express.json({ limit: '40mb' }));
   app.use(express.json());
   app.use(cookieParser());
   app.use(
@@ -435,6 +438,7 @@ async function main() {
   app.use('/api/preview', previewRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/comfyui', comfyuiRoutes);
+  app.use('/api/ultracode', ultracodeRoutes);
   app.use('/api/docker', dockerRoutes);
   app.use('/api/watchdogs', watchdogRoutes);
   app.use('/api/discord', discordRoutes);

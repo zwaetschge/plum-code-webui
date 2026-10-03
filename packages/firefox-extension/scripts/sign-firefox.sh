@@ -5,7 +5,10 @@
 # Bump "version" in both manifests first: AMO signs each version only once.
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
-data="${PLUM_DATA_DIR:-$here/../backend/data}/firefox"
+# The running server's data dir (inside the Plum container), else the repo copy.
+default_data="$here/../backend/data"
+[ -d /app/packages/backend/data/firefox ] && default_data=/app/packages/backend/data
+data="${PLUM_DATA_DIR:-$default_data}/firefox"
 set -a; . "$data/amo.env"; set +a
 
 node "$here/scripts/build.mjs"

@@ -14,6 +14,23 @@ const STATUS_TEXT = {
   unconfigured: 'Nicht eingerichtet',
 };
 
+// Opened as a tab only to grant the microphone (Chrome's side panel cannot prompt).
+if (new URLSearchParams(location.search).has('grantMic')) {
+  document.body.textContent = 'Bitte erlaube Plum den Zugriff aufs Mikrofon …';
+  navigator.mediaDevices
+    .getUserMedia({ audio: true })
+    .then((stream) => {
+      stream.getTracks().forEach((track) => track.stop());
+      document.body.textContent =
+        'Mikrofon freigegeben. Du kannst diesen Tab schließen und im Panel 🎙 drücken.';
+    })
+    .catch(() => {
+      document.body.textContent = 'Mikrofon wurde nicht freigegeben.';
+    });
+  // This tab is only for the permission prompt; the panel itself does not start.
+  throw new Error('plum: microphone permission tab');
+}
+
 let windowId = null;
 let windowSessionId = new URLSearchParams(location.search).get('session');
 let serverUrl = '';
@@ -84,7 +101,74 @@ const chat = plumMountChat($('chatView'), {
     if (base)
       void browser.tabs.create({ url: `${base}/session/${encodeURIComponent(session.id)}` });
   },
+  onRecord: async (action, note) => {
+    const session = chat.current();
+    if (!session) return;
+    const recording = windowRecording();
+    if (action === 'macro') {
+      const saved = await browser.runtime.sendMessage({ plumMacroSave: note, windowId });
+      if (!saved || !saved.ok) throw new Error((saved && saved.error) || 'Nicht gespeichert');
+      void renderMacros();
+      toast(`Makro „${saved.data.name}“ gespeichert (${saved.data.steps} Schritte).`);
+      return;
+    }
+    const message =
+      action === 'send'
+        ? { plumRecordSend: true, note, windowId }
+        : action === 'discard'
+          ? { plumRecordDiscard: true, windowId }
+          : recording && recording.active
+            ? { plumRecordStop: true, windowId }
+            : { plumRecordStart: { session: { id: session.id, name: session.name }, windowId } };
+    const reply = await browser.runtime.sendMessage(message);
+    if (!reply || !reply.ok) {
+      const error = new Error((reply && reply.error) || 'Aufnahme fehlgeschlagen');
+      if (action === 'send') throw error;
+      toast(error.message, 'error');
+    }
+  },
+  onGuide: async () => {
+    const session = chat.current();
+    if (!session) return;
+    const reply = await browser.runtime.sendMessage({
+      plumGuide: { session: { id: session.id, name: session.name }, windowId, on: !guideOn() },
+    });
+    if (!reply || !reply.ok)
+      toast((reply && reply.error) || 'Anleitungsmodus fehlgeschlagen', 'error');
+  },
+  // In guide mode every message says which tab the user is on.
+  decorate: async (text) => {
+    if (!guideOn()) return text;
+    const tab = await activeTab().catch(() => null);
+    return tab
+      ? `[Anleitungsmodus – ich bin im Tab „${tab.title || ''}“ ${tab.url || ''}]\n${text}`
+      : text;
+  },
 });
+
+let lastState = null;
+
+function guideOn() {
+  const session = chat.current();
+  return !!(
+    session &&
+    lastState &&
+    (lastState.guides || []).some(
+      (guide) => guide.sessionId === session.id && guide.windowId === windowId
+    )
+  );
+}
+
+/** The demonstration recorded in this window, if any (each window has its own). */
+function windowRecording() {
+  return (
+    ((lastState && lastState.recordings) || []).find((rec) => rec.windowId === windowId) || null
+  );
+}
+
+function renderModes() {
+  chat.setModes({ recording: windowRecording(), guide: guideOn() });
+}
 
 const picker = plumMountPicker($('picker'), {
   onChat: (session) => openSession(session),
@@ -107,8 +191,118 @@ function openSession(session) {
   void browser.storage.local.set({ panelSessionId: session.id, pickerSessionId: session.id });
   picker.select(session.id);
   show('chat');
-  void chat.open(session, picker.labels(session));
+  void chat
+    .open(session, picker.labels(session))
+    .then(renderModes)
+    .then(() => sendPendingShare(session));
 }
+
+/** A context-menu share made before any session was chosen goes to this one. */
+async function sendPendingShare(session) {
+  const { pendingShare } = await browser.storage.local.get('pendingShare');
+  if (!pendingShare) return;
+  await browser.storage.local.remove('pendingShare');
+  const reply = await browser.runtime.sendMessage({
+    plumRpc: 'chat.send',
+    params: {
+      sessionId: session.id,
+      message: pendingShare.message,
+      clientMessageId: `share-${Date.now()}`,
+      ...(pendingShare.images && pendingShare.images.length ? { images: pendingShare.images } : {}),
+    },
+  });
+  toast(
+    reply && reply.ok ? 'Geteilter Inhalt gesendet.' : 'Senden fehlgeschlagen.',
+    reply && reply.ok ? 'ok' : 'error'
+  );
+}
+
+// ---------------------------------------------------------------- macros
+
+async function renderMacros() {
+  const reply = await browser.runtime.sendMessage({ plumMacroList: true }).catch(() => null);
+  const macros = (reply && reply.ok && reply.data) || [];
+  $('macros').replaceChildren(
+    ...macros.map((macro) => {
+      const li = document.createElement('li');
+      li.className = 'macro';
+      const info = document.createElement('span');
+      info.className = 'name';
+      info.textContent = macro.name;
+      info.title = `${macro.steps} Schritte · ${macro.startUrl}${
+        macro.params.length
+          ? ` · Parameter: ${macro.params.map((param) => param.name).join(', ')}`
+          : ''
+      }`;
+      const run = document.createElement('button');
+      run.type = 'button';
+      run.className = 'primary';
+      run.textContent = '▶';
+      run.title = 'Die offene Session ausführen lassen';
+      run.addEventListener('click', async () => {
+        const session = chat.current();
+        if (!session) {
+          toast('Öffne zuerst eine Session.', 'error');
+          return;
+        }
+        const params = macro.params.length
+          ? ` Frag mich nach Werten für: ${macro.params.map((param) => `„${param.name}“`).join(', ')}, falls du sie nicht kennst.`
+          : '';
+        const sent = await browser.runtime.sendMessage({
+          plumRpc: 'chat.send',
+          params: {
+            sessionId: session.id,
+            message: `Führe das Makro „${macro.name}“ mit macro_run aus.${params}`,
+            clientMessageId: `macro-${Date.now()}`,
+          },
+        });
+        if (sent && sent.ok) show('chat');
+        else toast((sent && sent.error) || 'Senden fehlgeschlagen', 'error');
+      });
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '✕';
+      remove.title = 'Makro löschen';
+      remove.setAttribute('aria-label', `Makro ${macro.name} löschen`);
+      remove.addEventListener('click', async () => {
+        await browser.runtime.sendMessage({ plumMacroDelete: macro.id });
+        void renderMacros();
+      });
+      li.append(info, run, remove);
+      return li;
+    })
+  );
+  $('noMacros').hidden = macros.length > 0;
+}
+
+// ---------------------------------------------------------------- update hint
+
+function newer(latest, current) {
+  const a = String(latest || '')
+    .split('.')
+    .map(Number);
+  const b = String(current || '')
+    .split('.')
+    .map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  }
+  return false;
+}
+
+function renderUpdate(state) {
+  const available = state.latestVersion && newer(state.latestVersion, state.version);
+  $('updateBanner').hidden = !available;
+  if (available) {
+    $('updateText').textContent =
+      `Version ${state.latestVersion} verfügbar (du hast ${state.version}).`;
+  }
+}
+
+$('updateOpen').addEventListener('click', () => {
+  const base = plumNormalizeServerUrl(serverUrl);
+  if (base) void browser.tabs.create({ url: `${base}/settings?section=firefox-browser` });
+});
 
 // ---------------------------------------------------------------- new session
 
@@ -177,6 +371,9 @@ $('newSession').addEventListener('submit', async (event) => {
 // ---------------------------------------------------------------- connection state
 
 function render(state) {
+  renderUpdate(state);
+  lastState = state;
+  renderModes();
   serverUrl = state.serverUrl || '';
   const paused = state.paused && state.status === 'connected';
   $('dot').className = `dot ${paused ? 'paused' : state.status}`;
@@ -227,6 +424,7 @@ function render(state) {
 let startedOnce = false;
 /** First connection: pick the chat to show. Reconnects: reload what is open. */
 async function onConnected() {
+  void renderMacros();
   await picker.refresh();
   fillProviders();
   const defaults = await browser.runtime
@@ -268,6 +466,7 @@ $('options').addEventListener('click', () => browser.runtime.openOptionsPage());
 
 browser.runtime.onMessage.addListener((message) => {
   if (message && message.plumState) render(message.plumState);
+  if (message && message.plumToast) toast(message.plumToast, message.error ? 'error' : 'ok');
 });
 
 (async () => {

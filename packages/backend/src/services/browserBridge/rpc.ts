@@ -61,6 +61,27 @@ function text(params: Record<string, unknown>, key: string, max: number): string
   return value;
 }
 
+const MAX_IMAGES = 12;
+const MAX_IMAGE_BASE64 = 4 * 1024 * 1024;
+
+/** Screenshots from a recorded demonstration: JPEG/PNG only, bounded in number and size. */
+function images(list: unknown[]) {
+  if (list.length > MAX_IMAGES) throw new Error(`At most ${MAX_IMAGES} images`);
+  return list.map((item, index) => {
+    const image = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+    const mimeType = image.mimeType === 'image/png' ? 'image/png' : 'image/jpeg';
+    const data = typeof image.data === 'string' ? image.data : '';
+    if (!data || data.length > MAX_IMAGE_BASE64 || !/^[A-Za-z0-9+/=]+$/.test(data)) {
+      throw new Error(`Image ${index + 1} is invalid or too large`);
+    }
+    const filename =
+      typeof image.filename === 'string' && /^[\w.-]{1,80}$/.test(image.filename)
+        ? image.filename
+        : `bild-${index + 1}.${mimeType === 'image/png' ? 'png' : 'jpg'}`;
+    return { data, mimeType, filename };
+  });
+}
+
 /** Message rows the panel renders; tool payloads and media stay out. */
 function pickMessage(row: Record<string, unknown>) {
   return {
@@ -182,6 +203,7 @@ export async function handleBridgeRpc(
         message: text(params, 'message', 40_000),
         clientMessageId: text(params, 'clientMessageId', 64),
         activeFollowupMode: params.activeFollowupMode === 'steer' ? 'steer' : 'queue',
+        ...(Array.isArray(params.images) ? { images: images(params.images) } : {}),
       });
     }
     case 'chat.interrupt': {
@@ -211,6 +233,42 @@ export async function handleBridgeRpc(
         ctx.chat().denyDenied(id);
       }
       return { ok: true };
+    }
+    case 'transcribe': {
+      // Push-to-talk in the panel: the audio goes to Plum's transcription route.
+      const data = typeof params.data === 'string' ? params.data : '';
+      if (!data || data.length > 20 * 1024 * 1024 || !/^[A-Za-z0-9+/=]+$/.test(data)) {
+        throw new Error('Invalid audio');
+      }
+      const mimeType =
+        typeof params.mimeType === 'string' && /^audio\/[\w.+-]+(;.*)?$/.test(params.mimeType)
+          ? params.mimeType.split(';')[0]!
+          : 'audio/webm';
+      const form = new FormData();
+      form.append(
+        'audio',
+        new Blob([Buffer.from(data, 'base64')], { type: mimeType }),
+        'speech.webm'
+      );
+      if (typeof params.language === 'string')
+        form.append('language', params.language.slice(0, 10));
+      const response = await fetch(`http://127.0.0.1:${config.port}/api/transcribe`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${generateUserToken(ctx.userId, { expiresIn: '2m' })}`,
+        },
+        body: form,
+        signal: AbortSignal.timeout(130_000),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        data?: { text?: string };
+        error?: { message?: string };
+      } | null;
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error?.message || `HTTP ${response.status}`);
+      }
+      return { text: payload.data?.text ?? '' };
     }
     case 'question.respond': {
       const answers = Array.isArray(params.answers)

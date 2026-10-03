@@ -93,6 +93,7 @@ import { MemoryViewer } from '@/components/memory-viewer';
 import { RunCockpit, type RunCockpitSection } from '@/components/session/RunCockpit';
 import { RenameSessionDialog } from '@/components/session/RenameSessionDialog';
 import { OracleBrowserPanel } from '@/components/session/OracleBrowserPanel';
+import { BrowserLivePanel } from '@/components/session/BrowserLivePanel';
 import { CompactBoundaryCard } from '@/components/chat/CompactBoundaryCard';
 import { MessageBubble } from '@/components/chat/MessageBubble';
 import { ToolExecutionCard } from '@/components/chat/ToolExecutionCard';
@@ -1302,7 +1303,10 @@ export function SessionPage() {
     sessionProvider === 'zai' ||
     sessionProvider === 'codex' ||
     sessionProvider === 'opencode' ||
-    sessionProvider === 'pi';
+    sessionProvider === 'pi' ||
+    // ACP harnesses queue follow-ups in the backend (queueKimiTurn).
+    sessionProvider === 'kimi' ||
+    sessionProvider === 'vibe';
   const supportsSteeredFollowups = sessionProvider === 'codex';
   const composerActiveFollowupMode: ActiveFollowupMode | undefined = supportsActiveFollowups
     ? supportsSteeredFollowups
@@ -1316,6 +1320,8 @@ export function SessionPage() {
     sessionProvider === 'zai' ||
     sessionProvider === 'opencode' ||
     sessionProvider === 'pi' ||
+    sessionProvider === 'kimi' ||
+    sessionProvider === 'vibe' ||
     (supportsSteeredFollowups && activeFollowupMode === 'queue');
   const composerSteersWhileActive = supportsSteeredFollowups && activeFollowupMode === 'steer';
   const canInterruptActiveRun =
@@ -1507,14 +1513,16 @@ export function SessionPage() {
       ];
     }
     if (sessionProvider === 'vibe') {
-      // Vibe calls this "Thinking" and accepts exactly these five levels; the
-      // backend rejects anything else (see utils/reasoningLevel.ts).
+      // Vibe calls this "Thinking" (off … max); the backend rejects anything
+      // else (see utils/reasoningLevel.ts).
       return [
         { value: 'off', label: 'Off' },
         { value: 'low', label: 'Low' },
         { value: 'medium', label: 'Medium' },
         { value: 'high', label: 'High' },
         { value: 'max', label: 'Max' },
+        // Workflows through scripts/mcp-servers/vibe-ultracode.mjs, at high thinking.
+        { value: 'ultracode', label: 'Ultracode (workflows)' },
       ];
     }
     return [
@@ -3697,7 +3705,12 @@ export function SessionPage() {
     } else if (panel === 'android') {
       body = <AndroidDevicePanel sessionId={session.id} className="h-full" />;
     } else if (panel === 'browser') {
-      body = <OracleBrowserPanel sessionId={session.id} className="h-full" />;
+      body = (
+        <div className="flex h-full flex-col overflow-auto">
+          <BrowserLivePanel sessionId={session.id} />
+          <OracleBrowserPanel sessionId={session.id} className="min-h-[24rem] flex-1" />
+        </div>
+      );
     } else if (panel === 'git') {
       body = <GitPanel workingDirectory={session.workingDirectory} className="h-full" />;
     } else if (panel === 'github') {

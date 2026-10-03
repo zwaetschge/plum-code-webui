@@ -1,8 +1,9 @@
 import type { CLIProvider } from './session.js';
 
 /** Claude Code transport options, shared by Anthropic and Z.AI sessions.
- * `ultracode` is Pi-only (it turns on Pi's workflow tool) and must not appear
- * here, or Claude and Z.AI sessions would offer an effort their CLI rejects.
+ * `ultrathink` and `ultracode` are not `--effort` values: the backend launches
+ * them as `max` plus the "ultrathink" prompt keyword, and as `xhigh` plus the
+ * `ultracode` setting (standing dynamic workflows), see `claudeEffortLaunch`.
  */
 export const CLAUDE_CODE_EFFORT_OPTIONS = [
   { value: 'low', label: 'Low' },
@@ -10,6 +11,8 @@ export const CLAUDE_CODE_EFFORT_OPTIONS = [
   { value: 'high', label: 'High' },
   { value: 'xhigh', label: 'X-High' },
   { value: 'max', label: 'Max' },
+  { value: 'ultrathink', label: 'Ultrathink' },
+  { value: 'ultracode', label: 'Ultracode (workflows)' },
 ] as const;
 
 export interface ProviderCapabilities {

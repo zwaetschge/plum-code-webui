@@ -500,11 +500,13 @@ private fun RuntimeDefaultsPanel(
 
     val reasoningOptions = if (providerId == "codex") {
         listOf("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
-    } else if (providerId == "claude" || providerId == "zai" || providerId == "pi") {
+    } else if (providerId == "claude" || providerId == "zai") {
+        listOf("low", "medium", "high", "xhigh", "max", "ultrathink", "ultracode")
+    } else if (providerId == "pi") {
         listOf("low", "medium", "high", "xhigh", "max", "ultracode")
     } else if (providerId == "vibe") {
         // Vibe calls the setting "Thinking" and names its lowest level "off".
-        listOf("off", "low", "medium", "high", "max")
+        listOf("off", "low", "medium", "high", "max", "ultracode")
     } else {
         listOf("low", "medium", "high", "xhigh", "max")
     }

@@ -282,8 +282,13 @@ fun DevToolsScreen(
                         item { GitHubCollabPanel(state = state, viewModel = viewModel) }
                     }
 
-                    DevToolsTab.ORACLE -> item {
-                        OracleBrowserPanel(state = state, viewModel = viewModel)
+                    DevToolsTab.ORACLE -> {
+                        item(key = "browser-live") {
+                            BrowserLiveCard(state = state, viewModel = viewModel)
+                        }
+                        item(key = "oracle") {
+                            OracleBrowserPanel(state = state, viewModel = viewModel)
+                        }
                     }
 
                     DevToolsTab.DEVICES -> item {

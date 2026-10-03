@@ -28,7 +28,8 @@ const REASONING_LEVELS_BY_PROVIDER: Record<CLIProvider, Set<string>> = {
     'ultracode',
   ]),
   kimi: new Set(['minimal', 'low', 'medium', 'high']),
-  vibe: new Set(['off', 'low', 'medium', 'high', 'max']),
+  // Vibe's ultracode runs workflows at `high` thinking (scripts/mcp-servers/vibe-ultracode.mjs).
+  vibe: new Set(['off', 'low', 'medium', 'high', 'max', 'ultracode']),
 };
 
 export function normalizeReasoningLevel(provider: CLIProvider, value: unknown): string | null {

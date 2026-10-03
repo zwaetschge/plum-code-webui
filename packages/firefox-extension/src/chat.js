@@ -69,7 +69,10 @@ function renderMarkdown(container, source) {
 
 // ---------------------------------------------------------------- chat view
 
-function plumMountChat(root, { onSwitch, onOpenInPlum, onHandOver } = {}) {
+function plumMountChat(
+  root,
+  { onSwitch, onOpenInPlum, onHandOver, onRecord, onGuide, decorate } = {}
+) {
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -105,7 +108,10 @@ function plumMountChat(root, { onSwitch, onOpenInPlum, onHandOver } = {}) {
   switchText.append(switchName, switchMeta);
   switcher.append(switchText, el('span', 'chat-caret', '▾'));
   const headActions = el('span', 'chat-head-actions');
+  const speakToggle = button('🔈', 'icon', () => setSpeak(!view.speak), 'Antworten vorlesen');
+  speakToggle.setAttribute('aria-pressed', 'false');
   headActions.append(
+    speakToggle,
     button('⇲', 'icon', () => onHandOver && onHandOver(view.session), 'Aktuellen Tab übergeben'),
     button('↗', 'icon', () => onOpenInPlum && onOpenInPlum(view.session), 'In Plum öffnen')
   );
@@ -128,10 +134,37 @@ function plumMountChat(root, { onSwitch, onOpenInPlum, onHandOver } = {}) {
   stop.hidden = true;
   const formActions = el('div', 'composer-actions');
   const hint = el('span', 'composer-hint', 'Enter senden · Shift+Enter Zeile');
-  formActions.append(hint, stop, send);
+  const mic = button(
+    '🎙',
+    'mic',
+    () => void toggleMic(),
+    'Diktieren (nochmal klicken zum Beenden)'
+  );
+  mic.setAttribute('aria-label', 'Diktieren');
+  formActions.append(hint, mic, stop, send);
   form.append(input, formActions);
 
-  root.replaceChildren(head, log, activity, form);
+  // Tutorial modes: the user demonstrates (recording) or the agent coaches (guide).
+  const modes = el('div', 'chat-modes');
+  const recordButton = button(
+    '● Vorführen',
+    'mode-toggle record',
+    () => onRecord && onRecord('toggle'),
+    'Du führst etwas im Browser vor; Plum zeichnet die Schritte mit Screenshots auf und schickt sie der Session zum Lernen.'
+  );
+  const guideButton = button(
+    '✎ Anleiten',
+    'mode-toggle guide',
+    () => onGuide && onGuide(),
+    'Plum sieht deinen aktiven Tab und zeigt dir mit Cursor, Markierungen und Stift, was zu tun ist – klicken musst du selbst.'
+  );
+  recordButton.setAttribute('aria-pressed', 'false');
+  guideButton.setAttribute('aria-pressed', 'false');
+  modes.append(recordButton, guideButton);
+  const modeBanner = el('div', 'mode-banner');
+  modeBanner.hidden = true;
+
+  root.replaceChildren(head, modes, modeBanner, log, activity, form);
 
   // ------------------------------------------------------------ helpers
 
@@ -206,7 +239,86 @@ function plumMountChat(root, { onSwitch, onOpenInPlum, onHandOver } = {}) {
     scrollDown(stick);
   }
 
+  // ------------------------------------------------------------ voice
+
+  function speak(text) {
+    if (!view.speak || !('speechSynthesis' in window) || !text) return;
+    const plain = String(text)
+      .replace(/```[\s\S]*?```/g, ' Codeblock. ')
+      .replace(/[*_`#>]/g, '')
+      .replace(/https?:\/\/\S+/g, 'Link')
+      .slice(0, 1200);
+    const utterance = new SpeechSynthesisUtterance(plain);
+    utterance.lang = navigator.language || 'de-DE';
+    speechSynthesis.cancel();
+    speechSynthesis.speak(utterance);
+  }
+
+  function setSpeak(on) {
+    view.speak = !!on;
+    speakToggle.textContent = view.speak ? '🔊' : '🔈';
+    speakToggle.setAttribute('aria-pressed', String(view.speak));
+    if (!view.speak && 'speechSynthesis' in window) speechSynthesis.cancel();
+    void browser.storage.local.set({ speakReplies: view.speak });
+  }
+  void browser.storage.local
+    .get('speakReplies')
+    .then(({ speakReplies }) => setSpeak(!!speakReplies));
+
+  let recorder = null;
+  async function toggleMic() {
+    if (recorder) {
+      recorder.stop();
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (error) {
+      // Chrome's side panel cannot show the permission prompt; a tab can.
+      note(
+        'Mikrofon nicht freigegeben – ich öffne einen Tab zum Erlauben, danach nochmal 🎙.',
+        'error'
+      );
+      void browser.tabs.create({ url: browser.runtime.getURL('panel.html?grantMic=1') });
+      return;
+    }
+    const chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.addEventListener('dataavailable', (event) => chunks.push(event.data));
+    recorder.addEventListener('stop', async () => {
+      stream.getTracks().forEach((track) => track.stop());
+      recorder = null;
+      mic.classList.remove('on');
+      mic.textContent = '🎙';
+      const blob = new Blob(chunks, { type: chunks[0]?.type || 'audio/webm' });
+      if (blob.size < 800) return;
+      mic.disabled = true;
+      try {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        }
+        const result = await rpc('transcribe', { data: btoa(binary), mimeType: blob.type });
+        if (result.text) {
+          input.value = input.value ? `${input.value} ${result.text}` : result.text;
+          autosize();
+          input.focus();
+        }
+      } catch (error) {
+        note(`Diktat fehlgeschlagen: ${error.message}`, 'error');
+      } finally {
+        mic.disabled = false;
+      }
+    });
+    recorder.start();
+    mic.classList.add('on');
+    mic.textContent = '■';
+  }
+
   function finishAssistant(content) {
+    if (content || view.streaming) speak(content || view.streaming.text);
     if (view.streaming) {
       renderMarkdown(view.streaming.body, content || view.streaming.text);
       view.streaming.wrap.classList.remove('streaming');
@@ -428,13 +540,15 @@ function plumMountChat(root, { onSwitch, onOpenInPlum, onHandOver } = {}) {
   // ------------------------------------------------------------ actions
 
   async function submit() {
-    const message = input.value.trim();
-    if (!message || !view.session) return;
+    const typed = input.value.trim();
+    if (!typed || !view.session) return;
     input.value = '';
     autosize();
     const clientMessageId = `ext-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // Guide mode tells the agent which tab the user is looking at.
+    const message = decorate ? await decorate(typed) : typed;
     view.sentTexts.add(message);
-    const mine = bubble('user', message);
+    const mine = bubble('user', typed);
     mine.wrap.classList.add('pending');
     view.pending.set(clientMessageId, mine);
     setBusy(true);
@@ -536,8 +650,100 @@ function plumMountChat(root, { onSwitch, onOpenInPlum, onHandOver } = {}) {
   renderHead();
   renderActivity();
 
+  /**
+   * Mode state from the background: `recording` is its summary (or null),
+   * `guide` whether this window is in guide mode for the open session.
+   */
+  function setModes({ recording, guide }) {
+    const mine = recording && view.session && recording.sessionId === view.session.id;
+    const recordingHere = mine && recording.active;
+    recordButton.textContent = recordingHere ? '■ Aufnahme stoppen' : '● Vorführen';
+    recordButton.setAttribute('aria-pressed', String(!!recordingHere));
+    recordButton.classList.toggle('on', !!recordingHere);
+    recordButton.disabled = !!recording && !mine;
+    guideButton.setAttribute('aria-pressed', String(!!guide));
+    guideButton.classList.toggle('on', !!guide);
+
+    modeBanner.replaceChildren();
+    modeBanner.className = 'mode-banner';
+    if (mine && recording.active) {
+      modeBanner.classList.add('recording');
+      modeBanner.append(
+        el('strong', null, `● Aufnahme läuft · ${recording.steps} Schritte`),
+        el(
+          'p',
+          null,
+          'Führ es einfach vor: klicken, tippen, Seiten wechseln. Passwörter werden nicht aufgezeichnet.'
+        )
+      );
+    } else if (mine && !recording.active) {
+      modeBanner.classList.add('review');
+      modeBanner.append(
+        el(
+          'strong',
+          null,
+          `Vorführung: ${recording.steps} Schritte, ${recording.shots} Screenshots`
+        )
+      );
+      const list = el('ol', 'mode-steps');
+      for (const line of recording.preview) list.append(el('li', null, line));
+      const hint = el('textarea');
+      hint.rows = 2;
+      hint.placeholder = 'Was soll der Agent daraus lernen? (optional)';
+      const row = el('div', 'row');
+      const sendIt = button('An Session senden', 'primary', async () => {
+        sendIt.disabled = true;
+        try {
+          await onRecord('send', hint.value);
+          note('Vorführung gesendet.', 'muted');
+        } catch (error) {
+          note(error.message, 'error');
+          sendIt.disabled = false;
+        }
+      });
+      row.append(
+        sendIt,
+        button('Verwerfen', '', () => onRecord('discard'))
+      );
+      // Keep it as a macro the agent can replay later.
+      const macroRow = el('div', 'row');
+      const macroName = el('input');
+      macroName.type = 'text';
+      macroName.placeholder = 'Makro-Name, z. B. Rechnung herunterladen';
+      macroName.setAttribute('aria-label', 'Makro-Name');
+      const saveMacro = button('Als Makro speichern', '', async () => {
+        if (!macroName.value.trim()) {
+          macroName.focus();
+          return;
+        }
+        saveMacro.disabled = true;
+        try {
+          await onRecord('macro', macroName.value.trim());
+          saveMacro.textContent = 'Gespeichert ✓';
+        } catch (error) {
+          note(error.message, 'error');
+          saveMacro.disabled = false;
+        }
+      });
+      macroRow.append(macroName, saveMacro);
+      modeBanner.append(list, hint, row, macroRow);
+    } else if (guide) {
+      modeBanner.classList.add('guide');
+      modeBanner.append(
+        el('strong', null, '✎ Anleitungsmodus'),
+        el(
+          'p',
+          null,
+          'Plum sieht deinen aktiven Tab und zeigt dir mit Cursor, Markierungen und Stift, was zu tun ist. Klicken und tippen musst du selbst. Frag einfach im Chat.'
+        )
+      );
+    }
+    modeBanner.hidden = !modeBanner.childElementCount;
+  }
+
   return {
     open,
+    setModes,
     current: () => view.session,
     /** Plum reconnected: the server-side feed is new, so reload. */
     reopen: () => view.session && open(view.session),

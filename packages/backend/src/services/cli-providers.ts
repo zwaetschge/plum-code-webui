@@ -889,7 +889,10 @@ function discoverVibe(): void {
     if (catalog.models.length === 0) return;
     discoveredModels.vibe = catalog.models;
     Object.assign(MODEL_DISPLAY_LABELS, catalog.labels);
-    console.log(`[CLI-PROVIDERS] vibe: discovered ${catalog.models.length} models:`, catalog.models);
+    console.log(
+      `[CLI-PROVIDERS] vibe: discovered ${catalog.models.length} models:`,
+      catalog.models
+    );
   } catch {
     /* No Vibe home yet: keep the built-in default. */
   }
@@ -1326,7 +1329,9 @@ export function getCLIArgs(
 
       // Effort level (reasoning)
       if (options.reasoningLevel) {
-        args.push('--effort', options.reasoningLevel);
+        const launch = claudeEffortLaunch(options.reasoningLevel);
+        args.push('--effort', launch.effort);
+        if (launch.ultracode) args.push('--settings', JSON.stringify(ULTRACODE_SETTINGS));
       }
 
       // Allowed directories
@@ -1510,6 +1515,35 @@ export function getCLIArgs(
   }
 
   return args;
+}
+
+/**
+ * Claude Code's `ultracode` setting: standing dynamic-workflow orchestration
+ * (the Workflow tool on every turn). It needs the Workflows feature, which the
+ * same settings layer switches on.
+ */
+export const ULTRACODE_SETTINGS = { ultracode: true, enableWorkflows: true } as const;
+
+/**
+ * How a Claude/Z.AI effort choice launches the CLI. `ultrathink` and
+ * `ultracode` are Plum choices, not `--effort` values: the first is max effort
+ * plus the "ultrathink" keyword on every prompt, the second xhigh effort plus
+ * the `ultracode` setting (Claude Code 2.1.28x+, also behind Z.AI).
+ */
+export function claudeEffortLaunch(reasoningLevel: string): {
+  effort: string;
+  ultrathink: boolean;
+  ultracode: boolean;
+} {
+  if (reasoningLevel === 'ultrathink') return { effort: 'max', ultrathink: true, ultracode: false };
+  if (reasoningLevel === 'ultracode')
+    return { effort: 'xhigh', ultrathink: false, ultracode: true };
+  return { effort: reasoningLevel, ultrathink: false, ultracode: false };
+}
+
+/** Vibe has no ultracode thinking level: workflows run at `high`. */
+export function vibeThinkingLevel(reasoningLevel: string): string {
+  return reasoningLevel === 'ultracode' ? 'high' : reasoningLevel;
 }
 
 function normalizePiThinking(reasoningLevel: string): string {

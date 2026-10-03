@@ -22,6 +22,11 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import { requireAuth, requireAdmin, type AuthenticatedRequest } from '../middleware/auth.js';
 import { requireHookSecret } from '../middleware/hookSecret.js';
+import {
+  ANTIGRAVITY_ASPECT_RATIOS,
+  AntigravityImageError,
+  generateAntigravityImage,
+} from '../services/comfyui/antigravityImage.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
 import {
   comfyui,
@@ -339,6 +344,44 @@ internalRouter.post('/generate', requireHookSecret, async (req: Request, res: Re
         code: 'GENERATE_FAILED',
         message: err instanceof Error ? err.message : String(err),
       },
+    });
+  }
+});
+
+const geminiImageSchema = z.object({
+  prompt: z.string().trim().min(3).max(8000),
+  aspectRatio: z.enum(ANTIGRAVITY_ASPECT_RATIOS).optional(),
+  inputImages: z.array(z.string().min(1).max(1024)).max(6).optional(),
+});
+
+// Gemini image models through the user's Google Antigravity login (Pi).
+internalRouter.post('/gemini-image', requireHookSecret, async (req: Request, res: Response) => {
+  const parsed = geminiImageSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ success: false, error: { code: 'INVALID_INPUT', message: parsed.error.message } });
+  }
+  const sessionId = req.header('x-webui-session-id') || '';
+  const row = sessionId
+    ? ((await pgGet('SELECT user_id FROM sessions WHERE id = ?', sessionId)) as unknown as
+        | { user_id: string }
+        | undefined)
+    : undefined;
+  if (!row?.user_id) {
+    return res.status(403).json({
+      success: false,
+      error: { code: 'INVALID_SESSION', message: 'Unknown WebUI session identity' },
+    });
+  }
+  try {
+    const result = await generateAntigravityImage(row.user_id, parsed.data);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    const code = err instanceof AntigravityImageError ? err.code : 'FAILED';
+    res.status(code === 'NOT_CONNECTED' ? 409 : code === 'QUOTA' ? 429 : 502).json({
+      success: false,
+      error: { code, message: err instanceof Error ? err.message : String(err) },
     });
   }
 });

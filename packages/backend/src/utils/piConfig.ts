@@ -199,16 +199,65 @@ function readPiProviderModelsForUser(userId: string): Record<string, string[]> {
 }
 
 /**
- * OpenCode connections Pi does not list. Mistral's account runs in the Mistral
- * Vibe harness; through Pi it put the provider's whole catalog (32 models,
- * legacy and specialised ones included) into the picker.
+ * Providers Pi implements natively. Mistral has no OpenAI-style base URL in the
+ * OpenCode catalog or on models.dev, so the generic path drops it; Pi's own
+ * provider speaks Mistral's chat API and carries the model metadata. Only the
+ * key is passed on (MISTRAL_API_KEY via the credential env).
+ *
+ * Pi's catalog lists every Mistral model, dated snapshots, legacy and audio
+ * ones included, so the picker gets the current chat and code models only.
  */
-const PI_SKIPPED_PROVIDERS = new Set(['mistral']);
+const PI_NATIVE_PROVIDERS: Record<string, { catalogFile: string; api: string; models: string[] }> =
+  {
+    mistral: {
+      catalogFile: 'mistral.json',
+      api: 'mistral-conversations',
+      models: [
+        'mistral-medium-3.5',
+        'mistral-large-latest',
+        'devstral-latest',
+        'devstral-medium-latest',
+        'codestral-latest',
+        'magistral-medium-latest',
+        'mistral-small-latest',
+        'zai-glm-5-3',
+      ],
+    },
+  };
+
+/** The curated models of a native provider that Pi's installed catalog knows. */
+export function readPiNativeModelIds(providerId: string): string[] {
+  const native = PI_NATIVE_PROVIDERS[providerId];
+  if (!native) return [];
+  const file = firstExisting(
+    ['/home/node/.npm-global', '/opt/plum-cli'].map((prefix) =>
+      path.join(
+        prefix,
+        'lib',
+        'node_modules',
+        '@earendil-works',
+        'pi-coding-agent',
+        'node_modules',
+        '@earendil-works',
+        'pi-ai',
+        'dist',
+        'providers',
+        'data',
+        native.catalogFile
+      )
+    )
+  );
+  if (!file) return [];
+  const data = readJsonObject(file);
+  const known = isRecord(data[native.api]) ? (data[native.api] as Record<string, unknown>) : {};
+  return native.models.filter((id) => id in known);
+}
 
 export function buildPiModelCatalog(
   storedProviders: OpenCodeProvider[],
   catalog: OpenCodeProviderCatalog,
-  configuredModels: Record<string, string[]>
+  configuredModels: Record<string, string[]>,
+  nativeModelIds: (providerId: string) => string[] = readPiNativeModelIds
 ): {
   piProviders: Record<string, unknown>;
   models: string[];
@@ -217,7 +266,15 @@ export function buildPiModelCatalog(
   const models: string[] = [];
 
   for (const provider of storedProviders.filter((entry) => entry.enabled)) {
-    if (PI_SKIPPED_PROVIDERS.has(provider.id)) continue;
+    // A custom base URL means a proxy or self-hosted endpoint: that stays on
+    // the generic path. Otherwise Pi's native provider serves the account.
+    if (PI_NATIVE_PROVIDERS[provider.id] && !provider.baseUrl) {
+      const native = nativeModelIds(provider.id);
+      if (native.length > 0) {
+        models.push(...native.map((modelId) => `${provider.id}/${modelId}`));
+        continue;
+      }
+    }
     const entry = buildPiProviderConfig(provider, catalog, configuredModels[provider.id]);
     if (!entry) continue;
     piProviders[provider.id] = entry;
@@ -434,8 +491,13 @@ export function hasPiAntigravityExtension(): boolean {
  * credential, so the presence of the provider key is the only signal available
  * outside Pi's own process.
  */
+/** Pi's auth.json for a WebUI user (Antigravity OAuth lives here after `/login`). */
+export function piAuthFile(userId: string): string {
+  return path.join(PI_ROOT, safeUserSegment(userId), 'agent', 'auth.json');
+}
+
 export function hasPiAntigravityLogin(userId: string): boolean {
-  const authFile = path.join(PI_ROOT, safeUserSegment(userId), 'agent', 'auth.json');
+  const authFile = piAuthFile(userId);
   try {
     const parsed = JSON.parse(fs.readFileSync(authFile, 'utf8')) as unknown;
     if (!isRecord(parsed)) return false;

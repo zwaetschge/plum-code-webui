@@ -36,6 +36,7 @@ async function load() {
   $('label').value = settings.label;
   $('paused').checked = settings.paused;
   $('allowJs').checked = settings.allowJs;
+  $('protectedSites').value = settings.protectedSites;
   renderStatus(await browser.runtime.sendMessage({ plumGetState: true }));
 }
 
@@ -78,6 +79,9 @@ $('disconnect').addEventListener('click', async () => {
 
 $('paused').addEventListener('change', () => plumSaveSettings({ paused: $('paused').checked }));
 $('allowJs').addEventListener('change', () => plumSaveSettings({ allowJs: $('allowJs').checked }));
+$('protectedSites').addEventListener('change', () =>
+  plumSaveSettings({ protectedSites: $('protectedSites').value })
+);
 
 browser.runtime.onMessage.addListener((message) => {
   if (message && message.plumState) renderStatus(message.plumState);

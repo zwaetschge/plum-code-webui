@@ -74,6 +74,16 @@
           </span>
           <input id="allowJs" type="checkbox" />
         </div>
+        <div class="field">
+          <label for="protectedSites">Geschützte Seiten</label>
+          <textarea id="protectedSites" rows="6" spellcheck="false"></textarea>
+          <p class="hint">
+            Eine Adresse pro Zeile, <span class="mono">*</span> als Platzhalter (<span class="mono"
+              >*bank*</span
+            >, <span class="mono">paypal.com</span> gilt auch für Subdomains). Hier fragt der Agent
+            auf der Seite nach, bevor er klickt, tippt, navigiert oder Dateien hochlädt.
+          </p>
+        </div>
         <p class="hint">
           Agents sehen und steuern nur Tabs in der Tab-Gruppe ihrer Session („Plum · …“). Ziehe
           einen Tab in eine Gruppe, um ihn freizugeben; schließe die Gruppe, um den Zugriff zu

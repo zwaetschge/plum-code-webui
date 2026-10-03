@@ -233,8 +233,81 @@
     return hints;
   }
 
-  function inViewport(el) {
+  // ------------------------------------------------------------ frames and shadow roots
+  //
+  // Same-origin iframes and open shadow roots are part of the page for the
+  // agent: read_page and find walk into them, and positions are reported in
+  // top-window coordinates. Cross-origin frames stay opaque (browser security).
+
+  function frameDocument(frame) {
+    try {
+      return frame.contentDocument || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Offset of an element's document inside the top window. */
+  function frameOffset(el) {
+    let dx = 0;
+    let dy = 0;
+    let win = el.ownerDocument && el.ownerDocument.defaultView;
+    while (win && win !== window) {
+      let frame = null;
+      try {
+        frame = win.frameElement;
+      } catch {
+        break;
+      }
+      if (!frame) break;
+      const rect = frame.getBoundingClientRect();
+      dx += rect.left + frame.clientLeft;
+      dy += rect.top + frame.clientTop;
+      win = frame.ownerDocument.defaultView;
+    }
+    return { dx, dy };
+  }
+
+  /** getBoundingClientRect in top-window coordinates. */
+  function topRect(el) {
     const rect = el.getBoundingClientRect();
+    const { dx, dy } = frameOffset(el);
+    return {
+      left: rect.left + dx,
+      top: rect.top + dy,
+      right: rect.right + dx,
+      bottom: rect.bottom + dy,
+      width: rect.width,
+      height: rect.height,
+    };
+  }
+
+  /** Every element of the page, including open shadow roots and same-origin frames. */
+  function* deepElements(root = document) {
+    const nodes = root.querySelectorAll('*');
+    for (const el of nodes) {
+      yield el;
+      if (el.shadowRoot) yield* deepElements(el.shadowRoot);
+      if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') {
+        const doc = frameDocument(el);
+        if (doc && doc.body) yield* deepElements(doc);
+      }
+    }
+  }
+
+  function deepQuery(selector, root = document) {
+    for (const el of deepElements(root)) {
+      try {
+        if (el.matches(selector)) return el;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function inViewport(el) {
+    const rect = topRect(el);
     return rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth;
   }
 
@@ -259,7 +332,7 @@
     };
 
     const walk = (el, depth) => {
-      if (truncated || !(el instanceof Element)) return;
+      if (truncated || !el || el.nodeType !== 1) return;
       const tag = el.tagName.toLowerCase();
       if (
         ['script', 'style', 'noscript', 'template', 'svg', 'head', 'meta', 'link'].includes(tag)
@@ -316,8 +389,18 @@
         ? [...el.shadowRoot.children, ...el.children]
         : [...el.children];
       for (const child of children) walk(child, shown ? depth + 1 : depth);
-      if (tag === 'iframe')
-        push(depth, `iframe "${clean(el.title || el.src, 80)}" (inhalt nicht lesbar)`);
+      if (tag === 'iframe' || tag === 'frame') {
+        const doc = frameDocument(el);
+        if (doc && doc.body) {
+          push(depth, `iframe "${clean(el.title || el.src, 80)}"`);
+          walk(doc.body, depth + 1);
+        } else {
+          push(
+            depth,
+            `iframe "${clean(el.title || el.src, 80)}" (fremde Domain, Inhalt nicht lesbar – klicke per x/y mit trusted: true)`
+          );
+        }
+      }
     };
 
     walk(root, 0);
@@ -343,12 +426,18 @@
     if (!raw) throw new Error('query fehlt');
     let candidates;
     if (raw.startsWith('css:')) {
-      candidates = [...document.querySelectorAll(raw.slice(4).trim())].filter(isVisible);
+      const selector = raw.slice(4).trim();
+      candidates = [...deepElements()].filter((el) => {
+        try {
+          return el.matches(selector) && isVisible(el);
+        } catch {
+          throw new Error(`Ungültiger CSS-Selektor: ${selector}`);
+        }
+      });
     } else {
       const needle = raw.toLowerCase();
       const scored = [];
-      const all = document.querySelectorAll('body *');
-      for (const el of all) {
+      for (const el of deepElements()) {
         if (el === overlayHost || ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(el.tagName)) continue;
         const role = roleOf(el);
         const interactive = isInteractive(el, role);
@@ -389,7 +478,7 @@
       candidates = scored.map((entry) => entry.el);
     }
     const results = candidates.slice(0, 25).map((el) => {
-      const rect = el.getBoundingClientRect();
+      const rect = topRect(el);
       const role = roleOf(el) || el.tagName.toLowerCase();
       const hints = stateHints(el);
       return `${role} "${accessibleName(el) || clean(el.textContent, 80)}" [${refFor(el)}]${hints.length ? ` ${hints.join(' ')}` : ''} @ ${px(rect.left + rect.width / 2)},${px(rect.top + rect.height / 2)}${inViewport(el) ? '' : ' (offscreen)'}`;
@@ -429,9 +518,16 @@
       const el = elementForRef(ref);
       if (!inViewport(el))
         el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-      const rect = el.getBoundingClientRect();
+      const rect = topRect(el);
       const cx = rect.left + rect.width / 2;
       const cy = rect.top + rect.height / 2;
+      if (el.ownerDocument !== document) {
+        // Inside a same-origin frame: hit-test in that frame's own coordinates.
+        const { dx, dy } = frameOffset(el);
+        const hit = el.ownerDocument.elementFromPoint(cx - dx, cy - dy);
+        const target = hit && (el.contains(hit) || hit.contains(el)) ? hit : el;
+        return { target, x: cx, y: cy, covered: null };
+      }
       const top = document.elementFromPoint(cx, cy);
       // Dispatch on what a real pointer would hit, unless it is unrelated (covered).
       const target = top && (el.contains(top) || top.contains(el)) ? top : el;
@@ -439,24 +535,38 @@
       return { target, x: cx, y: cy, covered };
     }
     if (typeof x !== 'number' || typeof y !== 'number') throw new Error('ref oder x/y angeben');
-    const target = document.elementFromPoint(x, y);
+    let target = document.elementFromPoint(x, y);
     if (!target) throw new Error(`Kein Element bei ${x},${y} (außerhalb des Viewports?)`);
+    // Descend into same-origin frames under the point.
+    while (target && (target.tagName === 'IFRAME' || target.tagName === 'FRAME')) {
+      const doc = frameDocument(target);
+      if (!doc) break;
+      const { dx, dy } = frameOffset(doc.documentElement);
+      const inner = doc.elementFromPoint(x - dx, y - dy);
+      if (!inner) break;
+      target = inner;
+    }
     return { target, x, y, covered: null };
   }
 
   function mouse(target, type, x, y, extra = {}) {
+    // Client coordinates are relative to the target's own frame.
+    const { dx, dy } = frameOffset(target);
+    const view = target.ownerDocument.defaultView || window;
     const init = {
       bubbles: true,
       cancelable: true,
       composed: true,
-      view: window,
-      clientX: x,
-      clientY: y,
+      view,
+      clientX: x - dx,
+      clientY: y - dy,
       screenX: x + screenX,
       screenY: y + screenY,
       ...extra,
     };
-    const Ctor = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+    const Ctor = type.startsWith('pointer')
+      ? view.PointerEvent || PointerEvent
+      : view.MouseEvent || MouseEvent;
     if (Ctor === PointerEvent)
       Object.assign(init, { pointerId: 1, pointerType: 'mouse', isPrimary: true });
     return target.dispatchEvent(new Ctor(type, init));
@@ -511,7 +621,13 @@
     if (button === 2) mouse(target, 'contextmenu', x, y, { ...base, buttons: 0 });
     if (args.double) mouse(target, 'dblclick', x, y, { ...base, buttons: 0, detail: 2 });
     ripple(x, y);
-    const warning = covered ? ` – Achtung: Element wird von ${describe(covered)} überdeckt` : '';
+    let warning = covered ? ` – Achtung: Element wird von ${describe(covered)} überdeckt` : '';
+    if ((target.tagName === 'IFRAME' || target.tagName === 'FRAME') && !frameDocument(target)) {
+      warning +=
+        ' – Ziel ist ein eingebetteter Frame einer fremden Domain; DOM-Klicks erreichen ihn nicht. Nutze click mit x/y und trusted: true.';
+    } else if (target.tagName === 'CANVAS') {
+      warning += ' – Ziel ist ein Canvas; reagiert die App nicht, wiederhole mit trusted: true.';
+    }
     return `${args.double ? 'Doppelklick' : button === 2 ? 'Rechtsklick' : 'Klick'} auf ${describe(target)} @ ${px(x)},${px(y)}${warning}`;
   }
 
@@ -1110,10 +1226,50 @@
             margin: -17px 0 0 -17px; border-radius: 50%; border: 3px solid rgba(122, 76, 255, .9);
             animation: ripple .55s ease-out forwards; }
           @keyframes ripple { from { transform: scale(.3); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+          .chrome.hidden { visibility: hidden; }
+          .ink { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none;
+            z-index: 2147483645; width: 1px; height: 1px; }
+          .ink .stroke { fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round;
+            filter: drop-shadow(0 1px 2px rgba(20, 10, 60, .35)); }
+          .ink .shape { fill: none; stroke-width: 3.5; filter: drop-shadow(0 1px 3px rgba(20, 10, 60, .35)); }
+          .ink .area { stroke: none; opacity: .14; }
+          .notes { position: absolute; left: 0; top: 0; width: 1px; height: 1px; pointer-events: none;
+            z-index: 2147483646; }
+          .note { position: absolute; width: max-content; max-width: 280px; font: 600 13px/1.35 system-ui, sans-serif;
+            color: #fff; padding: 7px 10px; border-radius: 10px; white-space: pre-wrap;
+            box-shadow: 0 6px 20px rgba(20, 10, 60, .3); transform: translate(12px, -50%); }
+          .rec { position: fixed; top: 12px; right: 12px; z-index: 2147483647; pointer-events: none;
+            display: flex; align-items: center; gap: 8px; font: 700 12px/1 system-ui, sans-serif;
+            color: #141414; padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,.88);
+            border: 1px solid rgba(234,33,67,.5); box-shadow: 0 6px 20px rgba(58,52,78,.22); }
+          .rec[hidden] { display: none; }
+          .step-card, .confirm-card { position: absolute; pointer-events: auto; width: 300px;
+            font: 500 13px/1.4 system-ui, sans-serif; color: #141414; padding: 12px 14px;
+            border-radius: 14px; background: rgba(255,255,255,.96); border: 2px solid #1856ff;
+            box-shadow: 0 12px 36px rgba(20,10,60,.35); z-index: 2147483647; }
+          .step-card .n { font: 700 11px/1 ui-monospace, monospace; letter-spacing: .06em;
+            text-transform: uppercase; color: #1856ff; }
+          .step-card strong, .confirm-card strong { display: block; font-size: 15px; margin: 5px 0 4px; }
+          .step-card p, .confirm-card p { margin: 0 0 10px; color: #3a344e; white-space: pre-wrap; }
+          .step-card button, .confirm-card button { font: 700 13px system-ui, sans-serif; border: 0;
+            border-radius: 8px; padding: 8px 12px; cursor: pointer; background: #1856ff; color: #fff; }
+          .step-card button:focus-visible, .confirm-card button:focus-visible { outline: 3px solid #f5c400; }
+          .step-card.done { border-color: #07ca6b; }
+          .step-card.done .n { color: #07ca6b; }
+          .confirm-card { position: fixed; left: 50%; top: 18px; transform: translateX(-50%);
+            width: 380px; border-color: #e89558; }
+          .confirm-card .row { display: flex; gap: 6px; flex-wrap: wrap; }
+          .confirm-card .secondary { background: #eef0f7; color: #141414; }
+          .confirm-card .deny { background: #ea2143; }
+          .rec .dot { width: 9px; height: 9px; border-radius: 50%; background: #ea2143;
+            animation: blink 1.2s ease-in-out infinite; }
+          @keyframes blink { 50% { opacity: .25; } }
           @media (prefers-reduced-motion: reduce) {
             .frame { transition: none; } .cursor { transition: none !important; } .ripple { animation-duration: .01s; }
+            .rec .dot { animation: none; }
           }
         </style>
+        <div class="chrome">
         <div class="frame"><div class="pill"></div></div>
         <div class="cursor">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1123,22 +1279,32 @@
               fill="url(#g)" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/>
           </svg>
           <span class="tag">Plum</span>
-        </div>`;
+        </div>
+        </div>
+        <svg class="ink" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="notes"></div>
+        <div class="rec" hidden><span class="dot"></span><span class="rec-text"></span></div>`;
       overlayHost._shadow = shadow;
       overlayHost._frame = shadow.querySelector('.frame');
       overlayHost._pill = shadow.querySelector('.pill');
       overlayHost._cursor = shadow.querySelector('.cursor');
       overlayHost._tag = shadow.querySelector('.tag');
+      overlayHost._chrome = shadow.querySelector('.chrome');
+      overlayHost._ink = shadow.querySelector('.ink');
+      overlayHost._notes = shadow.querySelector('.notes');
+      overlayHost._rec = shadow.querySelector('.rec');
     }
     if (!overlayHost.isConnected)
       (document.body || document.documentElement).appendChild(overlayHost);
     return overlayHost;
   }
 
-  function showActivity(label) {
+  function showActivity(label, guide) {
     try {
       const ui = overlay();
-      ui._pill.textContent = `Plum steuert diesen Tab · ${label}`;
+      ui._pill.textContent = guide
+        ? `Plum zeigt dir etwas · ${label}`
+        : `Plum steuert diesen Tab · ${label}`;
       ui._frame.classList.add('on');
       ui._tag.textContent = `Plum · ${label}`;
       clearTimeout(overlayTimer);
@@ -1195,16 +1361,578 @@
   }
 
   function centerOf(el) {
-    const rect = el.getBoundingClientRect();
+    const rect = topRect(el);
     return { x: rect.left + Math.min(rect.width / 2, 40), y: rect.top + rect.height / 2 };
   }
 
-  /** Hidden while the background captures a screenshot, so the model sees the page itself. */
+  /**
+   * Hidden while the background captures a screenshot, so the model sees the
+   * page itself. Its own drawings stay, so it can check what it marked.
+   */
   async function setOverlayVisible({ visible }) {
-    if (overlayHost) overlayHost.style.visibility = visible ? '' : 'hidden';
+    if (overlayHost) {
+      overlayHost._chrome.classList.toggle('hidden', !visible);
+      overlayHost._rec.style.visibility = visible ? '' : 'hidden';
+    }
     await nextPaint();
     return true;
   }
+
+  // ------------------------------------------------------------ showing: pointer, marks, pen
+  //
+  // Used above all in guide mode, where the agent may look and show but not
+  // act. Everything is drawn in document coordinates, so it scrolls with the
+  // page, and stays until the agent clears it or the page changes.
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const COLORS = {
+    purple: '#7a4cff',
+    blue: '#1856ff',
+    red: '#ea2143',
+    green: '#07ca6b',
+    orange: '#e89558',
+    yellow: '#f5c400',
+  };
+  const colorOf = (name) => COLORS[String(name || '').toLowerCase()] || COLORS.purple;
+  const MAX_MARKS = 40;
+  let marks = [];
+
+  function svgEl(tag, attrs) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+    return node;
+  }
+
+  function remember(...nodes) {
+    marks.push(nodes);
+    while (marks.length > MAX_MARKS) marks.shift().forEach((node) => node.remove());
+  }
+
+  /** A viewport point or rectangle from ref / x,y(,width,height) in screenshot pixels. */
+  function regionFor(args) {
+    const scale = outScale || 1;
+    if (args.ref) {
+      const el = elementForRef(args.ref);
+      el.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      const rect = topRect(el);
+      return { x: rect.left, y: rect.top, width: rect.width, height: rect.height, el };
+    }
+    if (typeof args.x !== 'number' || typeof args.y !== 'number') {
+      throw new Error('ref oder x/y angeben');
+    }
+    const width = typeof args.width === 'number' ? args.width / scale : 0;
+    const height = typeof args.height === 'number' ? args.height / scale : 0;
+    return { x: args.x, y: args.y, width, height };
+  }
+
+  function note(text, pageX, pageY, color) {
+    if (!text) return null;
+    const label = document.createElement('div');
+    label.className = 'note';
+    label.textContent = String(text).slice(0, 300);
+    // Keep it clear of the top edge; it is centred vertically on the point.
+    label.style.left = `${Math.min(pageX, scrollX + innerWidth - 300)}px`;
+    label.style.top = `${Math.max(pageY, scrollY + 26)}px`;
+    label.style.background = color;
+    overlay()._notes.appendChild(label);
+    return label;
+  }
+
+  async function point(args) {
+    const region = regionFor(args);
+    const x = region.x + region.width / 2;
+    const y = region.y + region.height / 2;
+    await moveCursor(x, y);
+    ripple(x, y);
+    const color = colorOf(args.color);
+    const label = note(args.label, x + scrollX + 8, y + scrollY, color);
+    if (label) remember(label);
+    return `Zeigt auf ${region.el ? describe(region.el) : `${px(x)},${px(y)}`}`;
+  }
+
+  async function annotate(args) {
+    const region = regionFor(args);
+    const shape = String(args.shape || (region.width ? 'box' : 'circle'));
+    const color = colorOf(args.color);
+    const pad = region.el ? 6 : 0;
+    const left = region.x + scrollX - pad;
+    const top = region.y + scrollY - pad;
+    const width = region.width + pad * 2;
+    const height = region.height + pad * 2;
+    const cx = left + width / 2;
+    const cy = top + height / 2;
+    const ink = overlay()._ink;
+    const nodes = [];
+    if (shape === 'box') {
+      nodes.push(
+        svgEl('rect', {
+          x: left,
+          y: top,
+          width: Math.max(width, 12),
+          height: Math.max(height, 12),
+          rx: 8,
+          class: 'shape area',
+          fill: color,
+        })
+      );
+      nodes.push(
+        svgEl('rect', {
+          x: left,
+          y: top,
+          width: Math.max(width, 12),
+          height: Math.max(height, 12),
+          rx: 8,
+          class: 'shape',
+          stroke: color,
+        })
+      );
+    } else if (shape === 'underline') {
+      nodes.push(
+        svgEl('path', {
+          d: `M ${left} ${top + height + 3} Q ${cx} ${top + height + 9} ${left + width} ${top + height + 2}`,
+          class: 'stroke',
+          stroke: color,
+        })
+      );
+    } else if (shape === 'arrow') {
+      // Points at the target from the upper left, or from where the agent says.
+      const fromX =
+        typeof args.fromX === 'number' ? args.fromX / (outScale || 1) + scrollX : cx - 90;
+      const fromY =
+        typeof args.fromY === 'number' ? args.fromY / (outScale || 1) + scrollY : cy - 70;
+      const angle = Math.atan2(cy - fromY, cx - fromX);
+      const tipX = cx - Math.cos(angle) * (region.width ? Math.min(width, height) / 2 + 4 : 4);
+      const tipY = cy - Math.sin(angle) * (region.width ? Math.min(width, height) / 2 + 4 : 4);
+      const head = (spread) =>
+        `${tipX - Math.cos(angle - spread) * 16} ${tipY - Math.sin(angle - spread) * 16}`;
+      nodes.push(
+        svgEl('path', {
+          d: `M ${fromX} ${fromY} L ${tipX} ${tipY} M ${head(0.45)} L ${tipX} ${tipY} L ${head(-0.45)}`,
+          class: 'stroke',
+          stroke: color,
+        })
+      );
+    } else {
+      const rx = Math.max(width / 2 + 10, 22);
+      const ry = Math.max(height / 2 + 10, 22);
+      nodes.push(svgEl('ellipse', { cx, cy, rx, ry, class: 'shape', stroke: color }));
+    }
+    nodes.forEach((node) => ink.appendChild(node));
+    await moveCursor(cx - scrollX, cy - scrollY);
+    const label = note(args.label, left + width + 4, cy, color);
+    remember(...nodes, ...(label ? [label] : []));
+    return `Markiert (${shape}) ${region.el ? describe(region.el) : `@ ${px(cx - scrollX)},${px(cy - scrollY)}`}`;
+  }
+
+  /** A pen stroke along screenshot-pixel points; the cursor draws it visibly. */
+  async function draw(args) {
+    const scale = outScale || 1;
+    const points = (Array.isArray(args.points) ? args.points : [])
+      .filter((p) => Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number')
+      .slice(0, 400)
+      .map(([x, y]) => [x / scale, y / scale]);
+    if (points.length < 2) throw new Error('points braucht mindestens zwei [x, y]-Punkte');
+    const color = colorOf(args.color);
+    const path = svgEl('path', { d: '', class: 'stroke', stroke: color });
+    overlay()._ink.appendChild(path);
+    await moveCursor(points[0][0], points[0][1]);
+    let d = `M ${points[0][0] + scrollX} ${points[0][1] + scrollY}`;
+    const step =
+      reducedMotion || document.hidden ? points.length : Math.max(1, Math.ceil(points.length / 40));
+    for (let i = 1; i < points.length; i++) {
+      d += ` L ${points[i][0] + scrollX} ${points[i][1] + scrollY}`;
+      if (i % step === 0 || i === points.length - 1) {
+        path.setAttribute('d', d);
+        placeCursor(points[i][0], points[i][1], 0);
+        cursorPos = { x: points[i][0], y: points[i][1] };
+        if (step < points.length) await wait(16);
+      }
+    }
+    const [lastX, lastY] = points[points.length - 1];
+    const label = note(args.label, lastX + scrollX + 6, lastY + scrollY, color);
+    remember(path, ...(label ? [label] : []));
+    return `Gezeichnet (${points.length} Punkte)`;
+  }
+
+  function clearMarks() {
+    clearGuideStep();
+    marks.forEach((nodes) => nodes.forEach((node) => node.remove()));
+    marks = [];
+    return 'Markierungen entfernt';
+  }
+
+  // ------------------------------------------------------------ guided tutorial steps
+  //
+  // One step at a time: a mark, a card with the instruction and an "Erledigt"
+  // button. A real click on the marked element (or the button) completes the
+  // step; the background then tells the session, which shows the next one.
+
+  let guideStep = null;
+
+  function clearGuideStep() {
+    if (guideStep) guideStep.cleanup();
+    guideStep = null;
+  }
+
+  async function guideStepOp(args) {
+    clearGuideStep();
+    const step = Number(args.step) || 1;
+    const total = Number(args.total) || 0;
+    const title = String(args.title || '').slice(0, 120);
+    const instruction = String(args.instruction || '').slice(0, 500);
+    const hasTarget = !!args.ref || typeof args.x === 'number';
+    const region = hasTarget ? regionFor(args) : null;
+    let markNodes = [];
+    if (region) {
+      await annotate({
+        ...args,
+        shape: region.width || region.el ? 'box' : 'circle',
+        color: 'blue',
+        label: '',
+      });
+      markNodes = marks[marks.length - 1] || [];
+    }
+    const card = document.createElement('div');
+    card.className = 'step-card';
+    card.setAttribute('role', 'dialog');
+    const counter = document.createElement('span');
+    counter.className = 'n';
+    counter.textContent = total ? `Schritt ${step} von ${total}` : `Schritt ${step}`;
+    const heading = document.createElement('strong');
+    heading.textContent = title;
+    const text = document.createElement('p');
+    text.textContent = instruction;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Erledigt ✓';
+    card.append(counter, heading, text, button);
+    const ui = overlay();
+    if (region) {
+      const left = region.x + scrollX + Math.min(region.width, 60) + 18;
+      const top = region.y + scrollY + region.height + 16;
+      card.style.left = `${Math.max(scrollX + 8, Math.min(left, scrollX + innerWidth - 320))}px`;
+      card.style.top = `${Math.min(top, scrollY + innerHeight - 190)}px`;
+      ui._notes.appendChild(card);
+    } else {
+      card.style.position = 'fixed';
+      card.style.left = '50%';
+      card.style.bottom = '70px';
+      card.style.transform = 'translateX(-50%)';
+      ui._shadow.appendChild(card);
+    }
+
+    let finished = false;
+    const docs = new Set([document, region && region.el ? region.el.ownerDocument : document]);
+    const onClick = (event) => {
+      if (!event.isTrusted || finished || event.target === overlayHost) return;
+      let hit = false;
+      if (region && region.el) hit = region.el === event.target || region.el.contains(event.target);
+      else if (region) {
+        const w = Math.max(region.width, 40);
+        const h = Math.max(region.height, 40);
+        const x0 = region.width ? region.x : region.x - w / 2;
+        const y0 = region.height ? region.y : region.y - h / 2;
+        hit =
+          event.clientX >= x0 &&
+          event.clientX <= x0 + w &&
+          event.clientY >= y0 &&
+          event.clientY <= y0 + h;
+      }
+      if (hit) finish('click');
+    };
+    const finish = (how) => {
+      if (finished) return;
+      finished = true;
+      card.classList.add('done');
+      counter.textContent = `✓ ${counter.textContent} erledigt`;
+      button.remove();
+      browser.runtime.sendMessage({ plumGuideDone: { step, total, title, how } }).catch(() => {});
+      setTimeout(() => {
+        if (guideStep && guideStep.card === card) clearGuideStep();
+      }, 1800);
+    };
+    button.addEventListener('click', (event) => {
+      if (event.isTrusted) finish('button');
+    });
+    if (args.expect !== 'done' && region) {
+      docs.forEach((doc) => doc.addEventListener('click', onClick, true));
+    }
+    guideStep = {
+      card,
+      cleanup() {
+        docs.forEach((doc) => doc.removeEventListener('click', onClick, true));
+        card.remove();
+        markNodes.forEach((node) => node.remove());
+        marks = marks.filter((entry) => entry !== markNodes);
+      },
+    };
+    const waitsFor =
+      region && args.expect !== 'done'
+        ? ' (Klick auf die Markierung oder „Erledigt“)'
+        : ' („Erledigt“)';
+    return `Schritt ${step}${total ? `/${total}` : ''} „${title}“ gezeigt – wartet auf den Nutzer${waitsFor}.`;
+  }
+
+  // ------------------------------------------------------------ macros, files, confirmations
+
+  /** Find a recorded element again (macro replay): id, then role + name, then CSS path. */
+  function locate({ id, css, role, name }) {
+    const visible = (el) => el && isVisible(el);
+    let el = null;
+    if (id) {
+      try {
+        el = deepQuery(`#${CSS.escape(id)}`);
+      } catch {
+        el = null;
+      }
+    }
+    if (!visible(el) && name) {
+      const wanted = String(name).trim().toLowerCase();
+      let partial = null;
+      for (const candidate of deepElements()) {
+        if (candidate === overlayHost || !isInteractive(candidate, roleOf(candidate))) continue;
+        if (role && roleOf(candidate) !== role) continue;
+        const label = (accessibleName(candidate) || '').trim().toLowerCase();
+        if (!label || !isVisible(candidate)) continue;
+        if (label === wanted) {
+          el = candidate;
+          break;
+        }
+        if (!partial && label.includes(wanted)) partial = candidate;
+      }
+      if (!visible(el)) el = partial;
+    }
+    if (!visible(el) && css) el = deepQuery(css);
+    if (!visible(el)) {
+      const what = [role, name && `„${name}“`, id && `#${id}`, css].filter(Boolean).join(', ');
+      throw new Error(`Element nicht gefunden (${what})`);
+    }
+    if (!inViewport(el)) {
+      el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    }
+    return refFor(el);
+  }
+
+  function linkUrl({ ref }) {
+    const el = elementForRef(ref);
+    const link = el.closest('a[href]') || el.querySelector?.('a[href]');
+    const url = (link && link.href) || el.currentSrc || el.src || el.href;
+    if (!url) throw new Error(`${describe(el)} hat keine Link-Adresse`);
+    return url;
+  }
+
+  function upload({ ref, name, mimeType, data }) {
+    const el = elementForRef(ref);
+    const doc = el.ownerDocument;
+    const isFile = (node) => node && node.tagName === 'INPUT' && node.type === 'file';
+    let input = isFile(el)
+      ? el
+      : el.querySelector?.('input[type=file]') ||
+        (isFile(el.control) ? el.control : null) ||
+        (isFile(el.closest('label')?.control) ? el.closest('label').control : null) ||
+        el.closest('form')?.querySelector('input[type=file]') ||
+        null;
+    if (!input) {
+      const all = [...doc.querySelectorAll('input[type=file]')];
+      if (all.length === 1) input = all[0];
+    }
+    const view = doc.defaultView || window;
+    const binary = atob(String(data || ''));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    const file = new view.File([bytes], String(name || 'datei'), { type: mimeType || '' });
+    const transfer = new view.DataTransfer();
+    transfer.items.add(file);
+    if (input) {
+      input.files = transfer.files;
+      input.dispatchEvent(new view.Event('input', { bubbles: true }));
+      input.dispatchEvent(new view.Event('change', { bubbles: true }));
+      return `Datei „${file.name}“ (${bytes.length} Bytes) in ${describe(input)} gelegt`;
+    }
+    for (const type of ['dragenter', 'dragover', 'drop']) {
+      el.dispatchEvent(
+        new view.DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer })
+      );
+    }
+    return `Datei „${file.name}“ (${bytes.length} Bytes) auf ${describe(el)} fallen gelassen`;
+  }
+
+  /** Protected sites: ask the user on the page before the agent acts. */
+  function confirmAction({ text, host }) {
+    return new Promise((resolve) => {
+      const ui = overlay();
+      ui._shadow.querySelector('.confirm-card')?.remove();
+      const card = document.createElement('div');
+      card.className = 'confirm-card';
+      card.setAttribute('role', 'alertdialog');
+      const heading = document.createElement('strong');
+      heading.textContent = `Plum möchte auf ${host} handeln`;
+      const detail = document.createElement('p');
+      detail.textContent = String(text || '').slice(0, 300);
+      const row = document.createElement('div');
+      row.className = 'row';
+      let timer = null;
+      const done = (answer) => {
+        clearTimeout(timer);
+        card.remove();
+        resolve(answer);
+      };
+      const make = (label, className, answer) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        if (className) button.className = className;
+        button.addEventListener('click', (event) => {
+          if (event.isTrusted) done(answer);
+        });
+        return button;
+      };
+      row.append(
+        make('Erlauben', '', 'once'),
+        make('Für diese Session', 'secondary', 'session'),
+        make('Ablehnen', 'deny', 'deny')
+      );
+      card.append(heading, detail, row);
+      ui._shadow.appendChild(card);
+      timer = setTimeout(() => done('timeout'), 40_000);
+    });
+  }
+
+  // ------------------------------------------------------------ demonstration recording
+  //
+  // The user shows a task; each meaningful action becomes a step the agent can
+  // read and replay. Passwords and card numbers are never recorded.
+
+  let recording = false;
+  let recordCount = 0;
+  let scrollTimer = null;
+
+  function cssPath(el) {
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === 1 && parts.length < 5) {
+      if (node.id && /^[A-Za-z][\w-]*$/.test(node.id)) {
+        parts.unshift(`#${node.id}`);
+        break;
+      }
+      let part = node.tagName.toLowerCase();
+      const cls = [...node.classList].filter((c) => /^[A-Za-z][\w-]*$/.test(c)).slice(0, 2);
+      if (cls.length) part += `.${cls.join('.')}`;
+      const parent = node.parentElement;
+      if (parent) {
+        const same = [...parent.children].filter((child) => child.tagName === node.tagName);
+        if (same.length > 1) part += `:nth-of-type(${same.indexOf(node) + 1})`;
+      }
+      parts.unshift(part);
+      node = parent;
+    }
+    return parts.join(' > ');
+  }
+
+  function target(el) {
+    const actionable =
+      el.closest?.('a,button,input,select,textarea,label,summary,[role],[onclick],[tabindex]') ||
+      el;
+    return {
+      // Refs are per page load; the recording keeps the readable part only.
+      what: describe(actionable).replace(/\s*\[ref_\d+\]/, ''),
+      tag: actionable.tagName.toLowerCase(),
+      role: roleOf(actionable) || null,
+      name: (accessibleName(actionable) || '').slice(0, 120) || null,
+      id: actionable.id || null,
+      css: cssPath(actionable),
+      href: actionable.href || null,
+    };
+  }
+
+  const secret = (el) =>
+    el.type === 'password' || /cc-|card|cvc|cvv|one-time-code/i.test(el.autocomplete || '');
+
+  function sendStep(step) {
+    recordCount += 1;
+    if (overlayHost)
+      overlayHost._rec.querySelector('.rec-text').textContent =
+        `Plum lernt mit · ${recordCount} Schritte`;
+    browser.runtime
+      .sendMessage({
+        plumRecordStep: { ...step, url: location.href, title: document.title, at: Date.now() },
+      })
+      .catch(() => {});
+  }
+
+  function onRecordClick(event) {
+    if (!event.isTrusted || event.button !== 0 || event.target === overlayHost) return;
+    sendStep({
+      kind: 'click',
+      x: event.clientX,
+      y: event.clientY,
+      vw: innerWidth,
+      vh: innerHeight,
+      ...target(event.target),
+    });
+  }
+  function onRecordChange(event) {
+    const el = event.target;
+    if (!event.isTrusted || !el || !('value' in el)) return;
+    if (el.type === 'checkbox' || el.type === 'radio') {
+      sendStep({ kind: 'check', checked: el.checked, ...target(el) });
+      return;
+    }
+    const value = secret(el) ? '••••' : String(el.value).slice(0, 500);
+    sendStep({
+      kind: el.tagName === 'SELECT' ? 'select' : 'type',
+      value,
+      masked: secret(el),
+      ...target(el),
+    });
+  }
+  function onRecordKey(event) {
+    if (!event.isTrusted) return;
+    const combo = event.ctrlKey || event.metaKey || event.altKey;
+    if (!combo && !['Enter', 'Escape'].includes(event.key)) return;
+    if (['Control', 'Meta', 'Alt', 'Shift'].includes(event.key)) return;
+    const keys = [
+      event.ctrlKey && 'Control',
+      event.metaKey && 'Meta',
+      event.altKey && 'Alt',
+      event.shiftKey && 'Shift',
+      event.key,
+    ]
+      .filter(Boolean)
+      .join('+');
+    sendStep({ kind: 'key', keys, ...target(event.target) });
+  }
+  function onRecordScroll() {
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(
+      () =>
+        sendStep({ kind: 'scroll', scrollX: Math.round(scrollX), scrollY: Math.round(scrollY) }),
+      700
+    );
+  }
+
+  function setRecording({ on, count }) {
+    const want = !!on;
+    if (want !== recording) {
+      const method = want ? 'addEventListener' : 'removeEventListener';
+      document[method]('click', onRecordClick, true);
+      document[method]('change', onRecordChange, true);
+      document[method]('keydown', onRecordKey, true);
+      window[method]('scroll', onRecordScroll, { capture: true, passive: true });
+      recording = want;
+    }
+    if (typeof count === 'number') recordCount = count;
+    const ui = overlay();
+    ui._rec.hidden = !recording;
+    ui._rec.querySelector('.rec-text').textContent = `Plum lernt mit · ${recordCount} Schritte`;
+    return recording;
+  }
+
+  // A page that loads while recording picks it up again.
+  browser.runtime
+    .sendMessage({ plumRecordingState: true })
+    .then((answer) => answer && answer.recording && setRecording({ on: true, count: answer.count }))
+    .catch(() => {});
 
   // Redraw the cursor where it was before a navigation, in Plum-managed tabs only.
   const restoreCursor = () =>
@@ -1260,9 +1988,28 @@
     form_input: formInput,
     read_console: readConsole,
     evaluate_js: evaluateJs,
+    point,
+    annotate,
+    draw,
+    clear_annotations: clearMarks,
+    record: setRecording,
+    guide_step: guideStepOp,
+    locate,
+    link_url: linkUrl,
+    upload,
+    confirm: confirmAction,
   };
 
-  const QUIET_OPS = new Set(['viewport', 'check', 'overlay', 'history']);
+  const QUIET_OPS = new Set([
+    'viewport',
+    'check',
+    'overlay',
+    'history',
+    'record',
+    'locate',
+    'link_url',
+    'confirm',
+  ]);
   const LABELS = {
     read_page: 'liest',
     find: 'sucht',
@@ -1275,6 +2022,12 @@
     form_input: 'füllt Formular',
     read_console: 'liest Konsole',
     evaluate_js: 'führt JS aus',
+    point: 'zeigt',
+    annotate: 'markiert',
+    draw: 'zeichnet',
+    clear_annotations: 'räumt auf',
+    guide_step: 'leitet an',
+    upload: 'lädt Datei hoch',
   };
 
   // Reply through sendResponse: Chrome ignores a promise returned by the listener.
@@ -1288,7 +2041,7 @@
     outScale = Number(message.args && message.args._scale) || 1;
     if (!QUIET_OPS.has(message.op)) {
       hookConsole();
-      showActivity(LABELS[message.op] || message.op);
+      showActivity(LABELS[message.op] || message.op, message.args && message.args._guide);
     }
     Promise.resolve()
       .then(() => handler(message.args || {}))

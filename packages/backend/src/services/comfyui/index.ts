@@ -315,10 +315,34 @@ class ComfyUIOrchestrator {
       return value;
     }
 
-    // Paths may reference only this user's session attachments or a generated
-    // image owned by one of this user's jobs. Arbitrary absolute paths are
-    // deliberately rejected so ComfyUI cannot be used as a file-exfiltration
-    // relay from the backend/container mounts.
+    const { bytes, mime } = await this.readOwnedImage(userId, value, label);
+    const extension =
+      mime === 'image/jpeg'
+        ? '.jpg'
+        : mime === 'image/webp'
+          ? '.webp'
+          : mime === 'image/gif'
+            ? '.gif'
+            : '.png';
+    const uploaded = await client.uploadImage(`${randomUUID()}${extension}`, bytes, {
+      contentType: mime,
+      overwrite: false,
+    });
+    console.log(`[comfyui] uploaded owned ${label} → ComfyUI /input/${uploaded.name}`);
+    return uploaded.name;
+  }
+
+  /**
+   * Bytes of an image the user owns: one of their session attachments or a
+   * generated image of theirs. Arbitrary absolute paths are deliberately
+   * rejected so image tools cannot be used as a file-exfiltration relay from
+   * the backend/container mounts.
+   */
+  async readOwnedImage(
+    userId: string,
+    value: string,
+    label = 'image'
+  ): Promise<{ bytes: Buffer; mime: string }> {
     const candidate = value.startsWith(`${PUBLIC_PREFIX}/`)
       ? path.join(OUTPUT_DIR, path.basename(value))
       : path.isAbsolute(value)
@@ -343,20 +367,26 @@ class ComfyUIOrchestrator {
     const bytes = await readFile(abs);
     const mime = detectImageMime(bytes);
     if (!mime) throw new Error(`${label} is not a supported image file`);
-    const extension =
-      mime === 'image/jpeg'
-        ? '.jpg'
-        : mime === 'image/webp'
-          ? '.webp'
-          : mime === 'image/gif'
-            ? '.gif'
-            : '.png';
-    const uploaded = await client.uploadImage(`${randomUUID()}${extension}`, bytes, {
-      contentType: mime,
-      overwrite: false,
+    return { bytes, mime };
+  }
+
+  /** Store a generated image under /generated/<uuid>.<ext>, owned by `userId`. */
+  async saveGeneratedImage(
+    userId: string,
+    bytes: Buffer,
+    mime: string
+  ): Promise<{ filename: string; outputUrl: string }> {
+    const extension = mime === 'image/jpeg' ? '.jpg' : mime === 'image/webp' ? '.webp' : '.png';
+    const filename = `${randomUUID()}${extension}`;
+    await mkdir(OUTPUT_DIR, { recursive: true });
+    await writeFile(path.join(OUTPUT_DIR, filename), bytes);
+    const ownerDir = path.join(OUTPUT_DIR, '.owners');
+    await mkdir(ownerDir, { recursive: true });
+    await writeFile(path.join(ownerDir, `${filename}.json`), JSON.stringify({ userId }), {
+      encoding: 'utf8',
+      mode: 0o600,
     });
-    console.log(`[comfyui] uploaded owned ${label} → ComfyUI /input/${uploaded.name}`);
-    return uploaded.name;
+    return { filename, outputUrl: `${PUBLIC_PREFIX}/${filename}` };
   }
 
   private async isOwnedInputPath(filePath: string, userId: string): Promise<boolean> {
@@ -370,7 +400,7 @@ class ComfyUIOrchestrator {
         );
         if (liveJobOwned) return true;
 
-        if (/^[0-9a-f-]{36}\.png$/i.test(filename)) {
+        if (/^[0-9a-f-]{36}\.(png|jpg|webp)$/i.test(filename)) {
           try {
             const owner = JSON.parse(
               await readFile(path.join(OUTPUT_DIR, '.owners', `${filename}.json`), 'utf8')

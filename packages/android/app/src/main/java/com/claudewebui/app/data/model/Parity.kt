@@ -59,6 +59,25 @@ data class BrowserConnection(
     val lastSeenAt: String = "",
 )
 
+/** GET /api/browser-bridge/live/:sessionId — a picture of the session's browser tab. */
+@Serializable
+data class BrowserLiveImage(
+    val data: String = "",
+    val mimeType: String = "image/jpeg",
+)
+
+@Serializable
+data class BrowserLiveFrame(
+    val image: BrowserLiveImage? = null,
+    val info: String? = null,
+    val code: String? = null,
+    val paused: Boolean = false,
+    val at: String = "",
+)
+
+@Serializable
+data class BrowserPauseInput(val paused: Boolean)
+
 @Serializable
 data class BrowserBridgeStatus(
     val connections: List<BrowserConnection> = emptyList(),

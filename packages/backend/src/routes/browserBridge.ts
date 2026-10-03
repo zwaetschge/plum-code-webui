@@ -84,6 +84,62 @@ router.get('/extension-chrome.zip', requireAuth, (_req: Request, res: Response) 
   res.sendFile(file);
 });
 
+/**
+ * Live view for the WebUI and the Android app: a current picture of the tab a
+ * session works in, cursor and marks included.
+ */
+router.get('/live/:sessionId', requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const sessionId = req.params.sessionId!;
+  const row = (await pgGet(
+    'SELECT name FROM sessions WHERE id = ? AND user_id = ?',
+    sessionId,
+    userId
+  )) as unknown as { name: string | null } | undefined;
+  if (!row) throw new AppError('Session not found', 404, 'NOT_FOUND');
+  try {
+    const result = await browserBridge.call(
+      userId,
+      { id: sessionId, name: row.name || sessionId },
+      'peek',
+      {},
+      { timeoutMs: 12_000 }
+    );
+    const image = result.content.find((item) => item.type === 'image');
+    const info = result.content.find((item) => item.type === 'text');
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      success: true,
+      data: {
+        image: image ? { data: image.data, mimeType: image.mimeType } : null,
+        info: typeof info?.text === 'string' ? info.text : null,
+        paused: browserBridge
+          .listConnections(userId)
+          .some((conn) => conn.client.kind === 'browser' && conn.paused),
+        at: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    const bridgeError = error instanceof BrowserBridgeError ? error : null;
+    res.json({
+      success: true,
+      data: {
+        image: null,
+        info: error instanceof Error ? error.message : String(error),
+        code: bridgeError?.code ?? 'BROWSER_ERROR',
+        paused: false,
+        at: new Date().toISOString(),
+      },
+    });
+  }
+});
+
+router.post('/pause', requireAuth, (req: Request, res: Response) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const paused = req.body?.paused === true;
+  res.json({ success: true, data: { paused, browsers: browserBridge.setPaused(userId, paused) } });
+});
+
 const internalRouter = Router();
 
 const callSchema = z.object({
@@ -148,7 +204,12 @@ internalRouter.post('/call', requireHookSecret, async (req: Request, res: Respon
       { id: sessionId, name: row.name || sessionId },
       parsed.data.tool,
       parsed.data.args,
-      { timeoutMs: parsed.data.timeoutMs, connectionId: parsed.data.connectionId }
+      {
+        timeoutMs: parsed.data.timeoutMs,
+        connectionId: parsed.data.connectionId,
+        // desktop_* tools go to the desktop companion, everything else to a browser.
+        kind: parsed.data.tool.startsWith('desktop_') ? 'desktop' : 'browser',
+      }
     );
     res.json({ success: true, data: result });
   } catch (error) {

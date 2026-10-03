@@ -91,6 +91,22 @@ The Docker image runs this in the builder stage. It serves the Firefox package a
 - **Provisioning:** Managed storage works via Chrome policy `3rdparty.extensions.<id>` = `{serverUrl, token, label}` (schema in `managed_schema.json`).
 - **Tested:** Chromium 152 end to end, and a real Google Chrome 153 on the Geekom, including a locked screen.
 
+## Tutorial modes
+
+The panel's mode bar has two ways to teach and learn:
+
+- **Vorführen** (demonstrate): do the task yourself while the extension records
+  clicks, typed values (never passwords or card fields), Enter and shortcuts,
+  page loads, tab switches and scrolling, plus a screenshot per click with the
+  click circled. Review the steps, add a note and send them to the session; the
+  agent learns from them and can replay them with the browser tools.
+- **Anleiten** (guide): the agent watches your active tab and shows you what to
+  do with its cursor (`point`), marks (`annotate`: circle, box, arrow,
+  underline, with a label) and a pen (`draw`). Clicking, typing, scrolling and
+  navigating are blocked for it, so you do every step yourself.
+
+Both work on web pages only; native desktop apps are outside the browser.
+
 ## Signing
 
 Release Firefox installs unsigned add-ons only temporarily

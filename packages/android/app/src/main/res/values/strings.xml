@@ -29,5 +29,6 @@
 
     <!-- Quick Settings Tile -->
     <string name="tile_label">Plum Code</string>
+    <string name="component_reasoning_ultrathink">Ultrathink</string>
     <string name="component_reasoning_ultracode">Ultracode (Workflows)</string>
 </resources>

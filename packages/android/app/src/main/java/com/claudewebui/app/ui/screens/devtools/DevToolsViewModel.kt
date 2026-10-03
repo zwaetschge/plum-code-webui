@@ -53,6 +53,10 @@ data class DevToolsUiState(
     val isLoadingCollab: Boolean = false,
     val oracle: OracleBrowserState? = null,
     val oracleFrame: ByteArray? = null,
+    // The user's own Firefox/Chrome, where the session works through the Plum extension
+    val browserLive: com.claudewebui.app.data.model.BrowserLiveFrame? = null,
+    val browserLiveImage: ByteArray? = null,
+    val isBrowserPausePending: Boolean = false,
     val isLoadingOracle: Boolean = false,
     val isOracleActionPending: Boolean = false,
     // Android test devices (ADB + shared emulator)
@@ -338,6 +342,33 @@ class DevToolsViewModel(
                         it.copy(isLoadingOracle = false, error = failure.screenErrorMessage("devtools", "loadOracle"))
                     }
                 }
+        }
+    }
+
+    /** One live picture of the session's browser tab (polled by the card while visible). */
+    fun loadBrowserLive() {
+        viewModelScope.launch {
+            apiCall { api.getBrowserLive(sessionId) }
+                .onSuccess { response ->
+                    val frame = response.data
+                    val bytes = frame?.image?.data?.let {
+                        runCatching { android.util.Base64.decode(it, android.util.Base64.DEFAULT) }.getOrNull()
+                    }
+                    _uiState.update { it.copy(browserLive = frame, browserLiveImage = bytes) }
+                }
+        }
+    }
+
+    fun toggleBrowserPause() {
+        val paused = _uiState.value.browserLive?.paused ?: false
+        viewModelScope.launch {
+            _uiState.update { it.copy(isBrowserPausePending = true) }
+            apiCall { api.setBrowserPaused(!paused) }
+                .onFailure { failure ->
+                    _uiState.update { it.copy(error = failure.screenErrorMessage("devtools", "browserPause")) }
+                }
+            _uiState.update { it.copy(isBrowserPausePending = false) }
+            loadBrowserLive()
         }
     }
 

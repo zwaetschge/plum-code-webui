@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 export const EXTENSION_FILES = {
   firefox: 'plum-browser-firefox.xpi',
   chrome: 'plum-browser-chrome.zip',
+  chromeDir: 'chrome',
 } as const;
 
 /** First existing copy; a signed build in the persistent data dir wins. */
@@ -23,4 +24,16 @@ export function findExtensionArtifact(name: string): string | null {
     path.resolve('/app/packages/firefox-extension/dist', name),
   ].filter((candidate): candidate is string => !!candidate);
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
+/** Version of the extension build this Plum ships (Chrome and Firefox share it). */
+export function latestExtensionVersion(): string | null {
+  const dir = findExtensionArtifact('chrome');
+  if (!dir) return null;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+    return typeof manifest.version === 'string' ? manifest.version : null;
+  } catch {
+    return null;
+  }
 }

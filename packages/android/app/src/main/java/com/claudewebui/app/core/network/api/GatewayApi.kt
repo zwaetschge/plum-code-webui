@@ -36,6 +36,12 @@ interface GatewayApi {
 
     /** DELETE /api/browser-bridge/tokens/:id */
     suspend fun revokeBrowserToken(id: String): ApiResponse<JsonElement>
+
+    /** GET /api/browser-bridge/live/:sessionId — current picture of the session's tab. */
+    suspend fun getBrowserLive(sessionId: String): ApiResponse<BrowserLiveFrame>
+
+    /** POST /api/browser-bridge/pause — pause or resume every connected browser. */
+    suspend fun setBrowserPaused(paused: Boolean): ApiResponse<JsonElement>
 }
 
 class GatewayApiImpl(private val http: ApiHttp) : GatewayApi {
@@ -68,4 +74,10 @@ class GatewayApiImpl(private val http: ApiHttp) : GatewayApi {
 
     override suspend fun revokeBrowserToken(id: String): ApiResponse<JsonElement> =
         http.delete("/api/browser-bridge/tokens/$id")
+
+    override suspend fun getBrowserLive(sessionId: String): ApiResponse<BrowserLiveFrame> =
+        http.get("/api/browser-bridge/live/$sessionId")
+
+    override suspend fun setBrowserPaused(paused: Boolean): ApiResponse<JsonElement> =
+        http.post("/api/browser-bridge/pause") { setBody(BrowserPauseInput(paused)) }
 }

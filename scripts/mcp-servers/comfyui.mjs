@@ -219,6 +219,98 @@ TOOLS.push(
   }
 );
 
+// Gemini image models ("Nano Banana") through the user's Google Antigravity
+// subscription, the login Pi stores. Not ComfyUI, but the same output path and
+// chat rendering, so it lives with the other image tools.
+TOOLS.push({
+  name: 'generate_image_gemini',
+  description: [
+    "Generate or edit an image with Google Gemini's image model (Nano Banana) through the user's Google Antigravity subscription (Pi login).",
+    'Strong at prompt adherence, legible text in images, and editing or combining reference images (`input_images`).',
+    'Takes 10-30 s and uses the Antigravity image quota. Fails if Antigravity is not connected; then use the ComfyUI tools instead.',
+    'After this tool returns, paste the `display_markdown` field into your reply.',
+  ].join(' '),
+  inputSchema: {
+    type: 'object',
+    required: ['prompt'],
+    properties: {
+      prompt: {
+        type: 'string',
+        description:
+          'What to create, or for edits what to change. Natural language; quote any text that must appear in the image.',
+        minLength: 3,
+        maxLength: 8000,
+      },
+      aspect_ratio: {
+        type: 'string',
+        enum: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+        description:
+          'Output aspect ratio. Omit to let the model choose (edits keep the input ratio).',
+      },
+      input_images: {
+        type: 'array',
+        maxItems: 6,
+        description: 'Reference images to edit or combine (max 6).',
+        items: IMAGE_PATH_PROP,
+      },
+    },
+  },
+});
+
+async function runGeminiImage(args) {
+  const prompt = String(args?.prompt || '').trim();
+  if (prompt.length < 3) throw new Error('prompt must be at least 3 characters');
+  const headers = { 'content-type': 'application/json' };
+  const sessionId = getSessionId();
+  if (HOOK_SECRET) headers['x-webui-hook-secret'] = HOOK_SECRET;
+  if (sessionId) headers['x-webui-session-id'] = sessionId;
+  log('submit', { tool: 'generate_image_gemini', prompt: prompt.slice(0, 80) });
+  const resp = await fetch(`${BACKEND}/api/comfyui/internal/gemini-image`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      prompt,
+      ...(args?.aspect_ratio ? { aspectRatio: args.aspect_ratio } : {}),
+      ...(Array.isArray(args?.input_images) && args.input_images.length
+        ? { inputImages: args.input_images.map(String) }
+        : {}),
+    }),
+    signal: AbortSignal.timeout(200_000),
+  });
+  const body = await resp.json().catch(() => null);
+  if (!resp.ok || !body?.success) {
+    throw new Error(body?.error?.message || `HTTP ${resp.status}`);
+  }
+  const data = body.data;
+  const altText = prompt.length > 120 ? `${prompt.slice(0, 117)}...` : prompt;
+  const markdown = `![${altText}](${data.outputUrl})`;
+  log('done', { tool: 'generate_image_gemini', url: data.outputUrl, model: data.model });
+  return {
+    content: [
+      {
+        type: 'text',
+        text: [
+          'Image generated and saved.',
+          `url: ${data.outputUrl}`,
+          `filename: ${data.filename}`,
+          `model: ${data.model} (Google Antigravity)`,
+          ...(data.text ? [`model note: ${data.text}`] : []),
+          '',
+          `display_markdown: ${markdown}`,
+          '',
+          'NEXT STEP: include the display_markdown line above in your reply to the user so the image renders inline in the chat.',
+        ].join('\n'),
+      },
+    ],
+    structuredContent: {
+      url: data.outputUrl,
+      filename: data.filename,
+      model: data.model,
+      display_markdown: markdown,
+    },
+  };
+}
+
 const PROMPTING_GUIDE = [
   '# Prompting guide (Plum ComfyUI workflows)',
   '',
@@ -409,11 +501,14 @@ async function handleRequest(msg) {
           });
         }
       }
-      if (!WORKFLOW_BY_TOOL[toolName]) {
+      if (!WORKFLOW_BY_TOOL[toolName] && toolName !== 'generate_image_gemini') {
         return error(id, -32601, `unknown tool: ${toolName}`);
       }
       try {
-        const r = await runTool(toolName, args);
+        const r =
+          toolName === 'generate_image_gemini'
+            ? await runGeminiImage(args)
+            : await runTool(toolName, args);
         return result(id, r);
       } catch (e) {
         log('tool error', e.message);

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="browser_live_title">My browser · live</string>
+    <string name="browser_live_hint">Watch what the session does in your Firefox or Chrome.</string>
+    <string name="browser_live_loading">Loading…</string>
+    <string name="browser_live_watch">Watch</string>
+    <string name="browser_live_stop">Stop watching</string>
+    <string name="browser_live_pause">Pause control</string>
+    <string name="browser_live_resume">Resume</string>
+    <string name="browser_live_paused">Browser control is paused – agents cannot act right now.</string>
+    <string name="browser_live_image">Browser tab of the session: %1$s</string>
+</resources>
