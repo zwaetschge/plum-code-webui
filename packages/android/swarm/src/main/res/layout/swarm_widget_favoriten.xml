@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Favoriten-Widget (Punkt 19): bis 6 Vorlagen; ein Tipp öffnet die App, fragt die Platzhalter ab
+     und schickt den Auftrag erst nach deinem Okay. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/swarm_widget_wurzel"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/swarm_widget_hintergrund"
+    android:orientation="vertical"
+    android:padding="10dp">
+
+    <TextView
+        android:id="@+id/swarm_widget_titel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:paddingBottom="6dp"
+        android:text="@string/swarm_widget_titel"
+        android:textColor="#FFF2B84B"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/swarm_widget_leer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:padding="8dp"
+        android:text="@string/swarm_widget_leer"
+        android:textColor="#FFA7B0BE"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/swarm_widget_reihe_1"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <TextView android:id="@+id/swarm_fav_0" style="@style/swarm_SchwarmWidgetKnopf" android:layout_marginEnd="3dp" />
+        <TextView android:id="@+id/swarm_fav_1" style="@style/swarm_SchwarmWidgetKnopf" android:layout_marginStart="3dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/swarm_widget_reihe_2"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="6dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <TextView android:id="@+id/swarm_fav_2" style="@style/swarm_SchwarmWidgetKnopf" android:layout_marginEnd="3dp" />
+        <TextView android:id="@+id/swarm_fav_3" style="@style/swarm_SchwarmWidgetKnopf" android:layout_marginStart="3dp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/swarm_widget_reihe_3"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="6dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <TextView android:id="@+id/swarm_fav_4" style="@style/swarm_SchwarmWidgetKnopf" android:layout_marginEnd="3dp" />
+        <TextView android:id="@+id/swarm_fav_5" style="@style/swarm_SchwarmWidgetKnopf" android:layout_marginStart="3dp" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,963 @@
+/* Preserve Plum's selected theme and background; these tokens only describe glass. */
+.plum-assistant-shell {
+  --assistant-glass: hsl(var(--card) / 0.64);
+  --assistant-chrome: hsl(var(--card) / 0.56);
+  --assistant-glass-edge: hsl(var(--foreground) / 0.14);
+  --assistant-glass-shadow: 0 14px 40px -24px hsl(var(--shadow-color) / 0.5);
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  height: 100dvh;
+}
+.dark .plum-assistant-shell {
+  --assistant-glass: hsl(var(--card) / 0.68);
+  --assistant-chrome: hsl(var(--card) / 0.58);
+  --assistant-glass-edge: hsl(0 0% 100% / 0.19);
+}
+.assistant-sidebar {
+  width: 240px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 10px 12px;
+  background: var(--assistant-chrome);
+  backdrop-filter: blur(24px) saturate(145%);
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+  box-shadow: inset -1px 0 0 var(--assistant-glass-edge);
+  border-right: 1px solid hsl(var(--border) / 0.55);
+  color: hsl(var(--foreground));
+}
+.assistant-brand {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  column-gap: 10px;
+  align-items: center;
+  margin: 0 8px 10px;
+  font-weight: 600;
+  font-size: 19px;
+}
+.assistant-brand img {
+  grid-row: span 2;
+}
+.assistant-new-chat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 0;
+  background: hsl(var(--accent));
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.assistant-primary-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  background: hsl(var(--background) / 0.7);
+  border-radius: 8px;
+  padding: 3px;
+}
+.assistant-primary-nav .assistant-nav-link {
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 4px;
+  min-height: 32px;
+  font-size: 12px;
+}
+.assistant-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 10px;
+  min-height: 34px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: hsl(var(--foreground) / 0.85);
+}
+.assistant-nav-link:hover,
+.assistant-history-link:hover,
+.assistant-library summary:hover {
+  background: hsl(var(--muted));
+}
+.assistant-nav-link.is-active,
+.assistant-nav-link[aria-current='page'],
+.assistant-history-link.is-active {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+.assistant-primary-nav .is-active {
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.08);
+  font-weight: 600;
+}
+.assistant-sidebar-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.assistant-library summary {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  cursor: pointer;
+  padding: 8px 10px;
+  min-height: 34px;
+  font-size: 13px;
+  border-radius: 8px;
+  list-style: none;
+}
+.assistant-library summary::-webkit-details-marker {
+  display: none;
+}
+.assistant-library > div {
+  padding-left: 14px;
+}
+.assistant-history-title {
+  margin: 22px 10px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+.assistant-history-search {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid hsl(var(--border) / 0.7);
+  border-radius: 8px;
+  color: hsl(var(--muted-foreground));
+}
+.assistant-history-search input {
+  background: transparent;
+  font-size: 12px;
+  min-width: 0;
+  width: 100%;
+  outline: none;
+}
+.assistant-history-link {
+  display: block;
+  padding: 8px 10px;
+  min-height: 34px;
+  border-radius: 7px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-account {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 10px 2px;
+  border-top: 1px solid hsl(var(--border) / 0.6);
+  font-size: 12px;
+}
+.assistant-avatar {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: hsl(var(--secondary));
+}
+.assistant-sidebar :is(a, button, summary, input):focus-visible,
+.plum-chat-page :is(button, a, select, textarea, input):focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 3px;
+}
+.plum-chat-page {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+}
+.plum-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px;
+  min-height: 58px;
+  flex-shrink: 0;
+  border-bottom: 1px solid hsl(var(--border) / 0.35);
+  background: transparent;
+}
+.plum-model-select select {
+  font-size: 13px;
+  background: transparent;
+  border: 0;
+  color: hsl(var(--muted-foreground));
+  max-width: 220px;
+}
+.plum-chat-welcome {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  gap: 24px;
+  padding: 36px 24px 150px;
+}
+.plum-chat-welcome h1 {
+  max-width: 680px;
+  font-size: clamp(23px, 2.2vw, 30px);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+  text-align: center;
+}
+.plum-chat-welcome > p:not(.plum-chat-footnote) {
+  text-align: center;
+  font-size: 14px;
+  color: hsl(var(--muted-foreground));
+  margin-top: -9px;
+}
+.plum-message-composer {
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  width: 100%;
+  max-width: 660px;
+  border: 1px solid var(--assistant-glass-edge);
+  border-radius: 20px;
+  background: var(--assistant-glass);
+  box-shadow:
+    inset 0 1px 0 var(--assistant-glass-edge),
+    var(--assistant-glass-shadow);
+}
+.plum-message-composer:focus-within {
+  border-color: hsl(var(--ring) / 0.5);
+}
+.plum-message-composer textarea {
+  width: 100%;
+  min-height: 50px;
+  max-height: 160px;
+  padding: 16px 18px 4px;
+  resize: none;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: hsl(var(--foreground));
+  font-size: 15px;
+  line-height: 1.7;
+}
+.plum-message-composer textarea::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+.plum-composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 10px 10px;
+}
+.plum-composer-toolbar button {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+.plum-composer-toolbar .plum-send-button {
+  border-radius: 50%;
+  color: hsl(var(--primary-foreground));
+  background: hsl(var(--primary));
+  flex-shrink: 0;
+}
+.plum-chat-options {
+  width: 100%;
+  max-width: 660px;
+  background: var(--assistant-glass);
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+}
+.plum-chat-options label:not(.flex) {
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+}
+.plum-chat-options select {
+  width: 100%;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 7px;
+  background: transparent;
+}
+.plum-file-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: hsl(var(--muted));
+  padding: 7px 9px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+.plum-chat-tools-button {
+  font-size: 12px;
+  padding: 8px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+}
+.plum-assistant-shell .session-surface-chat {
+  background: transparent;
+  --font-body: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+}
+.plum-assistant-shell .session-surface-chat .composer-inner {
+  max-width: 780px;
+}
+.plum-assistant-shell .session-surface-chat .chat-composer-form {
+  background: var(--assistant-glass);
+  background-image: none;
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  border: 1px solid hsl(var(--border));
+  box-shadow:
+    inset 0 1px 0 var(--assistant-glass-edge),
+    var(--assistant-glass-shadow);
+}
+.plum-assistant-shell .session-surface-chat .chat-scroll-inner {
+  max-width: 820px;
+  margin-inline: auto;
+}
+.plum-api-conversation {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.plum-api-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 28px 24px;
+}
+.plum-api-content {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+}
+.plum-api-user {
+  max-width: 85%;
+  width: fit-content;
+  margin-left: auto;
+  background: hsl(var(--muted));
+  border-radius: 18px;
+  padding: 14px 18px;
+}
+.plum-api-answer {
+  padding: 20px 0;
+}
+.plum-api-answer .prose {
+  font-size: 15px;
+  line-height: 1.8;
+}
+.plum-api-footer {
+  flex-shrink: 0;
+  padding: 12px 24px 20px;
+  background: transparent;
+}
+.plum-api-footer > form {
+  margin-inline: auto;
+}
+.plum-message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.plum-message-actions button {
+  font-size: 11px;
+}
+@media (max-width: 767px) {
+  .assistant-sidebar {
+    width: 100%;
+    padding-top: 28px;
+  }
+  .plum-chat-header {
+    padding: 12px 16px;
+    min-height: 56px;
+  }
+  .plum-chat-welcome {
+    gap: 20px;
+    padding: 20px 16px 76px;
+  }
+  .plum-chat-welcome > p:not(.plum-chat-footnote) {
+    font-size: 13px;
+    max-width: 280px;
+    line-height: 1.6;
+  }
+  .plum-composer-toolbar {
+    padding: 6px 8px 10px;
+  }
+  .plum-composer-toolbar button {
+    padding-inline: 7px;
+  }
+  .plum-message-composer textarea {
+    padding: 16px 16px 4px;
+    min-height: 50px;
+  }
+  .plum-api-scroll {
+    padding: 20px 16px;
+  }
+  .plum-api-footer {
+    padding: 8px 12px max(12px, env(safe-area-inset-bottom));
+  }
+  .plum-model-select select {
+    max-width: 150px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plum-assistant-shell * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+/* Chat uses an ordinary scroll column; coding keeps its overlay layout. */
+.plum-assistant-shell .session-surface-chat .session-chat-layered > .chat-scroll-shell {
+  position: relative;
+  inset: auto;
+}
+.plum-assistant-shell .session-surface-chat .session-chat-layered > .composer-wrap {
+  position: relative;
+  inset: auto;
+  background: transparent;
+  padding: 10px 20px 20px;
+}
+.plum-assistant-shell .session-surface-chat .chat-top-spacer {
+  height: 20px;
+}
+.plum-assistant-shell .session-surface-chat .chat-footer-spacer {
+  height: 16px;
+}
+.plum-assistant-shell .session-surface-chat .chat-footer-stream {
+  padding-bottom: 16px;
+}
+.plum-assistant-shell .session-surface-chat .turn-asst {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+.plum-assistant-shell .session-surface-chat .asst-model {
+  display: none;
+}
+.plum-assistant-shell .session-surface-chat .chat-topbar {
+  position: relative;
+}
+@media (max-width: 767px) {
+  .plum-chat-page > .plum-chat-header .plum-chat-title {
+    display: none;
+  }
+  .plum-chat-page > .plum-chat-header {
+    justify-content: flex-start;
+  }
+}
+.plum-assistant-shell .session-surface-chat .chat-composer-form.glass-chrome {
+  background: var(--assistant-glass);
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  border: 1px solid hsl(var(--border));
+}
+.plum-assistant-shell .session-surface-chat .ub-bubble {
+  background: hsl(var(--muted));
+  border: 0;
+  color: hsl(var(--foreground));
+  box-shadow: none;
+}
+.plum-assistant-shell .session-surface-chat .ub-bubble .prose {
+  color: hsl(var(--foreground));
+}
+.plum-assistant-shell .session-surface-chat .composer-input-shell {
+  min-height: 68px;
+}
+.plum-assistant-shell .session-surface-chat .asst-provider-mark {
+  width: 18px;
+  height: 18px;
+}
+
+/* Compact start page, inspired by the user's chat references. */
+.assistant-brand > :first-child {
+  width: 26px;
+  height: 26px;
+}
+.assistant-sidebar-content {
+  padding-top: 4px;
+}
+.assistant-projects .assistant-history-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.assistant-projects .assistant-history-link span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.assistant-projects svg {
+  flex-shrink: 0;
+}
+.plum-new-chat-header {
+  border: 0;
+  color: hsl(var(--foreground));
+  font-size: 13px;
+}
+.plum-composer-model-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.plum-composer-model-tools .plum-model-select {
+  min-width: 0;
+}
+.plum-composer-model-tools select {
+  max-width: 180px;
+  font-size: 12px;
+  width: 100%;
+}
+.plum-composer-model-tools .plum-reasoning-select select {
+  max-width: 106px;
+}
+.plum-composer-toolbar button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+.plum-chat-context {
+  width: 100%;
+  max-width: 660px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: -12px;
+  padding-inline: 12px;
+  color: hsl(var(--foreground));
+  font-size: 11px;
+}
+.plum-chat-context select {
+  max-width: 170px;
+  font-size: 11px;
+}
+.plum-context-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+}
+.plum-context-button:hover {
+  color: hsl(var(--foreground));
+}
+
+.plum-chat-welcome [aria-label='Vorgeschlagene Prompts'] {
+  color: hsl(var(--foreground));
+}
+.plum-chat-dialog.plum-assistant-shell {
+  height: auto;
+  width: calc(100% - 32px);
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  border-radius: 16px;
+  background: var(--assistant-glass);
+  color: hsl(var(--foreground));
+  background-image: none;
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+}
+.plum-chat-dialog .plum-chat-options {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+@media (max-width: 767px) {
+  .plum-new-chat-header {
+    display: none;
+  }
+  .plum-chat-welcome h1 {
+    max-width: 330px;
+    line-height: 1.4;
+  }
+  .plum-composer-model-tools {
+    gap: 6px;
+  }
+  .plum-composer-model-tools select {
+    max-width: 110px;
+  }
+  .plum-composer-model-tools .plum-reasoning-select select {
+    max-width: 80px;
+  }
+  .plum-composer-toolbar button {
+    width: 36px;
+    height: 40px;
+  }
+  .plum-chat-context {
+    gap: 12px;
+    padding-inline: 4px;
+  }
+  .assistant-history-link {
+    min-height: 40px;
+  }
+}
+
+.plum-composer-model-tools .plum-current-model {
+  width: auto;
+  gap: 7px;
+  max-width: 200px;
+}
+.plum-current-model span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plum-composer-toolbar .plum-stop-answer {
+  width: auto;
+  height: auto;
+  padding: 8px 12px;
+}
+@media (max-width: 767px) {
+  .plum-composer-model-tools .plum-current-model {
+    max-width: 145px;
+  }
+}
+
+/* One translucent material for start, API and CLI conversations. */
+.plum-assistant-shell .session-surface-chat .chat-composer-form,
+.plum-assistant-shell .session-surface-chat .chat-composer-form.glass-chrome {
+  border-color: var(--assistant-glass-edge);
+}
+.plum-chat-header,
+.plum-api-footer,
+.plum-assistant-shell .session-surface-chat .session-chat-layered > .composer-wrap {
+  background: hsl(var(--background) / 0.24);
+}
+.assistant-primary-nav,
+.assistant-history-search,
+.assistant-new-chat {
+  background: hsl(var(--card) / 0.3);
+  border: 1px solid var(--assistant-glass-edge);
+}
+.plum-assistant-shell .session-surface-chat .ub-bubble,
+.plum-api-user {
+  background: var(--assistant-glass);
+  border: 1px solid var(--assistant-glass-edge);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.plum-chat-dialog.plum-assistant-shell {
+  border-color: var(--assistant-glass-edge);
+  box-shadow:
+    inset 0 1px 0 var(--assistant-glass-edge),
+    var(--assistant-glass-shadow);
+}
+.mobile-navigation-sheet.plum-assistant-shell {
+  background: hsl(var(--card) / 0.78);
+  backdrop-filter: blur(24px) saturate(145%);
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+}
+.mobile-navigation-sheet.plum-assistant-shell .assistant-sidebar {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* Keep native dropdown menus legible outside the translucent input. */
+.plum-assistant-shell select option {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .assistant-sidebar,
+  .plum-message-composer,
+  .plum-chat-options,
+  .plum-chat-dialog.plum-assistant-shell,
+  .mobile-navigation-sheet.plum-assistant-shell,
+  .plum-assistant-shell .session-surface-chat .chat-composer-form,
+  .plum-assistant-shell .session-surface-chat .chat-composer-form.glass-chrome,
+  .plum-assistant-shell .session-surface-chat .ub-bubble,
+  .plum-api-user {
+    background: hsl(var(--card));
+  }
+}
+html.eink .plum-assistant-shell {
+  --assistant-glass: hsl(var(--card));
+  --assistant-chrome: hsl(var(--card));
+  --assistant-glass-shadow: none;
+}
+html.eink
+  .plum-assistant-shell
+  :is(.assistant-sidebar, .plum-message-composer, .chat-composer-form, .ub-bubble, .plum-api-user),
+html.eink .plum-chat-dialog.plum-assistant-shell {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ── Model + thinking-depth picker ──────────────────────────────────────── */
+.plum-model-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 230px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--border) / 0.7);
+  background: hsl(var(--foreground) / 0.06);
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    transform 0.12s ease;
+}
+.plum-model-trigger:hover {
+  background: hsl(var(--foreground) / 0.1);
+}
+.plum-model-trigger:active {
+  transform: scale(0.97);
+}
+.plum-model-trigger-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plum-model-trigger-effort {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: hsl(var(--primary) / 0.18);
+  color: hsl(var(--primary));
+  font-size: 11px;
+  white-space: nowrap;
+}
+.plum-model-menu {
+  width: min(340px, calc(100vw - 24px));
+  padding: 8px;
+}
+.plum-model-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.plum-model-group {
+  padding: 6px 10px 2px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+.plum-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+}
+.plum-model-row.is-active {
+  background: hsl(var(--primary) / 0.14);
+}
+.plum-model-empty {
+  padding: 12px;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+.plum-effort {
+  padding: 8px 10px 6px;
+}
+.plum-effort-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+}
+.plum-effort-label {
+  color: hsl(var(--primary));
+  animation: plum-effort-pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+@keyframes plum-effort-pop {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.plum-effort-rail {
+  --pad: 6px;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--stops), 1fr);
+  height: 38px;
+  margin: 10px 0 6px;
+  padding: 0 var(--pad);
+  border-radius: 999px;
+  background: hsl(var(--foreground) / 0.1);
+}
+.plum-effort-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--pad) + (100% - 2 * var(--pad)) * (var(--index) + 1) / var(--stops));
+  border-radius: 999px;
+  background: linear-gradient(90deg, hsl(var(--primary) / 0.55), hsl(var(--primary)));
+  transition: width 0.34s cubic-bezier(0.3, 1.1, 0.4, 1);
+}
+.plum-effort-thumb {
+  position: absolute;
+  top: 4px;
+  left: var(--pad);
+  width: calc((100% - 2 * var(--pad)) / var(--stops));
+  height: 30px;
+  transform: translateX(calc(var(--index) * 100%));
+  transition: transform 0.34s cubic-bezier(0.3, 1.1, 0.4, 1);
+  pointer-events: none;
+}
+.plum-effort-thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0 2px;
+  border-radius: 999px;
+  background: hsl(var(--background));
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
+}
+.plum-effort-stop {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.plum-effort-stop span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: hsl(var(--foreground) / 0.35);
+}
+.plum-effort-stop[aria-checked='true'] span {
+  opacity: 0;
+}
+.plum-effort-stop:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: -2px;
+  border-radius: 999px;
+}
+.plum-effort-foot {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+.plum-effort-foot span:nth-child(2) {
+  text-align: center;
+  opacity: 0.8;
+}
+/* Moving light on every fill, a nebula with twinkling stars for the top levels. */
+.plum-effort-fill {
+  overflow: hidden;
+  background-size: 100% 100%;
+  transition:
+    width 0.34s cubic-bezier(0.3, 1.1, 0.4, 1),
+    background 0.4s ease;
+}
+.plum-effort-fill::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgb(255 255 255 / 0.28) 50%,
+    transparent 70%
+  );
+  background-size: 220% 100%;
+  animation: plum-effort-sheen 2.6s linear infinite;
+}
+@keyframes plum-effort-sheen {
+  from {
+    background-position: 160% 0;
+  }
+  to {
+    background-position: -60% 0;
+  }
+}
+.plum-effort-stars {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  background-image:
+    radial-gradient(1.5px 1.5px at 12% 30%, #fff 60%, transparent),
+    radial-gradient(1px 1px at 27% 68%, #fff 60%, transparent),
+    radial-gradient(1.5px 1.5px at 41% 22%, #fff 60%, transparent),
+    radial-gradient(1px 1px at 55% 62%, #fff 60%, transparent),
+    radial-gradient(1.5px 1.5px at 69% 34%, #fff 60%, transparent),
+    radial-gradient(1px 1px at 83% 72%, #fff 60%, transparent),
+    radial-gradient(1.5px 1.5px at 94% 26%, #fff 60%, transparent);
+  animation: plum-effort-twinkle 1.9s ease-in-out infinite alternate;
+}
+@keyframes plum-effort-twinkle {
+  from {
+    filter: brightness(0.6);
+    transform: translateX(-2px);
+  }
+  to {
+    filter: brightness(1.5);
+    transform: translateX(2px);
+  }
+}
+.plum-effort[data-special='true'] .plum-effort-fill {
+  background: linear-gradient(90deg, #3b2f9e, #7c4ddb 45%, #b07cf5 75%, #6c7df0);
+  background-size: 200% 100%;
+  animation: plum-effort-nebula 5s ease-in-out infinite alternate;
+}
+.plum-effort[data-special='true'] .plum-effort-stars {
+  opacity: 1;
+}
+.plum-effort[data-special='true'] .plum-effort-label {
+  background: linear-gradient(90deg, #a78bfa, #7dd3fc, #c4b5fd);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation:
+    plum-effort-pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    plum-effort-nebula 3s ease-in-out infinite alternate;
+}
+.plum-effort[data-special='true'] .plum-effort-thumb::after {
+  box-shadow:
+    0 0 14px 2px rgb(167 139 250 / 0.75),
+    0 2px 8px rgb(0 0 0 / 0.35);
+}
+@keyframes plum-effort-nebula {
+  from {
+    background-position: 0% 0;
+  }
+  to {
+    background-position: 100% 0;
+  }
+}
+.plum-model-trigger[data-special='true'] svg:first-child,
+.plum-model-trigger-effort[data-special='true'] {
+  color: #b79bff;
+  text-shadow: 0 0 10px rgb(167 139 250 / 0.7);
+}
+@media (prefers-reduced-motion: reduce) {
+  .plum-effort-fill,
+  .plum-effort-thumb,
+  .plum-model-trigger {
+    transition: none;
+  }
+  .plum-effort-label,
+  .plum-effort-fill,
+  .plum-effort-fill::before,
+  .plum-effort-stars {
+    animation: none !important;
+  }
+}

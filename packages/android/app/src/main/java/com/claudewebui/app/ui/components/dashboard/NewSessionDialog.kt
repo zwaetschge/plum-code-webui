@@ -95,6 +95,8 @@ fun NewSessionDialog(
     lastSetup: SessionLaunchSetup = SessionLaunchSetup(),
     isCreating: Boolean = false,
     creationError: String? = null,
+    surface: String = "code",
+    modelsFor: (CLIProvider) -> List<String> = { emptyList() },
     onDismiss: () -> Unit,
     onCreate: (
         name: String,
@@ -102,6 +104,8 @@ fun NewSessionDialog(
         workingDirectory: String?,
         mode: SessionMode,
         categoryId: String?,
+        model: String?,
+        reasoning: String?,
     ) -> Unit,
 ) {
     val componentTokens = PlumTheme.tokens
@@ -115,6 +119,11 @@ fun NewSessionDialog(
     var selectedMode by remember { mutableStateOf(lastSetup.mode) }
     var selectedCategoryId by remember { mutableStateOf(lastSetup.categoryId) }
     var showAdvanced by remember { mutableStateOf(false) }
+    var selectedModel by remember { mutableStateOf<String?>(null) }
+    var selectedReasoning by remember { mutableStateOf<String?>(null) }
+    var showModelSheet by remember { mutableStateOf(false) }
+    // Models and levels differ per provider, so a switch starts from the defaults.
+    LaunchedEffect(selectedProvider) { selectedModel = null; selectedReasoning = null }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(providers) {
@@ -130,9 +139,11 @@ fun NewSessionDialog(
             onCreate(
                 sessionName,
                 availableProvider,
-                workingDirectory.trim().takeIf { it.isNotEmpty() },
+                workingDirectory.trim().takeIf { surface == "code" && it.isNotEmpty() },
                 selectedMode,
                 selectedCategoryId,
+                selectedModel,
+                selectedReasoning,
             )
         }
     }
@@ -205,10 +216,52 @@ fun NewSessionDialog(
                 }
             }
 
+            // ── Model + thinking depth ───────────────────────────────────────
+            availableProvider?.let { provider ->
+                val levels = com.claudewebui.app.data.model.ReasoningLevel.forProvider(provider)
+                val stops = listOf(com.claudewebui.app.ui.screens.dashboard.EffortStop(null, stringResource(R.string.effort_auto))) +
+                    levels.map { com.claudewebui.app.ui.screens.dashboard.EffortStop(it.id, it.label, com.claudewebui.app.ui.screens.dashboard.isSpecialLevel(it.id)) }
+                Spacer(modifier = Modifier.height(componentTokens.spacing.section))
+                SectionLabel(stringResource(R.string.model_picker_title))
+                Spacer(modifier = Modifier.height(componentTokens.spacing.compact))
+                Surface(
+                    onClick = { showModelSheet = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(componentTokens.radius.md),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = componentTokens.spacing.lg, vertical = componentTokens.spacing.cozy),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = selectedModel ?: stringResource(R.string.model_picker_default),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = stops.firstOrNull { it.id == selectedReasoning }?.label ?: stringResource(R.string.effort_auto),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                if (showModelSheet) com.claudewebui.app.ui.screens.dashboard.ModelEffortSheet(
+                    models = listOf(com.claudewebui.app.ui.screens.dashboard.ModelOption(provider.name, provider.displayName, "", stringResource(R.string.model_picker_default))) +
+                        modelsFor(provider).map { com.claudewebui.app.ui.screens.dashboard.ModelOption(provider.name, provider.displayName, it) },
+                    selectedGroup = provider.name, selectedModel = selectedModel ?: "",
+                    onSelectModel = { selectedModel = it.model.ifBlank { null } },
+                    stops = stops, effort = selectedReasoning, onEffort = { selectedReasoning = it },
+                    onDismiss = { showModelSheet = false },
+                )
+            }
+
             // ── Templates ────────────────────────────────────────────────────
             // A saved template fills provider, mode and directory in one tap;
             // everything stays editable afterwards.
-            if (templates.isNotEmpty()) {
+            if (surface == "code" && templates.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(componentTokens.spacing.section))
                 SectionLabel(stringResource(R.string.component_start_from_a_template))
                 Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
@@ -289,6 +342,7 @@ fun NewSessionDialog(
                 exit = shrinkVertically() + fadeOut(),
             ) {
                 Column {
+                    if (surface == "code") {
                     // ── Workspace directory ──────────────────────────────────
                     SectionLabel(stringResource(R.string.component_workspace_directory_optional))
                     Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
@@ -317,6 +371,7 @@ fun NewSessionDialog(
 
                     Spacer(modifier = Modifier.height(componentTokens.spacing.lg))
 
+                    }
                     // ── Mode selector ────────────────────────────────────────
                     SectionLabel(stringResource(R.string.component_mode))
                     Spacer(modifier = Modifier.height(componentTokens.spacing.sm))
@@ -644,7 +699,7 @@ private fun NewSessionDialogPreview() {
                 ),
             ),
             onDismiss = {},
-            onCreate = { _, _, _, _, _ -> },
+            onCreate = { _, _, _, _, _, _, _ -> },
         )
     }
 }

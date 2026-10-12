@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Plum in Word</title>
+    <link rel="stylesheet" href="/office/style.css" />
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script type="module" src="/office/taskpane.js"></script>
+  </head>
+  <body>
+    <main>
+      <h1>Plum in Word</h1>
+      <p id="account" role="status">Noch nicht verbunden</p>
+      <div class="actions">
+        <button id="connect" disabled>Mit Plum verbinden</button
+        ><button id="disconnect" disabled>Verbindung beenden</button>
+      </div>
+      <p class="hint">
+        API-Textdialoge verfallen nach 24 Stunden. Ein ausdrücklich erstellter Task-Entwurf bleibt
+        in deiner Bibliothek; dort wählst du den Agenten und startest ihn. Die Office-Verbindung
+        gilt eine Stunde.
+      </p>
+      <label>API-Verbindung<select id="provider" disabled></select></label
+      ><label>Modell<select id="model" disabled></select></label>
+      <button id="select" disabled>Aktuelle Word-Auswahl übernehmen</button>
+      <label>Ausgewählte Originalstelle<textarea id="original" readonly rows="5"></textarea></label>
+      <label
+        >Änderungswunsch<textarea
+          id="instruction"
+          maxlength="1000"
+          rows="3"
+          placeholder="Zum Beispiel: kürzer und verständlicher formulieren"
+        ></textarea>
+      </label>
+      <div class="actions">
+        <button id="request" disabled>Änderung vorschlagen lassen</button
+        ><button id="retry" hidden>Zustellung erneut bestätigen</button
+        ><button id="stop" disabled>Antwort stoppen</button>
+      </div>
+      <button id="task" disabled>Als Plum-Task-Entwurf übernehmen</button
+      ><a id="task-link" hidden target="_blank" rel="noopener noreferrer">Task in Plum öffnen</a>
+      <label
+        >Geprüfter Ersetzungstext<textarea id="replacement" maxlength="20000" rows="6"></textarea>
+      </label>
+      <button id="apply" disabled>Ersetzung in ursprünglicher Stelle übernehmen</button>
+      <p id="notice" role="status" class="hint"></p>
+      <p id="error" role="alert"></p>
+      <a href="/chat" target="_blank" rel="noopener noreferrer">Plum Chat öffnen</a>
+    </main>
+  </body>
+</html>

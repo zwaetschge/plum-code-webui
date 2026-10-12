@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kürzel am App-Symbol (langes Drücken, App 2.5): neuer Chat, neuer Auftrag, Aktuell. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="neuer_chat"
+        android:enabled="true"
+        android:icon="@drawable/swarm_ic_kurz_chat"
+        android:shortcutShortLabel="@string/swarm_kurz_chat"
+        android:shortcutLongLabel="@string/swarm_kurz_chat_lang">
+        <intent
+            android:action="ch.zwaetschge.schwarm.KUERZEL_CHAT"
+            android:targetPackage="com.claudewebui.app"
+            android:targetClass="com.claudewebui.swarm.MainActivity">
+            <extra android:name="ch.zwaetschge.schwarm.ZIEL" android:value="neuer_chat" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="neuer_auftrag"
+        android:enabled="true"
+        android:icon="@drawable/swarm_ic_kurz_auftrag"
+        android:shortcutShortLabel="@string/swarm_kurz_auftrag"
+        android:shortcutLongLabel="@string/swarm_kurz_auftrag_lang">
+        <intent
+            android:action="ch.zwaetschge.schwarm.KUERZEL_AUFTRAG"
+            android:targetPackage="com.claudewebui.app"
+            android:targetClass="com.claudewebui.swarm.MainActivity">
+            <extra android:name="ch.zwaetschge.schwarm.ZIEL" android:value="neuer_auftrag" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="aktuell"
+        android:enabled="true"
+        android:icon="@drawable/swarm_ic_kurz_aktuell"
+        android:shortcutShortLabel="@string/swarm_kurz_aktuell"
+        android:shortcutLongLabel="@string/swarm_kurz_aktuell_lang">
+        <intent
+            android:action="ch.zwaetschge.schwarm.KUERZEL_AKTUELL"
+            android:targetPackage="com.claudewebui.app"
+            android:targetClass="com.claudewebui.swarm.MainActivity">
+            <extra android:name="ch.zwaetschge.schwarm.ZIEL" android:value="aktuell" />
+        </intent>
+    </shortcut>
+</shortcuts>

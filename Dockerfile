@@ -19,6 +19,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/backend/package.json ./packages/backend/
 COPY packages/frontend/package.json ./packages/frontend/
+COPY packages/swarm/package.json ./packages/swarm/
 
 # --frozen-lockfile so CI and prod resolve identical versions; fails loud if the
 # lockfile drifts from package.json.
@@ -28,10 +29,12 @@ RUN pnpm install --frozen-lockfile
 COPY packages/shared ./packages/shared
 COPY packages/backend ./packages/backend
 COPY packages/frontend ./packages/frontend
+COPY packages/swarm ./packages/swarm
 COPY packages/firefox-extension ./packages/firefox-extension
 
 # Shared types compile before backend/frontend (both import from shared).
 RUN pnpm --filter @plum-code-webui/shared build && \
+    pnpm --filter @plum-code-webui/swarm build && \
     pnpm --filter @plum-code-webui/backend build && \
     pnpm --filter @plum-code-webui/frontend build && \
     node packages/firefox-extension/scripts/build.mjs && \
@@ -65,7 +68,28 @@ LABEL org.opencontainers.image.vendor="Plum Code WebUI"
 # fixes already available in the repository. The image scan gates the pipeline
 # on exactly those.
 RUN apk upgrade --no-cache && \
-    apk add --no-cache git bash docker-cli docker-cli-compose curl openssh-client unzip imagemagick gcompat libstdc++ libgcc python3 py3-pip py3-numpy pipx ripgrep py3-httpx jq coreutils tzdata chromium chromium-chromedriver nss freetype harfbuzz font-noto font-noto-cjk ttf-freefont xvfb blender-headless github-cli postgresql17-client
+    apk add --no-cache git bash docker-cli docker-cli-compose curl openssh-client unzip imagemagick gcompat libstdc++ libgcc python3 py3-pip py3-numpy pipx ripgrep py3-httpx jq coreutils tzdata chromium chromium-chromedriver nss freetype harfbuzz font-noto font-noto-cjk ttf-freefont xvfb blender-headless github-cli postgresql17-client ffmpeg
+
+# plum-python: one venv with the PDF/TTS/screenshot toolkit skills expect
+# (`uv run --with pymupdf|edge-tts|playwright|pillow` upstream; uv cannot fetch
+# Playwright on musl). Playwright ships only manylinux wheels: the wheel is
+# pure Python around a bundled glibc Node, so it is installed under a generic
+# tag and run on the system Node (PLAYWRIGHT_NODEJS_PATH, set by the
+# scripts/plum-python.sh wrapper). Its expected Chromium paths point at Plum's
+# Chromium, so unmodified `chromium.launch()` calls work.
+ARG PLUM_PYTHON_PLAYWRIGHT=1.63.0
+RUN python3 -m venv /opt/plum-python && \
+    /opt/plum-python/bin/pip install --no-cache-dir pymupdf edge-tts pillow greenlet 'pyee>=13,<14' && \
+    /opt/plum-python/bin/pip download --no-deps --only-binary=:all: --platform manylinux1_x86_64 \
+      --python-version 3.12 -d /tmp/pw "playwright==${PLUM_PYTHON_PLAYWRIGHT}" && \
+    cp /tmp/pw/playwright-*.whl "/tmp/pw/playwright-${PLUM_PYTHON_PLAYWRIGHT}-py3-none-any.whl" && \
+    /opt/plum-python/bin/pip install --no-cache-dir --no-deps "/tmp/pw/playwright-${PLUM_PYTHON_PLAYWRIGHT}-py3-none-any.whl" && \
+    rm -rf /tmp/pw /opt/plum-python/lib/python3*/site-packages/playwright/driver/node && \
+    rev=$(/opt/plum-python/bin/python -c "import json,os,playwright as p;print(next(b['revision'] for b in json.load(open(os.path.join(os.path.dirname(p.__file__),'driver/package/browsers.json')))['browsers'] if b['name']=='chromium'))") && \
+    B=/opt/plum-python/playwright-browsers && \
+    mkdir -p "$B/chromium_headless_shell-$rev/chrome-headless-shell-linux64" "$B/chromium-$rev/chrome-linux64" && \
+    ln -s /usr/local/bin/plum-chromium "$B/chromium_headless_shell-$rev/chrome-headless-shell-linux64/chrome-headless-shell" && \
+    ln -s /usr/local/bin/plum-chromium "$B/chromium-$rev/chrome-linux64/chrome"
 
 # User-writable npm prefix: the `node` user must be able to upgrade the AI CLIs
 # at runtime (see services/cli-updates.ts). Mounted volume overlays this path.
@@ -230,6 +254,7 @@ COPY --from=builder --chown=node:node /app/packages/firefox-extension/dist ./pac
 COPY --chown=node:node scripts ./scripts
 
 RUN install -m 0755 ./scripts/chromium-webui.sh /usr/local/bin/plum-chromium && \
+    install -m 0755 ./scripts/plum-python.sh /usr/local/bin/plum-python && \
     ln -sfn /usr/local/bin/plum-chromium /usr/local/bin/chromium && \
     ln -sfn /usr/local/bin/plum-chromium /usr/local/bin/chromium-browser && \
     ln -sfn /usr/local/bin/plum-chromium /usr/local/bin/google-chrome && \

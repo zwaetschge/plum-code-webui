@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import { nativeShell } from '@/lib/nativeShell';
 import type { User } from '@plum-code-webui/shared';
 import { api, ApiError } from '@/services/api';
 
@@ -50,6 +51,10 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () => {
         set({ user: null, token: null, isAuthenticated: false });
+        if (nativeShell()) {
+          (window as Window & { PlumHost?: { logout(): void } }).PlumHost?.logout();
+          return;
+        }
         api.post('/auth/logout').catch(() => {});
       },
 
@@ -104,6 +109,16 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'claude-webui-auth',
+      ...(nativeShell()
+        ? {
+            storage: createJSONStorage(() => ({
+              getItem: () =>
+                JSON.stringify({ state: { token: nativeShell()?.token ?? null }, version: 0 }),
+              setItem: () => {},
+              removeItem: () => {},
+            })),
+          }
+        : {}),
       partialize: (state) => ({ token: state.token }),
     }
   )

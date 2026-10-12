@@ -9,6 +9,10 @@ plugins {
 
 android {
     namespace = "com.claudewebui.app"
+    if (projectDir.absolutePath.startsWith("/app/projects/")) {
+        sourceSets.getByName("test").java.srcDir(rootProject.file("plum-tests/java"))
+        sourceSets.getByName("androidTest").java.srcDir(rootProject.file("plum-ui-tests/java"))
+    }
     compileSdk = 35
 
     // ---------------------------------------------------------------------------
@@ -50,8 +54,8 @@ android {
         applicationId = "com.claudewebui.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "1.5.22"
+        versionCode = 39
+        versionName = "1.6.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -100,6 +104,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":swarm"))
     baselineProfile(project(":baselineprofile"))
     // Compose BOM
     val composeBom = platform(libs.compose.bom)
@@ -193,6 +198,7 @@ dependencies {
     testImplementation(libs.coroutines.test)
     androidTestImplementation(libs.junit.ext)
     androidTestImplementation(libs.espresso.core)
+    androidTestImplementation(libs.uiautomator)
     androidTestImplementation(libs.compose.ui.test.junit4)
 }
 
@@ -209,6 +215,7 @@ if (project.projectDir.absolutePath.startsWith("/app/projects/")) {
 // The MCP builder's assembleDebug must verify draft/send race regressions too.
 tasks.matching { it.name == "assembleDebug" }.configureEach {
     dependsOn("testDebugUnitTest")
+    dependsOn(":swarm:testDebugUnitTest")
     finalizedBy("assembleDebugAndroidTest")
 }
 

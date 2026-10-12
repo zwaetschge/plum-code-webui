@@ -191,6 +191,29 @@ object TokenStore {
     val isLoggedIn: Boolean
         get() = getToken() != null
 
+    /** No token enters the namespace. Pending assistant commands share the existing encrypted vault. */
+    fun assistantOwnerKey(): String? {
+        val user = getUserId() ?: return null
+        val server = getServerUrl()?.trimEnd('/') ?: return null
+        return java.security.MessageDigest.getInstance("SHA-256")
+            .digest("$user\n$server".toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+    }
+
+    fun readAssistantOutbox(owner: String): String? {
+        require(owner.matches(Regex("[a-f0-9]{64}")))
+        return secret("assistant_outbox_$owner")
+    }
+
+    fun writeAssistantOutbox(owner: String, content: String) {
+        require(owner.matches(Regex("[a-f0-9]{64}")) && content.length <= 1_000_000)
+        val store = checkNotNull(prefs) { "Encrypted storage unavailable; sign in after repairing the device storage" }
+        // A paid request may start only after its stable identifier reaches disk.
+        check(store.edit().putString("assistant_outbox_$owner", content).commit()) {
+            "Delivery could not be saved; request was not started"
+        }
+    }
+
     /**
      * Clear all stored credentials (logout).
      */

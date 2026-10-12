@@ -74,6 +74,7 @@ class ClaudeWebUIApp : Application(), SingletonImageLoader.Factory {
         // Before anything else, so a crash during the rest of startup is still
         // caught and reported on the next launch.
         CrashReporter.install(this)
+        com.claudewebui.swarm.SwarmIntegration.initialize(this)
         Breadcrumbs.add("lifecycle", "Application.onCreate")
 
         // Initialize secure token storage before anything else

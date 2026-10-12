@@ -56,6 +56,8 @@ interface SessionsApi {
     suspend fun setSessionReasoning(id: String, reasoning: String?): ApiResponse<Session>
 
     /** PATCH /api/sessions/:id/category — returns only the assignment, not a Session. */
+    suspend fun updateSessionSurface(id: String, surface: String): ApiResponse<kotlinx.serialization.json.JsonObject>
+
     suspend fun updateSessionCategory(id: String, categoryId: String?): ApiResponse<CategoryAssignment>
 
     suspend fun getAllowedDirectories(id: String): ApiResponse<List<String>>
@@ -150,6 +152,9 @@ class SessionsApiImpl(private val http: ApiHttp) : SessionsApi {
 
     override suspend fun setSessionReasoning(id: String, reasoning: String?): ApiResponse<Session> =
         http.patch("/api/sessions/$id/reasoning") { setBody(mapOf("reasoning" to reasoning)) }
+
+    override suspend fun updateSessionSurface(id: String, surface: String): ApiResponse<kotlinx.serialization.json.JsonObject> =
+        http.patch("/api/sessions/$id/surface") { setBody(mapOf("surface" to surface)) }
 
     override suspend fun updateSessionCategory(id: String, categoryId: String?): ApiResponse<CategoryAssignment> =
         http.patch("/api/sessions/$id/category") { setBody(mapOf("categoryId" to categoryId)) }

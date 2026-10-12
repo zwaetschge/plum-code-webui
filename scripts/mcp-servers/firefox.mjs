@@ -12,10 +12,31 @@ import { createInterface } from 'node:readline';
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, resolve } from 'node:path';
 
-const BACKEND = process.env.WEBUI_BACKEND_URL || 'http://localhost:3001';
-const HOOK_SECRET = process.env.WEBUI_HOOK_SECRET || '';
-const SESSION_ID = process.env.WEBUI_SESSION_ID || '';
-const SESSION_CONTEXT_FILE = process.env.WEBUI_SESSION_CONTEXT_FILE || '';
+function readParentEnv() {
+  if (process.platform !== 'linux' || !process.ppid) return {};
+  try {
+    const raw = readFileSync(`/proc/${process.ppid}/environ`, 'utf8');
+    const entries = {};
+    for (const item of raw.split('\0')) {
+      if (!item) continue;
+      const separator = item.indexOf('=');
+      if (separator <= 0) continue;
+      entries[item.slice(0, separator)] = item.slice(separator + 1);
+    }
+    return entries;
+  } catch {
+    return {};
+  }
+}
+
+// Codex starts MCP servers with the static config env block, which omits the
+// dynamic WebUI session/auth env of the parent Codex process.
+const RUNTIME_ENV = { ...readParentEnv(), ...process.env };
+
+const BACKEND = RUNTIME_ENV.WEBUI_BACKEND_URL || 'http://localhost:3001';
+const HOOK_SECRET = RUNTIME_ENV.WEBUI_HOOK_SECRET || '';
+const SESSION_ID = RUNTIME_ENV.WEBUI_SESSION_ID || '';
+const SESSION_CONTEXT_FILE = RUNTIME_ENV.WEBUI_SESSION_CONTEXT_FILE || '';
 
 const log = (...args) => console.error('[mcp-firefox]', ...args);
 

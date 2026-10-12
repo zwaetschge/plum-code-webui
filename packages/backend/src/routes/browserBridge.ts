@@ -6,7 +6,11 @@ import { requireHookSecret } from '../middleware/hookSecret.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { BrowserBridgeError, browserBridge } from '../services/browserBridge/bridge.js';
-import { EXTENSION_FILES, findExtensionArtifact } from '../services/browserBridge/package.js';
+import {
+  buildPairedChromePackage,
+  EXTENSION_FILES,
+  findExtensionArtifact,
+} from '../services/browserBridge/package.js';
 import {
   createBrowserToken,
   listBrowserTokens,
@@ -83,6 +87,35 @@ router.get('/extension-chrome.zip', requireAuth, (_req: Request, res: Response) 
   res.setHeader('Content-Disposition', `attachment; filename="${EXTENSION_FILES.chrome}"`);
   res.sendFile(file);
 });
+
+/**
+ * Chrome package with this Plum's address and a freshly minted pairing token in
+ * `plum-config.json`: unzip, Load unpacked, and it connects by itself.
+ */
+router.post(
+  '/extension-chrome-paired.zip',
+  requireAuth,
+  rateLimiters.strict,
+  async (req: Request, res: Response) => {
+    rejectGatewayCaller(req);
+    const parsed = z.object({ name: z.string().min(1).max(80) }).safeParse(req.body);
+    if (!parsed.success) throw new AppError('A browser name is required', 400, 'VALIDATION_ERROR');
+    const userId = (req as AuthenticatedRequest).userId;
+    // trust proxy is set, so protocol and host are the ones the user's browser used.
+    const serverUrl = `${req.protocol}://${req.get('host')}`;
+    let pkg;
+    try {
+      pkg = await buildPairedChromePackage({ userId, name: parsed.data.name, serverUrl });
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError('Extension package not built', 404, 'NOT_FOUND');
+    }
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${pkg.fileName}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(pkg.zip);
+  }
+);
 
 /**
  * Live view for the WebUI and the Android app: a current picture of the tab a

@@ -1,0 +1,375 @@
+{
+  "source": "/mnt/user/AI/plum-code/android-app-creator/projects/53352e53-8e5c-4390-a93a-70818a435bf8/app",
+  "version": "2.10.1",
+  "versionCode": 20,
+  "files": [
+    {
+      "path": "src/main/AndroidManifest.xml",
+      "sha256": "ff98da1619f73213cfae8e40ef50d45540ded95bd794599c2dd6d28a4a8e0bcd"
+    },
+    {
+      "path": "src/test/java/ch/zwaetschge/schwarm/TestDaten.kt",
+      "sha256": "5f30a3f8c5487fcedf1d312cbaa66957bbae3c076babd24241ecc8c7d9700230"
+    },
+    {
+      "path": "src/test/java/ch/zwaetschge/schwarm/data/FreigabenTest.kt",
+      "sha256": "4fb1706d1b58b146818d1dd2bc43e5ed0d6d6f725f7cec38b0904c21dc0bf579"
+    },
+    {
+      "path": "src/test/java/ch/zwaetschge/schwarm/data/AlarmeTest.kt",
+      "sha256": "a0bb982a514e2d62a5f88a57e516647332c68ad156bdfec48802e1b07486f887"
+    },
+    {
+      "path": "src/test/java/ch/zwaetschge/schwarm/data/EntscheidungenTest.kt",
+      "sha256": "d9c97fae31be068b3ba5ba2d504de331ccd8f0f9476e2fa099f3fa1427812a97"
+    },
+    {
+      "path": "src/test/java/ch/zwaetschge/schwarm/data/HubLeserTest.kt",
+      "sha256": "da652c036281e555e70264280bdaf878dfb3e19f386788ab45d725da232b13aa"
+    },
+    {
+      "path": "src/test/java/ch/zwaetschge/schwarm/data/UngelesenTest.kt",
+      "sha256": "abe8b1469d525d01dd28716f73cf5d17fcf45d1ba6da12c65abf8b5ddbe71c1d"
+    },
+    {
+      "path": "src/test/java/ch/zwaetschge/schwarm/data/RuheTest.kt",
+      "sha256": "8af073e107c687db92ae58a5a297df032aa652fb5f942b32b91dbd42df94c527"
+    },
+    {
+      "path": "src/test/java/ch/zwaetschge/schwarm/hintergrund/EinordnenTest.kt",
+      "sha256": "17f43a1547c7e65ed608d3858c6741692e9df141021ae0d2a98ed50c2f6813e8"
+    },
+    {
+      "path": "src/test/java/ch/zwaetschge/schwarm/ui/RaumEintraegeTest.kt",
+      "sha256": "20bf9b052f120dbd3148015e7e528ef83a27fa8534ea47716cbc596547d22b7f"
+    },
+    {
+      "path": "src/test/java/ch/zwaetschge/schwarm/ui/BetriebTest.kt",
+      "sha256": "6f0cd1aa199f5f95f154f523a4855be3318dfe0047bf4acd95237cab281346eb"
+    },
+    {
+      "path": "src/test/java/ch/zwaetschge/schwarm/ui/KetteTest.kt",
+      "sha256": "8b3768594ddd1827bac4ac6b5f46717a01c523c36ba6f1173a2b045ae14cde30"
+    },
+    {
+      "path": "src/main/res/values/strings.xml",
+      "sha256": "e6ca9f54b0c302507278e33aad7ee7b8a7c0348a58f16ce37d5c9aa804af35d4"
+    },
+    {
+      "path": "src/main/res/values/colors.xml",
+      "sha256": "e381df7ced45bcf495a7932e00a5e27fdf73ec9cf6829d62592fc2ed8682fc68"
+    },
+    {
+      "path": "src/main/res/values/themes.xml",
+      "sha256": "24e87f88d4610fbaefbeeba3aa3c15a4486873562762f3d27b80b9bbcbbaa17e"
+    },
+    {
+      "path": "src/main/res/drawable/ic_launcher_foreground.xml",
+      "sha256": "f7bcd05d0a11eee29c8a0465fe85cbd2e4ebbf3a89546f5242f3c2b64e2122fb"
+    },
+    {
+      "path": "src/main/res/drawable/ic_launcher_monochrome.xml",
+      "sha256": "35f9eca5fd1e90c00666ca85a0e7f4ecbdddb57845a5806e820553c72b82cde3"
+    },
+    {
+      "path": "src/main/res/drawable/ic_stat_schwarm.xml",
+      "sha256": "272b9344439d56a17a3429f35c0819834e21dd2d21a357c33ec41f1e5df39a93"
+    },
+    {
+      "path": "src/main/res/drawable/widget_hintergrund.xml",
+      "sha256": "06472193db9602d552bdf5bbdfdb1940b2f01b019220e974d9e5b26e208fd516"
+    },
+    {
+      "path": "src/main/res/drawable/widget_knopf.xml",
+      "sha256": "9a8009d9940669d2aa428b5ff47c195fa22233fc984aa60ff1cd08089eb38847"
+    },
+    {
+      "path": "src/main/res/drawable/ic_kurz_chat.xml",
+      "sha256": "35f8c30a17de83bfeeb018d2022009c12b04043257d20e325a6fe1b8090efd48"
+    },
+    {
+      "path": "src/main/res/drawable/ic_kurz_auftrag.xml",
+      "sha256": "fcd60d591bc3412cdaa4af314ecc4f1dcea474c9aeec6061e608dcbc07545c6e"
+    },
+    {
+      "path": "src/main/res/drawable/ic_kurz_aktuell.xml",
+      "sha256": "bc5d2b337a9c6d0127226a38fb9d1698ad5752ef74e71caadfed38247a99e5c9"
+    },
+    {
+      "path": "src/main/res/drawable/ic_kachel_notaus.xml",
+      "sha256": "f18090259c267fdd4840455059dad783f2d50b20de808338f1cb0c2ed13e9c29"
+    },
+    {
+      "path": "src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
+      "sha256": "fe1b7eafb938669af1e21797c9541fcb2eebdd78ae26216866a6a0fa88eef14b"
+    },
+    {
+      "path": "src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml",
+      "sha256": "fe1b7eafb938669af1e21797c9541fcb2eebdd78ae26216866a6a0fa88eef14b"
+    },
+    {
+      "path": "src/main/res/xml/favoriten_widget.xml",
+      "sha256": "46a6a383cc96ab41b4b299b8dd70222b1a15a21e9e8245556a98acafbf135ffd"
+    },
+    {
+      "path": "src/main/res/xml/dateipfade.xml",
+      "sha256": "6294e0f0498224f334bdc5710f7ccf466c9facf8d31cd87f61062ff4b69237e7"
+    },
+    {
+      "path": "src/main/res/xml/aktuell_widget.xml",
+      "sha256": "09aa0335c7df05d767f6f814c5ff6fc8bd8c8d434aa651065630ef78ed55ce8d"
+    },
+    {
+      "path": "src/main/res/xml/kuerzel.xml",
+      "sha256": "a96de11c9cb4a819c5d67d561c6c6a3665dedcd74c20b9eb782626d1f19ec7ee"
+    },
+    {
+      "path": "src/main/res/layout/widget_favoriten.xml",
+      "sha256": "ebc3e2b602e94f74999b623fefd0d3291b77ecca5ae5d618c50ae32b0e4ddef9"
+    },
+    {
+      "path": "src/main/res/layout/widget_aktuell.xml",
+      "sha256": "0c71faa94d1ec4f5a1a8327b4b8faaac34e24d47b524b08058417731de1ab21e"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/SchwarmApp.kt",
+      "sha256": "c1a27aa198a5f2fe4ee665c402e4eeecb2764c79155830fcfcf953c26f1de2df"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/MainActivity.kt",
+      "sha256": "77cb4b2ff7251ee24c31361d19c47793335c217df5e9127fd54d4af23e07bccb"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/TeilenActivity.kt",
+      "sha256": "b8d928e9597764c6247e933402d5c9cf5fc8a33901da7f37f8bbc7c95ded201d"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/NotAusKachel.kt",
+      "sha256": "cd228b8aa12e77025c5a2a7508694f4b5015474ec9ce95a1fe46c643eae8aac1"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/FreigabeActivity.kt",
+      "sha256": "bcc1b552ac138457de99192a1c350b875a4f4557dfed84c8ac5a03bb6b5b03ae"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/Antwort.kt",
+      "sha256": "8aee5c4c8dc8a8cc36d233ecfc8ec206aef7a7f11fc786ede1356b0926e708a2"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Sitzung.kt",
+      "sha256": "62d60e181203de9aad86ec0875b79e7c43d60131cc2da974cb7b063c5375ff1f"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Schwarm.kt",
+      "sha256": "b4b040f47a325534352f9e4dacd7fcc7bff48b68a661bd1110dbc4828aef1c34"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/SchwarmDienst.kt",
+      "sha256": "1b8da71973335dd86288ade1bd8e638f2109a1993a1be55839c145059823315e"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Vorschau.kt",
+      "sha256": "ff6c26aa920381b5d6fd0cca532725c509c5bc18d39069d77f061478b7f01965"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Lebenslauf.kt",
+      "sha256": "b19dcf65b4fdb59de53fe28e3a33807ecf8b34213a2ac81c59dc685fcb4ab16d"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Hubstand.kt",
+      "sha256": "2e38bb307053954281b49a3c2b9e3a8e0411544b576fdff75e315808d41a618e"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Patch.kt",
+      "sha256": "1364f47410017dd081720b0cfa776e74326125a84ac70212c7b335fa1537f73b"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Vorlagen.kt",
+      "sha256": "2da3d2fb8bf1a8d0409fd028666104fe11e48b173ce1089a81909f6f63539411"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/NotAus.kt",
+      "sha256": "75117e01db1182f3d0ce3dc81146540bf0365c3631f9b8bfc8985d595402e062"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Schnappschuss.kt",
+      "sha256": "1b1625936c179c7b7f736e86b8dd8a463762b2a4c5add1c7427cd298beb999c4"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Ungelesen.kt",
+      "sha256": "2c54f183d8863bc67dc6f84cc8f3245a00d466a383e49a5556ec52f52a64c5bc"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Allgemein.kt",
+      "sha256": "af051eee1b97b7e00df390154b500d0659f3d2cbe8133637fd99d263df68f222"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Bilder.kt",
+      "sha256": "6ebe437ee00f520894c624880045c6b01bbbd653c5a027b2bc3c2538d153e2f7"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Modelle.kt",
+      "sha256": "77a14ae4cb08cd49fba1e5c32b848ea7b3f0da78666befbf08b94299a80c9913"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Medien.kt",
+      "sha256": "2cef0156de473ced832da6500b86af0e9460fac20cb1a8da228f8cb8237a9f9c"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/BrianHilfe.kt",
+      "sha256": "5eac1ec4a66ba280e48ca69fd79be18623a8886364a8554e13d2d7ba3d74cb70"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/AppRelease.kt",
+      "sha256": "2b66fb4f47339c81ba20c3a8da03ad047838f4687989589d3993443bd49ec833"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/Absturz.kt",
+      "sha256": "3c8d21eda4d6e1566ca421e12b7bdf23b21185ed6c6d82b6b13d5aa1eb627454"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/KontoEinstellungen.kt",
+      "sha256": "61f0898e2221b92a185ded081cfc3ea7c01925ee1de52ca33ba042813fc3ad63"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Thema.kt",
+      "sha256": "16776a20c922c3794f917183d00c29885ec15cffd38ab6097a688bd957eaa5fe"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Bausteine.kt",
+      "sha256": "243e0c0e56390da763cfd8b6ad902f34f62acb57e061e21adf8557d9195a208b"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/SchwarmViewModel.kt",
+      "sha256": "e488cccee79841ebb44b3542e15faaf144892f5fcad40ded6a2833bc3d4e7295"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Verlauf.kt",
+      "sha256": "7702064f3dfa9e8a3f7ccd2595cff342665781ce6b890b0f07a0c0443d89e479"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Anmeldung.kt",
+      "sha256": "41d1ab594d792a02b266a403a44d2bda80d342038aa629c14886164894b68617"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Wurzel.kt",
+      "sha256": "e3a382c537cfd17c7bb2ba5d7ee34634c2cb0528716a2b161cf3160d9bdc700e"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Ansichten.kt",
+      "sha256": "d0f5ef450b0965099c60670d12dcc3ff96dd643e6e743c6bf07daf8c916ead7b"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Details.kt",
+      "sha256": "ddfc41f9daaf6cf5979ca00fba995d789c1b214a7c68a67e763d60a3bfae246c"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Meldungen.kt",
+      "sha256": "17901c1239c7fbe27402e7d4c73992a47af831841abef0f99455320d7e36c130"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Entscheidungen.kt",
+      "sha256": "3b539f4077b869d76d2ff8f27c3157f6546c09819c687a6bd5b8b3194579ee38"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Plum.kt",
+      "sha256": "bb35c4b59248189fbe7e7857808d1c0d518a55527ff7c7123f0ebc369c322374"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Werkzeuge.kt",
+      "sha256": "ae7ef0bf08cb64ef067461746c2dfb90413f01eb043d72872a5ea608f884c9e7"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Vorlagen.kt",
+      "sha256": "1d3a98935c3e18d964108191dd792d7dbd61fda8a58ad4dbebf02fd22fa78f73"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Befehle.kt",
+      "sha256": "1da6279c774ab8696c0c34df5195dec4d18224fb751a3b5214e22ff0a8ec80f5"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/NotAus.kt",
+      "sha256": "c74087ff4ba065e89f0f76a59c008f4f24bd610023de7071488c9afeeda0819f"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/PatchAnsicht.kt",
+      "sha256": "0cbc7a20d888cbfd753d3dc35fffcb228b31cb22679d7532cbc849218268618c"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Kennzahlen.kt",
+      "sha256": "e9008e2246a806c42e044c54129d11bbb4c59c2bafc6e052e09880f3890f802b"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Markdown.kt",
+      "sha256": "65b87e0e6274816ab9d26ffe08ca3968fae3e8e76951ee17ab5d4d89a001cf14"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/AllgemeinUi.kt",
+      "sha256": "ccb50e82fc742934b351bbe28db84327d94568d247c03b4375e77d11bfe014c1"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Raeume.kt",
+      "sha256": "28af178c4ca5822a39b6bd166b4692d53de1577837d8ebdd7a39d98e30272253"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Klang.kt",
+      "sha256": "0a7019fc25191f068d3245b85afa5dd8415ab3be34d68cddcce778fb48fe6669"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Anhaenge.kt",
+      "sha256": "a7fc21251ea9e0e62b725fd2706a11e46485bc38bc427948734878250ee1fdee"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/VorlesenUi.kt",
+      "sha256": "cab22f9557383d7487c2a7d85ae144f6c1f247bcb2f0d86e2aa58839ca2e6045"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/ModelleUi.kt",
+      "sha256": "88bf1fbc17e5442c842cd9326aa899d2d6a01e36525470ff583e8e523f22aa92"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/SchwarmBereich.kt",
+      "sha256": "d1cafcda3fe885675fc774573f98c409456f89fdcb439f9323fbc14f6baabbba"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Einrichtung.kt",
+      "sha256": "9980db15692ddfac1b9019546dcc56646fb66501dcf93a0f2ee18b7127220a4c"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/Betrieb.kt",
+      "sha256": "144f5278dd055a2049f8b8972d6ad391fa14c0fa677b8a8bc11d858a4adcb8cd"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/ui/LiteLlmUi.kt",
+      "sha256": "6a8fe6d75d7be5cbaa2fe0057dd7cc8a41f7da64026a205ed546f00a26ba03b2"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/hintergrund/Hintergrund.kt",
+      "sha256": "67a22dc48557b2cc0e759a7dfc6b9100cf0decf8b2ea8282a8039daabf321e9c"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/hintergrund/Push.kt",
+      "sha256": "2d67ba63181df3242dd40177bf5d5f6ab443db0ea2072a7521cd14cf14ddeb4d"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/hintergrund/Ruhe.kt",
+      "sha256": "217fee775758594723aa9c2c45e9a25b844d4ad134b816a25f296f0480f540b9"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/widget/FavoritenWidget.kt",
+      "sha256": "7e3beb4f8a932da4a75beea1be3aed9a7bfafad5f1acb6edbff05e0d00edca8e"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/widget/AktuellWidget.kt",
+      "sha256": "3c4050516deec2d61ce5fd2db8d0381ccbae9e0bcad0fe11b84f2f931bb96aab"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/matrix/Modelle.kt",
+      "sha256": "8efa7edf206efcce0a93b6e626954060f3af850b6335b3ba6f22226a323198d4"
+    },
+    {
+      "path": "src/main/java/ch/zwaetschge/schwarm/data/matrix/MatrixClient.kt",
+      "sha256": "83c0884b783d92bb0a046702f89a3483ae51fc1b1ab275e61b6d645697892fe3"
+    }
+  ]
+}

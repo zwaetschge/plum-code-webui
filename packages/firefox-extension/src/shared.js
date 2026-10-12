@@ -75,11 +75,25 @@ async function plumManagedSettings() {
   }
 }
 
+/**
+ * A pre-paired download from Plum ships `plum-config.json` next to the
+ * manifest, so the browser connects right after "Load unpacked" without
+ * copying the address and token by hand. Absent in the generic build.
+ */
+async function plumBundledSettings() {
+  try {
+    const response = await fetch(browser.runtime.getURL('plum-config.json'));
+    return response.ok ? await response.json() : {};
+  } catch {
+    return {};
+  }
+}
+
 async function plumLoadSettings() {
   const stored = await browser.storage.local.get(Object.keys(PLUM_DEFAULTS));
   const settings = { ...PLUM_DEFAULTS, ...stored };
-  // Priority: options page (storage) > administrator policy.
-  for (const source of [plumManagedSettings]) {
+  // Priority: options page (storage) > administrator policy > pre-paired bundle.
+  for (const source of [plumManagedSettings, plumBundledSettings]) {
     if (settings.serverUrl && settings.token) break;
     const provided = await source();
     for (const key of ['serverUrl', 'token', 'label']) {

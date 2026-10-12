@@ -1,3 +1,4 @@
+import { CLAUDE_CODE_EFFORT_OPTIONS } from '@plum-code-webui/shared';
 import type { CLIProvider as CLIProviderType } from '@plum-code-webui/shared';
 export type { CLIProvider } from '@plum-code-webui/shared';
 type CLIProvider = CLIProviderType;
@@ -34,10 +35,10 @@ export const UI_PROVIDER_META: Record<
   plum: {
     id: 'plum',
     label: 'Plum',
-    productName: 'Plum Code',
+    productName: 'Plum',
     tagline: 'WebUI',
     loginCta: 'Continue to Plum',
-    description: 'A Plum-branded dashboard for multi-provider CLI sessions.',
+    description: 'Dein persönlicher Assistent für Chat, Tasks und Code.',
   },
   claude: {
     id: 'claude',
@@ -320,4 +321,42 @@ export function applyProviderClass(_provider: UiProvider): void {
   );
   root.classList.add(`provider-${visualProvider}`);
   root.setAttribute('data-provider', visualProvider);
+}
+
+/** Choices accepted by the provider's existing session runtime. */
+export function getConversationReasoningOptions(provider: CLIProvider, model?: string) {
+  if (provider === 'claude' || provider === 'zai') {
+    return CLAUDE_CODE_EFFORT_OPTIONS.map((option) => ({
+      ...option,
+      label:
+        provider === 'claude' &&
+        model?.replace(/\[1m\]$/i, '') === 'claude-opus-5-5' &&
+        option.value === 'max'
+          ? 'Max · long thinking'
+          : option.label,
+    }));
+  }
+  const labels: Record<string, string> = {
+    off: 'Aus',
+    none: 'Ohne',
+    minimal: 'Minimal',
+    low: 'Niedrig',
+    medium: 'Mittel',
+    high: 'Hoch',
+    xhigh: 'Extra hoch',
+    max: 'Max',
+    ultra: 'Ultra',
+    ultracode: 'Ultracode (workflows)',
+  };
+  const levels =
+    provider === 'vibe'
+      ? ['off', 'low', 'medium', 'high', 'max', 'ultracode']
+      : provider === 'kimi'
+        ? ['minimal', 'low', 'medium', 'high']
+        : provider === 'pi'
+          ? ['minimal', 'low', 'medium', 'high', 'max', 'ultracode']
+          : provider === 'opencode'
+            ? ['minimal', 'low', 'medium', 'high', 'max']
+            : ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+  return levels.map((value) => ({ value, label: labels[value] ?? value }));
 }

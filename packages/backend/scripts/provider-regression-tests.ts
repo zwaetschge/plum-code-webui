@@ -4937,7 +4937,7 @@ async function testDefaultMcpServerSeeding() {
       env?: Record<string, string>;
     };
 
-    assert.deepEqual(first.added, ['blender', 'subagents', 'firefox']);
+    assert.deepEqual(first.added, ['blender', 'subagents', 'firefox', 'rea']);
     assert.equal(parsed.mcpServers.godot.command, 'custom-godot-wrapper');
     assert.deepEqual(parsed.mcpServers.godot.args, ['--keep-me']);
     assert.equal(parsed.mcpServers.blender.command, 'node');
@@ -4945,6 +4945,8 @@ async function testDefaultMcpServerSeeding() {
     assert.equal(parsed.mcpServers.subagents.command, 'node');
     assert.deepEqual(parsed.mcpServers.subagents.args, ['/app/scripts/mcp-servers/subagents.mjs']);
     assert.deepEqual(parsed.mcpServers.firefox.args, ['/app/scripts/mcp-servers/firefox.mjs']);
+    assert.equal(parsed.mcpServers.rea.command, 'npx');
+    assert.deepEqual(parsed.mcpServers.rea.args, ['--yes', 'rea-agents@6.3.0', 'mcp']);
     assert.equal(parsed.env?.KEEP, '1');
 
     const second = await ensureDefaultClaudeMcpServers({ settingsPath });

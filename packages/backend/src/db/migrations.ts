@@ -1,5 +1,11 @@
+import { MEMORY_SCHEMA, MEMORY_COMPLETION_SCHEMA } from '../services/assistant/memorySchema.js';
 import { all as pgAll, get as pgGet, transaction as pgTransaction } from './pg.js';
 import type { TransactionScope } from './pg.js';
+import {
+  ASSISTANT_SCHEMA,
+  ASSISTANT_DOCUMENT_SCHEMA,
+  ASSISTANT_PUBLICATION_SCHEMA,
+} from '../services/assistant/schema.js';
 import { REPRICE_MIGRATION_ID, repriceUsageHistory } from './reprice.js';
 
 /**
@@ -163,6 +169,11 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_browser_tokens_user ON browser_tokens(user_id)`,
     ],
   },
+  { id: '010-assistant-resources', statements: ASSISTANT_SCHEMA },
+  { id: '011-assistant-document-members', statements: ASSISTANT_DOCUMENT_SCHEMA },
+  { id: '012-assistant-publications', statements: ASSISTANT_PUBLICATION_SCHEMA },
+  { id: '013-assistant-long-term-memory', statements: MEMORY_SCHEMA },
+  { id: '014-assistant-semantic-memory', statements: MEMORY_COMPLETION_SCHEMA },
 ];
 
 async function ensureTable(): Promise<void> {

@@ -1,0 +1,180 @@
+import type { CLIProvider } from './session.js';
+
+export type AssistantResourceKind =
+  | 'profile'
+  | 'task'
+  | 'project'
+  | 'source'
+  | 'memory'
+  | 'artifact'
+  | 'routine'
+  | 'collection'
+  | 'meeting'
+  | 'course'
+  | 'connection'
+  | 'event-subscription'
+  | 'api-chat';
+
+export interface AssistantApiTurn {
+  id: string;
+  seq: number;
+  prompt: string;
+  response: string;
+  status: 'running' | 'completed' | 'cancelled' | 'failed' | 'interrupted';
+  error: string | null;
+  createdAt: string;
+  model: string;
+  providerId?: string;
+  profileId: string | null;
+  profileRevision: number | null;
+  sourceVersions: Array<{ id: string; revision: number }>;
+  imageAssetIds?: string[];
+  usage: {
+    input: number;
+    output: number;
+    cached: number;
+    cacheWrite: number;
+    costUsd: number | null;
+  } | null;
+}
+
+export interface AssistantApiProvider {
+  id: string;
+  name: string;
+  protocol: 'openai' | 'anthropic' | 'gemini';
+  models: string[];
+}
+export interface AssistantDocumentAccess {
+  resource: AssistantResource;
+  role: 'owner' | 'editor' | 'viewer';
+  ownerId: string;
+  ownerEmail: string;
+}
+export interface AssistantDocumentMember {
+  userId: string;
+  email: string;
+  role: 'editor' | 'viewer';
+  grantedRevision: number;
+}
+export interface AssistantApiImage {
+  id: string;
+  filename: string;
+  mimeType: string;
+  byteLength: number;
+}
+export interface AssistantArtifactImage {
+  url: string;
+  assetId: string;
+  filename: string;
+  mimeType: string;
+  byteLength: number;
+  sha256: string;
+}
+export interface AssistantApiUsage {
+  calls: number;
+  running: number;
+  input: number;
+  output: number;
+  cached: number;
+  cacheWrite: number;
+  knownCostUsd: number;
+  unpriced: number;
+  missingUsage: number;
+  byModel: Array<{
+    providerId: string;
+    model: string;
+    calls: number;
+    tokens: number;
+    knownCostUsd: number;
+    unpriced: number;
+  }>;
+}
+
+export interface AssistantResource<T extends Record<string, unknown> = Record<string, unknown>> {
+  id: string;
+  kind: AssistantResourceKind;
+  revision: number;
+  title: string;
+  body: T;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssistantProfileBody extends Record<string, unknown> {
+  instructions: string;
+  provider: CLIProvider;
+  model?: string | null;
+  language: string;
+  voice: string;
+  memory: 'off' | 'read' | 'read-write';
+  projectId?: string;
+}
+
+export type AssistantTaskStatus =
+  | 'draft'
+  | 'queued'
+  | 'running'
+  | 'waiting_input'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted';
+export interface AssistantTaskBody extends Record<string, unknown> {
+  goal: string;
+  status: AssistantTaskStatus;
+  provider: CLIProvider;
+  sessionId?: string;
+  originSessionId?: string;
+  parentId?: string;
+  agentId?: string;
+  priority: number;
+  budgetUsd?: number;
+  dueAt?: string;
+  result?: string;
+}
+
+export interface AssistantAgent {
+  id: string;
+  name: string;
+  source: 'cli' | 'matrix';
+  provider?: CLIProvider;
+  available: boolean;
+  capabilities: string[];
+  state?: string;
+  nativeId?: string;
+  nativeRoomId?: string;
+  mode?: 'native' | 'worker' | 'notify' | 'unknown';
+  model?: string;
+  trust?: string;
+  retired?: boolean;
+  schemaVersion?: number;
+}
+
+export interface AssistantOverview {
+  counts: Record<string, number>;
+  tasks: AssistantResource<AssistantTaskBody>[];
+  recent: AssistantResource[];
+  agents: AssistantAgent[];
+}
+
+export interface AssistantTaskLimits {
+  budgetUsd: number | null;
+  knownCostUsd: number | null;
+  unpricedTurns: number;
+  exhausted: boolean;
+  deadline: string | null;
+  deadlineExpired: boolean;
+  scope: 'api-equivalent-completed-turns' | 'native-coordinator';
+}
+export interface AssistantLibraryHit {
+  id: string;
+  entryType: 'resource' | 'session' | 'cli-message' | 'api-turn';
+  kind: string;
+  title: string;
+  category: 'library' | 'chats' | 'code';
+  revision: number | null;
+  updatedAt: string;
+  excerpt: string;
+  href: string;
+}

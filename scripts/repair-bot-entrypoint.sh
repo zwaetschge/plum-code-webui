@@ -16,6 +16,7 @@ WEBUI_PID=""
 # The repair WebUI shares the main provider config for emergency access, but
 # the main WebUI must remain the single owner of external skill imports.
 export WEBUI_EXTERNAL_SKILL_SYNC="${WEBUI_EXTERNAL_SKILL_SYNC:-false}"
+export PLUM_ASSISTANT_EXECUTOR="${PLUM_ASSISTANT_EXECUTOR:-false}"
 
 cleanup() {
     echo "[repair-bot] Shutting down..."

@@ -29,6 +29,12 @@
     "test:usage-limit-history": "tsx scripts/usage-limit-history-regression-tests.ts",
     "test:security-boundaries": "tsx scripts/security-boundaries-regression-tests.ts",
     "test:migrations": "tsx scripts/migration-dry-run.ts",
+    "test:assistant-api-chat": "tsx --conditions=development scripts/assistant-api-chat-regression-tests.ts",
+    "test:assistant-voice": "tsx --conditions=development scripts/assistant-voice-regression-tests.ts",
+    "test:assistant-sheet": "tsx --conditions=development scripts/assistant-sheet-regression-tests.ts",
+    "test:assistant-office": "python3 scripts/assistant-office-tests.py",
+    "test:assistant-matrix": "tsx --conditions=development scripts/assistant-matrix-regression-tests.ts",
+    "test:assistant": "tsx --conditions=development scripts/assistant-regression-tests.ts",
     "test:session-store": "tsx scripts/session-store-regression-tests.ts",
     "test:websocket-auth": "tsx scripts/websocket-authorization-regression-tests.ts",
     "test:websocket-send-ack": "tsx scripts/websocket-send-ack-regression-tests.ts",
@@ -47,7 +53,33 @@
     "clean": "rm -rf dist",
     "db:migrate": "tsx src/db/migrate.ts",
     "test:mistral-plan": "tsx scripts/mistral-plan-usage-tests.ts",
-    "test:vibe-provider": "pnpm --filter @plum-code-webui/shared run build && tsx scripts/vibe-provider-regression-tests.ts"
+    "test:vibe-provider": "pnpm --filter @plum-code-webui/shared run build && tsx scripts/vibe-provider-regression-tests.ts",
+    "test:assistant-notebook": "tsx --conditions=development scripts/assistant-notebook-regression-tests.ts",
+    "test:assistant-web-source": "tsx --conditions=development scripts/assistant-web-source-regression-tests.ts",
+    "test:assistant-document": "tsx --conditions=development scripts/assistant-document-regression-tests.ts",
+    "test:assistant-task-limits": "tsx --conditions=development scripts/assistant-task-limits-regression-tests.ts",
+    "test:assistant-pdf": "tsx --conditions=development scripts/assistant-pdf-regression-tests.ts",
+    "test:assistant-slides": "tsx --conditions=development scripts/assistant-slides-regression-tests.ts",
+    "test:assistant-collection": "tsx --conditions=development scripts/assistant-collection-regression-tests.ts",
+    "test:assistant-comparison": "tsx --conditions=development scripts/assistant-comparison-regression-tests.ts",
+    "test:assistant-task-image": "tsx --conditions=development scripts/assistant-task-image-regression-tests.ts",
+    "test:assistant-motion": "tsx --conditions=development scripts/assistant-motion-regression-tests.ts",
+    "test:assistant-library-search": "tsx --conditions=development scripts/assistant-library-search-regression-tests.ts",
+    "test:assistant-image-edit": "tsx --conditions=development scripts/assistant-image-edit-regression-tests.ts",
+    "test:assistant-artifact-image": "tsx --conditions=development scripts/assistant-artifact-image-regression-tests.ts",
+    "test:assistant-task-results": "tsx --conditions=development scripts/assistant-task-results-regression-tests.ts",
+    "test:assistant-office-session": "tsx --conditions=development scripts/assistant-office-session-regression-tests.ts",
+    "test:assistant-gemini": "tsx --conditions=development scripts/assistant-gemini-regression-tests.ts",
+    "test:assistant-document-access": "tsx --conditions=development scripts/assistant-document-access-regression-tests.ts",
+    "test:assistant-motion-audio": "tsx --conditions=development scripts/assistant-motion-audio-regression-tests.ts",
+    "test:assistant-motion-physics": "tsx --conditions=development scripts/assistant-motion-physics-regression-tests.ts",
+    "test:assistant-try-on": "tsx --conditions=development scripts/assistant-try-on-regression-tests.ts",
+    "test:assistant-native-preferences": "tsx --conditions=development scripts/assistant-native-preferences-regression-tests.ts",
+    "test:assistant-personal-workspace": "tsx --conditions=development scripts/assistant-personal-workspace-regression-tests.ts",
+    "test:assistant-publication": "tsx --conditions=development scripts/assistant-publication-regression-tests.ts",
+    "test:assistant-personalization": "tsx --conditions=development scripts/assistant-personalization-regression-tests.ts",
+    "test:assistant-memory": "tsx --conditions=development scripts/assistant-memory-regression-tests.ts",
+    "test:assistant-memory-completion": "tsx --conditions=development scripts/assistant-memory-completion-tests.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.23.0",
@@ -78,7 +110,9 @@
     "socket.io-client": "^4.8.1",
     "uuid": "^11.1.1",
     "ws": "^8.21.0",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "@plum-code-webui/swarm": "workspace:*",
+    "katex": "0.16.27"
   },
   "devDependencies": {
     "@types/archiver": "^6.0.4",
@@ -100,6 +134,7 @@
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "@types/katex": "0.16.7"
   }
 }

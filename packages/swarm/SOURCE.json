@@ -1,0 +1,387 @@
+{
+  "source": "bot-council/packages/matrix + packages/shared",
+  "importedAt": "2026-10-10",
+  "scope": "Native Schwarm-Hub, protocol, migrations; no credentials, config, data or compiled files imported",
+  "files": [
+    {
+      "path": "src/env.ts",
+      "originalSha256": "80cb1777ea1a58a5a8f0ac6884c32412929d7afcc11b46269331900f6f5194a1"
+    },
+    {
+      "path": "src/outbox.ts",
+      "originalSha256": "e9ab9dc75e25ad572f399593bcbcdbd48c3eaf721e5c2f073d74ba18dd3965c6"
+    },
+    {
+      "path": "src/context.ts",
+      "originalSha256": "f5774ec836f9c901233ecf4f0ec557672931868cda71e9916d14950ed17a935a"
+    },
+    {
+      "path": "src/notify.ts",
+      "originalSha256": "3ad3540ffe6eb2007fa05fc8544a87117bc50f69093936f208dd838b6d1f31e0"
+    },
+    {
+      "path": "src/inbox.ts",
+      "originalSha256": "3e53c8a6743c5c6556556318d1d45f6e262cea6ff023b9eb2e91a9a2b42e80b3"
+    },
+    {
+      "path": "src/reply.ts",
+      "originalSha256": "a6732e488da95408b6df28a6c69096613fb11e07800d4a5c8633a71e0fe20e83"
+    },
+    {
+      "path": "src/health.ts",
+      "originalSha256": "04aed47da82058903a3d509cbeffbbbd6353d50d48be67179fa424cf005bd7f0"
+    },
+    {
+      "path": "src/index.ts",
+      "originalSha256": "6975c1e5f78e846ee20c963b4b9a7e7e84e4fafa00f036556a8c96fc97eb3f82"
+    },
+    {
+      "path": "src/watchdog.ts",
+      "originalSha256": "e36b00d34d28df7bc1be513496f3f6d10e4ac89c8a98131ed364f8c9855d2891"
+    },
+    {
+      "path": "src/reconcile.ts",
+      "originalSha256": "3037ed004b4365c09a5421a43e0ef0ac5d8803c113dcc25e23858c286913c695"
+    },
+    {
+      "path": "src/tokens.ts",
+      "originalSha256": "f2d1809f0427afd1643ad7ef4bcdb904616639fb245c27d71816c7d8f5f02681"
+    },
+    {
+      "path": "src/redact.ts",
+      "originalSha256": "f1f2f060e92f2999273f06fa3b3f68979275b3da2a6759e3f5cfee3996fdb316"
+    },
+    {
+      "path": "src/bremsleiter.ts",
+      "originalSha256": "ec3b47a8b48c6d109e853370c870b58120ec1757908581a2bbe8580a2d8ce410"
+    },
+    {
+      "path": "src/schedule.ts",
+      "originalSha256": "12a2f83035f8871e1415e607426fec28bfecdbe218e8103348dce6f7d2d8107f"
+    },
+    {
+      "path": "src/tagesuebersicht.ts",
+      "originalSha256": "6bd06acbeccb9ad7cd2d02eee0c5e232ddcd1dcfa73eda8e77b71e6503e07e59"
+    },
+    {
+      "path": "src/ueberwachung.ts",
+      "originalSha256": "93032f5e48421bf736ef980665dc7a6bd237953b69c9274862b63d043f56a758"
+    },
+    {
+      "path": "src/alarme.ts",
+      "originalSha256": "600c10ab52b9a5f83e0dfa7fe84cd9bcbe8f3bec9e4c773006673be7f0f2ff39"
+    },
+    {
+      "path": "src/artifacts.ts",
+      "originalSha256": "b203fac357f1b59e5d26c011c348047fb6caf158beb27fb64145260874e5c842"
+    },
+    {
+      "path": "src/wartung.ts",
+      "originalSha256": "5c9a09f80441872c6d61feb996150fb50889425587d71c2f2673b3fd7a852755"
+    },
+    {
+      "path": "src/raumhinweis.ts",
+      "originalSha256": "9c8bfa6e2de7c6e0f03b4343f345a44ffdc3ae6266e5656decabd313228ac799"
+    },
+    {
+      "path": "src/absprachen.ts",
+      "originalSha256": "f85f8cde2fc0066244c3dc3b67ca7ed6e1079b8c77d9e69d6dece46af6b0b6f4"
+    },
+    {
+      "path": "src/release.ts",
+      "originalSha256": "1a225cef4324c52554bd64dd244fedfb8233e2bfaf059550d557c32aeeeb9e2b"
+    },
+    {
+      "path": "src/einheiten.ts",
+      "originalSha256": "93a52fc8c411d1b3d846003f9ed610566e5d5f71255290067d851d89466afb1e"
+    },
+    {
+      "path": "src/tuersteher.ts",
+      "originalSha256": "33c1c82935a76252f2c0a8956714b2f2f2426a8a374361f7a80e88226adbb56c"
+    },
+    {
+      "path": "src/weiter.ts",
+      "originalSha256": "e60df7134c95318506925630511c355e08c0c5db2312da5bf166046de7cbf499"
+    },
+    {
+      "path": "src/netz.ts",
+      "originalSha256": "8ac0b1a081168e0f7995cdb74800869bf81ca185f8865583530828e41cd98f7a"
+    },
+    {
+      "path": "src/kontingente.ts",
+      "originalSha256": "26c123f136bff97b891e454851d40ba4ba27c09f5b263a0cd9a6d81fd064381d"
+    },
+    {
+      "path": "src/plan.ts",
+      "originalSha256": "e24c2d8bc49758e4e842aab62009a42a030fa1016bee51d5c7065f12eeb9d55f"
+    },
+    {
+      "path": "src/routinen.ts",
+      "originalSha256": "2f44d10c732f46057f877d60fb502e32c2e0d72fd4472818732834910f205962"
+    },
+    {
+      "path": "src/tokenpflege.ts",
+      "originalSha256": "9e4b938d6d58f4a5c8d70b039bb995574ae27092cd3ca805d6e99b9e4f2e1231"
+    },
+    {
+      "path": "src/profil.ts",
+      "originalSha256": "8be9cad06aca960a076fa58a4b78530f0970127fb3845b86d94bc6d900190e14"
+    },
+    {
+      "path": "src/lernen.ts",
+      "originalSha256": "fcc10a241be80920e30b755277d05bfb9192403b7e3491074b5a0988d09b975d"
+    },
+    {
+      "path": "src/notaus.ts",
+      "originalSha256": "829a1aa3427f68f9f736ecdc45cb1628b40bf6897d392eb0e30379e27ef2ba68"
+    },
+    {
+      "path": "src/patches.ts",
+      "originalSha256": "9c9e4d7088bd7483844ff8e8ea3d939e89f7e637fa5923901456569cd8fc8aa4"
+    },
+    {
+      "path": "src/gedaechtnis.ts",
+      "originalSha256": "92faf4da14a8bd51805d66e36c18f437add8c83ca8977cbc1e67d4005b4b950d"
+    },
+    {
+      "path": "src/ablaeufe.ts",
+      "originalSha256": "40836dbe05983bced6cf48e8074cc4b0fa4c26bba4611e7052a2006d85976e3a"
+    },
+    {
+      "path": "src/gaeste.ts",
+      "originalSha256": "e888d014df7426224a79931a44c45d9878f8b4663126081845887fe386402b5b"
+    },
+    {
+      "path": "src/kennzahlen.ts",
+      "originalSha256": "4bef8da0bad5239cfb4b168aa88d912eaaf0aa4d7da94d498f6980e96f5d4747"
+    },
+    {
+      "path": "src/plumrueck.ts",
+      "originalSha256": "4b6477f3e6d139742c1b69ff9056974318278c0898fd857fdfa12f8821c9688f"
+    },
+    {
+      "path": "src/modelle.ts",
+      "originalSha256": "be15b2b8ac5ee5755862c50a71a38e4a0908424ec2f8b3e48d9547a3a7e1fbb6"
+    },
+    {
+      "path": "src/vorlesen.ts",
+      "originalSha256": "a790effd9bcf960f6e7578b4870935629003cc68204b3f3e54632498105b916b"
+    },
+    {
+      "path": "src/stimmen.ts",
+      "originalSha256": "3836d56376241b49d7b77fca953817f3300311027e62a99d70f77fe40034c5d8"
+    },
+    {
+      "path": "src/tagesbericht.ts",
+      "originalSha256": "3f91498a81b1b3f979a96d13f7cd2fdc07e06c605c8b4249dd606bbba8ab8508"
+    },
+    {
+      "path": "src/push.ts",
+      "originalSha256": "5398a4466a9ef3983ff60fc4840955b492278ced17d88ea9f3c262840ad4f0ea"
+    },
+    {
+      "path": "src/ruhe.ts",
+      "originalSha256": "5b52989d9ece107223484b551b8697808c97bbd3ea79cb3e8a6389bf7515833f"
+    },
+    {
+      "path": "src/litellm.ts",
+      "originalSha256": "4c3703f8418114d2210d88434fe850162de7892cdf7ef25b3218b0352ffd397d"
+    },
+    {
+      "path": "src/db/index.ts",
+      "originalSha256": "d2b80fc66700fbe339bdc5537b10010ddde392841f1d1e9ea3d30994c55281a7"
+    },
+    {
+      "path": "src/db/migrate.ts",
+      "originalSha256": "b8212ec40ecd0d6cf5af82b3bb5dbead756fb903c78efcd580e50edfdb2e0572"
+    },
+    {
+      "path": "src/db/audit.ts",
+      "originalSha256": "6dd209065a19326d239d316d92c16bae95374175f3fa13216cf0b5e0ce0daec8"
+    },
+    {
+      "path": "src/cli/migrate.ts",
+      "originalSha256": "7728f723f08c766f9c867da803fb47e48e7a3f316c3e2b21b351f62ff4b0dc71"
+    },
+    {
+      "path": "src/cli/token.ts",
+      "originalSha256": "76c008bc58a85b06a7bce6514a336e38a685e89304134f8b76cdfc057df4198e"
+    },
+    {
+      "path": "src/cli/abgleich.ts",
+      "originalSha256": "cc2ac20e2630b94d4af2b62afcdd0cba1c82a49b128b45cf87f983825fff42cd"
+    },
+    {
+      "path": "src/cli/ueberwachung.ts",
+      "originalSha256": "0780f4eeea42bf524b79841f8065f5bb1995847aea786a58ba986800fb7f7ff6"
+    },
+    {
+      "path": "src/cli/vorlauf.ts",
+      "originalSha256": "9537cbef954c65dff354ec7ee89eb81b3e22ee56c6fdb94b0181f8429347c4d1"
+    },
+    {
+      "path": "src/cli/aufraeumen.ts",
+      "originalSha256": "49131a7e1a2c8e47a115a17ca66b6ccf6d2bbbe251ab4189de735ac31c81e70e"
+    },
+    {
+      "path": "src/cli/auftrag.ts",
+      "originalSha256": "821b933db8c7067f19a7cd9af5a097219c18447ab81bff66c5e45399e6203f05"
+    },
+    {
+      "path": "src/cli/selbsttest.ts",
+      "originalSha256": "cb686fe721d3715fdf406f7016a095d7a05a6de21692affdcf29d61924060a37"
+    },
+    {
+      "path": "src/cli/wochenbericht.ts",
+      "originalSha256": "a78320058001bbb957a007ff16412a142742ea7fbf719dc2401fd2a4a6f26151"
+    },
+    {
+      "path": "src/tasks/state.ts",
+      "originalSha256": "15a23aac6325d2b01a0a585cf314960b2681a9a1d6f95e09fb9f18d242a41af6"
+    },
+    {
+      "path": "src/tasks/policy.ts",
+      "originalSha256": "0f45e01222c2b1f06a16bde5fb8737d5518697df52a869749aa5467eac5de4b4"
+    },
+    {
+      "path": "src/tasks/card.ts",
+      "originalSha256": "812a2ea7572e9d480ff1a7419e0deeb34af2252993f4cfce84350f98018ca7f9"
+    },
+    {
+      "path": "src/tasks/store.ts",
+      "originalSha256": "dbc94827cbc51f366e4164805a44f9a0f389cd6cc5a42dc50abe8c213b76f04b"
+    },
+    {
+      "path": "src/tasks/create.ts",
+      "originalSha256": "571f7eb775be9057e594ab60ffa2a82302d06106fef9dd12474d579a808c2433"
+    },
+    {
+      "path": "src/tasks/transition.ts",
+      "originalSha256": "7744a00463f3d43b472a93a70975675c576848765f6b021ba7003d9cbca17d6d"
+    },
+    {
+      "path": "src/tasks/watchdog-rules.ts",
+      "originalSha256": "d3cc31d3e59d24eabb58caacb25cdffb6ea269422d59090d89102e37605465c4"
+    },
+    {
+      "path": "src/agents/store.ts",
+      "originalSha256": "411e5c578507a68850a827ec6f6eb90a5990617387b9c2c56cc30e94e45c8e8e"
+    },
+    {
+      "path": "src/agents/config.ts",
+      "originalSha256": "ee0b03710d6c0ce418c41caa2a8a21c74007a951815af79e47342f69ca53285f"
+    },
+    {
+      "path": "src/appservice/client.ts",
+      "originalSha256": "4bcc4c6bcac56a99eb3051185af04a2eacac42b99a0018aadb28c84ca8747b6b"
+    },
+    {
+      "path": "src/appservice/auth.ts",
+      "originalSha256": "72f34dc5c97008013cf9bbf7f71b9c8e303e1a98ffae4f29a0be9369366c8c7e"
+    },
+    {
+      "path": "src/appservice/transactions.ts",
+      "originalSha256": "7db2b9e40107ba0860c798649676643e0836c074a6dee4a68d97c337520d23cb"
+    },
+    {
+      "path": "src/appservice/messages.ts",
+      "originalSha256": "56abd8e2303cc7d8986fe153a8d48ed0c9243e4b153709ffe0e0f134f20b369e"
+    },
+    {
+      "path": "src/appservice/routes.ts",
+      "originalSha256": "d26961687cf040e5ac20103c74bb43f4021f7aaa8826bec349018823667300c4"
+    },
+    {
+      "path": "src/appservice/puppets.ts",
+      "originalSha256": "e2a146cbb8ea0419066887ee2d893a7bec2b5b58c429f5c32962d807ca8da4ff"
+    },
+    {
+      "path": "src/council/halt.ts",
+      "originalSha256": "8158c50a0c97f1e9bc39da9b05a4ff5dc219137d4dca3675561cfc14324a45a3"
+    },
+    {
+      "path": "src/council/broker.ts",
+      "originalSha256": "0db50a4924a549aea0969a1d253a5f5ea5965cf69f35c66e8f1ea1d2173fca7d"
+    },
+    {
+      "path": "src/council/rat.ts",
+      "originalSha256": "2ad59f5d7df7894f8fb0c6664829caaa68436058975ccb30b5783dfffd340cf1"
+    },
+    {
+      "path": "src/council/freigabe.ts",
+      "originalSha256": "ef4917c6cbb2067bf28fe9619b14ca549b7f8d49d0a329d4ba8c75789c06e19f"
+    },
+    {
+      "path": "src/commands/index.ts",
+      "originalSha256": "f92b7be69afce1b983c954285a501b5c45bf17b1d0a5a7c4d65c31ef86cc1cb8"
+    },
+    {
+      "path": "src/rooms/bootstrap.ts",
+      "originalSha256": "adc27145d0015d2016f2dacd567e5e16485bffc162bb46ce42800f096d079bf1"
+    },
+    {
+      "path": "src/__tests__/unit.test.ts",
+      "originalSha256": "4ad14fb29e0d2485f9149b2603794eaa339343186c5eb0fd0a2c0f87e4b0f3ba"
+    },
+    {
+      "path": "src/__tests__/kanonisch.test.ts",
+      "originalSha256": "f5f4faeaf1edffe852b28d7d81c59b36ac7f4cac16b9638d00746aa7558e19e6"
+    },
+    {
+      "path": "src/__tests__/tagesuebersicht.test.ts",
+      "originalSha256": "5149fc9d9d7e9cb5951bc294d28f33840a122f12d8a2284529f6070159c25acf"
+    },
+    {
+      "path": "src/__tests__/redact-muster.test.ts",
+      "originalSha256": "f213953dc342047596e0368b6d42a5990d91bb026c13d626bcc44cb4bae7fe7f"
+    },
+    {
+      "path": "src/mcp/tools.ts",
+      "originalSha256": "e0aa09169e0e27f93028e2f54d7279963d114b7942b293d2dbecd4ffe3828c9d"
+    },
+    {
+      "path": "src/mcp/protocol.ts",
+      "originalSha256": "118adff4066a504e568f9e66ef57e10264c7b86ec709534378bca7dec02b4726"
+    },
+    {
+      "path": "src/mcp/zusatz.ts",
+      "originalSha256": "16932ab13970cd10d974f6eb3046fb21d4335cec44e33216e1d3cd3eafbf0cb4"
+    },
+    {
+      "path": "src/worker/server.ts",
+      "originalSha256": "fd23bd532b9536cba3f159d6c5505136488e2aaf0b6398804fcc00ecb3cc60de"
+    },
+    {
+      "path": "src/hooks/notify.ts",
+      "originalSha256": "7a31e7b728236a60553418773e0424340a0fe8fe227e092c366d786ba38b1e3f"
+    },
+    {
+      "path": "src/betrieb/faehigkeiten.ts",
+      "originalSha256": "266719fa7435867abf4d7cea238e8b06f42be3e41f849cfc8f27bfd75fc5c4f5"
+    },
+    {
+      "path": "src/betrieb/aktion.ts",
+      "originalSha256": "9de3a650274514acc2afede0a7bbffb6eb1cd33fb86e4b1b42a805be3208bded"
+    },
+    {
+      "path": "src/rat/prompts.ts",
+      "originalSha256": "8537a937c1786a0712698e069505c72f4da4e78679f87fac49dfe9ff8e5d0d85"
+    },
+    {
+      "path": "src/rat/lauf.ts",
+      "originalSha256": "82a1505601d4cc55c32ac780676614ef6650ca7383629b7cf250cec5936dec9a"
+    },
+    {
+      "path": "src/protocol/index.ts",
+      "originalSha256": "4e04fa589923bc850520460d3117624fc960f90d4c4b268031180be0f16dd075"
+    },
+    {
+      "path": "src/protocol/agents.ts",
+      "originalSha256": "028d3681a80d5a05245a21caadcd91f4a916a31b8698440e0ef2fde9be018685"
+    },
+    {
+      "path": "src/protocol/swarm.ts",
+      "originalSha256": "e4a6a595030c8d6d1cac4bf7982ec3ef922d7d6a1d1062cc968d4e784d6b18bf"
+    }
+  ]
+}

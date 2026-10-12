@@ -21,7 +21,19 @@
         <exclude domain="database" path="androidx.work.workdb-wal" />
         <exclude domain="database" path="androidx.work.workdb-shm" />
         <exclude domain="file" path="last-crash.txt" />
-    </cloud-backup>
+        <exclude domain="sharedpref" path="schwarm_sitzung.xml" />
+    <exclude domain="sharedpref" path="plum_swarm_notaus.xml" />
+    <exclude domain="sharedpref" path="schwarm_stand.xml" />
+    <exclude domain="sharedpref" path="schwarm_vorlagen.xml" />
+    <exclude domain="sharedpref" path="schwarm_ruhe.xml" />
+    <exclude domain="sharedpref" path="widget_aktuell.xml" />
+    <exclude domain="sharedpref" path="schwarm_push.xml" />
+    <exclude domain="sharedpref" path="einstellungen.xml" />
+    <exclude domain="sharedpref" path="hintergrund.xml" />
+
+    <exclude domain="file" path="schwarm-verlauf" />
+    <exclude domain="file" path="absturz" />
+</cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="claude_webui_secure_prefs.xml" />
         <exclude domain="sharedpref" path="__androidx_security_crypto_encrypted_prefs_key_keyset__.xml" />
@@ -34,5 +46,17 @@
         <exclude domain="database" path="androidx.work.workdb-wal" />
         <exclude domain="database" path="androidx.work.workdb-shm" />
         <exclude domain="file" path="last-crash.txt" />
-    </device-transfer>
+        <exclude domain="sharedpref" path="schwarm_sitzung.xml" />
+    <exclude domain="sharedpref" path="plum_swarm_notaus.xml" />
+    <exclude domain="sharedpref" path="schwarm_stand.xml" />
+    <exclude domain="sharedpref" path="schwarm_vorlagen.xml" />
+    <exclude domain="sharedpref" path="schwarm_ruhe.xml" />
+    <exclude domain="sharedpref" path="widget_aktuell.xml" />
+    <exclude domain="sharedpref" path="schwarm_push.xml" />
+    <exclude domain="sharedpref" path="einstellungen.xml" />
+    <exclude domain="sharedpref" path="hintergrund.xml" />
+
+    <exclude domain="file" path="schwarm-verlauf" />
+    <exclude domain="file" path="absturz" />
+</device-transfer>
 </data-extraction-rules>

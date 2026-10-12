@@ -6,6 +6,16 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -71,6 +81,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.runtime.key
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -127,7 +140,6 @@ import com.claudewebui.app.ui.components.dashboard.NewSessionDialog
 import org.koin.compose.viewmodel.koinViewModel
 import com.claudewebui.app.ui.components.common.PlumAmber
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     onNavigateToChat: (sessionId: String) -> Unit,
@@ -138,11 +150,126 @@ fun DashboardScreen(
     embedded: Boolean = false,
     selectedSessionId: String? = null,
 ) {
-    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+    var assistantArea by rememberSaveable { mutableStateOf("chat") }
+    var modelChatMode by rememberSaveable { mutableStateOf(false) }
+    var showPersonalization by remember { mutableStateOf(false) }
+    var workspacePath by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectArea: (String) -> Unit = { viewModel.clearSelection(); assistantArea = it; workspacePath = null; modelChatMode = false }
+    val reduceMotion = com.claudewebui.app.ui.theme.LocalReduceMotion.current
 
+    // Chat / Task / Code / Schwarm are sibling areas of one workspace. The
+    // header stays put and only the content below it cross-fades, so every
+    // switch (Chat→Task as much as Task→Code) animates the same way: no
+    // scale, no slide, nothing here is a drill-down.
+    val screen = when {
+        showPersonalization -> "personalization"
+        workspacePath != null -> "web:$workspacePath"
+        assistantArea == "chat" -> "model"
+        assistantArea == "swarm" -> "swarm"
+        else -> "list:$assistantArea"
+    }
+    var showHistory by remember { mutableStateOf(false) }
+    var showEmergency by remember { mutableStateOf(false) }
+    val showHeader = screen != "personalization" && !screen.startsWith("web:")
+    // The header floats over the content like the bottom bar: content fills the
+    // screen and scrolls underneath, dissolving into the header instead of
+    // being cut off by a straight edge.
+    var headerPx by remember { mutableIntStateOf(0) }
+    val topInset = if (showHeader) with(androidx.compose.ui.platform.LocalDensity.current) { headerPx.toDp() } else 0.dp
+    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+        androidx.compose.foundation.layout.Box(
+            Modifier.fillMaxSize().let { base ->
+                if (!showHeader) base else base
+                    .graphicsLayer(compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen)
+                    .drawWithContent {
+                        drawContent()
+                        val fade = 28.dp.toPx()
+                        val start = (headerPx - fade).coerceAtLeast(0f)
+                        val h = size.height.coerceAtLeast(1f)
+                        drawRect(
+                            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                (start / h).coerceIn(0f, 1f) to Color.Transparent,
+                                ((start + fade) / h).coerceIn(0f, 1f) to Color.Black,
+                                1f to Color.Black,
+                            ),
+                            blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                        )
+                    }
+            },
+        ) {
+            androidx.compose.animation.Crossfade(
+                targetState = screen,
+                animationSpec = androidx.compose.animation.core.tween(if (reduceMotion) 0 else 240),
+                label = "assistant_area",
+            ) { target ->
+                when {
+                    target == "personalization" ->
+                        AssistantPersonalizationScreen(onClose = { showPersonalization = false }, onOpenFeature = { showPersonalization = false; workspacePath = it })
+                    target.startsWith("web:") ->
+                        AssistantWebWorkspace(path = target.removePrefix("web:"), area = assistantArea, onAreaSelect = selectArea,
+                            onClose = { workspacePath = null; assistantArea = "code" },
+                            onPersonalize = { showPersonalization = true }, onNavigateToChat = onNavigateToChat,
+                            onNativeChat = { workspacePath = null; assistantArea = "chat"; modelChatMode = true })
+                    target == "model" -> AssistantModelChat(topInset = topInset, historyOpen = showHistory, onHistoryDismiss = { showHistory = false }, onAreaSelect = selectArea, onAgentChats = { modelChatMode = false })
+                    target == "swarm" -> AssistantSwarmScreen(topInset = topInset, emergencyOpen = showEmergency, onEmergencyDismiss = { showEmergency = false }, onAreaSelect = selectArea)
+                    else -> DashboardListScreen(
+                        onNavigateToChat, onNavigateToMessage, onNavigateToSettings, onNavigateMain,
+                        viewModel, embedded, selectedSessionId, target.removePrefix("list:"), selectArea,
+                        onPersonalize = { showPersonalization = true }, onModelChat = { modelChatMode = true },
+                        topInset = topInset,
+                    )
+                }
+            }
+        }
+        if (showHeader) androidx.compose.foundation.layout.Box(
+            Modifier.align(androidx.compose.ui.Alignment.TopCenter).onSizeChanged { headerPx = it.height }.let {
+                if (embedded) it.padding(top = 8.dp, start = 10.dp, end = 10.dp)
+                else it.statusBarsPadding().padding(top = 12.dp, start = 16.dp, end = 16.dp)
+            },
+        ) {
+            PlumAreaSelector(
+                assistantArea, selectArea,
+                onPersonalize = if (assistantArea == "code" || assistantArea == "task") ({ showPersonalization = true }) else null,
+                trailingIcon = when (assistantArea) {
+                    "chat" -> androidx.compose.material.icons.Icons.Outlined.History
+                    "swarm" -> androidx.compose.material.icons.Icons.Outlined.Shield
+                    else -> null
+                },
+                trailingLabel = when (assistantArea) {
+                    "chat" -> stringResource(R.string.assistant_history)
+                    "swarm" -> stringResource(R.string.assistant_emergency)
+                    else -> null
+                },
+                onTrailing = when (assistantArea) {
+                    "chat" -> ({ showHistory = true })
+                    "swarm" -> ({ showEmergency = true })
+                    else -> null
+                },
+            )
+        }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun DashboardListScreen(
+    onNavigateToChat: (sessionId: String) -> Unit,
+    onNavigateToMessage: (sessionId: String, messageId: String, chatId: String?) -> Unit,
+    onNavigateToSettings: () -> Unit,
+    onNavigateMain: (MainDestination) -> Unit,
+    viewModel: DashboardViewModel,
+    embedded: Boolean,
+    selectedSessionId: String?,
+    assistantArea: String,
+    selectArea: (String) -> Unit,
+    onPersonalize: () -> Unit,
+    onModelChat: () -> Unit,
+    topInset: androidx.compose.ui.unit.Dp = 0.dp,
+) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
     val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
     androidx.compose.ui.platform.LocalConfiguration.current
-
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showNewSessionDialog by remember { mutableStateOf(false) }
     // Selection mode drives the bulk action bar; archiving replaces deleting as
@@ -182,6 +309,7 @@ fun DashboardScreen(
     val idleAfter by IdlePrefs.threshold.collectAsStateWithLifecycle()
 
     val visibleSessions = state.filteredSessions.filter { session ->
+        if (session.surface != assistantArea) return@filter false
         when (selectedFilter) {
             "Running" -> effectiveState(session).activity == com.claudewebui.app.ui.components.dashboard.SessionActivity.WORKING
             "Attention" -> session.id in state.needsAttention
@@ -191,7 +319,7 @@ fun DashboardScreen(
             else -> true
         }
     }
-    val runningCount = state.sessions.count { effectiveState(it).activity == com.claudewebui.app.ui.components.dashboard.SessionActivity.WORKING }
+    val runningCount = state.sessions.count { it.surface == assistantArea && effectiveState(it).activity == com.claudewebui.app.ui.components.dashboard.SessionActivity.WORKING }
     // From the gateway overview, not derived here: a session blocked on an
     // approval is still "running", so counting ERROR rows missed exactly the
     // sessions that are waiting on the user.
@@ -247,7 +375,7 @@ fun DashboardScreen(
                 // Only the top inset shrinks the surface; the bottom inset goes
                 // into the grid's contentPadding so cards scroll *under* the
                 // floating nav bar instead of ending in a hard edge above it.
-                modifier = Modifier.fillMaxSize().padding(top = if (embedded) 0.dp else padding.calculateTopPadding()),
+                modifier = Modifier.fillMaxSize(),
                 max = 1180.dp,
             ) {
             LazyVerticalGrid(
@@ -258,16 +386,22 @@ fun DashboardScreen(
                 contentPadding = PaddingValues(
                     start = if (embedded) 10.dp else 16.dp,
                     end = if (embedded) 10.dp else 16.dp,
-                    top = if (embedded) 8.dp else 12.dp,
+                    top = topInset + 8.dp,
                     bottom = 12.dp + padding.calculateBottomPadding(),
                 ),
                 verticalArrangement = Arrangement.spacedBy(if (denseRows) 6.dp else screenTokens.spacing.cozy),
                 horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.cozy),
             ) {
+                if (assistantArea == "chat") item(span = { GridItemSpan(maxLineSpan) }) {
+                    Button(onClick = onModelChat) {
+                        Text(screenResources.getString(R.string.assistant_model_chat))
+                    }
+                }
                 if (selectionActive) item(span = { GridItemSpan(maxLineSpan) }) {
                     Column {
                         Text(screenResources.getString(R.string.selected_count, state.selectedSessionIds.size), color = PlumText)
                         LazyRow {
+                            item { TextButton(onClick = { viewModel.moveSessionsToSurface(state.selectedSessionIds.toList(), if (assistantArea == "task") "code" else "task") }) { Text(stringResource(if (assistantArea == "task") R.string.assistant_move_to_code else R.string.assistant_move_to_task)) } }
                             item { TextButton(onClick = { viewModel.bulkAction(if (state.showArchived) "unarchive" else "archive") }) { Text(screenResources.getString(if (state.showArchived) R.string.action_restore else R.string.action_archive)) } }
                             item { TextButton(onClick = { viewModel.bulkAction("star") }) { Text(dashboardFilterLabel("Starred", screenResources)) } }
                             item { TextButton(onClick = viewModel::clearSelection) { Text(screenResources.getString(R.string.action_cancel)) } }
@@ -305,7 +439,7 @@ fun DashboardScreen(
                             items(if (embedded) listOf("All", "Attention") else if (compactList) listOf("All", "Attention", "Running") else listOf("All", "Attention", "Running", "Unread", "Starred", "Recent")) { filter ->
                                 FilterPill(
                                     label = when (filter) {
-                                        "All" -> screenResources.getString(R.string.dashboard_all_1_s_a86c9, state.filteredSessions.size)
+                                        "All" -> screenResources.getString(R.string.dashboard_all_1_s_a86c9, state.filteredSessions.count { it.surface == assistantArea })
                                         "Attention" -> screenResources.getString(R.string.filter_attention)
                                         "Unread" -> screenResources.getString(R.string.filter_unread)
                                         else -> dashboardFilterLabel(filter, screenResources)
@@ -499,6 +633,7 @@ fun DashboardScreen(
                                 onToggleStar = { viewModel.toggleStar(row.session.id) },
                                 onRename = { renameTarget = row.session },
                                 onMove = { categoryTarget = row.session },
+                                onMoveSurface = { viewModel.moveSessionsToSurface(listOf(row.session.id), if (assistantArea == "task") "code" else "task") },
                                 onDelete = { deleteTarget = row.session },
                             )
                         }
@@ -510,6 +645,15 @@ fun DashboardScreen(
         }
     }
 
+    val settingsRepository = org.koin.compose.koinInject<com.claudewebui.app.data.repository.SettingsRepository>()
+    var providerModels by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+    LaunchedEffect(showNewSessionDialog) {
+        if (showNewSessionDialog && providerModels.isEmpty()) {
+            settingsRepository.getCLIProviders().onSuccess { configs ->
+                providerModels = configs.associate { it.id.lowercase() to it.models }
+            }
+        }
+    }
     if (showNewSessionDialog) {
         NewSessionDialog(
             categories = state.categories,
@@ -519,14 +663,16 @@ fun DashboardScreen(
             templates = state.sessionTemplates,
             isCreating = state.isCreatingSession,
             creationError = state.creationError,
+            surface = assistantArea,
             onDismiss = {
                 if (!state.isCreatingSession) {
                     showNewSessionDialog = false
                     viewModel.clearCreationError()
                 }
             },
-            onCreate = { name, provider, directory, mode, categoryId ->
-                viewModel.createSession(name, directory, provider, mode, categoryId)
+            modelsFor = { provider -> providerModels[provider.name.lowercase()].orEmpty() },
+            onCreate = { name, provider, directory, mode, categoryId, model, reasoning ->
+                viewModel.createSession(name, if (assistantArea == "code") directory else null, provider, mode, categoryId, assistantArea, model, reasoning)
             },
         )
     }
@@ -1219,6 +1365,7 @@ private fun PlumSessionCard(
     onRename: () -> Unit,
     onMove: () -> Unit,
     onDelete: () -> Unit,
+    onMoveSurface: () -> Unit = {},
     selected: Boolean = false,
     onSelect: () -> Unit = {},
     onArchive: () -> Unit = {},
@@ -1400,6 +1547,7 @@ private fun PlumSessionCard(
         }
 
         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(text = { Text(screenResources.getString(if (session.surface == "task") R.string.assistant_move_to_code else R.string.assistant_move_to_task)) }, onClick = { showMenu = false; onMoveSurface() })
             DropdownMenuItem(text = { Text(screenResources.getString(R.string.action_select)) }, onClick = { showMenu = false; onSelect() })
             DropdownMenuItem(text = { Text(screenResources.getString(if (archived) R.string.action_restore else R.string.action_archive)) }, onClick = { showMenu = false; onArchive() })
             DropdownMenuItem(

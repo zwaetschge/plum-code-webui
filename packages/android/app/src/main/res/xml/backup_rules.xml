@@ -33,4 +33,16 @@
     <exclude domain="database" path="androidx.work.workdb-wal" />
     <exclude domain="database" path="androidx.work.workdb-shm" />
     <exclude domain="file" path="last-crash.txt" />
+    <exclude domain="sharedpref" path="schwarm_sitzung.xml" />
+    <exclude domain="sharedpref" path="plum_swarm_notaus.xml" />
+    <exclude domain="sharedpref" path="schwarm_stand.xml" />
+    <exclude domain="sharedpref" path="schwarm_vorlagen.xml" />
+    <exclude domain="sharedpref" path="schwarm_ruhe.xml" />
+    <exclude domain="sharedpref" path="widget_aktuell.xml" />
+    <exclude domain="sharedpref" path="schwarm_push.xml" />
+    <exclude domain="sharedpref" path="einstellungen.xml" />
+    <exclude domain="sharedpref" path="hintergrund.xml" />
+
+    <exclude domain="file" path="schwarm-verlauf" />
+    <exclude domain="file" path="absturz" />
 </full-backup-content>

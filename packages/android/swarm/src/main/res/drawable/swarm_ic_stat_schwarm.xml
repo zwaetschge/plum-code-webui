@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kleines Symbol in der Statusleiste: die Wabe, einfarbig. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2.2 L20.5,7.1 L20.5,16.9 L12,21.8 L3.5,16.9 L3.5,7.1 Z M12,4.5 L5.5,8.25 L5.5,15.75 L12,19.5 L18.5,15.75 L18.5,8.25 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10.6,9.2 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0 Z M7.9,14.2 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0 Z M13.3,14.2 a1.4,1.4 0 1,0 2.8,0 a1.4,1.4 0 1,0 -2.8,0 Z" />
+</vector>

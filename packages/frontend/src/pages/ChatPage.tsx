@@ -1,0 +1,459 @@
+import { usePersonalization } from '@/components/assistant/usePersonalization';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowUp, Paperclip, SlidersHorizontal, X, Mic, Loader2 } from 'lucide-react';
+import type { AssistantApiProvider, AssistantResource } from '@plum-code-webui/shared';
+import { api } from '@/services/api';
+import { useAuthStore } from '@/stores/authStore';
+import { deliverAssistant } from '@/services/assistantOutbox';
+import { uploadChatImages } from '@/components/assistant/ChatImages';
+import { VoiceComposer } from '@/components/assistant/VoiceComposer';
+import { ResourcePicker } from '@/components/assistant/ResourcePicker';
+import { AssistantOutbox } from '@/components/assistant/AssistantOutbox';
+import {
+  ModelEffortPicker,
+  effortPayload,
+  useEffortChoice,
+} from '@/components/assistant/ModelEffortPicker';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { orderChatApiProviders } from '@/lib/chatApiProviders';
+
+export function ChatPage() {
+  const owner = useAuthStore((s) => s.user?.id);
+  const location = useLocation();
+  return <ChatAccountPage key={`${owner}:${location.key}`} owner={owner} />;
+}
+function ChatAccountPage({ owner }: { owner?: string }) {
+  const user = useAuthStore((state) => state.user);
+  const { preferences } = usePersonalization();
+  const firstName = preferences.nickname || user?.name?.trim().split(/\s+/)[0];
+  const navigate = useNavigate(),
+    cache = useQueryClient(),
+    input = useRef<HTMLTextAreaElement>(null),
+    fileInput = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState(''),
+    [selection, setSelection] = useState(''),
+    [model, setModel] = useState(''),
+    [profile, setProfile] = useState('');
+  const [options, setOptions] = useState(false),
+    [voice, setVoice] = useState(false),
+    [temporary, setTemporary] = useState(false),
+    [files, setFiles] = useState<File[]>([]),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  const [sources, setSources] = useState<string[]>([]),
+    [research, setResearch] = useState(false);
+  const [created, setCreated] = useState<AssistantResource | null>(null);
+  const [effort, setEffort] = useEffortChoice();
+  const providers = useQuery({
+    queryKey: ['assistant', 'api-chat-providers', owner],
+    select: orderChatApiProviders,
+    queryFn: async () =>
+      (await api.get<{ data: AssistantApiProvider[] }>('/api/assistant/api-chat-providers')).data
+        .data,
+  });
+  const profiles = useQuery({
+    queryKey: ['assistant', 'resources', 'profiles', owner],
+    queryFn: async () =>
+      (await api.get<{ data: AssistantResource[] }>('/api/assistant/profiles')).data.data,
+  });
+  const upstream = providers.data?.find((p) => `api:${p.id}` === selection) ?? providers.data?.[0];
+  const models = upstream?.models ?? [];
+  const actualModel = models.includes(model) ? model : models[0];
+  const chosenProfile = profiles.data?.find((p) => p.id === profile);
+  useEffect(() => {
+    const element = input.current;
+    if (element) {
+      element.style.height = 'auto';
+      element.style.height = `${Math.min(160, element.scrollHeight)}px`;
+    }
+  }, [draft]);
+  const start = async () => {
+    if (busy || !draft.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      {
+        if (!upstream || !actualModel)
+          throw new Error('Eine verfügbare Modellverbindung auswählen.');
+        const resource =
+          created ??
+          (
+            (await deliverAssistant(
+              '/api/assistant/api-chats',
+              {
+                title: draft.trim().slice(0, 80),
+                providerId: upstream.id,
+                model: actualModel,
+                profileId: profile || null,
+                temporary,
+                sourceIds: sources,
+                ...(research ? { workflow: 'research' } : {}),
+              },
+              'Gespräch erstellen'
+            )) as { data: { data: AssistantResource } }
+          ).data.data;
+        if (useAuthStore.getState().user?.id !== owner) return;
+        setCreated(resource);
+        const imageAssetIds = await uploadChatImages(resource.id, files);
+        if (useAuthStore.getState().user?.id !== owner) return;
+        await deliverAssistant(
+          `/api/assistant/api-chats/${resource.id}/turns`,
+          {
+            expectedRevision: resource.revision,
+            prompt: draft.trim(),
+            imageAssetIds,
+            ...effortPayload(effort),
+          },
+          'Erste Nachricht',
+          { expiresAt: resource.body.temporary ? String(resource.body.expiresAt) : undefined }
+        );
+        if (useAuthStore.getState().user?.id !== owner) return;
+        void cache.invalidateQueries({ queryKey: ['assistant', 'api-chats'] });
+        navigate(`/chat/model/${resource.id}`);
+      }
+    } catch (failure) {
+      if (useAuthStore.getState().user?.id === owner)
+        setError(
+          failure instanceof Error ? failure.message : 'Gespräch konnte nicht gestartet werden.'
+        );
+    } finally {
+      if (useAuthStore.getState().user?.id === owner) setBusy(false);
+    }
+  };
+  return (
+    <div className="plum-chat-page">
+      <header className="plum-chat-header plum-new-chat-header">
+        <span className="plum-chat-title">Plum Chat</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-label="Personalisierung öffnen"
+          onClick={() => navigate('/chat/personalization')}
+        >
+          <SlidersHorizontal size={16} />
+        </Button>
+      </header>
+      <div className="plum-chat-welcome">
+        <h1>
+          {firstName
+            ? `Hallo ${firstName}, was beschäftigt dich heute?`
+            : 'Was beschäftigt dich heute?'}
+        </h1>
+        <form
+          className="plum-message-composer"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void start();
+          }}
+        >
+          {!!files.length && (
+            <div className="flex flex-wrap gap-2 p-3 pb-0">
+              {files.map((file, index) => (
+                <span key={`${file.name}:${index}`} className="plum-file-chip">
+                  <Paperclip size={13} />
+                  <span className="max-w-40 truncate">{file.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`${file.name} entfernen`}
+                    disabled={busy}
+                    onClick={() => setFiles((old) => old.filter((_, i) => i !== index))}
+                  >
+                    <X size={14} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={input}
+            aria-label="Deine Nachricht"
+            placeholder="Frag Plum …"
+            value={draft}
+            disabled={busy}
+            maxLength={20000}
+            rows={1}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (
+                e.key === 'Enter' &&
+                !e.shiftKey &&
+                !e.nativeEvent.isComposing &&
+                window.matchMedia('(min-width: 768px)').matches
+              ) {
+                e.preventDefault();
+                void start();
+              }
+            }}
+          />
+          <div className="plum-composer-toolbar">
+            <div className="flex min-w-0 items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Dateien anhängen"
+                disabled={busy || !!created || research}
+                onClick={() => fileInput.current?.click()}
+              >
+                <Paperclip size={19} />
+              </Button>
+              <input
+                ref={fileInput}
+                type="file"
+                multiple
+                accept="image/png,image/jpeg,image/webp"
+                hidden
+                onChange={(e) => {
+                  const selectedFiles = Array.from(e.target.files ?? []);
+                  setFiles((old) => [...old, ...selectedFiles].slice(0, 4));
+                  e.target.value = '';
+                }}
+              />
+            </div>
+            <div className="plum-composer-model-tools">
+              <ModelEffortPicker
+                providers={providers.data ?? []}
+                providerId={upstream?.id}
+                model={actualModel}
+                disabled={busy || !!created}
+                onSelect={(providerId, value) => {
+                  setSelection(`api:${providerId}`);
+                  setModel(value);
+                }}
+                effort={effort}
+                onEffort={setEffort}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Sprache"
+                disabled={!preferences.voiceChat}
+                aria-expanded={voice}
+                onClick={() => setVoice(!voice)}
+              >
+                <Mic size={18} />
+              </Button>
+              <Button
+                size="icon"
+                type="submit"
+                aria-label="Nachricht senden"
+                disabled={
+                  busy ||
+                  !draft.trim() ||
+                  !upstream ||
+                  !actualModel ||
+                  (research && !sources.length)
+                }
+                className="plum-send-button"
+              >
+                {busy ? <Loader2 className="animate-spin" size={18} /> : <ArrowUp size={19} />}
+              </Button>
+            </div>
+          </div>
+        </form>
+        <div className="plum-chat-context">
+          <button
+            type="button"
+            onClick={() => setOptions(!options)}
+            aria-expanded={options}
+            className="plum-context-button"
+          >
+            <SlidersHorizontal size={13} />
+            {chosenProfile?.title ?? 'Gesprächsoptionen'}
+          </button>
+          {temporary && <span>Temporär · 24 Stunden</span>}
+          {research && <span>Dokumentrecherche</span>}
+        </div>
+        {providers.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            API-Verbindungen konnten nicht geladen werden.{' '}
+            <button type="button" className="underline" onClick={() => void providers.refetch()}>
+              Erneut versuchen
+            </button>
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        <Dialog open={options} onOpenChange={setOptions}>
+          <DialogContent className="plum-assistant-shell plum-chat-dialog">
+            <DialogTitle>Gespräch personalisieren</DialogTitle>
+            <DialogDescription>
+              Profil, persönliche Anweisungen und Gesprächskontext.
+            </DialogDescription>
+            <section className="plum-chat-options" aria-label="Gespräch personalisieren">
+              <div className="grid gap-3">
+                <label>
+                  Profil
+                  <select
+                    value={profile}
+                    disabled={busy || !!created}
+                    onChange={(e) => setProfile(e.target.value)}
+                  >
+                    <option value="">Standard</option>
+                    {profiles.data?.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <Link to="/assistant/profiles" className="text-sm underline">
+                  Profile und Systemanweisungen bearbeiten
+                </Link>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    disabled={busy || !!created}
+                    checked={temporary}
+                    onChange={(e) => {
+                      setTemporary(e.target.checked);
+                      if (e.target.checked) setResearch(false);
+                    }}
+                  />
+                  Temporäres Gespräch
+                </label>
+              </div>
+              {temporary && (
+                <p className="text-xs text-muted-foreground">
+                  Ohne persönliches Gedächtnis. Plum löscht den lokalen Verlauf nach 24 Stunden;
+                  beim Anbieter gelten eigene Aufbewahrungsregeln.
+                </p>
+              )}
+              {
+                <>
+                  <ResourcePicker
+                    label="Dokumentquellen"
+                    kind="source"
+                    value={sources}
+                    maximum={20}
+                    onChange={setSources}
+                  />
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={research}
+                      disabled={busy || !!created}
+                      onChange={(e) => {
+                        setResearch(e.target.checked);
+                        if (e.target.checked) {
+                          setTemporary(false);
+                          setFiles([]);
+                        }
+                      }}
+                    />
+                    Quellengebundene Dokumentrecherche
+                  </label>
+                </>
+              }
+              {!temporary &&
+                !research &&
+                Object.values(preferences.referencePhotos).some(Boolean) && (
+                  <div className="flex flex-wrap gap-2" aria-label="Gespeicherte Referenzfotos">
+                    {(['portrait', 'fullBody'] as const)
+                      .filter((slot) => preferences.referencePhotos[slot])
+                      .map((slot) => (
+                        <Button
+                          key={slot}
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={busy || !!created}
+                          onClick={() => {
+                            void (async () => {
+                              try {
+                                const response = await api.download(
+                                  `/api/assistant/personalization/photos/${slot}`
+                                );
+                                const bytes = await response.blob();
+                                if (useAuthStore.getState().user?.id !== owner) return;
+                                const selected = preferences.referencePhotos[slot]!;
+                                setFiles((old) =>
+                                  [
+                                    ...old,
+                                    new File([bytes], selected.filename, {
+                                      type: selected.mimeType,
+                                    }),
+                                  ].slice(0, 4)
+                                );
+                              } catch {
+                                setError('Referenzfoto konnte nicht geladen werden.');
+                              }
+                            })();
+                          }}
+                        >
+                          {slot === 'portrait'
+                            ? 'Referenzfoto anhängen'
+                            : 'Ganzkörperfoto anhängen'}
+                        </Button>
+                      ))}
+                  </div>
+                )}
+              {
+                <p className="text-xs text-muted-foreground">
+                  Dieses Gespräch nutzt deine API-Verbindung und wird vom Anbieter abgerechnet.
+                  Bildanhänge: bis zu vier Bilder.
+                </p>
+              }
+            </section>
+            <Button onClick={() => setOptions(false)}>Fertig</Button>
+          </DialogContent>
+        </Dialog>
+        {voice && preferences.voiceChat && (
+          <div className="plum-chat-options">
+            <VoiceComposer
+              scopeKey={`${owner}:new-chat`}
+              text=""
+              voice={String(chosenProfile?.body.voice ?? 'Rufus Beck')}
+              language={String(chosenProfile?.body.language ?? 'German')}
+              onTranscription={(text) => {
+                setDraft((old) => [old, text].filter(Boolean).join('\n'));
+                input.current?.focus();
+              }}
+            />
+          </div>
+        )}
+        {!providers.isPending && !providers.data?.length && (
+          <Link className="text-sm underline" to="/settings">
+            Anbieter in den Einstellungen verbinden
+          </Link>
+        )}
+        {preferences.suggestedPrompts && (
+          <div
+            className="flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs text-muted-foreground"
+            aria-label="Vorgeschlagene Prompts"
+          >
+            {[
+              'Hilf mir, einen Text zu schreiben',
+              'Plane mit mir meinen Tag',
+              'Erkläre mir ein Thema verständlich',
+            ].map((text) => (
+              <button
+                key={text}
+                type="button"
+                disabled={busy}
+                className="rounded-sm hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                onClick={() => {
+                  setDraft(text);
+                  input.current?.focus();
+                }}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+        )}
+        <AssistantOutbox />
+      </div>
+    </div>
+  );
+}

@@ -36,6 +36,7 @@ export const CLAUDE_PROVIDER_OVERRIDE_ENV_KEYS = [
 ] as const;
 
 export const WEBUI_DEFAULT_MCP_SERVERS: Record<string, ClaudeMcpServer> = {
+  assistant: { type: 'stdio', command: 'node', args: ['/app/scripts/mcp-servers/assistant.mjs'] },
   godot: {
     type: 'stdio',
     command: 'node',
@@ -55,6 +56,13 @@ export const WEBUI_DEFAULT_MCP_SERVERS: Record<string, ClaudeMcpServer> = {
     type: 'stdio',
     command: 'node',
     args: ['/app/scripts/mcp-servers/firefox.mjs'],
+  },
+  rea: {
+    type: 'stdio',
+    command: 'npx',
+    args: ['--yes', 'rea-agents@6.3.0', 'mcp'],
+    // The npm-global volume survives rebuilds; cache the pinned release there.
+    env: { npm_config_cache: '/home/node/.npm-global/cache' },
   },
 };
 

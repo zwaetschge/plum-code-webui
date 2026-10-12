@@ -1,0 +1,260 @@
+.plum-task-page {
+  width: min(100%, 1280px);
+  margin: 0 auto;
+  padding: 32px 28px;
+  color: hsl(var(--foreground));
+}
+.plum-task-page > header {
+  margin-bottom: 28px;
+  align-items: center;
+}
+.plum-task-page > header h1 {
+  margin-top: 6px;
+  font-size: 28px;
+  letter-spacing: -0.025em;
+}
+.plum-task-page > header p {
+  color: hsl(var(--foreground));
+  font-size: 13px;
+}
+.plum-task-workspace,
+.plum-task-list {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  align-items: start;
+}
+.plum-task-toolbar,
+.plum-task-card,
+.plum-task-editor,
+.plum-task-detail {
+  border: 1px solid var(--assistant-glass-edge);
+  background: var(--assistant-glass);
+  border-radius: 16px;
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  box-shadow:
+    inset 0 1px 0 var(--assistant-glass-edge),
+    var(--assistant-glass-shadow);
+}
+.plum-task-toolbar {
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+}
+.plum-task-search {
+  display: flex;
+  min-width: 0;
+}
+.plum-task-search input {
+  background: hsl(var(--background) / 0.24);
+  height: 44px;
+  border-radius: 10px;
+}
+.plum-task-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px 20px;
+}
+.plum-task-filters > label:not(:last-child) {
+  flex: 1 1 155px;
+}
+.plum-task-filters > label:last-child {
+  min-height: 40px;
+}
+.plum-task-filters select,
+.plum-task-editor select,
+.plum-task-detail select {
+  background: hsl(var(--background) / 0.36);
+  min-height: 40px;
+  width: 100%;
+  max-width: 100%;
+  color: hsl(var(--foreground));
+}
+.plum-task-page select option {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+}
+.plum-task-page input[type='checkbox'] {
+  accent-color: hsl(var(--primary));
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.plum-task-count {
+  padding: 8px 12px;
+  color: hsl(var(--foreground));
+  line-height: 1.65;
+  background: var(--assistant-glass);
+  border: 1px solid var(--assistant-glass-edge);
+  border-radius: 10px;
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+}
+.plum-task-card {
+  padding: 16px 18px;
+}
+.plum-task-card[data-selected] {
+  border-color: hsl(var(--primary));
+  box-shadow:
+    inset 3px 0 0 hsl(var(--primary)),
+    var(--assistant-glass-shadow);
+}
+.plum-task-open {
+  padding: 0;
+  display: block;
+}
+.plum-task-open:hover {
+  background: hsl(var(--foreground) / 0.05);
+}
+.plum-task-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  width: 100%;
+}
+.plum-task-card-heading > span:first-child {
+  flex: 1 1 160px;
+  font-size: 15px;
+  line-height: 1.55;
+}
+.plum-task-status {
+  border-radius: 999px;
+  border: 1px solid hsl(var(--foreground) / 0.16);
+  padding: 4px 9px;
+  color: hsl(var(--foreground));
+  background: hsl(var(--foreground) / 0.06);
+  line-height: 1.3;
+}
+.plum-task-status[data-status='running'],
+.plum-task-status[data-status='completed'] {
+  border-color: hsl(var(--primary) / 0.5);
+  background: hsl(var(--primary) / 0.12);
+}
+.plum-task-status[data-status='failed'],
+.plum-task-status[data-status='interrupted'],
+.plum-task-status[data-status='waiting_input'] {
+  border-style: dashed;
+}
+.plum-task-meta {
+  padding-top: 4px;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.6;
+}
+.plum-task-page :is(.plum-task-card, .plum-task-editor, .plum-task-detail) .text-muted-foreground,
+.plum-task-meta {
+  color: hsl(var(--foreground) / 0.82);
+}
+.plum-task-meta time {
+  color: hsl(var(--foreground));
+}
+.plum-task-meta time.text-destructive {
+  color: hsl(var(--foreground));
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.plum-task-editor,
+.plum-task-detail {
+  padding: 24px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.plum-task-fields {
+  display: grid;
+  align-items: start;
+  gap: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.plum-task-fields > :first-child,
+.plum-task-fields > label:has(textarea) {
+  grid-column: 1 / -1;
+}
+.plum-task-fields > * {
+  min-width: 0;
+}
+.plum-task-fields fieldset {
+  border-color: var(--assistant-glass-edge);
+  background: hsl(var(--background) / 0.18);
+  border-radius: 12px;
+}
+.plum-task-detail > .border,
+.plum-task-detail > section {
+  border-color: var(--assistant-glass-edge);
+  background: hsl(var(--background) / 0.18);
+  border-radius: 12px;
+}
+.plum-task-detail :is(input, textarea),
+.plum-task-editor :is(input:not([type='checkbox']), textarea) {
+  background: hsl(var(--background) / 0.28);
+}
+.plum-task-detail > div:first-child h2 {
+  line-height: 1.4;
+}
+.plum-task-detail > div:first-child p {
+  font-size: 12px;
+  margin-top: 6px;
+}
+.plum-task-page :is(select, input[type='checkbox']):focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 3px;
+}
+@media (min-width: 1150px) {
+  .plum-task-workspace:has(.plum-task-detail) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.95fr);
+  }
+  .plum-task-detail {
+    position: sticky;
+    top: 20px;
+    max-height: calc(100dvh - 40px);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+}
+@media (max-width: 639px) {
+  .plum-task-page {
+    padding: 22px 16px;
+  }
+  .plum-task-page > header {
+    gap: 16px;
+    margin-bottom: 22px;
+  }
+  .plum-task-page > header h1 {
+    font-size: 24px;
+  }
+  .plum-task-editor,
+  .plum-task-detail {
+    padding: 18px;
+  }
+  .plum-task-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .plum-task-filters > label:not(:last-child) {
+    flex-basis: 130px;
+  }
+  .plum-task-card {
+    padding: 14px;
+  }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .plum-task-page
+    :is(
+      .plum-task-toolbar,
+      .plum-task-count,
+      .plum-task-card,
+      .plum-task-editor,
+      .plum-task-detail
+    ) {
+    background: hsl(var(--card));
+  }
+}
+html.eink
+  .plum-task-page
+  :is(.plum-task-toolbar, .plum-task-count, .plum-task-card, .plum-task-editor, .plum-task-detail) {
+  background: hsl(var(--card));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}

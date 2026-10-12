@@ -1,0 +1,100 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  background: #f2f7f7;
+  color: #142c2a;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  padding: 16px;
+  max-width: 640px;
+  margin: auto;
+}
+h1 {
+  font-size: 1.4rem;
+}
+label {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  font-size: 0.9rem;
+}
+textarea,
+select,
+button {
+  font: inherit;
+  border: 1px solid #94aca8;
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  padding: 10px;
+  min-width: 0;
+}
+textarea,
+select {
+  width: 100%;
+}
+textarea {
+  resize: vertical;
+}
+button {
+  cursor: pointer;
+  max-width: 100%;
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.hint {
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+a {
+  color: #00594f;
+}
+#error {
+  color: #a31429;
+  white-space: pre-wrap;
+}
+#account,
+#notice {
+  overflow-wrap: anywhere;
+}
+button:focus-visible,
+a:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid #1856ff;
+  outline-offset: 2px;
+}
+[hidden] {
+  display: none !important;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    background: #142320;
+    color: #ecf4f2;
+  }
+  textarea,
+  select,
+  button {
+    background: #1f332e;
+    border-color: #728f86;
+  }
+  a {
+    color: #9be9d5;
+  }
+  #error {
+    color: #ffacb9;
+  }
+}

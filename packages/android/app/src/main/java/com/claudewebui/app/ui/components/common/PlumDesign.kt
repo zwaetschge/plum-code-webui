@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -35,6 +36,16 @@ import androidx.compose.material.icons.outlined.ShowChart
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.ViewList
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -173,7 +184,7 @@ fun PlumBackdrop(
     content: @Composable () -> Unit,
 ) {
     if (LocalBackdropAlreadyDrawn.current) {
-        Box(modifier.fillMaxSize()) { content() }
+        CompositionLocalProvider(LocalContentColor provides PlumText) { Box(modifier.fillMaxSize()) { content() } }
         return
     }
     val palette = LocalPlumPalette.current
@@ -228,7 +239,7 @@ fun PlumBackdrop(
                 }
             }
         }
-        CompositionLocalProvider(LocalBackdropAlreadyDrawn provides true) { content() }
+        CompositionLocalProvider(LocalBackdropAlreadyDrawn provides true, LocalContentColor provides palette.text) { content() }
     }
 }
 
@@ -680,11 +691,12 @@ private fun NavDestinationIcon(
     active: Boolean,
     badgeCount: Int,
 ) {
+    val label = destination.label
     val tokens = PlumTheme.tokens
     Box {
         Icon(
             destination.icon,
-            contentDescription = destination.label,
+            contentDescription = label,
             // 23dp: one step under iconLg so five items fit the short bar.
             tint = if (active) PlumAccent else PlumMuted,
             modifier = Modifier.size(23.dp),
@@ -881,64 +893,49 @@ fun PlumBottomBar(
     badgeDestination: MainDestination? = MainDestination.ACTIVITY,
     badgeCount: Int = 0,
 ) {
-    val tokens = PlumTheme.tokens
-    val short = isShortWindow() || LocalDensity.current.fontScale >= 1.5f
-    val barShape = tokens.radius.barShape
-    // 22dp: the item pill is inset from the 30dp bar so both curves stay concentric.
-    val itemShape = RoundedCornerShape(22.dp)
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(
-                horizontal = tokens.spacing.cozy,
-                vertical = if (short) tokens.spacing.xs else tokens.spacing.sm,
-            )
-            .height(if (short) tokens.sizing.navBarHeightShort else tokens.sizing.navBarHeight)
-            .shadow(tokens.elevation.level4, barShape)
-            .plumGlass(role = GlassRole.Overlay, shape = barShape),
+    val compact = isShortWindow() || LocalDensity.current.fontScale >= 1.5f
+    val primary = listOf(MainDestination.SESSIONS, MainDestination.MONITOR, MainDestination.LIBRARY)
+    val secondary = MainDestination.entries.filter { it !in primary }
+    var expanded by remember { mutableStateOf(false) }
+    val more = stringResource(R.string.assistant_shell_more)
+    Row(
+        modifier = modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)
+            .plumGlass(role = GlassRole.Overlay, shape = RoundedCornerShape(22.dp)).padding(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = tokens.spacing.xs, vertical = 5.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            MainDestination.entries.forEach { destination ->
-                val active = destination == selected
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(itemShape)
-                        .then(
-                            if (active) {
-                                Modifier
-                                    .background(LocalPlumPalette.current.selectionTint)
-                                    .border(tokens.border.hairline, PlumAccent, itemShape)
-                            } else Modifier
-                        )
-                        .semantics { this.selected = active }
-                        .clickable(role = Role.Button) { onNavigate(destination) }
-                        .padding(vertical = tokens.spacing.sm),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    NavDestinationIcon(
-                        destination = destination,
-                        active = active,
-                        badgeCount = if (destination == badgeDestination) badgeCount else 0,
-                    )
-                    if (!short) Text(
-                        destination.label,
-                        color = if (active) PlumAccent else PlumMuted,
-                        fontSize = 11.sp,
-                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
-                        // Six destinations on a phone-width bar: a label that
-                        // wraps would push the bar taller than its glass.
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+        primary.forEach { destination ->
+            val active = destination == selected
+            val label = destination.label
+            Column(
+                Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(16.dp))
+                    .background(if (active) LocalPlumPalette.current.selectionTint else Color.Transparent)
+                    .semantics { this.selected = active; contentDescription = label }
+                    .clickable(role = Role.Tab) { onNavigate(destination) }.padding(vertical = 9.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                NavDestinationIcon(destination, active, if (destination == badgeDestination) badgeCount else 0)
+                if (!compact) Text(destination.label, color = if (active) PlumText else PlumMuted,
+                    style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Box(Modifier.weight(1f)) {
+            Column(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(16.dp))
+                    .background(if (selected in secondary) LocalPlumPalette.current.selectionTint else Color.Transparent)
+                    .semantics { this.selected = selected in secondary; contentDescription = more }
+                    .clickable(role = Role.Button) { expanded = true }.padding(vertical = 9.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                BadgedBox(badge = { if (badgeDestination in secondary && badgeCount > 0) Badge { Text(badgeCount.coerceAtMost(99).toString()) } }) {
+                    Icon(Icons.Outlined.MoreHoriz, null, tint = PlumMuted, modifier = Modifier.size(26.dp))
+                }
+                if (!compact) Text(more, style = MaterialTheme.typography.labelSmall, color = PlumMuted, maxLines = 1)
+            }
+            DropdownMenu(expanded, { expanded = false }) {
+                secondary.forEach { destination ->
+                    DropdownMenuItem(text = { Text(destination.label) }, leadingIcon = { Icon(destination.icon, null) },
+                        onClick = { expanded = false; onNavigate(destination) })
                 }
             }
         }

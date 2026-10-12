@@ -1,0 +1,57 @@
+import json, os
+from playwright.sync_api import sync_playwright, expect
+url=os.environ.get('PLUM_FIXTURE_URL','http://127.0.0.1:5188');assert url.startswith(('http://127.0.0.1:','http://localhost:'))
+with sync_playwright() as p:
+    browser=p.chromium.launch(executable_path='/usr/local/bin/plum-chromium',headless=True)
+    page=browser.new_page(viewport={'width':390,'height':844});errors=[];requests=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    def api(route):
+        assert route.request.method=='PATCH',route.request.url
+        body=json.loads(route.request.post_data);requests.append(body)
+        page.evaluate('(body)=>window.__savedBody=body',body['body'])
+        route.fulfill(content_type='application/json',body=json.dumps({'data':{'id':'slides-fixture'}}))
+    page.route('**/api/**',api)
+    page.goto(url+'/scripts/fixtures/assistant-slides.html')
+    page.get_by_role('button',name='Als strukturierte Präsentation bearbeiten').click()
+    page.get_by_label('Folienlayout',exact=True).select_option('columns')
+    page.get_by_label('Folieninhalt',exact=True).fill('Äpfel\n12 CHF')
+    page.get_by_label('Zweite Spalte / Zusatz',exact=True).fill('Birnen\n10 CHF')
+    page.get_by_label('Sprechernotizen',exact=True).fill('Preise von heute prüfen')
+    page.get_by_role('button',name='Folie hinzufügen',exact=True).click()
+    page.get_by_label('Folientitel',exact=True).fill('Zusammenfassung')
+    page.get_by_role('button',name='Folie nach vorne',exact=True).click()
+    page.get_by_role('button',name='Vorige Folie',exact=True).click()
+    page.get_by_role('button',name='Neue Revision speichern',exact=True).click()
+    expect(page.get_by_role('heading',name='Vergleich',exact=True)).to_be_visible()
+    expect(page.get_by_label('Folienvorschau 1')).to_contain_text('Birnen')
+    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+    page.get_by_text('Sprechernotizen',exact=True).click();expect(page.get_by_text('Preise von heute prüfen',exact=True)).to_be_visible()
+    page.screenshot(path='.probe/plum-assistant/slides-mobile.png',full_page=True)
+    page.set_viewport_size({'width':1440,'height':900});page.screenshot(path='.probe/plum-assistant/slides-desktop.png',full_page=True)
+    page.get_by_role('button',name='Nächste Folie',exact=True).click();expect(page.get_by_role('heading',name='Zusammenfassung',exact=True)).to_be_visible()
+    assert len(requests)==1 and requests[0]['expectedRevision']==1
+    deck=json.loads(requests[0]['body']['content']);assert deck['slides'][0]['layout']=='columns';assert deck['slides'][0]['notes']=='Preise von heute prüfen'
+    page.get_by_role('button',name='Präsentieren',exact=True).click()
+    presentation=page.get_by_role('dialog',name='Präsentation',exact=True)
+    expect(presentation).to_be_visible()
+    expect(presentation.get_by_role('heading',name='Zusammenfassung',exact=True)).to_be_visible()
+    page.keyboard.press('Home')
+    expect(presentation.get_by_role('heading',name='Vergleich',exact=True)).to_be_visible()
+    expect(presentation.get_by_text('Preise von heute prüfen',exact=True)).to_have_count(0)
+    presentation.get_by_label('Sprechernotizen anzeigen',exact=True).check()
+    expect(presentation.get_by_text('Preise von heute prüfen',exact=True)).to_be_visible()
+    page.keyboard.press('ArrowRight')
+    expect(presentation.get_by_role('heading',name='Zusammenfassung',exact=True)).to_be_visible()
+    page.keyboard.press('ArrowLeft')
+    presentation.get_by_label('Sprechernotizen anzeigen',exact=True).uncheck()
+    page.screenshot(path='.probe/plum-assistant/presentation-desktop.png',full_page=True)
+    page.set_viewport_size({'width':390,'height':844})
+    page.screenshot(path='.probe/plum-assistant/presentation-mobile.png',full_page=True)
+    assert presentation.evaluate('el=>el.scrollWidth<=el.clientWidth')
+    page.keyboard.press('Escape')
+    expect(presentation).not_to_be_visible()
+    expect(page.get_by_role('button',name='Präsentieren',exact=True)).to_be_focused()
+    assert len(requests)==1, 'Presentation never changes the saved revision'
+    assert not errors, errors
+    print('PASS: actual artifact conversion, title/column/note editing, slide add/reorder, revision save, desktop/mobile presentation, keyboard/Home/Escape/focus return and explicitly visible presenter notes')
+    browser.close()

@@ -1,21 +1,39 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/services/api';
 
-/**
- * Push-to-talk dictation for the composers.
- *
- * Records with MediaRecorder and posts the clip to the server, which forwards
- * it to the configured Whisper-compatible service. Availability is probed once:
- * without `TRANSCRIBE_URL` on the server, or without microphone support in the
- * browser, callers simply hide the button.
- */
-export function useVoiceInput(onText: (text: string) => void) {
+/** Push-to-talk dictation. Disabling or changing the conversation releases the mic and discards pending audio. */
+export function useVoiceInput(onText: (text: string) => void, enabled = true, scopeKey = '') {
   const [available, setAvailable] = useState(false);
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const uploadRef = useRef<AbortController | null>(null);
+  const generation = useRef(0);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+
+  const discard = useCallback(() => {
+    generation.current++;
+    uploadRef.current?.abort();
+    uploadRef.current = null;
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    if (recorder) {
+      recorder.onstop = null;
+      recorder.ondataavailable = null;
+      if (recorder.state !== 'inactive') recorder.stop();
+    }
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setRecording(false);
+    setBusy(false);
+  }, []);
+  useEffect(() => {
+    if (!enabled) discard();
+    return discard;
+  }, [enabled, scopeKey, discard]);
 
   useEffect(() => {
     let cancelled = false;
@@ -23,8 +41,7 @@ export function useVoiceInput(onText: (text: string) => void) {
       typeof window !== 'undefined' &&
       typeof window.MediaRecorder !== 'undefined' &&
       Boolean(navigator.mediaDevices?.getUserMedia);
-    if (!supported) return;
-
+    if (!supported || !enabled) return;
     api
       .get<{ success: boolean; data: { available: boolean } }>('/api/transcribe/status')
       .then((response) => {
@@ -36,60 +53,74 @@ export function useVoiceInput(onText: (text: string) => void) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 
   const stop = useCallback(() => {
-    recorderRef.current?.stop();
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
     setRecording(false);
   }, []);
-
   const start = useCallback(async () => {
+    if (!enabledRef.current || busy) return;
+    const captured = ++generation.current;
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-
-      recorder.onstop = async () => {
-        // Release the mic immediately; the upload does not need it.
+      if (captured !== generation.current || !enabledRef.current) {
         stream.getTracks().forEach((track) => track.stop());
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        return;
+      }
+      streamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        if (streamRef.current === stream) streamRef.current = null;
+        if (captured !== generation.current || !enabledRef.current) return;
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
         if (blob.size === 0) return;
-
+        const controller = new AbortController();
+        uploadRef.current = controller;
         setBusy(true);
         try {
           const form = new FormData();
           form.append('audio', blob, 'speech.webm');
           const response = await api.post<{ success: boolean; data: { text: string } }>(
             '/api/transcribe',
-            form
+            form,
+            { signal: controller.signal }
           );
+          if (captured !== generation.current || !enabledRef.current) return;
           const text = response.data.data?.text?.trim();
           if (text) onText(text);
           else setError('Nothing was recognised.');
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'Transcription failed');
+        } catch (failure) {
+          if (captured === generation.current && !controller.signal.aborted)
+            setError(failure instanceof Error ? failure.message : 'Transcription failed');
         } finally {
-          setBusy(false);
+          if (captured === generation.current) {
+            uploadRef.current = null;
+            setBusy(false);
+          }
         }
       };
-
       recorder.start();
       recorderRef.current = recorder;
       setRecording(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Microphone unavailable');
+    } catch (failure) {
+      if (captured === generation.current) {
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        setError(failure instanceof Error ? failure.message : 'Microphone unavailable');
+      }
     }
-  }, [onText]);
-
+  }, [onText, busy]);
   const toggle = useCallback(() => {
+    if (!enabledRef.current) return;
     if (recording) stop();
     else void start();
   }, [recording, start, stop]);
-
-  return { available, recording, busy, error, toggle };
+  return { available: available && enabled, recording, busy, error, toggle };
 }

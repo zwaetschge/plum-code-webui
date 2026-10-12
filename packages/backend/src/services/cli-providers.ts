@@ -1297,9 +1297,11 @@ export function getCLIArgs(
     reasoningLevel?: string;
     serviceTier?: CodexServiceTier | string | null;
     webSearchMode?: CodexWebSearchMode;
+    ephemeral?: boolean;
     codexExecCommand?: { type: 'review'; args: string[]; prompt?: string };
   }
 ): string[] {
+  if (options.ephemeral) options = { ...options, resumeSessionId: undefined };
   const config = CLI_PROVIDERS[provider];
   const args: string[] = [];
 
@@ -1351,6 +1353,7 @@ export function getCLIArgs(
       const isResume = !!(options.resumeSessionId && config.supportsResume);
       if (isReview) {
         args.push('exec', '--json');
+        if (options.ephemeral) args.push('--ephemeral');
       } else if (isResume) {
         args.push('exec', 'resume');
         if (shouldBypassCodexResumeSandbox(options.mode)) {
@@ -1360,6 +1363,8 @@ export function getCLIArgs(
       } else {
         args.push('exec', '--json');
       }
+
+      if (options.ephemeral && !args.includes('--ephemeral')) args.push('--ephemeral');
 
       // Sandbox / approval flags only apply to fresh `exec`, not `exec resume`.
       if (!isResume) {

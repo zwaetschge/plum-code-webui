@@ -535,17 +535,13 @@ function extractSeed(
   id: WorkflowId
 ): number | undefined {
   switch (id) {
-    case 'z-image-turbo':
-      return workflow['59:3']?.inputs?.seed;
-    case 'flux2-klein-t2i':
-      return workflow['113']?.inputs?.noise_seed;
-    case 'flux2-klein-edit':
-      return workflow['7']?.inputs?.seed;
     case 'krea2-t2i':
       return workflow['30:3']?.inputs?.seed;
-    case 'f2k-edit':
-    case 'f2k-inpaint':
+    case 'qwen21-edit':
+    case 'qwen21-inpaint':
       return workflow['7']?.inputs?.seed;
+    case 'qwen21-pixelart':
+      return workflow['14']?.inputs?.seed;
   }
 }
 

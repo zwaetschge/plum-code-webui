@@ -3,6 +3,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Menu } from 'lucide-react';
 import { Sidebar } from './Sidebar';
+import './assistant-shell.css';
 import { SessionMenuContext, type NavigationView } from './SessionMenuContext';
 import { useIsDesktopLayout } from '@/hooks/useMediaQuery';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
@@ -73,8 +74,10 @@ export function Layout() {
   const location = useLocation();
   // Session page manages its own scroll + floating chat bars, so it renders
   // edge-to-edge inside <main>. Every other page uses the default padded scroll.
-  const isFullBleed = location.pathname.startsWith('/session/');
-  const routeSessionId = location.pathname.match(/^\/session\/([^/]+)/)?.[1] ?? null;
+  const isChatRoute = location.pathname === '/chat' || location.pathname.startsWith('/chat/');
+  const isFullBleed = location.pathname.startsWith('/session/') || isChatRoute;
+  const routeSessionId =
+    location.pathname.match(/^\/(?:chat\/session|session)\/([^/]+)/)?.[1] ?? null;
   useEffect(() => {
     setNavigationView('tools');
   }, [routeSessionId]);
@@ -91,9 +94,8 @@ export function Layout() {
     return () => window.removeEventListener('session:open-mobile-right-menu', openTools);
   }, [isDesktopLayout]);
   const sessions = useSessionStore((state) => state.sessions);
-  const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const setSessions = useSessionStore((state) => state.setSessions);
-  const headerSessionId = routeSessionId ?? activeSessionId;
+  const headerSessionId = routeSessionId;
   const storeUsage = useSessionStore((state) =>
     headerSessionId ? state.usage[headerSessionId] : undefined
   );
@@ -188,14 +190,35 @@ export function Layout() {
 
   const activeMeta = UI_PROVIDER_META.plum;
   const activeSession = useMemo(() => {
-    const sessionId = routeSessionId ?? activeSessionId;
+    const sessionId = routeSessionId;
     if (!sessionId) return null;
     return routeSession ?? sessions.find((s) => s.id === sessionId) ?? null;
-  }, [activeSessionId, routeSession, routeSessionId, sessions]);
+  }, [routeSession, routeSessionId, sessions]);
   const headerProvider = activeSession?.cliProvider
     ? toUiProvider(activeSession.cliProvider)
     : 'plum';
-  const headerTitle = activeSession?.name ?? activeMeta.productName;
+  const assistantSurface =
+    isChatRoute ||
+    activeSession?.surface === 'chat' ||
+    location.pathname === '/' ||
+    location.pathname.startsWith('/assistant/') ||
+    location.pathname === '/swarm' ||
+    location.pathname.startsWith('/collaborate');
+  const sessionSurfaceFilter =
+    activeSession?.surface === 'task' ||
+    location.pathname === '/tasks' ||
+    location.pathname === '/assistant/tasks'
+      ? 'task'
+      : isChatRoute || activeSession?.surface === 'chat' || (assistantSurface && !activeSession)
+        ? 'chat'
+        : 'code';
+  const headerTitle =
+    activeSession?.name ??
+    (isChatRoute
+      ? 'Plum Chat'
+      : location.pathname === '/tasks'
+        ? 'Plum Task'
+        : activeMeta.productName);
   const headerTelemetryUsage = routeSession?.telemetry?.usage ?? null;
   const headerUsage = headerSessionId
     ? normalizeUsageSnapshot(
@@ -241,22 +264,23 @@ export function Layout() {
 
   useEffect(() => {
     document.title = activeSession
-      ? `${activeSession.name} · Plum Code`
-      : `${activeMeta.productName} WebUI`;
-  }, [activeMeta.productName, activeSession]);
+      ? `${activeSession.name} · Plum ${activeSession.surface === 'chat' ? 'Chat' : activeSession.surface === 'task' ? 'Task' : 'Code'}`
+      : `${headerTitle} WebUI`;
+  }, [headerTitle, activeSession]);
 
   return (
     <SessionMenuContext.Provider value={menuContext}>
       <div
         className={cn(
           'relative flex h-screen bg-background',
-          isFullBleed && 'session-shell-has-edge-fades'
+          isFullBleed && !assistantSurface && 'session-shell-has-edge-fades',
+          assistantSurface && 'plum-assistant-shell'
         )}
       >
         {/* Background effects */}
         <AppBackground animation={backgroundAnimation} />
         <div className="absolute inset-0 pattern-bg pointer-events-none" />
-        {isFullBleed && (
+        {isFullBleed && !assistantSurface && (
           <>
             <div
               className="session-global-edge-fade session-global-edge-fade-top"
@@ -273,6 +297,7 @@ export function Layout() {
         {isDesktopLayout && (
           <div className="hidden md:block relative z-10">
             <Sidebar
+              surface={sessionSurfaceFilter}
               navigationOnly={location.pathname === '/'}
               contextUsage={isFullBleed ? headerUsage : undefined}
               contextStats={headerContextStats}
@@ -283,8 +308,15 @@ export function Layout() {
 
         {/* Mobile Sheet */}
         <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-          <SheetContent side="left" className="mobile-navigation-sheet p-0 w-72">
+          <SheetContent
+            side="left"
+            className={cn(
+              'mobile-navigation-sheet p-0 w-72',
+              assistantSurface && 'plum-assistant-shell'
+            )}
+          >
             <Sidebar
+              surface={sessionSurfaceFilter}
               onNavigate={handleNavigation}
               mobile
               contextUsage={isFullBleed ? headerUsage : undefined}
@@ -303,15 +335,25 @@ export function Layout() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setMobileMenuOpen(true)}
+              onClick={() => {
+                setNavigationView('sessions');
+                setMobileMenuOpen(true);
+              }}
               className="h-9 w-9"
-              title="Open navigation"
+              title="Navigation öffnen"
+              aria-label="Navigation öffnen"
             >
               <Menu className="h-5 w-5" />
             </Button>
 
             <Link
-              to={activeSession ? `/session/${activeSession.id}` : '/'}
+              to={
+                activeSession
+                  ? `${activeSession.surface === 'chat' ? '/chat/session' : '/session'}/${activeSession.id}`
+                  : isChatRoute
+                    ? '/chat'
+                    : '/'
+              }
               className="flex min-w-0 flex-1 items-center gap-2 px-1"
               title={headerTitle}
             >
@@ -338,7 +380,11 @@ export function Layout() {
           {/* Page Content */}
           <main
             className={
-              isFullBleed ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 overflow-auto p-4 md:p-6'
+              isFullBleed
+                ? 'flex-1 min-h-0 overflow-hidden'
+                : assistantSurface
+                  ? 'flex-1 min-h-0 overflow-auto'
+                  : 'flex-1 overflow-auto p-4 md:p-6'
             }
           >
             <Outlet />

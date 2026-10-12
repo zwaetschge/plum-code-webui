@@ -44,6 +44,18 @@ class MessagePagingTest {
 
     @After fun closeDatabase() = db.close()
 
+    @Test fun taskAssignmentSurvivesRoomRefreshWithoutDroppingHistory() = runBlocking(Dispatchers.IO) {
+        db.messageDao().insertAll(listOf(message(10)))
+        db.sessionDao().syncRemote(listOf(session("one").copy(surface = "task"), session("two")))
+        val cached = requireNotNull(db.sessionDao().getByIdOnce("one")).toModel()
+        assertEquals("task", cached.surface)
+        assertEquals("one", cached.id)
+        assertEquals(1, db.messageDao().getLatest("one", "main", 10).size)
+        db.sessionDao().syncRemote(listOf(session("one").copy(surface = "code"), session("two")))
+        assertEquals("code", requireNotNull(db.sessionDao().getByIdOnce("one")).toModel().surface)
+        assertEquals(1, db.messageDao().getLatest("one", "main", 10).size)
+    }
+
     @Test fun loadsBeyondTwoHundredWithStableOrderingAndThreadIsolation() = runBlocking(Dispatchers.IO) {
         val expected = (0 until 241).map { message(it) }
         db.messageDao().insertAll(expected.shuffled() + listOf(

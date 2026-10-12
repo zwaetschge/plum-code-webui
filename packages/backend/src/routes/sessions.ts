@@ -6,6 +6,9 @@ import {
   transaction as pgTransaction,
 } from '../db/pg.js';
 import { Router, raw, type NextFunction, type Request, type Response } from 'express';
+import { createAssistantWorkspace } from '../services/assistant/workspaces.js';
+import { bindProfile } from '../services/assistant/context.js';
+import { findResource } from '../services/assistant/resources.js';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import path from 'path';
@@ -99,7 +102,9 @@ export const createSessionSchema = z.object({
   cliReasoning: z.string().trim().min(1).max(50).nullable().optional(),
   cliServiceTier: z.enum(['fast']).nullable().optional(),
   mode: z.enum(['planning', 'auto-accept', 'manual', 'danger']).optional().default('auto-accept'),
-  surface: z.enum(['code', 'task']).optional().default('code'),
+  surface: z.enum(['chat', 'code', 'task']).optional().default('code'),
+  temporary: z.preprocess(value => value === 'true' ? true : value === 'false' ? false : value,z.boolean().default(false)),
+  profileId: z.string().min(1).max(200).optional(),
   initialMessage: z.string().trim().min(1).max(40000).optional(),
 });
 
@@ -1091,9 +1096,16 @@ router.post(
       cliServiceTier,
       mode,
       surface,
+      profileId,
+      temporary,
       initialMessage,
     } = parsed.data;
+    if (surface === 'chat') throw new AppError('Plum Chat verwendet API-Verbindungen. Agentensessions gehören zu Task oder Code.',400,'CHAT_REQUIRES_API');
+    if (temporary) throw new AppError('Temporäre Gespräche werden über Plum Chat mit einer API-Verbindung erstellt.',400,'TEMPORARY_UNSUPPORTED');
     await assertProviderEnabled(userId, cliProvider);
+    const profile = profileId ? await findResource(userId, profileId) : null;
+    if (profile && profile.kind !== 'profile') throw new AppError('Ungültiges Profil', 400, 'INVALID_PROFILE');
+    const selectedModel = cliModel?.trim() || (profile?.body.provider === cliProvider && typeof profile.body.model === 'string' ? profile.body.model.trim() : '') || null;
     let storedReasoning = cliReasoning?.trim() || null;
     let storedServiceTier = cliProvider === 'codex' ? cliServiceTier || null : null;
 
@@ -1104,7 +1116,9 @@ router.post(
 
     let workingDirectory: string;
 
-    if (providedWorkingDir) {
+    if (surface !== 'code' && !providedWorkingDir) {
+      workingDirectory = await createAssistantWorkspace(userId);
+    } else if (providedWorkingDir) {
       // User selected an existing folder - use it directly
       workingDirectory = path.resolve(providedWorkingDir);
 
@@ -1184,11 +1198,14 @@ router.post(
       cliProvider,
       mode,
       surface,
-      cliModel?.trim() || null,
+      selectedModel,
       storedReasoning,
       storedServiceTier
     );
 
+    if (profileId) await bindProfile(userId, sessionId, profileId);
+    if (temporary) await pgRun(`INSERT INTO assistant_session_bindings(session_id,temporary,temporary_expires_at) VALUES (?,1,?)
+      ON CONFLICT(session_id) DO UPDATE SET temporary=1,temporary_expires_at=excluded.temporary_expires_at`,sessionId,new Date(Date.now()+24*3600000).toISOString());
     let newSession = (await selectSessionById(sessionId, userId)) as Record<string, unknown>;
     const projectIcon = await readProjectIconCandidate(workingDirectory).catch((err) => {
       console.warn(
@@ -1512,8 +1529,11 @@ async function chatListPayload(sessionId: string, activeChatId: string | null) {
     };
   }
   return {
-    chats: rows.map(({ providerSessionId: _p, ...rest }) => rest),
-    activeChatId: activeChatId,
+    chats: [
+      ...(activeChatId === null ? [{ id:'main',title:'Chat 1',createdAt:null,updatedAt:null }] : []),
+      ...rows.map(({ providerSessionId: _p, ...rest }) => rest),
+    ],
+    activeChatId: activeChatId ?? 'main',
   };
 }
 
@@ -1627,6 +1647,8 @@ router.post('/:id/chats/:chatId/activate', requireAuth, async (req, res) => {
   const userId = (req as AuthenticatedRequest).userId;
   const session = await requireOwnedSession(req.params.id as string, userId);
   const targetId = req.params.chatId as string;
+  if (getProcessManager().getSessionRuntimeSnapshot(session.id).busy)
+    throw new AppError('Die laufende Antwort zuerst beenden oder unterbrechen',409,'SESSION_BUSY');
 
   if (targetId === 'main' && session.activeChatId === null) {
     // Already on the implicit main thread.

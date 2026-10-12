@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Wabe mit drei verbundenen Knoten: der Schwarm. Innerhalb der sicheren Zone 66×66. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:strokeColor="#F2B84B"
+        android:strokeWidth="3.5"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,31 L73.9,42.5 L73.9,65.5 L54,77 L34.1,65.5 L34.1,42.5 Z" />
+    <path
+        android:strokeColor="#B3F2B84B"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M54,45 L44.5,61 L63.5,61 Z" />
+    <path
+        android:fillColor="#F2B84B"
+        android:pathData="M49.5,45 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0 Z" />
+    <path
+        android:fillColor="#6EA8FE"
+        android:pathData="M40,61 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0 Z" />
+    <path
+        android:fillColor="#7EE0A1"
+        android:pathData="M59,61 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0 Z" />
+</vector>

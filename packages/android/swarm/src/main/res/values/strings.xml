@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="swarm_app_name">Plum Schwarm</string>
+    <string name="swarm_widget_name">Plum · Favoriten</string>
+    <string name="swarm_widget_titel">Plum · Favoriten</string>
+    <string name="swarm_widget_leer">Noch keine Favoriten. Markiere in der App unter „Vorlagen“ bis zu 6 mit einem Stern.</string>
+    <string name="swarm_widget_beschreibung">Bis zu 6 Auftrags-Vorlagen: Ein Tipp fragt die Platzhalter ab und schickt den Auftrag nach deinem Okay.</string>
+    <!-- Widget „Braucht dich“ (App 2.5) -->
+    <string name="swarm_widget_aktuell_name">Plum · Braucht dich</string>
+    <string name="swarm_widget_aktuell_titel">Plum · Braucht dich</string>
+    <string name="swarm_widget_aktuell_leer">Öffne die App einmal, dann steht hier, was auf dich wartet.</string>
+    <string name="swarm_widget_aktuell_beschreibung">Wie viel auf dich wartet und das Dringendste davon. Ein Tipp öffnet „Aktuell“.</string>
+    <!-- Kürzel am App-Symbol und Schnellkachel (App 2.5) -->
+    <string name="swarm_kurz_chat">Neuer Chat</string>
+    <string name="swarm_kurz_chat_lang">Neuer Chat mit Brian</string>
+    <string name="swarm_kurz_auftrag">Neuer Auftrag</string>
+    <string name="swarm_kurz_auftrag_lang">Neuer Auftrag an einen Agenten</string>
+    <string name="swarm_kurz_aktuell">Aktuell</string>
+    <string name="swarm_kurz_aktuell_lang">Was dich braucht</string>
+    <string name="swarm_kachel_notaus">Not-Aus</string>
+</resources>

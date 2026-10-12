@@ -5,22 +5,17 @@
  * schema (node-id-keyed graph). `buildWorkflow()` deep-clones the template and
  * overlays user-supplied parameters onto the appropriate node fields.
  *
- * Three workflows ship out of the box:
- *   - `z-image-turbo`      — fast T2I via Z-Image Turbo (Lumina2 / qwen3_4b CLIP)
- *   - `flux2-klein-t2i`    — quality T2I via Flux.2 Klein 9B + Turbo LoRA + TeaCache
- *   - `flux2-klein-edit`   — image-to-image edit via Flux.2 Klein + reference latent
+ * Text-to-image is Krea2 only; every image-input workflow is Qwen-Image 2.1:
+ *   - `krea2-t2i`        — default T2I via Krea2 Turbo
+ *   - `qwen21-edit`      — instruction edit via Qwen-Image 2.1
+ *   - `qwen21-inpaint`   — masked crop & stitch edit via Qwen-Image 2.1
+ *   - `qwen21-pixelart`  — pixel-art sprite redraw via Qwen-Image 2.1
  *
  * Adding a new workflow: copy the ComfyUI "Save (API Format)" JSON into TEMPLATES,
  * declare the parameter map below, and surface it in routes/comfyui.ts.
  */
 
-export type WorkflowId =
-  | 'z-image-turbo'
-  | 'flux2-klein-t2i'
-  | 'flux2-klein-edit'
-  | 'krea2-t2i'
-  | 'f2k-edit'
-  | 'f2k-inpaint';
+export type WorkflowId = 'krea2-t2i' | 'qwen21-edit' | 'qwen21-inpaint' | 'qwen21-pixelart';
 
 export const VALID_ASPECTS = [
   '1:1 (Perfect Square)',
@@ -54,11 +49,6 @@ export interface WorkflowParams {
   unet?: string;
   clip?: string;
   vae?: string;
-  // LoRA override (Flux workflows only).
-  lora_name?: string;
-  lora_strength?: number;
-  // TeaCache tuning (Flux workflows only).
-  teacache_threshold?: number;
   // Image-edit workflow only — filename already uploaded to ComfyUI's `/input/`.
   input_image?: string;
   // Inpaint workflow only — greyscale mask, same filename rules as `input_image`.
@@ -84,44 +74,16 @@ interface WorkflowMeta {
   > & { scheduler?: string };
   requiresInputImage: boolean;
   requiresMask?: boolean;
+  /** The prompt is an optional hint (pixel-art: who the sprite is). */
+  promptOptional?: boolean;
 }
 
 export const WORKFLOWS: Record<WorkflowId, WorkflowMeta> = {
-  'z-image-turbo': {
-    id: 'z-image-turbo',
-    title: 'Z-Image Turbo (fast T2I)',
-    description: 'Fast text-to-image via Z-Image Turbo + qwen3_4b CLIP. ~5s/image, lower VRAM.',
-    kind: 't2i',
-    defaults: {
-      steps: 9,
-      cfg: 1,
-      megapixel: '2.0',
-      aspect_ratio: '1:1 (Perfect Square)',
-      sampler_name: 'dpmpp_2m_sde',
-      scheduler: 'beta',
-    },
-    requiresInputImage: false,
-  },
-  'flux2-klein-t2i': {
-    id: 'flux2-klein-t2i',
-    title: 'Flux.2 Klein 9B (quality T2I)',
-    description:
-      'High-quality T2I via Flux.2 Klein 9B + Turbo LoRA + TeaCache. ~8 steps, qwen3_8b CLIP.',
-    kind: 't2i',
-    defaults: {
-      steps: 8,
-      cfg: 1,
-      megapixel: '2.0',
-      aspect_ratio: '1:1 (Perfect Square)',
-      sampler_name: 'euler',
-    },
-    requiresInputImage: false,
-  },
   'krea2-t2i': {
     id: 'krea2-t2i',
     title: 'Krea2 Turbo (default T2I)',
     description:
-      'Text-to-image via Krea2 Turbo FP8 + qwen3vl_4b CLIP. 8 steps, euler/simple. ' +
+      'Text-to-image via Krea2 Turbo INT8 ConvRot + qwen3vl_4b CLIP. 8 steps, euler/simple. ' +
       'Prompt refinement and LoRA trigger slots ship disabled — the prompt is used verbatim.',
     kind: 't2i',
     defaults: {
@@ -134,15 +96,19 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowMeta> = {
     },
     requiresInputImage: false,
   },
-  'f2k-edit': {
-    id: 'f2k-edit',
-    title: 'Flux.2 Klein (image edit, current)',
+  'qwen21-edit': {
+    id: 'qwen21-edit',
+    title: 'Qwen-Image 2.1 (image edit, default)',
     description:
-      'Image edit via Flux.2 Klein 9B + Turbo LoRA and dual ReferenceLatent. ' +
-      'Pass an `input_image` already uploaded to ComfyUI.',
+      'Instruction edit via Qwen-Image 2.1 INT8: the input image goes to TextEncodeQwenImage21 ' +
+      'as `<image1>` (Qwen3-VL sees it, its VAE latent is spliced in) and the encoder latent ' +
+      'sets the canvas, so the output follows the input aspect ratio. Write the change as an ' +
+      'instruction ("Make the cape red, keep everything else"). Re-renders the whole frame; ' +
+      '`megapixel` sets the pixel budget, `aspect_ratio` is ignored. Output may carry an alpha ' +
+      'channel (the model can edit transparency). ~45 s at 1 MP, ~90 s at 2 MP.',
     kind: 'edit',
     defaults: {
-      steps: 8,
+      steps: 25,
       cfg: 1,
       megapixel: '2.0',
       aspect_ratio: '1:1 (Perfect Square)',
@@ -151,43 +117,47 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowMeta> = {
     },
     requiresInputImage: true,
   },
-  'flux2-klein-edit': {
-    id: 'flux2-klein-edit',
-    title: 'Flux.2 Klein 9B (image edit, TeaCache variant)',
+  'qwen21-inpaint': {
+    id: 'qwen21-inpaint',
+    title: 'Qwen-Image 2.1 (masked inpaint, crop & stitch)',
     description:
-      'Image-to-image edit via Flux.2 Klein + ReferenceLatent. Pass an `input_image` already uploaded to ComfyUI.',
+      'Masked edit via Qwen-Image 2.1 INT8. Crops the masked region at 1024 px, edits the crop ' +
+      'with the prompt as instruction, and stitches it back, so every pixel outside the mask ' +
+      'survives bit-identical. Needs `input_image` and `mask` (white = repaint). Output keeps ' +
+      'the source resolution; `megapixel` and `aspect_ratio` are ignored.',
     kind: 'edit',
     defaults: {
-      steps: 8,
+      steps: 25,
       cfg: 1,
-      megapixel: '2.0',
-      aspect_ratio: '1:1 (Perfect Square)',
-      sampler_name: 'euler',
-      scheduler: 'simple',
-    },
-    requiresInputImage: true,
-  },
-  'f2k-inpaint': {
-    id: 'f2k-inpaint',
-    title: 'Flux.2 Klein (masked inpaint, crop & stitch)',
-    description:
-      'Masked edit via Flux.2 Klein 9B + Turbo LoRA. Crops the masked region at ' +
-      'working resolution, repaints only there, and stitches it back, so every ' +
-      'pixel outside the mask survives bit-identical — unlike `f2k-edit`, which ' +
-      're-renders the whole frame. Needs `input_image` and `mask` ' +
-      '(white = repaint). Output keeps the source resolution; `megapixel` and ' +
-      '`aspect_ratio` are ignored.',
-    kind: 'edit',
-    defaults: {
-      steps: 8,
-      cfg: 1,
-      megapixel: '2.0',
+      megapixel: '1.0',
       aspect_ratio: '1:1 (Perfect Square)',
       sampler_name: 'euler',
       scheduler: 'simple',
     },
     requiresInputImage: true,
     requiresMask: true,
+  },
+  'qwen21-pixelart': {
+    id: 'qwen21-pixelart',
+    title: 'Qwen-Image 2.1 Pixel-Art Upscaler',
+    description:
+      'Redraws a pixel-art sprite as a clean high-resolution illustration. Snaps the sprite to ' +
+      'its native pixel grid and lets Qwen-Image 2.1 redraw it in edit mode, with the sprite as ' +
+      'reference image, so pose, colors, expression and props stay faithful. `prompt` is optional ' +
+      'and names the character (e.g. "Squirtle, the Pokemon"), which gives the best results for ' +
+      'known figures; leave it empty for own characters. Transparent PNGs get a white background. ' +
+      '~30 s at 1 MP, ~90 s at 2 MP.',
+    kind: 'edit',
+    defaults: {
+      steps: 25,
+      cfg: 1,
+      megapixel: '1.0',
+      aspect_ratio: '1:1 (Perfect Square)',
+      sampler_name: 'euler',
+      scheduler: 'simple',
+    },
+    requiresInputImage: true,
+    promptOptional: true,
   },
 };
 
@@ -196,320 +166,8 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowMeta> = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Workflow = Record<string, any>;
 
-const Z_IMAGE_TURBO_TEMPLATE: Workflow = {
-  '60': {
-    inputs: { filename_prefix: 'z-image', images: ['59:8', 0] },
-    class_type: 'SaveImage',
-    _meta: { title: 'Save Image' },
-  },
-  '67': {
-    inputs: { clip_name: 'qwen_3_4b.safetensors', type: 'lumina2', device: 'default' },
-    class_type: 'CLIPLoader',
-    _meta: { title: 'Load CLIP' },
-  },
-  '74': {
-    inputs: {
-      megapixel: '2.0',
-      aspect_ratio: '9:16 (Slim Vertical)',
-      divisible_by: '64',
-      custom_ratio: false,
-      custom_aspect_ratio: '1:1',
-    },
-    class_type: 'FluxResolutionNode',
-    _meta: { title: 'Flux Resolution Calc' },
-  },
-  '59:29': {
-    inputs: { vae_name: 'ae.safetensors' },
-    class_type: 'VAELoader',
-    _meta: { title: 'Load VAE' },
-  },
-  '59:28': {
-    inputs: { unet_name: 'z_image_turbo_bf16.safetensors', weight_dtype: 'default' },
-    class_type: 'UNETLoader',
-    _meta: { title: 'Load Diffusion Model' },
-  },
-  '59:11': {
-    inputs: { shift: 3, model: ['59:28', 0] },
-    class_type: 'ModelSamplingAuraFlow',
-    _meta: { title: 'ModelSamplingAuraFlow' },
-  },
-  '59:27': {
-    inputs: { text: '"insert prompt here"', clip: ['67', 0] },
-    class_type: 'CLIPTextEncode',
-    _meta: { title: 'CLIP Text Encode (Prompt)' },
-  },
-  '59:13': {
-    inputs: { width: ['74', 0], height: ['74', 1], batch_size: 1 },
-    class_type: 'EmptySD3LatentImage',
-    _meta: { title: 'EmptySD3LatentImage' },
-  },
-  '59:33': {
-    inputs: { conditioning: ['59:27', 0] },
-    class_type: 'ConditioningZeroOut',
-    _meta: { title: 'ConditioningZeroOut' },
-  },
-  '59:3': {
-    inputs: {
-      seed: 0,
-      steps: 9,
-      cfg: 1,
-      sampler_name: 'dpmpp_2m_sde',
-      scheduler: 'beta',
-      denoise: 1,
-      model: ['59:11', 0],
-      positive: ['59:27', 0],
-      negative: ['59:33', 0],
-      latent_image: ['59:13', 0],
-    },
-    class_type: 'KSampler',
-    _meta: { title: 'KSampler' },
-  },
-  '59:8': {
-    inputs: {
-      tile_size: 512,
-      overlap: 64,
-      temporal_size: 32,
-      temporal_overlap: 16,
-      samples: ['59:3', 0],
-      vae: ['59:29', 0],
-    },
-    class_type: 'VAEDecodeTiled',
-    _meta: { title: 'VAE Decode (Tiled)' },
-  },
-};
-
-const FLUX2_KLEIN_T2I_TEMPLATE: Workflow = {
-  '81': {
-    inputs: {
-      noise: ['113', 0],
-      guider: ['112', 0],
-      sampler: ['111', 0],
-      sigmas: ['92', 0],
-      latent_image: ['94', 0],
-    },
-    class_type: 'SamplerCustomAdvanced',
-    _meta: { title: 'SamplerCustomAdvanced' },
-  },
-  '82': {
-    inputs: {
-      tile_size: 512,
-      overlap: 64,
-      temporal_size: 64,
-      temporal_overlap: 8,
-      samples: ['81', 0],
-      vae: ['114', 0],
-    },
-    class_type: 'VAEDecodeTiled',
-    _meta: { title: 'VAE Decode (Tiled)' },
-  },
-  '84': {
-    inputs: { text: '', clip: ['102', 0] },
-    class_type: 'CLIPTextEncode',
-    _meta: { title: 'CLIP Text Encode (Negative Prompt)' },
-  },
-  '91': {
-    inputs: { text: '"insert prompt here"', clip: ['102', 0] },
-    class_type: 'CLIPTextEncode',
-    _meta: { title: 'CLIP Text Encode (Positive Prompt)' },
-  },
-  '92': {
-    inputs: { steps: 8, width: ['93', 0], height: ['93', 1] },
-    class_type: 'Flux2Scheduler',
-    _meta: { title: 'Flux2Scheduler' },
-  },
-  '93': {
-    inputs: {
-      megapixel: '2.0',
-      aspect_ratio: '9:16 (Slim Vertical)',
-      divisible_by: '64',
-      custom_ratio: false,
-      custom_aspect_ratio: '1:1',
-    },
-    class_type: 'FluxResolutionNode',
-    _meta: { title: 'Flux Resolution Calc' },
-  },
-  '94': {
-    inputs: { width: ['93', 0], height: ['93', 1], batch_size: 1 },
-    class_type: 'EmptyFlux2LatentImage',
-    _meta: { title: 'Empty Flux 2 Latent' },
-  },
-  '95': {
-    inputs: { filename_prefix: 'ComfyUI', images: ['82', 0] },
-    class_type: 'SaveImage',
-    _meta: { title: 'Save Image' },
-  },
-  '100': {
-    inputs: { unet_name: 'flux-2-klein-base-9b.safetensors', weight_dtype: 'default' },
-    class_type: 'UNETLoader',
-    _meta: { title: 'Load Diffusion Model' },
-  },
-  '102': {
-    inputs: { clip_name: 'qwen_3_8b_fp8mixed.safetensors', type: 'flux2', device: 'default' },
-    class_type: 'CLIPLoader',
-    _meta: { title: 'Load CLIP' },
-  },
-  '105': {
-    inputs: {
-      model_type: 'flux',
-      rel_l1_thresh: 0.4,
-      start_percent: 0,
-      end_percent: 1,
-      cache_device: 'cuda',
-      model: ['129', 0],
-    },
-    class_type: 'TeaCache',
-    _meta: { title: 'TeaCache (Flux)' },
-  },
-  '111': {
-    inputs: { sampler_name: 'euler' },
-    class_type: 'KSamplerSelect',
-    _meta: { title: 'KSamplerSelect' },
-  },
-  '112': {
-    inputs: { cfg: 1, model: ['105', 0], positive: ['91', 0], negative: ['84', 0] },
-    class_type: 'CFGGuider',
-    _meta: { title: 'CFGGuider' },
-  },
-  '113': {
-    inputs: { noise_seed: 0 },
-    class_type: 'RandomNoise',
-    _meta: { title: 'RandomNoise' },
-  },
-  '114': {
-    inputs: { vae_name: 'flux2-vae.safetensors' },
-    class_type: 'VAELoader',
-    _meta: { title: 'Load VAE' },
-  },
-  '129': {
-    inputs: {
-      lora_name: 'f2k/concept/klein_9B_Turbo_r128.safetensors',
-      strength_model: 1,
-      model: ['100', 0],
-    },
-    class_type: 'LoraLoaderModelOnly',
-    _meta: { title: 'Load LoRA' },
-  },
-};
-
-const FLUX2_KLEIN_EDIT_TEMPLATE: Workflow = {
-  '1': {
-    inputs: { vae_name: 'flux2-vae.safetensors' },
-    class_type: 'VAELoader',
-    _meta: { title: 'Load VAE' },
-  },
-  '2': {
-    inputs: { text: '"Insert prompt to edit input image here"', clip: ['4', 0] },
-    class_type: 'CLIPTextEncode',
-    _meta: { title: 'CLIP Text Encode (Positive Prompt)' },
-  },
-  '3': {
-    inputs: { text: '', clip: ['4', 0] },
-    class_type: 'CLIPTextEncode',
-    _meta: { title: 'CLIP Text Encode (Negative - unused at CFG 1)' },
-  },
-  '4': {
-    inputs: { clip_name: 'qwen_3_8b_fp8mixed.safetensors', type: 'flux2', device: 'default' },
-    class_type: 'CLIPLoader',
-    _meta: { title: 'Load CLIP' },
-  },
-  '5': {
-    inputs: { upscale_method: 'lanczos', megapixels: 2, resolution_steps: 1, image: ['10', 0] },
-    class_type: 'ImageScaleToTotalPixels',
-    _meta: { title: 'ImageScaleToTotalPixels' },
-  },
-  '6': {
-    inputs: {
-      tile_size: 512,
-      overlap: 64,
-      temporal_size: 64,
-      temporal_overlap: 8,
-      samples: ['7', 0],
-      vae: ['1', 0],
-    },
-    class_type: 'VAEDecodeTiled',
-    _meta: { title: 'VAE Decode (Tiled)' },
-  },
-  '7': {
-    inputs: {
-      seed: 0,
-      steps: 8,
-      cfg: 1,
-      sampler_name: 'euler',
-      scheduler: 'simple',
-      denoise: 1,
-      model: ['13', 0],
-      positive: ['9:77', 0],
-      negative: ['9:76', 0],
-      latent_image: ['8', 0],
-    },
-    class_type: 'KSampler',
-    _meta: { title: 'KSampler' },
-  },
-  '8': {
-    inputs: { width: ['16', 0], height: ['16', 1], batch_size: 1 },
-    class_type: 'EmptyFlux2LatentImage',
-    _meta: { title: 'Empty Flux 2 Latent' },
-  },
-  '10': {
-    inputs: { image: 'placeholder.png' },
-    class_type: 'LoadImage',
-    _meta: { title: 'Load Image' },
-  },
-  '11': {
-    inputs: { filename_prefix: 'ComfyUI', images: ['6', 0] },
-    class_type: 'SaveImage',
-    _meta: { title: 'Save Image' },
-  },
-  '12': {
-    inputs: { unet_name: 'flux-2-klein-base-9b.safetensors', weight_dtype: 'default' },
-    class_type: 'UNETLoader',
-    _meta: { title: 'Load Diffusion Model' },
-  },
-  '13': {
-    inputs: {
-      model_type: 'flux',
-      rel_l1_thresh: 0.4,
-      start_percent: 0,
-      end_percent: 1,
-      cache_device: 'cuda',
-      model: ['15', 0],
-    },
-    class_type: 'TeaCache',
-    _meta: { title: 'TeaCache (Flux)' },
-  },
-  '15': {
-    inputs: {
-      lora_name: 'f2k/concept/klein_9B_Turbo_r128.safetensors',
-      strength_model: 1,
-      model: ['12', 0],
-    },
-    class_type: 'LoraLoaderModelOnly',
-    _meta: { title: 'Load LoRA' },
-  },
-  '16': {
-    inputs: { image: ['5', 0] },
-    class_type: 'GetImageSize',
-    _meta: { title: 'Get Image Size' },
-  },
-  '9:78': {
-    inputs: { pixels: ['5', 0], vae: ['1', 0] },
-    class_type: 'VAEEncode',
-    _meta: { title: 'VAE Encode' },
-  },
-  '9:77': {
-    inputs: { conditioning: ['2', 0], latent: ['9:78', 0] },
-    class_type: 'ReferenceLatent',
-    _meta: { title: 'ReferenceLatent' },
-  },
-  '9:76': {
-    inputs: { conditioning: ['3', 0], latent: ['9:78', 0] },
-    class_type: 'ReferenceLatent',
-    _meta: { title: 'ReferenceLatent' },
-  },
-};
-
-// ── Krea2 / F2K templates ────────────────────────────────────────────────
-// Transcribed verbatim from the ComfyUI API exports the Krea2/F2K client
+// ── Krea2 templates ──────────────────────────────────────────────────────
+// Transcribed verbatim from the ComfyUI API exports the Krea2 client
 // ships, so a workflow update here is a file copy rather than a rewrite.
 
 const KREA2_T2I_TEMPLATE: Workflow = {
@@ -584,11 +242,17 @@ const KREA2_T2I_TEMPLATE: Workflow = {
     },
   },
   '30:10': {
+    // The FP8 checkpoint was removed from the server; the INT8 ConvRot file needs
+    // the OneTrainer W8A8 loader (core UNETLoader rejects its quant format).
     inputs: {
-      unet_name: 'krea2_turbo_fp8_scaled.safetensors',
+      unet_name: 'Krea2-Turbo-int8-ConvRot.safetensors',
       weight_dtype: 'default',
+      model_type: 'krea2',
+      on_the_fly_quantization: false,
+      enable_convrot: true,
+      lora_mode: 'Dynamic',
     },
-    class_type: 'UNETLoader',
+    class_type: 'OTUNetLoaderW8A8',
     _meta: {
       title: 'Load Diffusion Model',
     },
@@ -695,8 +359,9 @@ const KREA2_T2I_TEMPLATE: Workflow = {
     },
   },
   '30:23': {
+    // Off: no LoRA is loaded here, so its trigger words must not reach the prompt.
     inputs: {
-      value: true,
+      value: false,
     },
     class_type: 'PrimitiveBoolean',
     _meta: {
@@ -829,317 +494,78 @@ const KREA2_T2I_TEMPLATE: Workflow = {
   },
 };
 
-const F2K_EDIT_TEMPLATE: Workflow = {
-  '1': {
-    inputs: {
-      vae_name: 'flux2-vae.safetensors',
-    },
-    class_type: 'VAELoader',
-    _meta: {
-      title: 'Load VAE',
-    },
-  },
-  '2': {
-    inputs: {
-      text: "a woman assumes the identical pose from the reference image — matching the original figure's body position, posture, weight distribution, limb angles, hand placement, and gaze direction with precision. She wears the exact same outfit from the reference image, every garment, accessory, fabric texture, fold, drape, and fit reproduced identically on her frame. The lighting, environment, and atmosphere match the original scene. Shot on 35mm film with shallow depth of field.",
-      clip: ['4', 0],
-    },
-    class_type: 'CLIPTextEncode',
-    _meta: {
-      title: 'CLIP Text Encode (Positive Prompt)',
-    },
-  },
-  '3': {
-    inputs: {
-      text: '',
-      clip: ['4', 0],
-    },
-    class_type: 'CLIPTextEncode',
-    _meta: {
-      title: 'CLIP Text Encode (Negative - unused at CFG 1)',
-    },
-  },
+/** Shared Qwen-Image 2.1 INT8 loader nodes for the edit/inpaint templates. */
+const QWEN21_LOADERS: Workflow = {
+  '1': { inputs: { vae_name: 'qwen_image_2.1_vae_bf16.safetensors' }, class_type: 'VAELoader' },
   '4': {
     inputs: {
-      clip_name: 'qwen_3_8b_fp8mixed.safetensors',
-      type: 'flux2',
+      clip_name: 'qwen3vl_8b_int8_convrot.safetensors',
+      type: 'qwen_image',
       device: 'default',
     },
     class_type: 'CLIPLoader',
-    _meta: {
-      title: 'Load CLIP',
-    },
-  },
-  '5': {
-    inputs: {
-      upscale_method: 'lanczos',
-      megapixels: 2,
-      resolution_steps: 1,
-      image: ['10', 0],
-    },
-    class_type: 'ImageScaleToTotalPixels',
-    _meta: {
-      title: 'Scale Image to Total Pixels',
-    },
-  },
-  '7': {
-    inputs: {
-      seed: 310778855344884,
-      steps: 8,
-      cfg: 1,
-      sampler_name: 'euler',
-      scheduler: 'simple',
-      denoise: 1,
-      model: ['15', 0],
-      positive: ['9:77', 0],
-      negative: ['9:76', 0],
-      latent_image: ['8', 0],
-    },
-    class_type: 'KSampler',
-    _meta: {
-      title: 'KSampler',
-    },
-  },
-  '8': {
-    inputs: {
-      width: ['16', 0],
-      height: ['16', 1],
-      batch_size: 1,
-    },
-    class_type: 'EmptyFlux2LatentImage',
-    _meta: {
-      title: 'Empty Flux 2 Latent',
-    },
-  },
-  '10': {
-    inputs: {
-      image: '(m=qOL97SYbeaSaaTbaAaaaa)(mh=5YVGCSKGMfRnI6z1)0.jpg',
-    },
-    class_type: 'LoadImage',
-    _meta: {
-      title: 'Load Image',
-    },
-  },
-  '11': {
-    inputs: {
-      filename_prefix: 'ComfyUI',
-      images: ['79', 0],
-    },
-    class_type: 'SaveImage',
-    _meta: {
-      title: 'Save Image',
-    },
   },
   '12': {
-    inputs: {
-      unet_name: 'flux-2-klein-base-9b.safetensors',
-      weight_dtype: 'default',
-    },
+    inputs: { unet_name: 'qwen-image-2.1-UC-int8_convrot.safetensors', weight_dtype: 'default' },
     class_type: 'UNETLoader',
-    _meta: {
-      title: 'Load Diffusion Model',
-    },
   },
-  '15': {
-    inputs: {
-      lora_name: 'f2k/concept/klein_9B_Turbo_r128.safetensors',
-      strength_model: 1,
-      model: ['12', 0],
-    },
-    class_type: 'LoraLoaderModelOnly',
-    _meta: {
-      title: 'Turbo LoRA (fest)',
-    },
-  },
-  '16': {
-    inputs: {
-      image: ['5', 0],
-    },
-    class_type: 'GetImageSize',
-    _meta: {
-      title: 'Get Image Size',
-    },
-  },
-  '79': {
-    inputs: {
-      samples: ['7', 0],
-      vae: ['1', 0],
-    },
-    class_type: 'VAEDecode',
-    _meta: {
-      title: 'VAE Decode',
-    },
-  },
-  '9:78': {
-    inputs: {
-      pixels: ['5', 0],
-      vae: ['1', 0],
-    },
-    class_type: 'VAEEncode',
-    _meta: {
-      title: 'VAE Encode',
-    },
-  },
-  '9:77': {
-    inputs: {
-      conditioning: ['2', 0],
-      latent: ['9:78', 0],
-    },
-    class_type: 'ReferenceLatent',
-    _meta: {
-      title: 'ReferenceLatent',
-    },
-  },
-  '9:76': {
-    inputs: {
-      conditioning: ['3', 0],
-      latent: ['9:78', 0],
-    },
-    class_type: 'ReferenceLatent',
-    _meta: {
-      title: 'ReferenceLatent',
-    },
+  '13': {
+    inputs: { device: 'auto', dtype: 'default', model: ['12', 0] },
+    class_type: 'QwenImage21Cache',
   },
 };
 
-// Masked inpaint. Same model stack as F2K_EDIT_TEMPLATE, but the diffusion path
-// runs on a crop around the mask instead of the whole frame:
-//   10 LoadImage ─┐
-//   20 LoadImageMask ─┴→ 21 InpaintCropImproved → (stitcher, crop, cropped mask)
-//                                 crop → VAEEncode → ReferenceLatent → KSampler
-//                                 → VAEDecode → 22 InpaintStitchImproved(stitcher)
-// The stitcher replays the recorded geometry, so pixels outside the (feathered)
-// mask come straight from the source. No ImageScaleToTotalPixels here — the
-// output must keep the source resolution, which is the whole point.
-const F2K_INPAINT_TEMPLATE: Workflow = {
-  '1': {
-    inputs: {
-      vae_name: 'flux2-vae.safetensors',
-    },
-    class_type: 'VAELoader',
-    _meta: {
-      title: 'Load VAE',
-    },
-  },
+/**
+ * Qwen-Image 2.1 instruction edit (official ComfyUI template, prompt enhancer
+ * off). TextEncodeQwenImage21 sees the input as `<image1>` and emits positive,
+ * negative and the canvas latent; the sampler runs at denoise 1 on that latent.
+ * `resolution` is the encoder's edge length (pixels ≈ resolution²), filled from
+ * `megapixel` by translateValue.
+ */
+const QWEN21_EDIT_TEMPLATE: Workflow = {
+  ...QWEN21_LOADERS,
+  '10': { inputs: { image: 'input.png' }, class_type: 'LoadImage' },
   '2': {
     inputs: {
-      text: 'a photograph',
+      prompt: 'Keep the image unchanged.',
+      negative_prompt: '',
+      resolution: 1440,
       clip: ['4', 0],
+      'images.image_1': ['10', 0],
+      vae: ['1', 0],
     },
-    class_type: 'CLIPTextEncode',
-    _meta: {
-      title: 'CLIP Text Encode (Positive Prompt)',
-    },
-  },
-  '3': {
-    inputs: {
-      text: '',
-      clip: ['4', 0],
-    },
-    class_type: 'CLIPTextEncode',
-    _meta: {
-      title: 'CLIP Text Encode (Negative - unused at CFG 1)',
-    },
-  },
-  '4': {
-    inputs: {
-      clip_name: 'qwen_3_8b_fp8mixed.safetensors',
-      type: 'flux2',
-      device: 'default',
-    },
-    class_type: 'CLIPLoader',
-    _meta: {
-      title: 'Load CLIP',
-    },
+    class_type: 'TextEncodeQwenImage21',
   },
   '7': {
     inputs: {
-      seed: 310778855344884,
-      steps: 8,
+      seed: 0,
+      steps: 25,
       cfg: 1,
       sampler_name: 'euler',
       scheduler: 'simple',
       denoise: 1,
-      model: ['15', 0],
-      positive: ['9:77', 0],
-      negative: ['9:76', 0],
-      latent_image: ['8', 0],
+      model: ['13', 0],
+      positive: ['2', 0],
+      negative: ['2', 1],
+      latent_image: ['2', 2],
     },
     class_type: 'KSampler',
-    _meta: {
-      title: 'KSampler',
-    },
   },
-  '8': {
-    inputs: {
-      width: ['16', 0],
-      height: ['16', 1],
-      batch_size: 1,
-    },
-    class_type: 'EmptyFlux2LatentImage',
-    _meta: {
-      title: 'Empty Flux 2 Latent',
-    },
-  },
-  '10': {
-    inputs: {
-      image: 'input.png',
-    },
-    class_type: 'LoadImage',
-    _meta: {
-      title: 'Load Image',
-    },
-  },
-  '11': {
-    inputs: {
-      filename_prefix: 'ComfyUI',
-      images: ['22', 0],
-    },
-    class_type: 'SaveImage',
-    _meta: {
-      title: 'Save Image',
-    },
-  },
-  '12': {
-    inputs: {
-      unet_name: 'flux-2-klein-base-9b.safetensors',
-      weight_dtype: 'default',
-    },
-    class_type: 'UNETLoader',
-    _meta: {
-      title: 'Load Diffusion Model',
-    },
-  },
-  '15': {
-    inputs: {
-      lora_name: 'f2k/concept/klein_9B_Turbo_r128.safetensors',
-      strength_model: 1,
-      model: ['12', 0],
-    },
-    class_type: 'LoraLoaderModelOnly',
-    _meta: {
-      title: 'Turbo LoRA (fest)',
-    },
-  },
-  '16': {
-    inputs: {
-      image: ['21', 1],
-    },
-    class_type: 'GetImageSize',
-    _meta: {
-      title: 'Get Image Size (of crop)',
-    },
-  },
-  '20': {
-    inputs: {
-      image: 'mask.png',
-      channel: 'red',
-    },
-    class_type: 'LoadImageMask',
-    _meta: {
-      title: 'Load Mask',
-    },
-  },
+  '8': { inputs: { samples: ['7', 0], vae: ['1', 0] }, class_type: 'VAEDecode' },
+  '11': { inputs: { filename_prefix: 'Qwen21-Edit', images: ['8', 0] }, class_type: 'SaveImage' },
+};
+
+/**
+ * Qwen-Image 2.1 masked inpaint: InpaintCropImproved crop & stitch around a Qwen
+ * edit of the 1024 px crop (`resolution: 0`
+ * keeps the crop size, so the stitcher gets a same-sized image). The 2.1 VAE
+ * decodes RGBA; SplitImageWithAlpha drops alpha because InpaintStitchImproved
+ * needs RGB.
+ */
+const QWEN21_INPAINT_TEMPLATE: Workflow = {
+  ...QWEN21_LOADERS,
+  '10': { inputs: { image: 'input.png' }, class_type: 'LoadImage' },
+  '20': { inputs: { image: 'mask.png', channel: 'red' }, class_type: 'LoadImageMask' },
   '21': {
     inputs: {
       image: ['10', 0],
@@ -1170,109 +596,165 @@ const F2K_INPAINT_TEMPLATE: Workflow = {
       device_mode: 'gpu (much faster)',
     },
     class_type: 'InpaintCropImproved',
-    _meta: {
-      title: 'Inpaint Crop',
-    },
   },
+  '2': {
+    inputs: {
+      prompt: 'Keep the image unchanged.',
+      negative_prompt: '',
+      resolution: 0,
+      clip: ['4', 0],
+      'images.image_1': ['21', 1],
+      vae: ['1', 0],
+    },
+    class_type: 'TextEncodeQwenImage21',
+  },
+  '7': {
+    inputs: {
+      seed: 0,
+      steps: 25,
+      cfg: 1,
+      sampler_name: 'euler',
+      scheduler: 'simple',
+      denoise: 1,
+      model: ['13', 0],
+      positive: ['2', 0],
+      negative: ['2', 1],
+      latent_image: ['2', 2],
+    },
+    class_type: 'KSampler',
+  },
+  '79': { inputs: { samples: ['7', 0], vae: ['1', 0] }, class_type: 'VAEDecode' },
+  '80': { inputs: { image: ['79', 0] }, class_type: 'SplitImageWithAlpha' },
   '22': {
-    inputs: {
-      stitcher: ['21', 0],
-      inpainted_image: ['79', 0],
-    },
+    inputs: { stitcher: ['21', 0], inpainted_image: ['80', 0] },
     class_type: 'InpaintStitchImproved',
-    _meta: {
-      title: 'Inpaint Stitch',
-    },
   },
-  '79': {
-    inputs: {
-      samples: ['7', 0],
-      vae: ['1', 0],
-    },
-    class_type: 'VAEDecode',
-    _meta: {
-      title: 'VAE Decode',
-    },
+  '11': {
+    inputs: { filename_prefix: 'Qwen21-Inpaint', images: ['22', 0] },
+    class_type: 'SaveImage',
   },
-  '9:78': {
+};
+
+/**
+ * Qwen-Image 2.1 Pixel-Art Upscaler (ComfyUI user workflow
+ * `Qwen21-PixelArt-Upscaler.json`). PixelArtPrepXBRZ only snaps the sprite to its
+ * native grid (`native_preview`, nearest; xBRZ smoothing made Qwen soft) and fills
+ * transparency white. TextEncodeQwenImage21 feeds it as `<image1>` to the edit
+ * model; its latent output sets the canvas, so the sampler runs at denoise 1.
+ * Node 8 is the optional "who is this?" name; nodes 10-12 build
+ * "<image1> shows NAME. <instruction>" and drop the sentence when the name is
+ * empty. `megapixel` maps to the encoder `resolution` (see translateValue).
+ * The workflow's optional correction pass is left out of the template.
+ */
+const QWEN21_PIXELART_TEMPLATE: Workflow = {
+  '1': { inputs: { image: 'meowth_sprite.png' }, class_type: 'LoadImage' },
+  '2': {
     inputs: {
-      pixels: ['21', 1],
-      vae: ['1', 0],
+      native_width: 0,
+      xbrz_factor: 1,
+      megapixels: 1,
+      background: '#FFFFFF',
+      image: ['1', 0],
+      mask: ['1', 1],
     },
-    class_type: 'VAEEncode',
-    _meta: {
-      title: 'VAE Encode',
-    },
+    class_type: 'PixelArtPrepXBRZ',
   },
-  '9:77': {
-    inputs: {
-      conditioning: ['2', 0],
-      latent: ['9:78', 0],
-    },
-    class_type: 'ReferenceLatent',
-    _meta: {
-      title: 'ReferenceLatent',
-    },
+  '3': {
+    inputs: { unet_name: 'qwen-image-2.1-UC-int8_convrot.safetensors', weight_dtype: 'default' },
+    class_type: 'UNETLoader',
   },
-  '9:76': {
+  '4': {
+    inputs: { device: 'auto', dtype: 'default', model: ['3', 0] },
+    class_type: 'QwenImage21Cache',
+  },
+  '5': {
     inputs: {
-      conditioning: ['3', 0],
-      latent: ['9:78', 0],
+      clip_name: 'qwen3vl_8b_int8_convrot.safetensors',
+      type: 'qwen_image',
+      device: 'default',
     },
-    class_type: 'ReferenceLatent',
-    _meta: {
-      title: 'ReferenceLatent',
+    class_type: 'CLIPLoader',
+  },
+  '6': { inputs: { vae_name: 'qwen_image_2.1_vae_bf16.safetensors' }, class_type: 'VAELoader' },
+  '8': { inputs: { value: '' }, class_type: 'PrimitiveStringMultiline' },
+  '9': {
+    inputs: {
+      value:
+        'Redraw <image1> as a crisp high-resolution 2D cartoon illustration of exactly ' +
+        'the same character: same pose, proportions, colors, facial expression and ' +
+        'background composition. Replace the blocky low-resolution pixel look with smooth ' +
+        'clean bold dark outlines, flat cel shading with subtle soft highlights and sharp ' +
+        'vector edges. No pixels, no stair-stepped edges, no blur.',
     },
+    class_type: 'PrimitiveStringMultiline',
+  },
+  '10': {
+    inputs: { string_a: '<image1> shows ', string_b: ['8', 0], delimiter: '' },
+    class_type: 'StringConcatenate',
+  },
+  '11': {
+    inputs: { string_a: ['10', 0], string_b: ['9', 0], delimiter: '. ' },
+    class_type: 'StringConcatenate',
+  },
+  '12': {
+    inputs: {
+      string: ['11', 0],
+      regex_pattern: '^<image1> shows\\s*\\.\\s*',
+      replace: '',
+      case_insensitive: true,
+      multiline: false,
+      dotall: false,
+      count: 0,
+    },
+    class_type: 'RegexReplace',
+  },
+  '13': {
+    inputs: {
+      prompt: ['12', 0],
+      negative_prompt: '',
+      resolution: 1024,
+      clip: ['5', 0],
+      'images.image_1': ['2', 1],
+      vae: ['6', 0],
+    },
+    class_type: 'TextEncodeQwenImage21',
+  },
+  '14': {
+    inputs: {
+      seed: 42,
+      steps: 25,
+      cfg: 1,
+      sampler_name: 'euler',
+      scheduler: 'simple',
+      denoise: 1,
+      model: ['4', 0],
+      positive: ['13', 0],
+      negative: ['13', 1],
+      latent_image: ['13', 2],
+    },
+    class_type: 'KSampler',
+  },
+  '15': { inputs: { samples: ['14', 0], vae: ['6', 0] }, class_type: 'VAEDecode' },
+  '16': {
+    inputs: { filename_prefix: 'Qwen21-PixelUpscale', images: ['15', 0] },
+    class_type: 'SaveImage',
   },
 };
 
 const TEMPLATES: Record<WorkflowId, Workflow> = {
-  'z-image-turbo': Z_IMAGE_TURBO_TEMPLATE,
-  'flux2-klein-t2i': FLUX2_KLEIN_T2I_TEMPLATE,
-  'flux2-klein-edit': FLUX2_KLEIN_EDIT_TEMPLATE,
   'krea2-t2i': KREA2_T2I_TEMPLATE,
-  'f2k-edit': F2K_EDIT_TEMPLATE,
-  'f2k-inpaint': F2K_INPAINT_TEMPLATE,
+  'qwen21-edit': QWEN21_EDIT_TEMPLATE,
+  'qwen21-inpaint': QWEN21_INPAINT_TEMPLATE,
+  'qwen21-pixelart': QWEN21_PIXELART_TEMPLATE,
 };
 
 // Per-workflow map: which node holds which parameter. Each entry is
 // `[node_id, field_path_in_inputs]`. Field paths are dot-separated for nested
-// fields (e.g. `lora_name` is at `inputs.lora_name`, just `lora_name`).
+// fields (e.g. `seed` is at `inputs.seed`, just `seed`).
 const PARAM_MAP: Record<
   WorkflowId,
   Partial<Record<keyof WorkflowParams, [nodeId: string, field: string]>>
 > = {
-  'z-image-turbo': {
-    prompt: ['59:27', 'text'],
-    seed: ['59:3', 'seed'],
-    steps: ['59:3', 'steps'],
-    cfg: ['59:3', 'cfg'],
-    sampler_name: ['59:3', 'sampler_name'],
-    scheduler: ['59:3', 'scheduler'],
-    megapixel: ['74', 'megapixel'],
-    aspect_ratio: ['74', 'aspect_ratio'],
-    unet: ['59:28', 'unet_name'],
-    clip: ['67', 'clip_name'],
-    vae: ['59:29', 'vae_name'],
-    filename_prefix: ['60', 'filename_prefix'],
-  },
-  'flux2-klein-t2i': {
-    prompt: ['91', 'text'],
-    negative_prompt: ['84', 'text'],
-    seed: ['113', 'noise_seed'],
-    steps: ['92', 'steps'],
-    cfg: ['112', 'cfg'],
-    sampler_name: ['111', 'sampler_name'],
-    megapixel: ['93', 'megapixel'],
-    aspect_ratio: ['93', 'aspect_ratio'],
-    unet: ['100', 'unet_name'],
-    clip: ['102', 'clip_name'],
-    vae: ['114', 'vae_name'],
-    lora_name: ['129', 'lora_name'],
-    lora_strength: ['129', 'strength_model'],
-    teacache_threshold: ['105', 'rel_l1_thresh'],
-    filename_prefix: ['95', 'filename_prefix'],
-  },
   'krea2-t2i': {
     // The prompt node feeds a switch chain (refiner, then LoRA trigger words)
     // before it reaches CLIPTextEncode, so the raw string belongs in 30:19.
@@ -1289,38 +771,34 @@ const PARAM_MAP: Record<
     vae: ['30:12', 'vae_name'],
     filename_prefix: ['29', 'filename_prefix'],
   },
-  'f2k-edit': {
-    prompt: ['2', 'text'],
-    negative_prompt: ['3', 'text'],
+  'qwen21-edit': {
+    prompt: ['2', 'prompt'],
+    negative_prompt: ['2', 'negative_prompt'],
     seed: ['7', 'seed'],
     steps: ['7', 'steps'],
     cfg: ['7', 'cfg'],
     sampler_name: ['7', 'sampler_name'],
     scheduler: ['7', 'scheduler'],
-    megapixel: ['5', 'megapixels'],
+    // Pixel budget of the edit canvas; translated to the encoder's edge length.
+    megapixel: ['2', 'resolution'],
     unet: ['12', 'unet_name'],
     clip: ['4', 'clip_name'],
     vae: ['1', 'vae_name'],
-    lora_name: ['15', 'lora_name'],
-    lora_strength: ['15', 'strength_model'],
     input_image: ['10', 'image'],
     filename_prefix: ['11', 'filename_prefix'],
   },
-  'f2k-inpaint': {
-    prompt: ['2', 'text'],
-    negative_prompt: ['3', 'text'],
+  'qwen21-inpaint': {
+    prompt: ['2', 'prompt'],
+    negative_prompt: ['2', 'negative_prompt'],
     seed: ['7', 'seed'],
     steps: ['7', 'steps'],
     cfg: ['7', 'cfg'],
     sampler_name: ['7', 'sampler_name'],
     scheduler: ['7', 'scheduler'],
-    // Deliberately no `megapixel` / `aspect_ratio`: the crop sizes itself from
-    // the mask and the stitch restores the source frame.
+    // No `megapixel` / `aspect_ratio`: the crop sizes itself and the stitch restores the frame.
     unet: ['12', 'unet_name'],
     clip: ['4', 'clip_name'],
     vae: ['1', 'vae_name'],
-    lora_name: ['15', 'lora_name'],
-    lora_strength: ['15', 'strength_model'],
     input_image: ['10', 'image'],
     mask: ['20', 'image'],
     mask_blend_pixels: ['21', 'mask_blend_pixels'],
@@ -1328,23 +806,21 @@ const PARAM_MAP: Record<
     mask_invert: ['21', 'mask_invert'],
     filename_prefix: ['11', 'filename_prefix'],
   },
-  'flux2-klein-edit': {
-    prompt: ['2', 'text'],
-    negative_prompt: ['3', 'text'],
-    seed: ['7', 'seed'],
-    steps: ['7', 'steps'],
-    cfg: ['7', 'cfg'],
-    sampler_name: ['7', 'sampler_name'],
-    scheduler: ['7', 'scheduler'],
-    megapixel: ['5', 'megapixels'],
-    unet: ['12', 'unet_name'],
-    clip: ['4', 'clip_name'],
-    vae: ['1', 'vae_name'],
-    lora_name: ['15', 'lora_name'],
-    lora_strength: ['15', 'strength_model'],
-    teacache_threshold: ['13', 'rel_l1_thresh'],
-    input_image: ['10', 'image'],
-    filename_prefix: ['11', 'filename_prefix'],
+  'qwen21-pixelart': {
+    // The prompt is the optional "who is this?" name (node 8).
+    prompt: ['8', 'value'],
+    seed: ['14', 'seed'],
+    steps: ['14', 'steps'],
+    cfg: ['14', 'cfg'],
+    sampler_name: ['14', 'sampler_name'],
+    scheduler: ['14', 'scheduler'],
+    // Pixel budget of the edit canvas; translated to the encoder's edge length.
+    megapixel: ['13', 'resolution'],
+    unet: ['3', 'unet_name'],
+    clip: ['5', 'clip_name'],
+    vae: ['6', 'vae_name'],
+    input_image: ['1', 'image'],
+    filename_prefix: ['16', 'filename_prefix'],
   },
 };
 
@@ -1373,6 +849,11 @@ const RESOLUTION_SELECTOR_ASPECTS: Record<AspectRatio, string> = {
 function translateValue(id: WorkflowId, field: string, value: unknown): unknown {
   if (id === 'krea2-t2i' && field === 'aspect_ratio' && typeof value === 'string') {
     return RESOLUTION_SELECTOR_ASPECTS[value as AspectRatio] ?? value;
+  }
+  // TextEncodeQwenImage21 takes an edge length (pixels ~ resolution², multiple of 32).
+  if ((id === 'qwen21-pixelart' || id === 'qwen21-edit') && field === 'resolution') {
+    const mp = Number(value);
+    if (Number.isFinite(mp) && mp > 0) return Math.round((Math.sqrt(mp) * 1024) / 32) * 32;
   }
   return value;
 }
@@ -1411,10 +892,11 @@ export function validateParams(
   const meta = WORKFLOWS[id];
   if (!meta) return { ok: false, error: `unknown workflow: ${id}` };
 
-  if (!params.prompt || params.prompt.trim().length < 3) {
+  const prompt = (params.prompt ?? '').trim();
+  if (meta.promptOptional ? prompt.length > 0 && prompt.length < 3 : prompt.length < 3) {
     return { ok: false, error: 'prompt must be at least 3 characters' };
   }
-  if (params.prompt.length > 4000) {
+  if (prompt.length > 4000) {
     return { ok: false, error: 'prompt exceeds 4000 chars' };
   }
   if (meta.requiresInputImage && !params.input_image) {
@@ -1446,12 +928,6 @@ export function validateParams(
   }
   if (params.megapixel && !VALID_MEGAPIXELS.includes(params.megapixel)) {
     return { ok: false, error: `megapixel must be one of: ${VALID_MEGAPIXELS.join(', ')}` };
-  }
-  if (
-    params.lora_strength !== undefined &&
-    (params.lora_strength < 0 || params.lora_strength > 2)
-  ) {
-    return { ok: false, error: 'lora_strength must be 0-2' };
   }
   return { ok: true };
 }

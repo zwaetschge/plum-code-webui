@@ -202,7 +202,11 @@ data class CreateSessionInput(
     val name: String,
     val workingDirectory: String? = null,
     val cliProvider: CLIProvider? = null,
-    val mode: SessionMode? = null
+    val mode: SessionMode? = null,
+    val surface: String = "code",
+    val profileId: String? = null,
+    val cliModel: String? = null,
+    val cliReasoning: String? = null,
 )
 
 @Serializable

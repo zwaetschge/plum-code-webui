@@ -1,9 +1,25 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, type NativeImage } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Tray,
+  Menu,
+  nativeImage,
+  globalShortcut,
+  type NativeImage,
+} from 'electron';
 import path from 'path';
 import { tryDeviceAuth, registerDevice } from './auth';
 import { generateFingerprint, getDeviceName } from './fingerprint';
 import { loadDeviceConfig, clearDeviceConfig } from './store';
-import { createSetupWindow, createAppWindow, closeSetupWindow, getAppWindow } from './window';
+import {
+  createSetupWindow,
+  createAppWindow,
+  closeSetupWindow,
+  getAppWindow,
+  createMiniWindow,
+  closeMiniWindow,
+} from './window';
 
 let tray: Tray | null = null;
 
@@ -36,6 +52,17 @@ app.whenReady().then(async () => {
 
   // Setup system tray
   setupTray();
+  // Conflicts are reported; the tray action remains available without rebinding.
+  if (
+    !globalShortcut.register('CommandOrControl+Alt+Space', () => {
+      createMiniWindow();
+    })
+  )
+    console.info('Plum Mini: shortcut unavailable; use the tray entry.');
+});
+app.on('will-quit', () => {
+  globalShortcut.unregister('CommandOrControl+Alt+Space');
+  closeMiniWindow();
 });
 
 // macOS: keep app running when all windows closed (tray mode)
@@ -116,9 +143,15 @@ function setupTray(): void {
   }
 
   tray = new Tray(trayIcon);
-  tray.setToolTip('Plum Code WebUI');
+  tray.setToolTip('Plum');
 
   const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Plum Mini',
+      click: () => {
+        createMiniWindow();
+      },
+    },
     {
       label: 'Open',
       click: () => {
@@ -134,14 +167,13 @@ function setupTray(): void {
       click: async () => {
         const authResult = await tryDeviceAuth();
         if (authResult.success && authResult.token && authResult.serverUrl) {
-          const win = getAppWindow();
-          if (win) {
+          const previous = getAppWindow();
+          const win = createAppWindow(authResult.serverUrl, authResult.token);
+          if (win === previous) {
             const authUrl = `${authResult.serverUrl}/auth/callback?token=${encodeURIComponent(authResult.token)}`;
             win.loadURL(authUrl);
-            win.show();
-          } else {
-            createAppWindow(authResult.serverUrl, authResult.token);
           }
+          win.show();
         } else {
           createSetupWindow();
         }
@@ -152,6 +184,7 @@ function setupTray(): void {
       label: 'Reset Device',
       click: () => {
         clearDeviceConfig();
+        closeMiniWindow();
         const win = getAppWindow();
         if (win && !win.isDestroyed()) {
           win.close();

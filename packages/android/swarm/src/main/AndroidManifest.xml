@@ -1,0 +1,91 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    
+    <queries>
+        <intent>
+            <action android:name="org.unifiedpush.android.distributor.REGISTER" />
+        </intent>
+    </queries>
+
+    <application>
+
+        
+        <activity android:name="com.claudewebui.swarm.MainActivity" android:exported="false" android:launchMode="singleTop" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|uiMode|keyboard|keyboardHidden|navigation" android:windowSoftInputMode="adjustResize" android:theme="@style/swarm_Theme.Schwarm">
+            </activity>
+
+        
+        <activity android:name="com.claudewebui.swarm.TeilenActivity" android:exported="true" android:excludeFromRecents="true" android:noHistory="true" android:theme="@android:style/Theme.NoDisplay" android:label="Plum Schwarm">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+
+        
+        <provider android:name="com.claudewebui.swarm.SwarmFileProvider" android:authorities="${applicationId}.dateien" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/swarm_dateipfade" />
+        </provider>
+
+        
+        <receiver android:name="com.claudewebui.swarm.widget.FavoritenWidget" android:exported="false" android:label="Plum Schwarm">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/swarm_favoriten_widget" />
+        </receiver>
+        
+        <receiver android:name="com.claudewebui.swarm.widget.AktuellWidget" android:exported="false" android:label="Plum Schwarm">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/swarm_aktuell_widget" />
+        </receiver>
+
+        
+        <service android:name="com.claudewebui.swarm.NotAusKachel" android:exported="true" android:icon="@drawable/swarm_ic_kachel_notaus" android:label="@string/swarm_kachel_notaus" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        
+        <activity android:name="com.claudewebui.swarm.FreigabeActivity" android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode|density" android:exported="false" android:excludeFromRecents="true" android:noHistory="true" android:taskAffinity="" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <receiver android:name="com.claudewebui.swarm.FreigabeAblehnen" android:exported="false" android:label="Plum Schwarm" />
+        
+        <receiver android:name="com.claudewebui.swarm.AntwortEmpfaenger" android:exported="false" android:label="Plum Schwarm" />
+
+        
+        <receiver android:name="com.claudewebui.swarm.hintergrund.PushEmpfaenger" android:exported="true" android:label="Plum Schwarm">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />
+                <action android:name="org.unifiedpush.android.connector.MESSAGE" />
+                <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED" />
+                <action android:name="org.unifiedpush.android.connector.UNREGISTERED" />
+                <action android:name="org.unifiedpush.android.connector.TEMP_UNAVAILABLE" />
+            </intent-filter>
+        </receiver>
+        <service android:name="com.claudewebui.swarm.hintergrund.PushDienst" android:exported="true">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.RAISE_TO_FOREGROUND" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

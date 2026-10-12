@@ -1,0 +1,434 @@
+import type { AssistantApiProvider } from '@plum-code-webui/shared';
+import { readOpenCodeProvidersForUser } from '../../utils/opencodeProviderKeys.js';
+import { getOpenCodeProviderCatalog } from '../../utils/opencodeCatalog.js';
+import { safeDecrypt } from '../../utils/encryption.js';
+import { AppError } from '../../middleware/errorHandler.js';
+
+const compatible = new Set([
+  'openai',
+  'openrouter',
+  'mistral',
+  'zai',
+  'z-ai',
+  'deepseek',
+  'xai',
+  'x-ai',
+  'groq',
+  'together',
+  'togetherai',
+  'cerebras',
+  'fireworks-ai',
+  'perplexity',
+  'moonshotai',
+  'ollama',
+  'ollama-cloud',
+  'lmstudio',
+  'opencode',
+  'opencode-go',
+]);
+interface Endpoint extends AssistantApiProvider {
+  baseUrl: string;
+  key: string;
+}
+async function endpoints(userId: string): Promise<Endpoint[]> {
+  const providers = await readOpenCodeProvidersForUser(userId),
+    catalog = getOpenCodeProviderCatalog();
+  return providers.flatMap((provider) => {
+    if (!provider.enabled || !provider.apiKey) return [];
+    const protocol =
+      provider.id === 'anthropic'
+        ? 'anthropic'
+        : provider.id === 'google'
+          ? 'gemini'
+          : compatible.has(provider.id) || (!catalog[provider.id] && provider.baseUrl)
+            ? 'openai'
+            : null;
+    const baseUrl =
+        provider.baseUrl ||
+        catalog[provider.id]?.api ||
+        (protocol === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta' : undefined),
+      key = safeDecrypt(provider.apiKey);
+    if (!protocol || !baseUrl || !key) return [];
+    let url: URL;
+    try {
+      url = new URL(baseUrl);
+    } catch {
+      return [];
+    }
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    )
+      return [];
+    const models = provider.models?.length ? provider.models : (catalog[provider.id]?.models ?? []);
+    return [
+      {
+        id: provider.id,
+        name: provider.name,
+        protocol,
+        baseUrl,
+        key,
+        models: models.slice(0, 500),
+      },
+    ];
+  });
+}
+export async function apiChatProviders(userId: string): Promise<AssistantApiProvider[]> {
+  return (await endpoints(userId)).map(({ id, name, protocol, models }) => ({
+    id,
+    name,
+    protocol,
+    models,
+  }));
+}
+export async function apiChatEndpoint(userId: string, providerId: string, model: string) {
+  const endpoint = (await endpoints(userId)).find((item) => item.id === providerId);
+  if (!endpoint || !endpoint.models.includes(model))
+    throw new AppError(
+      'Diese API-Verbindung oder dieses Modell ist nicht verfügbar. Prüfe deine Provider-Einstellungen.',
+      409,
+      'API_MODEL_UNAVAILABLE'
+    );
+  return endpoint;
+}
+export interface ApiUsage {
+  input: number;
+  output: number;
+  cached: number;
+  cacheWrite: number;
+}
+export interface ApiStreamResult {
+  model: string;
+  usage: ApiUsage | null;
+  warning: string | null;
+}
+/** Thinking depth a client may request per turn; mapped to each protocol's own knob. */
+export const API_REASONING_EFFORTS = ['low', 'medium', 'high', 'max', 'ultra'] as const;
+export type ApiReasoningEffort = (typeof API_REASONING_EFFORTS)[number];
+const ANTHROPIC_THINKING_BUDGET: Record<ApiReasoningEffort, number> = {
+  low: 2048,
+  medium: 6144,
+  high: 16384,
+  max: 32768,
+  ultra: 49152,
+};
+const GEMINI_THINKING_BUDGET: Record<ApiReasoningEffort, number> = {
+  low: 1024,
+  medium: 4096,
+  high: 12288,
+  max: 24576,
+  ultra: 32768,
+};
+export interface ApiMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  images?: Array<{ mimeType: string; data: string }>;
+}
+export async function streamApiChat(
+  endpoint: Endpoint,
+  model: string,
+  system: string,
+  messages: ApiMessage[],
+  signal: AbortSignal,
+  onText: (text: string) => Promise<void>,
+  effort?: ApiReasoningEffort
+): Promise<ApiStreamResult> {
+  const anthropic = endpoint.protocol === 'anthropic',
+    gemini = endpoint.protocol === 'gemini';
+  const geminiModel = model.replace(/^models\//, '');
+  if (gemini && !/^[A-Za-z0-9._-]{1,160}$/.test(geminiModel))
+    throw new AppError(
+      'Dieses Gemini-Modell kann nicht über GenerateContent aufgerufen werden.',
+      409,
+      'API_MODEL_UNAVAILABLE'
+    );
+  const wireMessages = messages.map((message) => ({
+    role: message.role,
+    content: message.images?.length
+      ? anthropic
+        ? [
+            ...message.images.map((image) => ({
+              type: 'image',
+              source: { type: 'base64', media_type: image.mimeType, data: image.data },
+            })),
+            { type: 'text', text: message.content },
+          ]
+        : [
+            { type: 'text', text: message.content },
+            ...message.images.map((image) => ({
+              type: 'image_url',
+              image_url: { url: `data:${image.mimeType};base64,${image.data}` },
+            })),
+          ]
+      : message.content,
+  }));
+  const base = new URL(endpoint.baseUrl);
+  if (gemini) {
+    const prefix = base.pathname.replace(/\/$/, '');
+    base.pathname =
+      prefix +
+      (/\/v1(?:beta)?$/.test(prefix) ? '' : '/v1beta') +
+      '/models/' +
+      encodeURIComponent(geminiModel) +
+      ':streamGenerateContent';
+    base.searchParams.set('alt', 'sse');
+  } else
+    base.pathname =
+      base.pathname.replace(/\/$/, '') +
+      (anthropic
+        ? base.pathname.replace(/\/$/, '').endsWith('/v1')
+          ? '/messages'
+          : '/v1/messages'
+        : '/chat/completions');
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    accept: 'text/event-stream',
+  };
+  if (gemini) headers['x-goog-api-key'] = endpoint.key;
+  else if (anthropic) {
+    headers['x-api-key'] = endpoint.key;
+    headers['anthropic-version'] = '2023-06-01';
+  } else headers.authorization = `Bearer ${endpoint.key}`;
+  const response = await fetch(base, {
+    method: 'POST',
+    headers,
+    redirect: 'error',
+    signal,
+    body: JSON.stringify(
+      gemini
+        ? {
+            systemInstruction: { parts: [{ text: system }] },
+            contents: messages.map((message) => ({
+              role: message.role === 'assistant' ? 'model' : 'user',
+              parts: [
+                { text: message.content },
+                ...(message.images ?? []).map((image) => ({
+                  inlineData: { mimeType: image.mimeType, data: image.data },
+                })),
+              ],
+            })),
+            generationConfig: {
+              candidateCount: 1,
+              maxOutputTokens: 8192 + (effort ? GEMINI_THINKING_BUDGET[effort] : 0),
+              ...(effort
+                ? { thinkingConfig: { thinkingBudget: GEMINI_THINKING_BUDGET[effort] } }
+                : {}),
+            },
+          }
+        : anthropic
+          ? {
+              model,
+              system,
+              messages: wireMessages,
+              // The thinking budget counts against max_tokens, so the answer keeps its 8k.
+              max_tokens: 8192 + (effort ? ANTHROPIC_THINKING_BUDGET[effort] : 0),
+              stream: true,
+              ...(effort
+                ? {
+                    thinking: { type: 'enabled', budget_tokens: ANTHROPIC_THINKING_BUDGET[effort] },
+                  }
+                : {}),
+            }
+          : {
+              model,
+              messages: [{ role: 'system', content: system }, ...wireMessages],
+              stream: true,
+              stream_options: { include_usage: true },
+              // OpenAI-style APIs know low/medium/high; max and ultra are the highest of those.
+              ...(effort
+                ? { reasoning_effort: effort === 'max' || effort === 'ultra' ? 'high' : effort }
+                : {}),
+            }
+    ),
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new AppError(
+      `Die Modell-API hat den Auftrag abgelehnt (HTTP ${response.status}).`,
+      502,
+      'API_UPSTREAM_ERROR'
+    );
+  }
+  if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) {
+    await response.body?.cancel();
+    throw new AppError(
+      'Die API liefert keinen unterstützten Antwortstream.',
+      502,
+      'API_STREAM_UNSUPPORTED'
+    );
+  }
+  const reader = response.body.getReader(),
+    decoder = new TextDecoder();
+  let buffer = '',
+    received = 0,
+    done = false,
+    finish = false,
+    served = model,
+    usage: ApiUsage | null = null,
+    warning: string | null = null;
+  const count = (value: unknown) =>
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 10000000
+      ? value
+      : 0;
+  const event = async (frame: string) => {
+    const raw = frame
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n');
+    if (!raw) return;
+    if (raw === '[DONE]') {
+      done = true;
+      return;
+    }
+    const item = JSON.parse(raw);
+    if (item.error || item.type === 'error')
+      throw new AppError(
+        'Die Modell-API hat den Antwortstream abgebrochen.',
+        502,
+        'API_STREAM_ERROR'
+      );
+    if (typeof item.model === 'string') served = item.model.slice(0, 200);
+    if (gemini) {
+      if (typeof item.modelVersion === 'string') served = item.modelVersion.slice(0, 200);
+      if (item.promptFeedback?.blockReason)
+        throw new AppError(
+          'Die Gemini-API hat die Eingabe abgewiesen.',
+          502,
+          'API_UPSTREAM_BLOCKED'
+        );
+      if (item.usageMetadata) {
+        const u = item.usageMetadata,
+          cached = count(u.cachedContentTokenCount);
+        usage = {
+          input: Math.max(0, count(u.promptTokenCount) - cached),
+          output: count(u.candidatesTokenCount) + count(u.thoughtsTokenCount),
+          cached,
+          cacheWrite: 0,
+        };
+      }
+      for (const candidate of item.candidates ?? []) {
+        if ((candidate.index ?? 0) !== 0) continue;
+        for (const part of candidate.content?.parts ?? []) {
+          if (part.functionCall || part.executableCode || part.codeExecutionResult)
+            throw new AppError(
+              'Das Modell verlangt Werkzeuge, die dieser Modellchat nicht bereitstellt.',
+              502,
+              'API_TOOL_UNSUPPORTED'
+            );
+          if (typeof part.text === 'string' && part.thought !== true) await onText(part.text);
+        }
+        if (candidate.finishReason && candidate.finishReason !== 'FINISH_REASON_UNSPECIFIED') {
+          finish = true;
+          if (candidate.finishReason !== 'STOP')
+            warning = `Die Gemini-API hat die Ausgabe mit «${String(candidate.finishReason).slice(0, 40)}» beendet.`;
+        }
+      }
+    } else if (anthropic) {
+      if (item.type === 'message_start') {
+        if (typeof item.message?.model === 'string') served = item.message.model.slice(0, 200);
+        const u = item.message?.usage;
+        if (u)
+          usage = {
+            input: count(u.input_tokens),
+            output: count(u.output_tokens),
+            cached: count(u.cache_read_input_tokens),
+            cacheWrite: count(u.cache_creation_input_tokens),
+          };
+      }
+      if (
+        item.type === 'content_block_start' &&
+        item.content_block?.type === 'text' &&
+        typeof item.content_block.text === 'string'
+      )
+        await onText(item.content_block.text);
+      if (
+        item.type === 'content_block_delta' &&
+        item.delta?.type === 'text_delta' &&
+        typeof item.delta.text === 'string'
+      )
+        await onText(item.delta.text);
+      if (item.type === 'message_delta') {
+        if (usage && item.usage) usage.output = count(item.usage.output_tokens);
+        if (item.delta?.stop_reason === 'max_tokens')
+          warning = 'Die API hat die Ausgabe an ihrer Token-Grenze beendet.';
+        if (item.delta?.stop_reason === 'tool_use')
+          throw new AppError(
+            'Das Modell verlangt Werkzeuge, die dieser Modellchat nicht bereitstellt.',
+            502,
+            'API_TOOL_UNSUPPORTED'
+          );
+      }
+      if (item.type === 'message_stop') done = true;
+    } else {
+      if (item.usage) {
+        const u = item.usage,
+          cached = count(u.prompt_tokens_details?.cached_tokens);
+        usage = {
+          input: Math.max(0, count(u.prompt_tokens) - cached),
+          output: count(u.completion_tokens),
+          cached,
+          cacheWrite: 0,
+        };
+      }
+      for (const choice of item.choices ?? []) {
+        if (choice.index !== 0) continue;
+        if (choice.delta?.tool_calls)
+          throw new AppError(
+            'Das Modell verlangt Werkzeuge, die dieser Modellchat nicht bereitstellt.',
+            502,
+            'API_TOOL_UNSUPPORTED'
+          );
+        const text = choice.delta?.content ?? choice.delta?.refusal;
+        if (typeof text === 'string') await onText(text);
+        else if (Array.isArray(text)) {
+          // Mistral mixes reasoning blocks and visible text blocks in delta.content.
+          // Only render text; thinking blocks remain private to the model.
+          for (const block of text) {
+            if (block?.type === 'text' && typeof block.text === 'string') await onText(block.text);
+          }
+        }
+        if (choice.finish_reason) {
+          finish = true;
+          if (choice.finish_reason !== 'stop')
+            warning = `Die API hat die Ausgabe mit «${String(choice.finish_reason).slice(0, 40)}» beendet.`;
+        }
+      }
+    }
+  };
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        buffer += decoder.decode();
+        break;
+      }
+      received += chunk.value.byteLength;
+      if (received > 8000000)
+        throw new AppError('Der API-Antwortstream ist zu gross.', 502, 'API_STREAM_LIMIT');
+      buffer = (buffer + decoder.decode(chunk.value, { stream: true })).replace(/\r\n/g, '\n');
+      let boundary: number;
+      while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        await event(frame);
+      }
+      if (buffer.length > 262144)
+        throw new AppError('Das API-Streamereignis ist zu gross.', 502, 'API_STREAM_LIMIT');
+    }
+    if (buffer.trim()) await event(buffer);
+    if (!done && !finish)
+      throw new AppError(
+        'Die Verbindung endete vor der bestätigten Antwort.',
+        502,
+        'API_STREAM_INTERRUPTED'
+      );
+    return { model: served, usage, warning };
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}

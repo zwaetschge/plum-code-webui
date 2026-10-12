@@ -1,9 +1,10 @@
+import { ReasoningPicker } from '@/components/assistant/ModelEffortPicker';
 import { RuntimeSelect } from '@/components/session/RuntimeSelect';
+import { ConversationControls } from '@/components/assistant/ConversationControls';
 import { createPortal } from 'react-dom';
 import { useSessionMenu } from '@/components/layout/SessionMenuContext';
 import { SubagentPanel } from '@/components/session/SubagentPanel';
 import { isActiveAgent, subagentCounts } from '@plum-code-webui/shared';
-import { CLAUDE_CODE_EFFORT_OPTIONS } from '@plum-code-webui/shared';
 import {
   Fragment,
   useEffect,
@@ -166,6 +167,7 @@ import { ChatInput, type ChatSendOptions } from '@/components/chat/ChatInput';
 import { PermissionApprovalDialog } from '@/components/chat/PermissionApprovalDialog';
 import { QuestionApprovalDialog } from '@/components/chat/QuestionApprovalDialog';
 import {
+  getConversationReasoningOptions,
   CLI_PROVIDER_DEFAULT_MODEL,
   CLI_PROVIDER_LABEL,
   toUiProvider,
@@ -750,6 +752,7 @@ export function SessionPage() {
     return cliTools.find((t) => t.id === selectedCliTool)?.name;
   }, [selectedCliTool, cliTools]);
 
+  const [chatToolsOpened, setChatToolsOpened] = useState(false);
   const [mainView, setMainView] = useState<'chat' | 'editor' | 'files'>('chat');
   const [configTab, setConfigTab] = useState<'memories' | 'agents'>('memories');
   const isDesktopLayout = useIsDesktopLayout();
@@ -807,6 +810,7 @@ export function SessionPage() {
 
   const openRightPanel = useCallback(
     (panel: WorkspaceSheetPanel) => {
+      setChatToolsOpened(true);
       closeNavigation();
       if (window.matchMedia('(max-width: 1023px)').matches) {
         setMobileSheetPanel(panel);
@@ -1261,6 +1265,13 @@ export function SessionPage() {
     refetchIntervalInBackground: false,
   });
 
+  useEffect(() => {
+    if (session?.surface === 'chat') {
+      setMainView('chat');
+      setRunCockpitOpen(false);
+      setChatToolsOpened(false);
+    }
+  }, [session?.id, session?.surface]);
   const sessionProvider = session?.cliProvider ?? toCliProvider();
   const sessionUiProvider = toUiProvider(sessionProvider);
   const providerLabel = CLI_PROVIDER_LABEL[sessionProvider];
@@ -1483,7 +1494,6 @@ export function SessionPage() {
     sessionProvider === 'pi' ||
     sessionProvider !== 'opencode' ||
     configuredModelsForProvider.length > 0;
-  // Opus 5.5 effort labels apply to both its 200k and its `[1m]` variant.
   const isClaudeOpus55 =
     sessionProvider === 'claude' && selectedModel.replace(/\[1m\]$/i, '') === 'claude-opus-5-5';
   const selectedReasoning = session?.cliReasoning || '';
@@ -1491,51 +1501,10 @@ export function SessionPage() {
   const selectedServiceTier = session?.cliServiceTier || '';
   const serviceTierSelectValue = selectedServiceTier || '__default__';
   const fastModeActive = sessionProvider === 'codex' && serviceTierSelectValue === 'fast';
-  const reasoningOptions = useMemo(() => {
-    if (sessionProvider === 'claude' || sessionProvider === 'zai') {
-      return isClaudeOpus55
-        ? CLAUDE_CODE_EFFORT_OPTIONS.map((option) =>
-            option.value === 'max' ? { ...option, label: 'Max · long thinking' } : option
-          )
-        : CLAUDE_CODE_EFFORT_OPTIONS;
-    }
-    if (sessionProvider === 'opencode' || sessionProvider === 'pi') {
-      return [
-        { value: 'minimal', label: 'Minimal' },
-        { value: 'low', label: 'Low' },
-        { value: 'medium', label: 'Medium' },
-        { value: 'high', label: 'High' },
-        { value: 'max', label: 'Max' },
-        // Pi runs Ultracode workflows through scripts/pi-ultracode-extension.ts.
-        ...(sessionProvider === 'pi'
-          ? [{ value: 'ultracode', label: 'Ultracode (workflows)' }]
-          : []),
-      ];
-    }
-    if (sessionProvider === 'vibe') {
-      // Vibe calls this "Thinking" (off … max); the backend rejects anything
-      // else (see utils/reasoningLevel.ts).
-      return [
-        { value: 'off', label: 'Off' },
-        { value: 'low', label: 'Low' },
-        { value: 'medium', label: 'Medium' },
-        { value: 'high', label: 'High' },
-        { value: 'max', label: 'Max' },
-        // Workflows through scripts/mcp-servers/vibe-ultracode.mjs, at high thinking.
-        { value: 'ultracode', label: 'Ultracode (workflows)' },
-      ];
-    }
-    return [
-      { value: 'none', label: 'None' },
-      { value: 'minimal', label: 'Minimal' },
-      { value: 'low', label: 'Low' },
-      { value: 'medium', label: 'Medium' },
-      { value: 'high', label: 'High' },
-      { value: 'xhigh', label: 'XHigh' },
-      { value: 'max', label: 'Max' },
-      { value: 'ultra', label: 'Ultra' },
-    ];
-  }, [sessionProvider, isClaudeOpus55]);
+  const reasoningOptions = useMemo(
+    () => getConversationReasoningOptions(sessionProvider, selectedModel),
+    [sessionProvider, selectedModel]
+  );
 
   const { data: sessionChatList, isSuccess: sessionChatsReady } = useQuery({
     queryKey: ['session-chats', id],
@@ -3249,7 +3218,12 @@ export function SessionPage() {
   const goalObjective = goalDraft.trim();
   const canUseCodexGoal = sessionProvider === 'codex';
   const goalObjectiveTooLong = goalObjective.length > 4000;
-  const visibleDockedPanels: WorkspaceSheetPanel[] = DOCKED_PANEL_KEYS;
+  const visibleDockedPanels: WorkspaceSheetPanel[] =
+    session.surface && session.surface !== 'code'
+      ? DOCKED_PANEL_KEYS.filter(
+          (panel) => !['git', 'github', 'checkpoints', 'agentsEditor'].includes(panel)
+        )
+      : DOCKED_PANEL_KEYS;
   const hasVisiblePinnedPanel = visibleDockedPanels.some((panel) => pinnedPanels[panel]);
   const styleMenuPanels = visibleDockedPanels.filter((panel) => STYLE_PANEL_KEYS.includes(panel));
   const workspaceMenuPanels = visibleDockedPanels.filter(
@@ -4056,22 +4030,14 @@ export function SessionPage() {
             value: reasoningValueLabel,
             icon: <Brain className="h-3.5 w-3.5" />,
             children: (
-              <RuntimeSelect
-                id={fieldId('reasoning')}
+              <ReasoningPicker
                 className="session-runtime-select"
+                label="Session reasoning"
+                options={reasoningOptions}
                 value={reasoningSelectValue}
-                onValueChange={(value) => applyReasoningSelection(value)}
-                aria-label="Session reasoning"
-              >
-                <option value="__default__">
-                  {isClaudeOpus55 ? 'Default · Medium on Opus 5.5' : 'Default'}
-                </option>
-                {reasoningOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </RuntimeSelect>
+                onChange={(value) => applyReasoningSelection(value)}
+                defaultLabel={isClaudeOpus55 ? 'Default · Medium on Opus 5.5' : 'Default'}
+              />
             ),
           })}
 
@@ -4452,7 +4418,7 @@ export function SessionPage() {
                     onClick: () => openView('editor'),
                     active: mainView === 'editor',
                   })}
-                {renderPanelMenuItem('git')}
+                {(!session.surface || session.surface === 'code') && renderPanelMenuItem('git')}
                 {renderPanelMenuItem('preview')}
                 {renderPanelMenuItem('notes')}
               </div>
@@ -4513,7 +4479,10 @@ export function SessionPage() {
   return (
     <div
       ref={rootShellRef}
-      className={cn('flex h-full min-h-0 relative overflow-hidden', 'session-surface-code')}
+      className={cn(
+        'flex h-full min-h-0 relative overflow-hidden',
+        `session-surface-${session.surface || 'code'}`
+      )}
     >
       {/* Main column: layered chat viewport with transparent topbar/composer overlays */}
       <div
@@ -4529,7 +4498,59 @@ export function SessionPage() {
           </span>
         </div>
 
+        {session.surface === 'chat' && (
+          <header className="plum-chat-header">
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-medium">{session.name}</h1>
+              <label className="plum-model-select">
+                <span className="sr-only">Chat-Modell</span>
+                <select
+                  value={modelSelectValue}
+                  disabled={sessionModelMutation.isPending || isActive}
+                  onChange={(event) =>
+                    sessionModelMutation.mutate(
+                      event.target.value === '__default__' ? null : event.target.value
+                    )
+                  }
+                >
+                  <option value="__default__">
+                    {resolvedDefaultModel
+                      ? modelLabels[resolvedDefaultModel] || resolvedDefaultModel
+                      : 'Standard'}
+                  </option>
+                  {modelOptions.map((model) => (
+                    <option key={model} value={model}>
+                      {modelLabels[model] || model}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <button
+              type="button"
+              className="plum-chat-tools-button"
+              onClick={() => window.dispatchEvent(new Event('session:open-mobile-right-menu'))}
+            >
+              Gesprächswerkzeuge
+            </button>
+          </header>
+        )}
+
         {/* Main Content - Chat or Editor */}
+        {session.surface && session.surface !== 'code' && (
+          <ConversationControls
+            session={session}
+            chatId={activeHistoryChatId}
+            messages={sessionMessages}
+            busy={session.runtime?.busy === true || hasStreamingContent}
+            onSend={handleSendMessage}
+            onActivateBranch={async (chatId) => {
+              const payload = await activateSearchTargetChat(chatId);
+              queryClient.setQueryData(['session-chats', id], payload);
+              await queryClient.invalidateQueries({ queryKey: ['messages', id] });
+            }}
+          />
+        )}
         <div
           className={cn(
             'flex-1 min-h-0',
@@ -4663,7 +4684,7 @@ export function SessionPage() {
                             sessionStatus={session.status}
                             provider={sessionUiProvider}
                             modelLabel={asstModelLabel}
-                            assistantName={providerLabel}
+                            assistantName={session.surface === 'chat' ? 'Plum' : providerLabel}
                             showAssistantIdentity={
                               message.role === 'assistant' ? !!turnSegment?.startsAfterUser : true
                             }
@@ -4855,6 +4876,7 @@ export function SessionPage() {
                 onOpenTasks={() => openRightPanel('tasks')}
               />
               <ChatInput
+                conversation={session.surface === 'chat'}
                 key={`${id}:${activeHistoryChatId ?? ''}`}
                 chatId={activeHistoryChatId}
                 sessionId={id || ''}
@@ -4862,9 +4884,9 @@ export function SessionPage() {
                 onSendMessageWithFiles={handleSendMessageWithFiles}
                 onCommandExecute={handleCommandExecute}
                 onInterrupt={isExecutingTool ? handleCancelCliTool : handleInterrupt}
-                onRestart={handleRestart}
+                onRestart={session.surface === 'chat' ? undefined : handleRestart}
                 canInterrupt={canInterruptActiveRun || isExecutingTool}
-                commands={commands}
+                commands={session.surface === 'chat' ? [] : commands}
                 selectedToolName={selectedToolName}
                 selectedCliTool={selectedCliTool}
                 disabled={session.status === 'error'}
@@ -4881,7 +4903,11 @@ export function SessionPage() {
                 }
                 fastModeActive={fastModeActive}
                 fastModePending={sessionServiceTierMutation.isPending}
-                onFastModeToggle={sessionProvider === 'codex' ? handleFastModeToggle : undefined}
+                onFastModeToggle={
+                  session.surface !== 'chat' && sessionProvider === 'codex'
+                    ? handleFastModeToggle
+                    : undefined
+                }
                 queueDepth={queuedDepth}
                 onOpenRun={handleOpenRunOverview}
               />
@@ -4898,25 +4924,27 @@ export function SessionPage() {
         )}
 
       {/* Tool content may open beside the chat; navigation lives in the left sidebar. */}
-      {isDockLayout && (runCockpitOpen || hasVisiblePinnedPanel) && (
-        <div
-          className={cn(
-            'session-right-dock session-content-dock hidden lg:flex',
-            !runCockpitOpen && pinnedPanels.browser && 'has-browser'
-          )}
-        >
+      {isDockLayout &&
+        (session.surface !== 'chat' || chatToolsOpened || runCockpitOpen) &&
+        (runCockpitOpen || hasVisiblePinnedPanel) && (
           <div
             className={cn(
-              'session-docked-panel-column',
-              !runCockpitOpen && pinnedPanels.browser && 'is-browser-active'
+              'session-right-dock session-content-dock hidden lg:flex',
+              !runCockpitOpen && pinnedPanels.browser && 'has-browser'
             )}
           >
-            {runCockpitOpen
-              ? renderRunCockpitPanel()
-              : visibleDockedPanels.map((p) => (pinnedPanels[p] ? renderDockedPanel(p) : null))}
+            <div
+              className={cn(
+                'session-docked-panel-column',
+                !runCockpitOpen && pinnedPanels.browser && 'is-browser-active'
+              )}
+            >
+              {runCockpitOpen
+                ? renderRunCockpitPanel()
+                : visibleDockedPanels.map((p) => (pinnedPanels[p] ? renderDockedPanel(p) : null))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       {runCockpitOpen && !isDockLayout && (
         <div className="lg:hidden">{renderRunCockpitPanel('rail')}</div>

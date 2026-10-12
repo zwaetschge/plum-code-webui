@@ -31,6 +31,8 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.paging.LoadState
@@ -350,7 +352,24 @@ internal fun ChatMessageList(
                         // The lazy list's own clip is not enough here: items were
                         // still drawn into the status bar above its bounds.
                         .clipToBounds()
-                        .fadingEdges(top = t.spacing.section, bottom = t.spacing.section),
+                        .graphicsLayer(compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen)
+                        .drawWithContent {
+                            drawContent()
+                            // Dissolve the transcript under the floating header so
+                            // text never reads next to the title or its buttons.
+                            val topPx = 84.dp.toPx().coerceAtMost(size.height / 2)
+                            val botPx = t.spacing.section.toPx().coerceAtMost(size.height / 2)
+                            drawRect(
+                                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    0f to androidx.compose.ui.graphics.Color.Transparent,
+                                    (topPx * 0.5f / size.height) to androidx.compose.ui.graphics.Color.Transparent,
+                                    (topPx / size.height) to androidx.compose.ui.graphics.Color.Black,
+                                    1f - (botPx / size.height) to androidx.compose.ui.graphics.Color.Black,
+                                    1f to androidx.compose.ui.graphics.Color.Transparent,
+                                ),
+                                blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                            )
+                        },
                     contentPadding = PaddingValues(
                         top = (contentPadding.calculateTopPadding() - systemTop).coerceAtLeast(0.dp) + t.spacing.sm,
                         bottom = (contentPadding.calculateBottomPadding() - systemBottom).coerceAtLeast(0.dp) + t.spacing.sm,

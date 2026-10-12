@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- „Braucht dich“ (App 2.5). Ohne Zeitplan: Die App aktualisiert das Widget, wenn sich der Stand ändert. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/swarm_widget_aktuell_beschreibung"
+    android:initialLayout="@layout/swarm_widget_aktuell"
+    android:minWidth="180dp"
+    android:minHeight="60dp"
+    android:minResizeWidth="140dp"
+    android:minResizeHeight="50dp"
+    android:previewLayout="@layout/swarm_widget_aktuell"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="3"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

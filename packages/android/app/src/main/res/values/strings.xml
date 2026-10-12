@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Plum Code</string>
+    <string name="app_name">Plum</string>
 
     <!-- Widgets -->
     <string name="widget_label">Sessions &amp; Agents</string>
@@ -28,7 +28,18 @@
     <string name="widget_chart_description">Daily token usage chart</string>
 
     <!-- Quick Settings Tile -->
-    <string name="tile_label">Plum Code</string>
+    <string name="tile_label">Plum</string>
     <string name="component_reasoning_ultrathink">Ultrathink</string>
     <string name="component_reasoning_ultracode">Ultracode (Workflows)</string>
+    <string name="assistant_tab_chat">Chat</string>
+    <string name="assistant_tab_task">Task</string>
+    <string name="assistant_tab_code">Code</string>
+    <string name="assistant_shell_more">More</string>
+    <string name="assistant_navigation">Open navigation</string>
+    <string name="assistant_move_to_code">Move to Code</string>
+    <string name="assistant_move_to_task">Move to Task</string>
+    <string name="assistant_memory_provider_choice">Memory provider</string>
+    <string name="assistant_memory_model_choice">Memory model</string>
+    <string name="assistant_automatic">Automatic</string>
+    <string name="assistant_surface_move_failed">Could not update the area for %1$d sessions.</string>
 </resources>

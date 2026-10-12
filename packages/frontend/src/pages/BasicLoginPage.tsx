@@ -90,29 +90,29 @@ export function BasicLoginPage() {
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col items-center justify-center gap-10 px-6 py-12 lg:grid lg:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-6 text-center lg:text-left">
-          <div className="flex justify-center lg:justify-start">
-            <img
-              src="/logos/plum-banner.png"
-              alt="Plum Code WebUI"
-              className="h-auto w-64 max-w-full object-contain"
-            />
+          <div className="flex items-center justify-center gap-3 lg:justify-start">
+            <img src="/logos/plum.png" alt="" className="h-12 w-12 object-contain" />
+            <span className="text-3xl font-semibold">Plum</span>
           </div>
 
           <div className="space-y-3">
             <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-              Orchestrate every CLI session from one plum-tinted cockpit.
+              Dein persönlicher Assistent.
             </h1>
             <p className="text-base text-muted-foreground">
-              Manage sessions, switch providers, and keep context stitched together with a single
-              dashboard.
+              Gespräche führen, Aufgaben erledigen und an Projekten arbeiten – mit deinen Modellen
+              und Agenten.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-            {(['claude', 'codex', 'opencode', 'pi'] as const).map((provider) => (
+            {(['codex', 'opencode', 'pi', 'kimi', 'vibe', 'claude'] as const).map((provider) => (
               <span key={provider} className="ui-pill ui-pill-subtle gap-2 backdrop-blur-sm">
                 <ProviderLogo provider={provider} className="h-4 w-4" alt="" />
-                <span className="text-xs font-medium">{UI_PROVIDER_META[provider].label}</span>
+                <span className="text-xs font-medium">
+                  {UI_PROVIDER_META[provider].label}
+                  {provider === 'claude' ? ' · Legacy' : ''}
+                </span>
               </span>
             ))}
           </div>
@@ -120,18 +120,18 @@ export function BasicLoginPage() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl border border-border/60 bg-card/70 p-4 shadow-sm backdrop-blur-sm">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                Session Handoff
+                Plum Chat · Task · Code
               </p>
               <p className="text-sm text-muted-foreground">
-                Switch providers without losing context or momentum.
+                Fragen stellen, dauerhafte Aufträge vergeben und Code bearbeiten.
               </p>
             </div>
             <div className="rounded-xl border border-border/60 bg-card/70 p-4 shadow-sm backdrop-blur-sm">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                Shared Skills
+                Gemeinsame Fähigkeiten
               </p>
               <p className="text-sm text-muted-foreground">
-                Reuse agents, skills, and tools across every CLI.
+                Profile, Wissen, Ergebnisse, Skills und den Schwarm an einem Ort nutzen.
               </p>
             </div>
           </div>

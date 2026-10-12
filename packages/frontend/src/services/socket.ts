@@ -1,3 +1,4 @@
+import { nativeShell } from '@/lib/nativeShell';
 import { io, Socket } from 'socket.io-client';
 import type {
   ActiveFollowupMode,
@@ -84,6 +85,7 @@ export interface PersistedOutboxEntry {
   attempts: number;
   error?: string;
   retryable?: boolean;
+  requiresReview?: boolean;
 }
 
 type OutboxStatusDetail = {
@@ -235,7 +237,11 @@ class SocketService {
       throw new Error('No auth token');
     }
 
-    this.socket = io({
+    const native = nativeShell();
+    this.socket = io(native ? new URL(native.apiBase).origin : undefined, {
+      ...(native
+        ? { path: `${new URL(native.apiBase).pathname.replace(/\/$/, '')}/socket.io` }
+        : {}),
       auth: { token },
       transports: ['websocket', 'polling'],
     });
@@ -834,6 +840,32 @@ class SocketService {
       sending: this.outboxInFlight.has(entry.clientMessageId),
     }));
   }
+  importOutboxEntries(entries: PersistedOutboxEntry[]): void {
+    const existing = readOutbox();
+    for (const entry of entries) {
+      const previous = existing.find((item) => item.clientMessageId === entry.clientMessageId);
+      if (previous) {
+        if (
+          previous.sessionId !== entry.sessionId ||
+          (previous.chatId ?? null) !== (entry.chatId ?? null) ||
+          previous.message !== entry.message ||
+          JSON.stringify(previous.uploadIds ?? []) !== JSON.stringify(entry.uploadIds ?? [])
+        )
+          throw new Error(
+            'Outbox-Konflikt: dieselbe Nachrichtenkennung hat unterschiedliche Inhalte'
+          );
+      } else existing.push({ ...entry, requiresReview: true });
+    }
+    if (!writeOutbox(existing)) throw new Error('Outbox konnte nicht gespeichert werden');
+  }
+  reviewImportedOutboxEntry(clientMessageId: string): void {
+    const entries = readOutbox();
+    const entry = entries.find((item) => item.clientMessageId === clientMessageId);
+    if (entry)
+      writeOutbox(
+        entries.map((item) => (item === entry ? { ...item, requiresReview: false } : item))
+      );
+  }
 
   discardOutboxEntry(clientMessageId: string): void {
     if (this.outboxInFlight.has(clientMessageId)) return;
@@ -866,6 +898,7 @@ class SocketService {
         if (!this.socket?.connected) break;
         if (
           entry.retryable === false ||
+          entry.requiresReview === true ||
           this.outboxInFlight.has(entry.clientMessageId) ||
           !readOutbox().some((item) => item.clientMessageId === entry.clientMessageId)
         )

@@ -5,6 +5,13 @@ import com.claudewebui.app.ui.theme.PlumTheme
 import com.claudewebui.app.R
 import androidx.compose.ui.res.stringResource
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -107,6 +114,7 @@ internal class ChatTopBarActions(
     val onNewChat: () -> Unit,
     val onDeleteChat: (String) -> Unit,
     val onOpenAgents: () -> Unit = {},
+    val onRestart: () -> Unit = {},
 )
 
 // ── Top Bar ───────────────────────────────────────────────────────────────────
@@ -126,7 +134,6 @@ internal fun ChatTopBar(
     var editTitleText by remember(session?.name) { mutableStateOf(session?.name ?: "") }
     val focusRequester = remember { FocusRequester() }
     var showMenu by remember { mutableStateOf(false) }
-    var showChatMenu by remember { mutableStateOf(false) }
     val largeText = LocalDensity.current.fontScale >= 1.5f
 
     LaunchedEffect(header.isEditingTitle) {
@@ -135,361 +142,173 @@ internal fun ChatTopBar(
         }
     }
 
-    // Keep the status-bar area and the wallpaper visible around a single
-    // readable header surface. The transcript is laid out below this bar by
-    // Scaffold, so no chat text is double-exposed behind its translucent fill.
     val palette = LocalPlumPalette.current
-    val headerShape = RoundedCornerShape(22.dp)
-    // The transcript scrolls behind this bar: at .72 its text read straight
-    // through and collided with the title. Opaque; border, shadow and the
-    // gradient carry the glass look.
-    val headerTopAlpha = 1f
-    val headerBottomAlpha = 1f
-    Column(Modifier.fillMaxWidth().statusBarsPadding()) {
-    Column(
+    // ChatGPT-style header: no card, just floating round controls and a title
+    // capsule over the backdrop. Everything else lives under the menu.
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = t.spacing.sm, vertical = t.spacing.xs)
-            .shadow(8.dp, headerShape, ambientColor = palette.glassShadow, spotColor = palette.glassShadow)
-            .clip(headerShape)
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        palette.surfaceStrong.copy(alpha = headerTopAlpha),
-                        palette.surface.copy(alpha = headerBottomAlpha),
-                    ),
-                ),
-            )
-            .border(1.dp, palette.border.copy(alpha = .85f), headerShape)
-            .padding(horizontal = t.spacing.sm, vertical = t.spacing.sm),
-        verticalArrangement = Arrangement.spacedBy(9.dp),
+            .statusBarsPadding()
+            .padding(horizontal = t.spacing.sm, vertical = t.spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(t.spacing.sm),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (showBackButton) IconButton(onClick = actions.onNavigateBack) {
-                Icon(navigationIcon ?: Icons.AutoMirrored.Filled.ArrowBack, navigationLabel ?: stringResource(R.string.chat_back), tint = PlumText)
-            }
-            Box(Modifier.weight(1f)) {
-            if (header.isEditingTitle) {
+        if (showBackButton) HeaderRoundButton(
+            icon = navigationIcon ?: Icons.AutoMirrored.Filled.ArrowBack,
+            description = navigationLabel ?: stringResource(R.string.chat_back),
+            onClick = actions.onNavigateBack,
+        )
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            androidx.compose.animation.Crossfade(
+                targetState = header.isEditingTitle,
+                animationSpec = tween(160),
+                label = "header_title_mode",
+            ) { editing ->
+            if (editing) {
                 OutlinedTextField(
                     value = editTitleText,
                     onValueChange = { editTitleText = it },
                     singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(focusRequester),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
                     textStyle = MaterialTheme.typography.titleMedium.copy(color = PlumText),
+                    shape = CircleShape,
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Sentences,
                         imeAction = ImeAction.Done,
                     ),
-                    keyboardActions = KeyboardActions(
-                        onDone = { actions.onTitleSaved(editTitleText) }
-                    ),
+                    keyboardActions = KeyboardActions(onDone = { actions.onTitleSaved(editTitleText) }),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = PlumAccent,
                         unfocusedBorderColor = PlumBorder,
                     ),
                 )
             } else {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(t.spacing.xxs),
-                    modifier = Modifier.clickableNoRipple(actions.onEditTitle),
-                ) {
-                    Row(
-                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(t.spacing.inline),
-                    ) {
-                        Text(
-                            text = session?.name ?: stringResource(R.string.chat_loading),
-                            style = MaterialTheme.typography.titleLarge,
-                            color = PlumText,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-
-                    // Connection / status indicator
-                    Row(
-                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
-                    ) {
-                        val statusColor = when {
-                            !header.isConnected -> Color(0xFFFF575F)
-                            header.isWorking -> ClaudeWebUITheme.extendedColors.warning
-                            else -> PlumGreen
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(t.spacing.inline)
-                                .clip(CircleShape)
-                                .background(statusColor)
-                        )
-                        Text(
-                            text = when {
-                                !header.isConnected -> stringResource(R.string.chat_disconnected)
-                                header.isWorking -> stringResource(R.string.chat_working)
-                                else -> stringResource(when (session?.status) {
-                                    SessionStatus.RUNNING -> R.string.chat_status_running
-                                    SessionStatus.STOPPED -> R.string.chat_status_stopped
-                                    SessionStatus.ERROR -> R.string.chat_status_error
-                                    null -> R.string.chat_ready
-                                })
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = PlumMuted,
-                            fontSize = 11.sp,
-                        )
-                    }
+                val statusTarget = when {
+                    !header.isConnected -> Color(0xFFFF575F)
+                    header.isWorking -> ClaudeWebUITheme.extendedColors.warning
+                    else -> PlumGreen
                 }
-            }
-            }
-
-            IconButton(onClick = actions.onSearch) {
-                Icon(Icons.Outlined.Search, contentDescription = stringResource(R.string.chat_search_title), tint = PlumText)
-            }
-
-            // ── Chat-thread switcher ─────────────────────────────────────────
-            Box {
+                val statusColor by animateColorAsState(statusTarget, tween(300), label = "header_status")
                 val activeChat = header.chats.firstOrNull { it.id == (header.activeChatId ?: "main") }
                     ?: header.chats.firstOrNull()
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
                     modifier = Modifier
-                        .glassSurface(RoundedCornerShape(t.spacing.cozy))
-                        .clickable(enabled = !header.isSwitchingChat) { showChatMenu = true }
-                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                        .heightIn(min = 44.dp)
+                        .clip(CircleShape)
+                        .background(palette.controlSurface)
+                        .border(1.dp, palette.border.copy(alpha = .7f), CircleShape)
+                        .clickableNoRipple(actions.onEditTitle)
+                        .padding(horizontal = 16.dp)
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Icon(
-                        Icons.Outlined.Forum,
-                        contentDescription = stringResource(R.string.chat_switch),
-                        tint = if (header.isSwitchingChat) PlumMuted else PlumAccent,
-                        modifier = Modifier.size(13.dp),
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(statusColor))
+                    Text(
+                        text = session?.name ?: stringResource(R.string.chat_loading),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = PlumText,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (!largeText) {
+                    if (header.chats.size > 1 && activeChat != null && !largeText) {
                         Text(
-                            text = activeChat?.title ?: stringResource(R.string.chat_first),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = PlumText,
-                            fontSize = 11.sp,
+                            text = activeChat.title,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = PlumMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 82.dp),
-                        )
-                        Icon(
-                            Icons.Filled.ArrowDropDown,
-                            contentDescription = null,
-                            tint = PlumMuted,
-                            modifier = Modifier.size(t.spacing.cozy),
+                            modifier = Modifier.widthIn(max = 72.dp),
                         )
                     }
                 }
-                DropdownMenu(
-                    expanded = showChatMenu,
-                    onDismissRequest = { showChatMenu = false },
-                ) {
+            }
+            }
+        }
+
+        HeaderRoundButton(Icons.Outlined.Search, stringResource(R.string.chat_search_title), actions.onSearch)
+
+        Box {
+            HeaderRoundButton(Icons.Filled.MoreVert, stringResource(R.string.chat_more)) { showMenu = true }
+            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                @Composable
+                fun item(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) =
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        leadingIcon = { Icon(icon, contentDescription = null) },
+                        onClick = { showMenu = false; onClick() },
+                    )
+                item(stringResource(R.string.chat_new), Icons.Outlined.AddComment, actions.onNewChat)
+                if (header.chats.size > 1) {
                     header.chats.forEach { chat ->
                         DropdownMenuItem(
-                            text = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(t.spacing.sm),
-                                ) {
-                                    Icon(
-                                        Icons.Outlined.Check,
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .size(15.dp)
-                                            .alpha(if (chat.id == (header.activeChatId ?: "main")) 1f else 0f),
-                                    )
-                                    Text(chat.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
+                            text = { Text(chat.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Outlined.Check, null,
+                                    modifier = Modifier.alpha(if (chat.id == (header.activeChatId ?: "main")) 1f else 0f),
+                                )
                             },
-                            trailingIcon = if (header.chats.size > 1 && chat.id != "main") {
+                            trailingIcon = if (chat.id != "main") {
                                 {
                                     IconButton(
-                                        onClick = {
-                                            showChatMenu = false
-                                            actions.onDeleteChat(chat.id)
-                                        },
+                                        onClick = { showMenu = false; actions.onDeleteChat(chat.id) },
                                         modifier = Modifier.size(26.dp),
-                                    ) {
-                                        Icon(
-                                            Icons.Outlined.Delete,
-                                            contentDescription = stringResource(R.string.chat_delete),
-                                            modifier = Modifier.size(15.dp),
-                                        )
-                                    }
+                                    ) { Icon(Icons.Outlined.Delete, stringResource(R.string.chat_delete), modifier = Modifier.size(15.dp)) }
                                 }
                             } else null,
-                            onClick = {
-                                showChatMenu = false
-                                actions.onSwitchChat(chat.id)
-                            },
+                            enabled = !header.isSwitchingChat,
+                            onClick = { showMenu = false; actions.onSwitchChat(chat.id) },
                         )
                     }
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_new)) },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Outlined.AddComment,
-                                contentDescription = null,
-                                modifier = Modifier.size(t.spacing.lg),
-                            )
-                        },
-                        onClick = {
-                            showChatMenu = false
-                            actions.onNewChat()
-                        },
-                    )
                 }
-            }
-
-            // Tapping the provider badge opens session settings, the fastest
-            // path to switching provider, model and reasoning effort.
-            if (!largeText && !compact) {
-                session?.cliProvider?.let { ChatProviderBadge(it, onClick = actions.onOpenSessionSettings) }
-            }
-            Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Filled.MoreVert, stringResource(R.string.chat_more), tint = PlumText)
-                }
-                // Only destinations that exist nowhere else — Files/Git/Checks/
-                // Stats live in the tab bar, session settings behind the
-                // provider badge.
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                ) {
-                    if (compact) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_tools)) },
-                            leadingIcon = { Icon(Icons.Outlined.Terminal, contentDescription = null) },
-                            onClick = { showMenu = false; actions.onOpenToolLog() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.chat_stats)) },
-                            leadingIcon = { Icon(Icons.Outlined.BarChart, contentDescription = null) },
-                            onClick = { showMenu = false; actions.onToggleUsage() },
-                        )
-                        HorizontalDivider()
-                    }
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_settings)) },
-                        leadingIcon = { Icon(Icons.Outlined.Tune, contentDescription = null) },
-                        onClick = { showMenu = false; actions.onOpenSessionSettings() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_panel_notes)) },
-                        leadingIcon = { Icon(Icons.Outlined.StickyNote2, contentDescription = null) },
-                        onClick = { showMenu = false; actions.onNavigateToNotes() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_memory)) },
-                        leadingIcon = { Icon(Icons.Outlined.Psychology, contentDescription = null) },
-                        onClick = { showMenu = false; actions.onNavigateToMemory() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.chat_dev_tools)) },
-                        leadingIcon = { Icon(Icons.Outlined.Dns, contentDescription = null) },
-                        onClick = { showMenu = false; actions.onNavigateToDevTools() },
-                    )
-                }
+                HorizontalDivider()
+                item(stringResource(R.string.chat_files), Icons.Outlined.FolderOpen, actions.onNavigateToFiles)
+                item(stringResource(R.string.chat_panel_git), Icons.Outlined.MergeType, actions.onNavigateToGit)
+                item(stringResource(R.string.chat_checks), Icons.Outlined.Security, actions.onNavigateToCheckpoints)
+                item(stringResource(R.string.chat_stats), Icons.Outlined.BarChart, actions.onToggleUsage)
+                item(stringResource(R.string.agents_title), Icons.Outlined.Groups, actions.onOpenAgents)
+                item(stringResource(R.string.chat_tools), Icons.Outlined.Terminal, actions.onOpenToolLog)
+                HorizontalDivider()
+                item(stringResource(R.string.chat_settings), Icons.Outlined.Tune, actions.onOpenSessionSettings)
+                item(stringResource(R.string.chat_panel_notes), Icons.Outlined.StickyNote2, actions.onNavigateToNotes)
+                item(stringResource(R.string.chat_memory), Icons.Outlined.Psychology, actions.onNavigateToMemory)
+                item(stringResource(R.string.chat_dev_tools), Icons.Outlined.Dns, actions.onNavigateToDevTools)
+                item(stringResource(R.string.chat_restart_session), Icons.Outlined.Refresh, actions.onRestart)
             }
         }
-
-        if (!compact) Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .glassSurface(RoundedCornerShape(18.dp))
-                .padding(t.spacing.xs)
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
-        ) {
-            ChatTab(stringResource(R.string.chat_tab), Icons.Outlined.ChatBubbleOutline, true, Modifier, {})
-            ChatTab(stringResource(R.string.chat_files), Icons.Outlined.FolderOpen, false, Modifier, actions.onNavigateToFiles)
-            ChatTab(stringResource(R.string.chat_panel_git), Icons.Outlined.MergeType, false, Modifier, actions.onNavigateToGit)
-            ChatTab(stringResource(R.string.chat_checks), Icons.Outlined.Security, false, Modifier, actions.onNavigateToCheckpoints)
-            // Model, account limits and context/token/cost all live behind
-            // this toggle — the header stays as small as possible.
-            ChatTab(stringResource(R.string.chat_stats), Icons.Outlined.BarChart, header.showUsageBanner, Modifier, actions.onToggleUsage)
-            ChatTab(stringResource(R.string.agents_title), Icons.Outlined.Groups, false, Modifier, actions.onOpenAgents)
-            // Mirrors the WebUI's Tool Log dock: every tool call of this session
-            // in one place, instead of only inline in the transcript.
-            ChatTab(
-                stringResource(R.string.chat_tools),
-                Icons.Outlined.Terminal,
-                header.hasActiveTools,
-                Modifier,
-                actions.onOpenToolLog,
-            )
-        }
-    }
     }
 }
 
+/** Round floating header control with a spring press response. */
 @Composable
-private fun ChatTab(
-    label: String,
+private fun HeaderRoundButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    selected: Boolean,
-    modifier: Modifier,
+    description: String,
     onClick: () -> Unit,
 ) {
-    val t = PlumTheme.tokens
-    Row(
-        modifier = modifier
-            .heightIn(min = 48.dp)
-            .clip(RoundedCornerShape(t.spacing.cozy))
-            .background(if (selected) Color(0xFF8044C5) else Color.Transparent)
-            .semantics {
-                this.selected = selected
-                role = Role.Button
-            }
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, tint = if (selected) Color.White else PlumMuted, modifier = Modifier.size(18.dp))
-        Text(
-            label,
-            color = if (selected) Color.White else PlumMuted,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            softWrap = false,
-        )
-    }
-}
-
-// ── Provider Badge ────────────────────────────────────────────────────────────
-
-/** Chat-header variant; distinct from the shared `ui.components.common.ProviderBadge`. */
-@Composable
-private fun ChatProviderBadge(provider: CLIProvider, onClick: () -> Unit) {
-    val t = PlumTheme.tokens
-    val label = providerLabel(provider)
-    val color = providerColor(provider)
+    val palette = LocalPlumPalette.current
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.9f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
+        label = "header_button_press",
+    )
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(t.radius.chip))
-            .background(color.copy(alpha = 0.15f))
-            .border(1.dp, color, RoundedCornerShape(t.radius.chip))
-            .clickable(onClick = onClick),
+            .size(44.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .shadow(2.dp, CircleShape, ambientColor = palette.glassShadow, spotColor = palette.glassShadow)
+            .clip(CircleShape)
+            .background(palette.controlSurface)
+            .border(1.dp, palette.border.copy(alpha = .7f), CircleShape)
+            .clickable(interactionSource = source, indication = null, role = Role.Button, onClickLabel = description, onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = color,
-            modifier = Modifier.padding(horizontal = t.spacing.md, vertical = 7.dp),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-        )
+        Icon(icon, description, tint = PlumText, modifier = Modifier.size(22.dp))
     }
 }
 

@@ -1,4 +1,5 @@
 import { CLAUDE_CODE_EFFORT_OPTIONS } from '@plum-code-webui/shared';
+import { ReasoningPicker } from '@/components/assistant/ModelEffortPicker';
 import {
   useEffect,
   useDeferredValue,
@@ -69,6 +70,9 @@ import { cn } from '@/lib/utils';
 import { getSessionRunState } from '@/lib/sessionRunState';
 import { RECENT_SESSIONS_LIMIT } from '@/lib/sessionGrouping';
 import { CLI_PROVIDER_DEFAULT_MODEL, toUiProvider } from '@/lib/providers';
+import { SessionAssignmentDialog } from '@/components/session/SessionAssignmentDialog';
+import { SessionSurfaceMenuItem } from '@/components/session/SessionSurfaceMenuItem';
+import { sessionSurface } from '@/lib/sessionSurface';
 import { TASK_WORKFLOWS, type TaskWorkflow } from '@/lib/taskWorkflows';
 import {
   DropdownMenu,
@@ -250,7 +254,39 @@ function formatDashboardLastActivity(session: Session): string {
   })}`;
 }
 
-export function DashboardPage() {
+export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' }) {
+  const isTask = surface === 'task';
+  const starters: TaskWorkflow[] = isTask
+    ? TASK_WORKFLOWS
+    : [
+        {
+          id: 'build-feature',
+          title: 'Funktion entwickeln',
+          shortTitle: 'Neue Funktion',
+          description: 'Eine konkrete Softwarefunktion implementieren und prüfen.',
+          meta: 'Ziel → Umsetzung → Prüfung',
+          prompt:
+            'Implementiere die folgende Softwarefunktion im bestehenden Projekt. Prüfe zuerst den aktuellen Code, erhalte die bestehenden Konventionen und verifiziere die Änderung: ',
+        },
+        {
+          id: 'fix-bug',
+          title: 'Fehler im Code beheben',
+          shortTitle: 'Fehler beheben',
+          description: 'Einen Programmfehler reproduzieren, beheben und prüfen.',
+          meta: 'Reproduktion → Korrektur → Prüfung',
+          prompt:
+            'Reproduziere und behebe den folgenden Programmfehler im bestehenden Projekt. Prüfe die Ursache und verifiziere die Korrektur: ',
+        },
+        {
+          id: 'review-code',
+          title: 'Code prüfen',
+          shortTitle: 'Codeprüfung',
+          description: 'Änderungen auf konkrete Fehler und Risiken prüfen.',
+          meta: 'Code → Befunde → Verbesserungen',
+          prompt:
+            'Prüfe die folgenden Codeänderungen auf konkrete Fehler und Risiken. Priorisiere belegte Befunde und nenne die betroffenen Stellen: ',
+        },
+      ];
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -510,9 +546,10 @@ export function DashboardPage() {
     [categories]
   );
   const filteredSessions = useMemo(() => {
+    const codeSessions = sessions.filter((session) => sessionSurface(session) === surface);
     const byCategory = dashboardCategoryFilter
-      ? sessions.filter((session) => session.category === dashboardCategoryFilter)
-      : sessions;
+      ? codeSessions.filter((session) => session.category === dashboardCategoryFilter)
+      : codeSessions;
     if (!normalizedDashboardSearch) return byCategory;
 
     return byCategory.filter((session) => {
@@ -535,7 +572,13 @@ export function DashboardPage() {
         return words.includes(normalizedDashboardSearch);
       });
     });
-  }, [dashboardCategoryFilter, dashboardCategoryNames, normalizedDashboardSearch, sessions]);
+  }, [
+    dashboardCategoryFilter,
+    dashboardCategoryNames,
+    normalizedDashboardSearch,
+    sessions,
+    surface,
+  ]);
   const sessionRunStates = useMemo(
     () =>
       new Map(
@@ -719,9 +762,11 @@ export function DashboardPage() {
   const selectedUiProvider = toUiProvider(selectedCliProvider);
   const workspaceSummary =
     sessionMode === 'new'
-      ? hasDefaultDir
-        ? `New folder in ${settings?.defaultWorkingDir}`
-        : 'Default folder missing'
+      ? isTask
+        ? 'Eigener Aufgabenbereich'
+        : hasDefaultDir
+          ? `New folder in ${settings?.defaultWorkingDir}`
+          : 'Default folder missing'
       : selectedFolder || 'Choose an existing folder';
 
   // Delete session mutation
@@ -1064,7 +1109,7 @@ export function DashboardPage() {
       });
       return;
     }
-    if (sessionMode === 'new' && !hasDefaultDir) {
+    if (!isTask && sessionMode === 'new' && !hasDefaultDir) {
       toast({
         title: 'Default folder missing',
         description: 'Set a default working directory before creating new workspace folders.',
@@ -1098,7 +1143,7 @@ export function DashboardPage() {
       cliModel: selectedModel.trim() || null,
       cliReasoning: normalizeDashboardReasoning(selectedCliProvider, reasoning) || null,
       mode: newSessionPermissionMode,
-      surface: 'code',
+      surface,
       initialMessage: prompt,
       files: newSessionFiles,
     };
@@ -1161,14 +1206,20 @@ export function DashboardPage() {
             <div className="dashboard-hero-main">
               <div className="dashboard-eyebrow">
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>Plum Code</span>
+                <span>Plum {isTask ? 'Task' : 'Code'}</span>
               </div>
               <div className="dashboard-title-row">
-                <h1>What should Plum do?</h1>
-                <span className="dashboard-count">{sessions.length}</span>
+                <h1>
+                  {isTask ? 'Welche Aufgabe soll Plum erledigen?' : 'Was möchtest du entwickeln?'}
+                </h1>
+                <span className="dashboard-count">
+                  {sessions.filter((s) => sessionSurface(s) === surface).length}
+                </span>
               </div>
               <p className="dashboard-subtitle ui-text">
-                Start a conversation for coding, writing, research, or planning.
+                {isTask
+                  ? 'Deine Aufgaben als Sessions: recherchieren, planen, schreiben oder deine Systeme prüfen.'
+                  : 'Deine Coding-Sessions: Software entwickeln, Code prüfen und Fehler beheben.'}
               </p>
             </div>
             <label className="dashboard-search" aria-label="Search sessions">
@@ -1281,7 +1332,11 @@ export function DashboardPage() {
                     target.style.height = 'auto';
                     target.style.height = `${Math.min(target.scrollHeight, 176)}px`;
                   }}
-                  placeholder="What would you like to build, write, research, or change?"
+                  placeholder={
+                    isTask
+                      ? 'Zum Beispiel: Prüfe meine Cache-Platte und zeige mir die Befunde.'
+                      : 'Was möchtest du entwickeln, prüfen oder im Code ändern?'
+                  }
                   className="dashboard-prompt-input dashboard-chatbar-textarea"
                   rows={1}
                   style={{ height: 'auto', overflow: 'hidden' }}
@@ -1295,7 +1350,7 @@ export function DashboardPage() {
                 disabled={
                   createMutation.isPending ||
                   !newSessionPrompt.trim() ||
-                  (sessionMode === 'new' && !hasDefaultDir) ||
+                  (!isTask && sessionMode === 'new' && !hasDefaultDir) ||
                   (sessionMode === 'existing' && !selectedFolder) ||
                   !!(selectedProviderInfo && !selectedProviderInfo.available)
                 }
@@ -1313,7 +1368,7 @@ export function DashboardPage() {
             <details className="session-starters">
               <summary>Starting points</summary>
               <div className="dashboard-task-workflows" aria-label="Starting points">
-                {TASK_WORKFLOWS.map((workflow) => (
+                {starters.map((workflow) => (
                   <button
                     key={workflow.id}
                     type="button"
@@ -1424,26 +1479,18 @@ export function DashboardPage() {
                     ? 'Effort'
                     : 'Reasoning'}
                 </span>
-                <select
-                  value={selectedReasoning || '__default__'}
-                  onChange={(event) =>
-                    setSelectedReasoning(
-                      event.target.value === '__default__' ? '' : event.target.value
-                    )
-                  }
-                  aria-label={
+                <ReasoningPicker
+                  className="dashboard-reasoning-picker"
+                  label={
                     selectedCliProvider === 'claude' || selectedCliProvider === 'zai'
                       ? 'Effort'
                       : 'Reasoning'
                   }
-                >
-                  <option value="__default__">Default</option>
-                  {reasoningOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  options={reasoningOptions}
+                  value={selectedReasoning || '__default__'}
+                  onChange={(value) => setSelectedReasoning(value === '__default__' ? '' : value)}
+                  defaultLabel="Default"
+                />
               </label>
 
               <button
@@ -1533,7 +1580,7 @@ export function DashboardPage() {
                     className="gap-1.5"
                   >
                     <FolderPlus className="h-3.5 w-3.5" />
-                    New folder
+                    {isTask ? 'Eigener Aufgabenbereich' : 'Neuer Projektordner'}
                   </Button>
                   <Button
                     type="button"
@@ -1550,7 +1597,7 @@ export function DashboardPage() {
                   </Button>
                 </div>
 
-                {sessionMode === 'new' && !hasDefaultDir ? (
+                {!isTask && sessionMode === 'new' && !hasDefaultDir ? (
                   <div className="dashboard-workspace-warning">
                     <FolderOpen className="h-4 w-4" />
                     <span>Set a default working directory before creating new folders.</span>
@@ -1599,6 +1646,18 @@ export function DashboardPage() {
             if (!newSessionName) setNewSessionName(path.split('/').pop() || '');
           }}
         />
+
+        <div className="flex flex-wrap items-center gap-3">
+          <SessionAssignmentDialog surface={surface} />
+          {isTask && (
+            <Link
+              className="text-sm text-primary underline underline-offset-4"
+              to="/assistant/tasks"
+            >
+              Strukturierte Aufträge &amp; Schwarm
+            </Link>
+          )}
+        </div>
 
         {/* Sessions */}
         <div className="dashboard-content-row">
@@ -1818,7 +1877,9 @@ export function DashboardPage() {
                                               <MoreHorizontal className="h-3.5 w-3.5" />
                                             </Button>
                                           </DropdownMenuTrigger>
-                                          <DropdownMenuContent align="end" className="w-44">
+                                          <DropdownMenuContent align="end" className="w-64">
+                                            <SessionSurfaceMenuItem session={session} />
+                                            <DropdownMenuSeparator />
                                             <DropdownMenuItem
                                               onClick={() => setRenamingSession(session)}
                                               className="cursor-pointer"
@@ -2003,10 +2064,14 @@ export function DashboardPage() {
                 <Card className="dashboard-empty-card">
                   <CardContent className="flex flex-col items-center justify-center py-8">
                     <MessageSquare className="h-10 w-10 text-muted-foreground mb-3" />
-                    <p className="text-sm text-muted-foreground mb-3">No sessions yet</p>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      {isTask
+                        ? 'Hier erscheinen deine Aufgaben-Sessions.'
+                        : 'Hier erscheinen deine Coding-Sessions.'}
+                    </p>
                     <Button size="sm" onClick={() => openNewSession()}>
                       <Plus className="mr-1.5 h-3.5 w-3.5" />
-                      Create your first session
+                      {isTask ? 'Neue Aufgabe starten' : 'Neue Coding-Session starten'}
                     </Button>
                   </CardContent>
                 </Card>
@@ -2028,7 +2093,7 @@ export function DashboardPage() {
             selectedCategory={dashboardCategoryFilter}
             onCategorySelect={setDashboardCategoryFilter}
           />
-          <DiscoveredProjects cliProvider={selectedCliProvider} />
+          {!isTask && <DiscoveredProjects cliProvider={selectedCliProvider} />}
         </div>
 
         <input
@@ -2075,7 +2140,7 @@ export function DashboardPage() {
                 />
               </div>
               <div className="session-side-menu-embed">
-                <DiscoveredProjects cliProvider={selectedCliProvider} />
+                {!isTask && <DiscoveredProjects cliProvider={selectedCliProvider} />}
               </div>
             </div>
           )}

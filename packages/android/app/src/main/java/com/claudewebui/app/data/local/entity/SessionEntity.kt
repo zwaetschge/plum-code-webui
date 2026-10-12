@@ -29,6 +29,7 @@ data class SessionEntity(
     val lastMessage: String? = null,
     @ColumnInfo(defaultValue = "0") val unreadCount: Int = 0,
     val categoryId: String? = null,
+    @ColumnInfo(defaultValue = "'code'") val surface: String = "code",
     // Cached alongside the rest: without these the session settings sheet reads
     // a cached session that has dropped its model and reasoning, and shows
     // "provider default" for a session that has neither.
@@ -65,6 +66,7 @@ fun Session.toEntity(): SessionEntity = SessionEntity(
     lastMessage = lastMessage,
     unreadCount = unreadCount,
     categoryId = category,
+    surface = surface,
     cliModel = cliModel,
     cliReasoning = cliReasoning,
     cliServiceTier = cliServiceTier,
@@ -92,6 +94,7 @@ fun SessionEntity.toModel(): Session = Session(
     lastMessage = lastMessage,
     unreadCount = unreadCount,
     category = categoryId,
+    surface = surface,
     cliModel = cliModel,
     cliReasoning = cliReasoning,
     cliServiceTier = cliServiceTier,

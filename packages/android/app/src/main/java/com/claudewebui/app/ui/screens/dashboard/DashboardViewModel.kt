@@ -4,6 +4,7 @@ import com.claudewebui.app.core.network.toAppError
 import com.claudewebui.app.ui.screens.screenErrorMessage
 import com.claudewebui.app.core.network.apiCall
 import android.content.Context
+import com.claudewebui.app.R
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.claudewebui.app.core.network.ApiClient
@@ -524,6 +525,9 @@ class DashboardViewModel(
         provider: CLIProvider,
         mode: SessionMode? = null,
         categoryId: String? = null,
+        surface: String = "code",
+        model: String? = null,
+        reasoning: String? = null,
     ) {
         viewModelScope.launch {
             _uiState.update { it.copy(isCreatingSession = true, creationError = null) }
@@ -534,6 +538,9 @@ class DashboardViewModel(
                         workingDirectory = workingDirectory,
                         cliProvider = provider,
                         mode = mode,
+                        surface = surface,
+                        cliModel = model,
+                        cliReasoning = reasoning,
                     )
                 )
                 // A {success:false} body is a failure, not "no session".
@@ -595,6 +602,20 @@ class DashboardViewModel(
                 .onFailure { error ->
                     _events.send(DashboardEvent.ShowError(error.screenErrorMessage("dashboard", "renameSession", appContext)))
                 }
+        }
+    }
+
+    fun moveSessionsToSurface(ids: List<String>, surface: String) {
+        if (surface !in listOf("task", "code") || ids.isEmpty()) return
+        viewModelScope.launch {
+            var failures = 0
+            for (id in ids.distinct()) {
+                apiCall { apiClient.updateSessionSurface(id, surface) }
+                    .onSuccess { if (!it.success) failures++ }.onFailure { failures++ }
+            }
+            clearSelection()
+            loadSessions()
+            if (failures > 0) _events.send(DashboardEvent.ShowError(appContext.getString(R.string.assistant_surface_move_failed, failures)))
         }
     }
 

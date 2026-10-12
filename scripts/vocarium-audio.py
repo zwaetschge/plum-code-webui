@@ -66,15 +66,16 @@ EXPECTED_MCP_TOOLS = CORE_MCP_TOOLS | (
 )
 
 ESTIMATED_MIB = {
-    "tts": 8500,
+    # OmniVoice (Qwen3-TTS, which needed ~8.5 GB, is retired).
+    "tts": 4000,
     "asr": 2500,
     "music": 8000,
     "sfx": 7000,
 }
 
 SERVICE_CONTAINERS = {
-    "tts": {"qwen3-tts"},
-    "asr": {"qwen3-asr"},
+    "tts": {"omnivoice-tts", "qwen3-tts"},
+    "asr": {"whisper-stt", "qwen3-asr"},
     "music": {"acestep"},
     "sfx": {"mmaudio"},
 }
@@ -331,6 +332,12 @@ def _service_used_mib(gpu: dict[str, Any], kind: str) -> int:
     return total
 
 
+def _service_resident(gpu: dict[str, Any], kind: str) -> bool:
+    """The engine already holds its VRAM on this GPU (OmniVoice stays loaded)."""
+    containers = SERVICE_CONTAINERS.get(kind, set())
+    return any(_container_name(proc) in containers for proc in gpu.get("processes", []))
+
+
 def preflight(kind: str, target: str = "auto") -> dict[str, Any]:
     data = gpu_status()
     gpus = data.get("gpus", [])
@@ -347,7 +354,8 @@ def preflight(kind: str, target: str = "auto") -> dict[str, Any]:
         reasons = []
         if protected:
             reasons.append("RTX 5060 Ti is protected because ComfyUI or other VRAM use is active")
-        if effective_free < need:
+        resident = _service_resident(gpu, kind)
+        if effective_free < need and not resident:
             reasons.append(
                 f"only {free} MiB free plus {reclaimable} MiB reclaimable, "
                 f"estimated need is {need} MiB"
@@ -360,6 +368,7 @@ def preflight(kind: str, target: str = "auto") -> dict[str, Any]:
                 "free_mib": free,
                 "effective_free_mib": effective_free,
                 "reclaimable_mib": reclaimable,
+                "resident": resident,
                 "used_mib": used,
                 "comfy_active": _comfy_active(gpu),
                 "allowed": allowed,

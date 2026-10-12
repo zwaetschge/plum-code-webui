@@ -1,0 +1,5 @@
+export const content = `<label>Wert <input id="value" value="0"></label><button id="save">Speichern</button><button id="load">Laden</button><button id="propose">Task vorschlagen</button><output id="result"></output><script>
+document.querySelector('#load').onclick=async()=>{try{const state=await window.Plum.loadState();document.querySelector('#value').value=state?.count ?? 0;document.querySelector('#result').textContent='geladen';}catch(error){document.querySelector('#result').textContent=error.message;}};
+document.querySelector('#save').onclick=async()=>{try{await window.Plum.saveState({count:Number(document.querySelector('#value').value)});document.querySelector('#result').textContent='gespeichert';}catch(error){document.querySelector('#result').textContent=error.message;}};
+document.querySelector('#propose').onclick=async()=>{try{const result=await window.Plum.proposeTask({title:'Bericht vorbereiten',goal:'Erstelle einen Bericht zum ausgewählten App-Kontext.'});document.querySelector('#result').textContent=result.status;}catch(error){document.querySelector('#result').textContent=error.message;}};
+</script>`;

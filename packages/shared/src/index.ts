@@ -1,6 +1,7 @@
 // Types
 export type * from './types/user.js';
 export type * from './types/session.js';
+export type * from './types/assistant.js';
 export type * from './types/message.js';
 export type * from './types/chat-delivery.js';
 export * from './types/settings.js';
@@ -20,3 +21,16 @@ export type * from './types/home-assistant.js';
 export * from './utils/contextWindow.js';
 
 export * from './utils/subagents.js';
+export * from './types/assistant-csv.js';
+
+export * from './types/assistant-sheet.js';
+export * from './types/assistant-research.js';
+export * from './types/assistant-notebook.js';
+
+export * from './types/assistant-document.js';
+export * from './types/assistant-slides.js';
+export * from './types/assistant-comparison.js';
+export * from './types/assistant-motion.js';
+export * from './types/assistant-personal-workspace.js';
+
+export * from './types/assistant-personalization.js';

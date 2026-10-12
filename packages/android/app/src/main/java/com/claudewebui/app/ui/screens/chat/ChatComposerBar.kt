@@ -124,10 +124,13 @@ internal fun ChatComposerBar(
     onShowAttention: () -> Unit,
     onShowDetails: () -> Unit,
     onShowOutbox: () -> Unit,
+    modelLabel: String? = null,
+    effortLabel: String? = null,
+    onModelEffort: (() -> Unit)? = null,
 ) {
     val t = PlumTheme.tokens
     val palette = LocalPlumPalette.current
-    val composerShape = RoundedCornerShape(22.dp)
+    val composerShape = RoundedCornerShape(28.dp)
     // The transcript scrolls behind the dock; at .72 (and still at .92) its
     // text showed through and overlapped the action row and the input hint.
     // Opaque: the glass look stays in the border, shadow and gradient.
@@ -150,27 +153,22 @@ internal fun ChatComposerBar(
                 .padding(horizontal = t.spacing.sm, vertical = t.spacing.xs)
                 .shadow(8.dp, composerShape, ambientColor = palette.glassShadow, spotColor = palette.glassShadow)
                 .clip(composerShape)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            palette.surface.copy(alpha = composerTopAlpha),
-                            palette.surfaceStrong.copy(alpha = composerBottomAlpha),
-                        ),
-                    ),
-                )
+                .background(palette.controlSurface.copy(alpha = 1f))
                 .border(1.dp, palette.border.copy(alpha = .85f), composerShape),
         ) {
-            FlowRow(
+            val showActions = activity.needsAttention || activity.queuedCount > 0 ||
+                outboxPendingCount > 0 || composer.isWorking
+            if (showActions) FlowRow(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = t.spacing.md),
                 horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
             ) {
                 if (activity.needsAttention) {
                     TextButton(onClick = onShowAttention, modifier = actionModifier, contentPadding = actionPadding) { Text(stringResource(R.string.chat_attention), color = PlumAmber) }
                 }
-                TextButton(onClick = onShowDetails, modifier = actionModifier, contentPadding = actionPadding) {
-                    Text(if (activity.queuedCount > 0) stringResource(R.string.chat_details_queue, activity.queuedCount) else stringResource(R.string.chat_details), color = PlumMuted)
+                if (activity.queuedCount > 0) TextButton(onClick = onShowDetails, modifier = actionModifier, contentPadding = actionPadding) {
+                    Text(stringResource(R.string.chat_details_queue, activity.queuedCount), color = PlumMuted)
                 }
-                TextButton(onClick = onShowOutbox, modifier = actionModifier, contentPadding = actionPadding) {
+                if (outboxPendingCount > 0) TextButton(onClick = onShowOutbox, modifier = actionModifier, contentPadding = actionPadding) {
                     Text(stringResource(R.string.chat_outbox_count, outboxPendingCount), color = PlumMuted)
                 }
                 if (composer.isWorking) {
@@ -178,9 +176,13 @@ internal fun ChatComposerBar(
                         Text(stringResource(R.string.chat_interrupt), color = MaterialTheme.colorScheme.error)
                     }
                 }
-                TextButton(onClick = actions.onRestart, modifier = actionModifier, contentPadding = actionPadding) {
-                    Text(stringResource(R.string.chat_restart_session), color = PlumMuted)
-                }
+            }
+
+            // Model and thinking depth are one tap away, as in the Chat area.
+            if (onModelEffort != null) Row(Modifier.fillMaxWidth().padding(start = t.spacing.md, end = t.spacing.md, top = 4.dp)) {
+                com.claudewebui.app.ui.screens.dashboard.ModelEffortChip(
+                    model = modelLabel.orEmpty(), effortLabel = effortLabel, enabled = true, onClick = onModelEffort,
+                )
             }
 
             // Thinking/tool indicator sits just above input

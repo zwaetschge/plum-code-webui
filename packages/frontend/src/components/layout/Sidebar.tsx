@@ -1,4 +1,7 @@
-import { Inbox, LayoutGrid } from 'lucide-react';
+import { ChatSidebarResources } from './ChatSidebarResources';
+import { Inbox, LayoutGrid, MessageSquare, ListTodo, Code2, Bot } from 'lucide-react';
+import { SessionSurfaceMenuItem } from '@/components/session/SessionSurfaceMenuItem';
+import { sessionSurface } from '@/lib/sessionSurface';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
@@ -29,6 +32,8 @@ import {
   Sparkles,
   Loader2,
   ServerCog,
+  Plus,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useSessionMenu, type NavigationView } from './SessionMenuContext';
 import { cn } from '@/lib/utils';
@@ -60,7 +65,12 @@ import type { ApiResponse, Session } from '@plum-code-webui/shared';
 import type { UsageData } from '@plum-code-webui/shared';
 
 const baseNavItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+  { icon: LayoutDashboard, label: 'Übersicht', path: '/' },
+  { icon: MessageSquare, label: 'Plum Chat', path: '/chat' },
+  { icon: ListTodo, label: 'Plum Task', path: '/tasks' },
+  { icon: Code2, label: 'Plum Code', path: '/code' },
+  { icon: Bot, label: 'Agenten', path: '/assistant/agents' },
+  { icon: Inbox, label: 'Schwarm', path: '/swarm' },
   { icon: LayoutGrid, label: 'Monitor', path: '/monitor' },
   { icon: BarChart3, label: 'Analytics', path: '/analytics' },
   { icon: ServerCog, label: 'Operations', path: '/operations' },
@@ -91,6 +101,7 @@ const FAVORITES_GROUP_ID = '__favorites__';
 const RECENT_GROUP_ID = '__recent__';
 
 interface SidebarProps {
+  surface?: 'code' | 'task' | 'chat';
   onNavigate?: () => void;
   mobile?: boolean;
   navigationOnly?: boolean;
@@ -103,6 +114,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  surface = 'code',
   onNavigate,
   mobile,
   navigationOnly = false,
@@ -111,6 +123,7 @@ export function Sidebar({
   contextSession,
 }: SidebarProps) {
   const location = useLocation();
+  const surfaceHome = surface === 'chat' ? '/chat' : surface === 'task' ? '/tasks' : '/code';
   const sessionMenu = useSessionMenu();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -191,7 +204,7 @@ export function Sidebar({
     }
   }, [isCollapsed]);
 
-  const activeMatch = location.pathname.match(/^\/session\/([^/]+)/);
+  const activeMatch = location.pathname.match(/^\/(?:chat\/session|session)\/([^/]+)/);
   const activeId = activeMatch ? activeMatch[1] : null;
   const activeSession = useMemo(
     () =>
@@ -204,7 +217,7 @@ export function Sidebar({
   );
   const filteredSessions = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    let list = sessions;
+    let list = sessions.filter((session) => sessionSurface(session) === surface);
 
     if (q) {
       list = list.filter(
@@ -265,6 +278,7 @@ export function Sidebar({
     queueState,
     searchQuery,
     sessions,
+    surface,
     sortMode,
     streamingSessionIds,
     toolExecutions,
@@ -378,7 +392,7 @@ export function Sidebar({
 
   const workingCount = useMemo(
     () =>
-      sessions.filter(
+      filteredSessions.filter(
         (session) =>
           getSessionRunState(session, {
             activity: activity[session.id],
@@ -398,7 +412,7 @@ export function Sidebar({
       lifecycle,
       pendingApprovalCounts,
       queueState,
-      sessions,
+      filteredSessions,
       streamingSessionIds,
       toolExecutions,
     ]
@@ -452,7 +466,7 @@ export function Sidebar({
       await api.delete(`/api/sessions/${id}`);
       removeSession(id);
       toast({ title: 'Session deleted' });
-      if (activeId === id) navigate('/');
+      if (activeId === id) navigate(surfaceHome);
     } catch (err) {
       const msg =
         err instanceof ApiError
@@ -730,7 +744,7 @@ export function Sidebar({
         onBlur={() => hideCollapsedSessionFlyout(session.id)}
       >
         <Link
-          to={`/session/${session.id}`}
+          to={surface === 'chat' ? `/chat/session/${session.id}` : `/session/${session.id}`}
           title={`${session.name} · ${sessionRunState.detail}`}
           aria-current={isActive ? 'page' : undefined}
           onClick={handleLinkClick}
@@ -797,7 +811,9 @@ export function Sidebar({
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent navigation align="end" className="w-52">
+            <DropdownMenuContent navigation align="end" className="w-64">
+              <SessionSurfaceMenuItem session={session} />
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => startRename(session)} className="cursor-pointer">
                 <Pencil className="mr-2 h-3.5 w-3.5" />
                 Rename
@@ -948,7 +964,10 @@ export function Sidebar({
   const renderNavigationItem = (item: (typeof baseNavItems)[number]) => {
     const Icon = item.icon;
     const selected =
-      item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path);
+      item.path === '/'
+        ? location.pathname === '/'
+        : location.pathname.startsWith(item.path) ||
+          (Boolean(activeId) && item.path === surfaceHome);
     return (
       <Link
         key={item.path}
@@ -981,14 +1000,14 @@ export function Sidebar({
     >
       <div className={cn('sidebar-header sidebar-refined-header', isCollapsed && 'is-collapsed')}>
         <Link
-          to="/"
+          to={surfaceHome}
           onClick={handleLinkClick}
           className="sidebar-brand"
-          aria-label="Plum Code home"
-          title="Plum Code home"
+          aria-label="Plum home"
+          title="Plum home"
         >
           <ProviderLogo provider="plum" className="h-6 w-6 shrink-0 text-primary" />
-          {!isCollapsed && <span>Plum Code</span>}
+          {!isCollapsed && <span>Plum</span>}
         </Link>
         {!isCollapsed && <NotificationCenter />}
         {!mobile && !navigationOnly && (
@@ -1035,6 +1054,21 @@ export function Sidebar({
             <Inbox className="h-4 w-4 shrink-0" />
             {!isCollapsed && <span>Outbox</span>}
           </button>
+          {surface === 'chat' && (
+            <Link
+              to="/chat"
+              onClick={handleLinkClick}
+              aria-label="Neuer Chat"
+              title="Neuer Chat"
+              className={cn(
+                'sidebar-nav-item flex items-center gap-3 px-3 py-2 text-sm font-medium',
+                isCollapsed && 'is-collapsed'
+              )}
+            >
+              <Plus className="h-4 w-4 shrink-0" />
+              {!isCollapsed && 'Neuer Chat'}
+            </Link>
+          )}
         </div>
 
         {activeId && (
@@ -1106,7 +1140,9 @@ export function Sidebar({
           >
             {!isCollapsed && (
               <div className="flex items-center gap-2">
-                <span className="sidebar-section-label">Sessions</span>
+                <span className="sidebar-section-label">
+                  {surface === 'chat' ? 'Gespräche' : 'Sessions'}
+                </span>
                 {workingCount > 0 && (
                   <span className="session-run-count" title={`${workingCount} sessions working`}>
                     {workingCount} active
@@ -1159,8 +1195,8 @@ export function Sidebar({
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search sessions..."
-                  aria-label="Search sessions"
+                  placeholder={surface === 'chat' ? 'Gespräche suchen' : 'Search sessions...'}
+                  aria-label={surface === 'chat' ? 'Gespräche suchen' : 'Search sessions'}
                   className="h-9 rounded-full border-0 bg-transparent pl-8 pr-8 text-xs shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                 />
                 {searchQuery && (
@@ -1186,11 +1222,22 @@ export function Sidebar({
             }}
           >
             <div className="sidebar-session-scroll-content mt-1">
+              {surface === 'chat' && (
+                <ChatSidebarResources
+                  search={searchQuery}
+                  collapsed={isCollapsed}
+                  onNavigate={handleLinkClick}
+                />
+              )}
               {filteredSessions.length === 0
                 ? !isCollapsed && (
                     <div className="px-3 py-3 text-center">
                       <p className="text-xs text-muted-foreground/70">
-                        {searchQuery ? 'No matches' : 'No sessions'}
+                        {searchQuery
+                          ? 'No matches'
+                          : surface === 'chat'
+                            ? 'Frühere Agentengespräche erscheinen hier.'
+                            : 'No sessions'}
                       </p>
                       {searchQuery && (
                         <Button
@@ -1269,6 +1316,12 @@ export function Sidebar({
           </div>
         </div>
         <div className="sidebar-footer shrink-0">
+          {surface === 'chat' &&
+            renderNavigationItem({
+              icon: SlidersHorizontal,
+              label: 'Personalisierung',
+              path: '/chat/personalization',
+            })}
           {contextUsage && (
             <div className={cn('sidebar-context-slot shrink-0', isCollapsed && 'is-collapsed')}>
               <ContextPopover

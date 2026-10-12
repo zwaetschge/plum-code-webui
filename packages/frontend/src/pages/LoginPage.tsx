@@ -277,24 +277,21 @@ export function LoginPage() {
         {/* Left side - Branding */}
         <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 xl:p-16">
           <div>
-            <div className="mb-16">
-              <img
-                src="/logos/plum-banner.png"
-                alt="Plum Code WebUI"
-                className="h-auto w-72 max-w-full object-contain object-left xl:w-80"
-              />
+            <div className="mb-16 flex items-center gap-3">
+              <img src="/logos/plum.png" alt="" className="h-14 w-14 object-contain" />
+              <span className="text-3xl font-semibold">Plum</span>
             </div>
 
             <div className="space-y-6 max-w-lg">
               <h1 className="text-5xl xl:text-6xl font-bold tracking-tight leading-[1.1]">
-                <span className="block">Code with</span>
+                <span className="block">Dein persönlicher</span>
                 <span className="block bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent bg-[length:200%_auto] animate-[gradient_8s_linear_infinite]">
-                  Intelligence
+                  Assistent
                 </span>
               </h1>
               <p className="text-lg text-muted-foreground leading-relaxed">
-                A unified interface for AI-powered coding assistants. Connect your favorite CLI
-                tools and start building.
+                Plum Chat für Gespräche, Plum Task für Aufträge und Plum Code für Projekte. Deine
+                Modelle, Werkzeuge und Agenten unter einem Dach.
               </p>
             </div>
           </div>
@@ -327,12 +324,13 @@ export function LoginPage() {
           <div className="mx-auto w-full max-w-md">
             {/* Mobile logo */}
             <div className="lg:hidden mb-10 text-center">
-              <img
-                src="/logos/plum-banner.png"
-                alt="Plum Code WebUI"
-                className="mx-auto mb-4 h-auto w-56 max-w-full object-contain"
-              />
-              <p className="text-sm text-muted-foreground">Connect your CLI provider to continue</p>
+              <div className="mb-4 flex items-center justify-center gap-3">
+                <img src="/logos/plum.png" alt="" className="h-12 w-12 object-contain" />
+                <span className="text-3xl font-semibold">Plum</span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Dein persönlicher Assistent für Chat, Tasks und Code
+              </p>
             </div>
 
             {/* Error message */}

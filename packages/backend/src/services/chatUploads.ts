@@ -7,6 +7,7 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { constants as fsConstants } from 'node:fs';
 
 import type {
   ChatUpload,
@@ -594,3 +595,22 @@ const cleanupTimer = setInterval(
   15 * 60 * 1000
 );
 cleanupTimer.unref();
+
+/** Account export reads original upload bytes without reserving or re-sending them. */
+export async function exportOwnedChatUpload(userId:string,sessionId:string,uploadId:string):Promise<Buffer> {
+  const row=await readOwnedUpload(userId,sessionId,uploadId);
+  const filename=completedPath(row);
+  const file=await open(filename,fsConstants.O_RDONLY|fsConstants.O_NOFOLLOW);
+  let bytes:Buffer;try { if (!(await file.stat()).isFile()) throw new ChatUploadError('Original upload is unavailable',404);bytes=await file.readFile(); } finally { await file.close(); }
+  if (bytes.length!==row.byteSize || createHash('sha256').update(bytes).digest('hex')!==row.sha256) throw new ChatUploadError('Original upload is unavailable',404,'UPLOAD_UNAVAILABLE');
+  return bytes;
+}
+/** Retention is scoped to the expired session, including uploads already consumed by a message. */
+export async function purgeSessionChatUploads(userId:string,sessionId:string):Promise<void> {
+  if (!(await pgGet('SELECT id FROM sessions WHERE id = ? AND user_id = ?',sessionId,userId))) throw new ChatUploadError('Session not found',404);
+  const rows=await pgAll('SELECT id FROM chat_uploads WHERE user_id = ? AND session_id = ?',userId,sessionId);
+  for (const row of rows) await withUploadLock(String(row.id),async()=>{
+    await rm(uploadDirectory(userId,String(row.id)),{recursive:true,force:true});
+    await pgRun('DELETE FROM chat_uploads WHERE id = ? AND user_id = ? AND session_id = ?',row.id,userId,sessionId);
+  });
+}

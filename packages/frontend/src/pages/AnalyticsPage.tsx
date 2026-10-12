@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { DEFAULT_ANALYTICS_HIDDEN_LIMIT_METRICS, type UserSettings } from '@plum-code-webui/shared';
 import { KpiCard, type KpiDelta } from '@/components/analytics/KpiCard';
+import { ApiChatUsagePanel } from '@/components/analytics/ApiChatUsagePanel';
 import { Segmented } from '@/components/analytics/AnalyticsPanel';
 import {
   UsageOverTimeCard,
@@ -810,7 +811,7 @@ export function AnalyticsPage() {
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={exportJson} disabled={!summary && !timeline}>
                 <FileJson className="mr-2 h-4 w-4" />
-                Everything as JSON
+                Agent usage as JSON
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -823,6 +824,8 @@ export function AnalyticsPage() {
           <span>{errorMessage}</span>
         </div>
       )}
+      <ApiChatUsagePanel window={analyticsWindow ?? undefined} />
+      <h2 className="text-lg font-semibold">Agentengespräche und CLI-Sessions</h2>
 
       <div className={cn('analytics-kpis', summaryLoading && 'is-loading')}>
         <KpiCard

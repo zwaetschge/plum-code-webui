@@ -32,7 +32,7 @@ import com.claudewebui.app.data.local.entity.SessionEntity
         OutboxEntity::class,
         SessionReadStateEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -175,6 +175,13 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Preserve cached messages/outbox while retaining Task versus Code assignments. */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sessions ADD COLUMN surface TEXT NOT NULL DEFAULT 'code'")
+            }
+        }
+
         /** Every migration, in order. [DatabaseModule] registers exactly this list. */
         val ALL_MIGRATIONS = arrayOf(
             MIGRATION_1_2,
@@ -184,6 +191,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_5_6,
             MIGRATION_6_7,
             MIGRATION_7_8,
+            MIGRATION_8_9,
         )
     }
 }

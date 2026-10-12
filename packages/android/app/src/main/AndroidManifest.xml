@@ -17,6 +17,8 @@
 
     <!-- Dictation in the chat composer; requested at first use. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <!-- Vibration for high-priority permission-request notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -79,8 +81,7 @@
             </intent-filter>
 
             <!--
-                HTTPS app links — replace "your-domain.example.com" with your
-                actual server domain. Requires a matching /.well-known/assetlinks.json
+                HTTPS app links require a matching /.well-known/assetlinks.json
                 on the server for autoVerify to succeed (optional but recommended).
             -->
             <intent-filter android:autoVerify="true">
@@ -89,7 +90,8 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:scheme="https"
-                    android:host="your-domain.example.com" />
+                    android:host="plum.zwaetschge-webui.ch" />
+                <data android:scheme="https" android:host="code.zwaetschge-webui.ch" />
             </intent-filter>
         </activity>
 

@@ -1,7 +1,7 @@
 {
-  "name": "Plum Code WebUI",
-  "short_name": "Plum Code",
-  "description": "Web Interface for Plum Code",
+  "name": "Plum",
+  "short_name": "Plum",
+  "description": "Dein persönlicher Assistent für Chat, Task und Code",
   "id": "/",
   "start_url": "/",
   "scope": "/",
@@ -88,10 +88,24 @@
   "categories": ["developer", "productivity", "utilities"],
   "shortcuts": [
     {
-      "name": "New Session",
-      "short_name": "New",
-      "url": "/?new=true",
-      "description": "Start a new coding session",
+      "name": "Plum Chat",
+      "short_name": "Chat",
+      "url": "/chat",
+      "description": "Ein persönliches Gespräch starten",
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Plum Task",
+      "short_name": "Task",
+      "url": "/tasks?new=true",
+      "description": "Einen Auftrag vorbereiten",
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }]
+    },
+    {
+      "name": "Plum Code",
+      "short_name": "Code",
+      "url": "/code?new=true",
+      "description": "Eine Coding-Sitzung starten",
       "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }]
     },
     {

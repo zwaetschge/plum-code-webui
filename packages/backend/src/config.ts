@@ -43,6 +43,7 @@ const envSchema = z.object({
     .optional()
     .transform((v) => v !== 'false'),
   PREVIEW_HOSTNAME: z.string().optional(),
+  PREVIEW_HOSTNAME_ALIASES: z.string().optional(),
   // Shared secret proving a request originates from the local permission-prompt
   // hook script (or any other in-process CLI caller). Auto-generated per-process
   // if not provided so a fresh container boot gets a fresh secret.
@@ -164,6 +165,7 @@ function loadConfig() {
       .map((p) => p.trim())
       .filter((p) => p.length > 0),
     previewHostname: env.PREVIEW_HOSTNAME?.toLowerCase(),
+    previewHostnameAliases: (env.PREVIEW_HOSTNAME_ALIASES || '').split(',').map(host => host.trim().toLowerCase()).filter(host => /^[a-z0-9.-]+$/.test(host)),
     auth: {
       // Empty array means "no allowlist" — every successful OAuth/basic-auth
       // login is accepted. Set AUTH_ALLOWED_EMAILS to lock down a public

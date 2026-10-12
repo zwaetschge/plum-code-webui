@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Nur das Fenster vor dem ersten Compose-Frame; alles Weitere macht das Compose-Theme. -->
+    <style name="swarm_Theme.Schwarm" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/swarm_schwarm_nacht</item>
+        <item name="android:colorAccent">@color/swarm_schwarm_bernstein</item>
+    </style>
+
+    <!-- Ein Favorit im Widget (RemoteViews: nur einfache Views und Stile). -->
+    <style name="swarm_SchwarmWidgetKnopf">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:background">@drawable/swarm_widget_knopf</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingStart">8dp</item>
+        <item name="android:paddingEnd">8dp</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:textColor">#FFE6E9EF</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+</resources>

@@ -42,7 +42,7 @@ class CLIProviderTest {
     @Test
     fun vibeOffersItsOwnThinkingLevels() {
         assertEquals(
-            listOf("off", "low", "medium", "high", "max"),
+            listOf("off", "low", "medium", "high", "max", "ultracode"),
             ReasoningLevel.forProvider(CLIProvider.VIBE).map { it.id },
         )
     }

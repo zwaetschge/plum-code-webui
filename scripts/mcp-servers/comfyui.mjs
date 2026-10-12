@@ -13,10 +13,31 @@
 import { createInterface } from 'node:readline';
 import { readFileSync } from 'node:fs';
 
-const BACKEND = process.env.WEBUI_BACKEND_URL || 'http://localhost:3001';
-const HOOK_SECRET = process.env.WEBUI_HOOK_SECRET || '';
-const SESSION_ID = process.env.WEBUI_SESSION_ID || '';
-const SESSION_CONTEXT_FILE = process.env.WEBUI_SESSION_CONTEXT_FILE || '';
+function readParentEnv() {
+  if (process.platform !== 'linux' || !process.ppid) return {};
+  try {
+    const raw = readFileSync(`/proc/${process.ppid}/environ`, 'utf8');
+    const entries = {};
+    for (const item of raw.split('\0')) {
+      if (!item) continue;
+      const separator = item.indexOf('=');
+      if (separator <= 0) continue;
+      entries[item.slice(0, separator)] = item.slice(separator + 1);
+    }
+    return entries;
+  } catch {
+    return {};
+  }
+}
+
+// Codex starts MCP servers with the static config env block, which omits the
+// dynamic WebUI session/auth env of the parent Codex process.
+const RUNTIME_ENV = { ...readParentEnv(), ...process.env };
+
+const BACKEND = RUNTIME_ENV.WEBUI_BACKEND_URL || 'http://localhost:3001';
+const HOOK_SECRET = RUNTIME_ENV.WEBUI_HOOK_SECRET || '';
+const SESSION_ID = RUNTIME_ENV.WEBUI_SESSION_ID || '';
+const SESSION_CONTEXT_FILE = RUNTIME_ENV.WEBUI_SESSION_CONTEXT_FILE || '';
 // A non-numeric COMFYUI_TIMEOUT_SECONDS used to yield NaN, and `setTimeout(NaN)`
 // fires immediately - every generation would abort on the spot.
 const TIMEOUT_S = (() => {
@@ -53,6 +74,9 @@ const MEGAPIXELS = ['0.1', '0.25', '0.5', '1.0', '1.5', '2.0'];
 
 // Shared parameter schema used by all three tools. Edit-only fields are
 // added to the edit tool below.
+const EDIT_PROMPT_DESCRIPTION =
+  'The change as an instruction, e.g. "Replace the shield with an open hand, same cartoon style". Name what must stay unchanged when it matters.';
+
 const COMMON_PROPS = {
   prompt: {
     type: 'string',
@@ -74,7 +98,8 @@ const COMMON_PROPS = {
   },
   steps: {
     type: 'integer',
-    description: 'Sampling steps. Fewer = faster. Defaults set per workflow (8-9 typically).',
+    description:
+      'Sampling steps. Fewer = faster. Defaults set per workflow (8 for Krea2, 25 for Qwen-Image 2.1).',
     minimum: 1,
     maximum: 60,
   },
@@ -111,21 +136,8 @@ const TOOLS = [
   {
     name: 'generate_image',
     description: [
-      'Generate an image via Z-Image Turbo (fast T2I). ~5s/image, lower VRAM.',
+      'DEFAULT text-to-image: Krea2 Turbo, 8 steps, ~10-20 s. Use this for every text-to-image request; it is the only text-to-image tool.',
       'After this tool returns, paste the `display_markdown` field into your reply so the image renders inline in chat.',
-    ].join(' '),
-    inputSchema: {
-      type: 'object',
-      required: ['prompt'],
-      properties: COMMON_PROPS,
-    },
-  },
-  {
-    name: 'generate_image_quality',
-    description: [
-      'Generate an image via Flux.2 Klein 9B + Turbo LoRA (quality T2I, ~8 steps).',
-      'Use this when the user wants higher fidelity / more detail than `generate_image` provides.',
-      'After this tool returns, paste the `display_markdown` field into your reply.',
     ].join(' '),
     inputSchema: {
       type: 'object',
@@ -136,7 +148,8 @@ const TOOLS = [
   {
     name: 'edit_image',
     description: [
-      'Edit an existing image via Flux.2 Klein image-to-image (ReferenceLatent).',
+      'Edit an existing image via Qwen-Image 2.1 (instruction edit; output follows the input aspect ratio).',
+      'Write `prompt` as an instruction, e.g. "Make the cape red, keep everything else unchanged". Re-renders the whole frame; for a surgical change use `inpaint_image`. ~45 s at 1 MP, ~90 s at 2 MP.',
       'Pass an absolute path to a local image file as `input_image` — the backend automatically uploads it to ComfyUI before running the workflow.',
       'After this tool returns, paste the `display_markdown` field into your reply.',
     ].join(' '),
@@ -145,6 +158,7 @@ const TOOLS = [
       required: ['prompt', 'input_image'],
       properties: {
         ...COMMON_PROPS,
+        prompt: { ...COMMON_PROPS.prompt, description: EDIT_PROMPT_DESCRIPTION },
         input_image: IMAGE_PATH_PROP,
       },
     },
@@ -152,7 +166,7 @@ const TOOLS = [
   {
     name: 'inpaint_image',
     description: [
-      'Masked edit: repaint ONLY the white area of `mask` and leave every other pixel bit-identical.',
+      'Masked edit via Qwen-Image 2.1: repaint ONLY the white area of `mask` and leave every other pixel bit-identical.',
       'This is the tool for surgical work — remove an object, replace a background, change one garment —',
       'because `edit_image` re-renders the whole frame and silently shifts everything else.',
       'Build the mask yourself with ImageMagick (same size as the source, white = repaint, black = keep),',
@@ -164,6 +178,7 @@ const TOOLS = [
       required: ['prompt', 'input_image', 'mask'],
       properties: {
         ...COMMON_PROPS,
+        prompt: { ...COMMON_PROPS.prompt, description: EDIT_PROMPT_DESCRIPTION },
         input_image: IMAGE_PATH_PROP,
         mask: {
           ...IMAGE_PATH_PROP,
@@ -192,13 +207,38 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'upscale_pixel_art',
+    description: [
+      'Redraw a pixel-art sprite as a clean high-resolution illustration (Qwen-Image 2.1 Pixel-Art Upscaler).',
+      'Snaps the sprite to its pixel grid and redraws it with Qwen-Image 2.1 in edit mode, so pose, colors, expression and props stay faithful. ~30 s at 1 MP, ~90 s at 2 MP.',
+      'Works with tiny originals (e.g. 40x40) and already enlarged block-pixel images; transparent PNGs get a white background.',
+      'For known characters pass `subject` (e.g. "Meowth, the Pokemon"): it is the biggest quality lever. Leave it out for original characters.',
+      'After this tool returns, paste the `display_markdown` field into your reply.',
+    ].join(' '),
+    inputSchema: {
+      type: 'object',
+      required: ['input_image'],
+      properties: {
+        input_image: IMAGE_PATH_PROP,
+        subject: {
+          type: 'string',
+          description:
+            'Optional: who or what the sprite is, or a short description of ambiguous details (e.g. "a knight with a blue cape").',
+          maxLength: 400,
+        },
+        megapixel: COMMON_PROPS.megapixel,
+        seed: COMMON_PROPS.seed,
+      },
+    },
+  },
 ];
 
 const WORKFLOW_BY_TOOL = {
   generate_image: 'krea2-t2i',
-  generate_image_quality: 'flux2-klein-t2i',
-  edit_image: 'f2k-edit',
-  inpaint_image: 'f2k-inpaint',
+  edit_image: 'qwen21-edit',
+  inpaint_image: 'qwen21-inpaint',
+  upscale_pixel_art: 'qwen21-pixelart',
 };
 
 // Discovery + guidance tools, following the official Comfy MCP conventions
@@ -214,7 +254,7 @@ TOOLS.push(
   {
     name: 'get_prompting_guide',
     description:
-      'Prompting recommendations per workflow family (Krea2, Flux.2 Klein, Z-Image). Read-only; consult before writing prompts for best results.',
+      'Prompting recommendations per workflow family (Krea2, Qwen-Image 2.1). Read-only; consult before writing prompts for best results.',
     inputSchema: { type: 'object', properties: {} },
   }
 );
@@ -319,28 +359,31 @@ const PROMPTING_GUIDE = [
   '- Describe subject, style, lighting, colors and composition explicitly.',
   '- 8 steps, euler/simple; CFG is distilled to 1 — do not raise it.',
   '',
-  '## generate_image_quality — Flux.2 Klein 9B + Turbo LoRA',
-  '- Handles longer, denser prompts and fine detail better than the fast path.',
-  '- Natural-language sentences outperform keyword soup on Flux models.',
-  '- 8 steps, CFG 1 distilled; changing sampler rarely helps.',
+  '## edit_image — Qwen-Image 2.1 instruction edit',
+  '- `input_image` is required; write the prompt as an INSTRUCTION ("Make the cape red"),',
+  '  not as a description of the whole result. Say what must stay ("keep everything else unchanged").',
+  '- The input is visible to the model as `<image1>`; you can refer to it ("the dog in <image1>").',
+  '- It re-renders the WHOLE frame and follows the input aspect ratio; `megapixel` sets the size',
+  '  ("1.0" ~45 s, "2.0" ~90 s), `aspect_ratio` is ignored. For a targeted change use `inpaint_image`.',
+  '- 25 steps, CFG 1. More steps or CFG > 1 brought no visible gain in tests; CFG 3 doubles the time.',
+  '- Output may carry an alpha channel: the model can make backgrounds transparent on request.',
   '',
-  '## edit_image — Flux.2 Klein image-to-image (ReferenceLatent)',
-  '- `input_image` is required; the prompt describes the desired RESULT, not the change delta.',
-  '- Keep the prompt aligned with what should stay: unmentioned traits may drift.',
-  '- It re-renders the WHOLE frame. Nothing is preserved exactly, not even untouched regions,',
-  '  and the canvas may be resized by a few pixels. For a targeted change use `inpaint_image`.',
-  '',
-  '## inpaint_image — masked crop & stitch (surgical edits)',
+  '## inpaint_image — Qwen-Image 2.1 masked crop & stitch (surgical edits)',
   '- Everything outside the mask is copied from the source, so the change is auditable:',
   '  `magick compare -metric AE source result null:` should report only the masked pixels.',
-  '- The prompt describes what belongs INSIDE the mask, plus enough context to blend',
-  '  ("weathered brick wall, same afternoon light"), not the edit instruction.',
+  '- The prompt is an instruction about the masked object ("Remove the shield; show his arm and',
+  '  cape there instead, same style"). The model sees a 1024 px crop around the mask, not the whole image.',
   '- Build the mask with ImageMagick, e.g. a region: ',
   '  `magick -size WxH xc:black -fill white -draw "roundrectangle x1,y1 x2,y2 12,12" mask.png`,',
   '  or from colour: `magick src.png -fuzz 18% -fill white -opaque "#3a5f2b" -fill black +opaque white mask.png`.',
   '- Blur the mask (`-blur 0x8`) OR raise `mask_blend_pixels`; doing both over-softens the seam.',
   '- If a thin halo of the old content survives, raise `mask_expand_pixels` to 8-16.',
   '- Very small masks still render at working resolution, so a 60px mask is fine.',
+  '',
+  '## upscale_pixel_art — Qwen-Image 2.1 pixel-art redraw',
+  '- Pass the character name as `subject` for known figures ("Squirtle, the Pokemon"); it gives the best results.',
+  '- If the sprite itself is ambiguous (a pixel blob read as an extra item), fix it afterwards with `inpaint_image`',
+  '  or `edit_image` ("Remove the second shield"); text in `subject` does not override the sprite shapes.',
   '',
   '## General',
   '- megapixel "0.5" for chat previews, "1.0"–"2.0" for final quality.',
@@ -408,8 +451,12 @@ async function runTool(name, args) {
   const workflow = WORKFLOW_BY_TOOL[name];
   if (!workflow) throw new Error(`unknown tool: ${name}`);
 
-  const prompt = String(args?.prompt || '').trim();
-  if (prompt.length < 3) throw new Error('prompt must be at least 3 characters');
+  // The pixel-art upscaler takes an optional `subject` instead of a prompt.
+  const optionalPrompt = workflow === 'qwen21-pixelart';
+  const prompt = String((optionalPrompt ? args?.subject : args?.prompt) || '').trim();
+  if (prompt.length < 3 && !(optionalPrompt && prompt.length === 0)) {
+    throw new Error(`${optionalPrompt ? 'subject' : 'prompt'} must be at least 3 characters`);
+  }
 
   const params = { prompt };
   if (args?.aspect_ratio) params.aspect_ratio = args.aspect_ratio;
@@ -433,7 +480,8 @@ async function runTool(name, args) {
     throw new Error(`generation did not complete: ${data.error || data.status}`);
   }
 
-  const altText = prompt.length > 120 ? `${prompt.slice(0, 117)}...` : prompt;
+  const label = prompt || 'Pixel art redrawn in high resolution';
+  const altText = label.length > 120 ? `${label.slice(0, 117)}...` : label;
   const markdown = `![${altText}](${data.outputUrl})`;
 
   log('done', { tool: name, url: data.outputUrl, seed: data.seed });

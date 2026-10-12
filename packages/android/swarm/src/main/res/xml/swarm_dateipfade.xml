@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider (App 2.2): heruntergeladene Anhänge und Fotos der Kamera, beides im Cache.
+     „updates“ ist die geladene und geprüfte APK, die der Paketinstallierer öffnen darf (App 2.8). -->
+<paths>
+    <cache-path name="medien" path="medien/" />
+    <cache-path name="kamera" path="kamera/" />
+    <cache-path name="updates" path="updates/" />
+</paths>

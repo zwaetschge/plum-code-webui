@@ -1,3 +1,4 @@
+import { startMemoryWorker } from './services/assistant/memory.js';
 import express from 'express';
 import fs from 'fs';
 import { createServer } from 'http';
@@ -41,6 +42,15 @@ import { resetDiscovery } from './services/cli-providers.js';
 
 // Routes
 import authRoutes from './routes/auth.js';
+import assistantRoutes from './routes/assistant.js';
+import publicationRoutes from './routes/publications.js';
+import officeRoutes from './routes/office.js';
+import { officeSurfaceHeaders } from './middleware/officeSurface.js';
+import { reconcileAssistantTasks } from './services/assistant/tasks.js';
+import { startTemporaryRetention } from './services/assistant/temporary.js';
+import { startSourceObservation } from './services/assistant/webSources.js';
+import appLinksRoutes from './routes/appLinks.js';
+import { startAssistantCoordinator } from './services/assistant/coordinator.js';
 import basicAuthRoutes from './routes/basic-auth.js';
 import ultracodeRoutes from './routes/ultracode.js';
 import sessionRoutes from './routes/sessions.js';
@@ -242,6 +252,7 @@ async function main() {
   void refreshOpenCodeModelsCache();
 
   const app = express();
+  app.use('/.well-known', appLinksRoutes);
 
   // Trust proxy headers when behind nginx/reverse proxy. `true` is dangerous
   // without a guard proxy — any client can spoof X-Forwarded-For and defeat
@@ -252,6 +263,14 @@ async function main() {
 
   // Setup WebSocket
   const io = setupWebSocket(httpServer);
+  await reconcileAssistantTasks();
+  startSourceObservation();
+  startMemoryWorker();
+  startTemporaryRetention(async (id, userId) => {
+    const { getProcessManager } = await import('./websocket/index.js');
+    await getProcessManager().stopSession(id, userId);
+  });
+  await startAssistantCoordinator();
   // Firefox extension relay; its own upgrade path and token auth.
   browserBridge.attach(httpServer);
   attachNotificationIo(io);
@@ -301,6 +320,7 @@ async function main() {
       originAgentCluster: false,
     })
   );
+  app.use(officeSurfaceHeaders);
   app.use((req, res, next) => {
     const host = (req.hostname || '').toLowerCase();
     const isTrustedOrigin =
@@ -360,6 +380,7 @@ async function main() {
 
   // Agents upload files into web forms through the browser bridge (hook-secret only).
   app.use('/api/browser-bridge/internal', express.json({ limit: '40mb' }));
+  app.use('/api/assistant/memory-system/transfer', express.json({ limit: '2mb' }));
   app.use(express.json());
   app.use(cookieParser());
   app.use(
@@ -405,6 +426,9 @@ async function main() {
   app.use('/auth', authRoutes);
   app.use('/api/basic-auth', basicAuthRoutes);
   app.use('/api/sessions', sessionRoutes);
+  app.use('/api/assistant', assistantRoutes);
+  app.use('/published', publicationRoutes);
+  app.use('/api/office', officeRoutes);
   app.use('/api/files', filesRoutes);
   app.use('/api/git', gitRoutes);
   app.use('/api/settings', settingsRoutes);
@@ -537,6 +561,7 @@ async function main() {
       '/claude-logo.png',
       '/favicon.svg',
       '/design-previews/',
+      '/office/',
       '/manifest.json',
       '/sw.js',
       '/service-worker.js',

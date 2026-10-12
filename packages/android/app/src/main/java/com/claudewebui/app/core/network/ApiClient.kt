@@ -1,6 +1,8 @@
 package com.claudewebui.app.core.network
 
 import com.claudewebui.app.core.network.api.AgentsApi
+import com.claudewebui.app.core.network.api.AssistantApi
+import com.claudewebui.app.core.network.api.AssistantApiImpl
 import com.claudewebui.app.core.network.api.AgentsApiImpl
 import com.claudewebui.app.core.network.api.AnalyticsApi
 import com.claudewebui.app.core.network.api.AnalyticsApiImpl
@@ -91,6 +93,7 @@ class ApiClient(
     oracleBrowser: OracleBrowserApi = OracleBrowserApiImpl(http),
     androidDevices: AndroidDevicesApi = AndroidDevicesApiImpl(http),
     workspace: WorkspaceApi = WorkspaceApiImpl(http),
+    assistant: AssistantApi = AssistantApiImpl(http),
 ) : AuthApi by auth,
     SessionsApi by sessions,
     MessagesApi by messages,
@@ -115,7 +118,8 @@ class ApiClient(
     PreviewApi by preview,
     OracleBrowserApi by oracleBrowser,
     AndroidDevicesApi by androidDevices,
-    WorkspaceApi by workspace {
+    WorkspaceApi by workspace,
+    AssistantApi by assistant {
 
     /** The server origin every request is built on, resolved from [com.claudewebui.app.core.security.TokenStore]. */
     val baseUrl: String

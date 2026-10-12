@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
   Plus,
@@ -69,6 +69,8 @@ import { FolderBrowserDialog } from '@/components/ui/folder-browser';
 import { PluginEditorDialog } from '@/components/ui/plugin-editor';
 import { MarketplaceBrowserDialog } from '@/components/ui/marketplace-browser';
 import { CapabilityCatalogSections } from '@/components/settings/CapabilityCatalogSections';
+import { PortabilityPanel } from '@/components/settings/PortabilityPanel';
+import { OfficeIntegrationPanel } from '@/components/settings/OfficeIntegrationPanel';
 import { type AgentInfo, type SkillInfo } from '@/components/settings/capabilityCatalog';
 import { api } from '@/services/api';
 import { toast } from '@/hooks/use-toast';
@@ -1987,6 +1989,13 @@ export function SettingsPage() {
               </button>
             </div>
 
+            <Link
+              to="/chat/personalization"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-muted"
+            >
+              <Settings2 size={16} />
+              Personalisierung für Plum Chat
+            </Link>
             <div className="settings-search-field">
               <Search className="settings-search-icon h-4 w-4" />
               <Input
@@ -2341,6 +2350,7 @@ export function SettingsPage() {
                   >
                     <TabsContent value="workspace" className="settings-general-pane mt-0">
                       <div className="settings-pane-column">
+                        <PortabilityPanel />
                         <SettingsPanel
                           id="default-directory"
                           eyebrow="Workspace"
@@ -3944,6 +3954,7 @@ export function SettingsPage() {
               {/* Integrations Tab */}
               <TabsContent value="integrations" className="settings-pane-rail mt-0">
                 <div className="settings-pane-column">
+                  <OfficeIntegrationPanel />
                   <section id="oracle-browser">
                     <Card className="border border-border/70">
                       <CardHeader>
@@ -4290,15 +4301,16 @@ export function SettingsPage() {
                     <CardHeader>
                       <CardTitle className="text-base">Image generation</CardTitle>
                       <CardDescription>
-                        Plum Code WebUI ships three baked-in workflows (Z-Image Turbo, Flux.2 Klein
-                        T2I, Flux.2 Klein image-edit). Set your ComfyUI server URL below — every CLI
-                        session can then generate images via the{' '}
+                        Plum Code WebUI ships baked-in workflows (Krea2 Turbo for text-to-image,
+                        Qwen-Image 2.1 for edit, inpaint and pixel-art). Set your ComfyUI server URL
+                        below — every CLI session can then generate images via the{' '}
                         <code className="px-1 py-0.5 rounded bg-muted text-xs">generate_image</code>
-                        ,{' '}
+                        , <code className="px-1 py-0.5 rounded bg-muted text-xs">edit_image</code>,{' '}
+                        <code className="px-1 py-0.5 rounded bg-muted text-xs">inpaint_image</code>{' '}
+                        and{' '}
                         <code className="px-1 py-0.5 rounded bg-muted text-xs">
-                          generate_image_quality
+                          upscale_pixel_art
                         </code>{' '}
-                        and <code className="px-1 py-0.5 rounded bg-muted text-xs">edit_image</code>{' '}
                         MCP tools without any external LoRA Tester container. Defaults to{' '}
                         <code className="px-1 py-0.5 rounded bg-muted text-xs">$COMFYUI_URL</code>{' '}
                         env var when unset.

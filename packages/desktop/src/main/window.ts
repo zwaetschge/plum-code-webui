@@ -1,8 +1,11 @@
 import { BrowserWindow, shell } from 'electron';
 import path from 'path';
+import { desktopOrigin, isDesktopOrigin } from './navigation';
 
 let setupWindow: BrowserWindow | null = null;
 let appWindow: BrowserWindow | null = null;
+let miniWindow: BrowserWindow | null = null;
+let configuredOrigin: string | null = null;
 
 /**
  * Create the first-run setup window.
@@ -43,17 +46,23 @@ export function createSetupWindow(): BrowserWindow {
  * Create the main app window that loads the remote WebUI.
  */
 export function createAppWindow(serverUrl: string, token: string): BrowserWindow {
+  const origin = desktopOrigin(serverUrl);
+  if (configuredOrigin && configuredOrigin !== origin) {
+    closeMiniWindow();
+    appWindow?.destroy();
+  }
   if (appWindow && !appWindow.isDestroyed()) {
     appWindow.focus();
     return appWindow;
   }
+  configuredOrigin = origin;
 
   appWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 800,
     minHeight: 600,
-    title: 'Plum Code WebUI',
+    title: 'Plum',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
@@ -64,12 +73,12 @@ export function createAppWindow(serverUrl: string, token: string): BrowserWindow
   });
 
   // Load the WebUI with auth token injection
-  const authUrl = `${serverUrl}/auth/callback?token=${encodeURIComponent(token)}`;
+  const authUrl = `${origin}/auth/callback?token=${encodeURIComponent(token)}`;
   appWindow.loadURL(authUrl);
 
   // Intercept external navigation — open in default browser
   appWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith(serverUrl)) {
+    if (!isDesktopOrigin(url, origin)) {
       shell.openExternal(url);
       return { action: 'deny' };
     }
@@ -78,17 +87,82 @@ export function createAppWindow(serverUrl: string, token: string): BrowserWindow
 
   // Intercept navigation to external URLs
   appWindow.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith(serverUrl)) {
+    if (!isDesktopOrigin(url, origin)) {
       event.preventDefault();
       shell.openExternal(url);
     }
   });
 
+  const primary = appWindow;
   appWindow.on('closed', () => {
-    appWindow = null;
+    if (appWindow === primary) {
+      appWindow = null;
+      configuredOrigin = null;
+      closeMiniWindow();
+    }
   });
 
   return appWindow;
+}
+
+/** Same origin/session as the full client; no token is placed in the mini URL. */
+export function createMiniWindow(): BrowserWindow | null {
+  if (!configuredOrigin || !appWindow || appWindow.isDestroyed()) return null;
+  if (miniWindow && !miniWindow.isDestroyed()) {
+    miniWindow.show();
+    miniWindow.focus();
+    return miniWindow;
+  }
+  const origin = configuredOrigin;
+  miniWindow = new BrowserWindow({
+    width: 460,
+    height: 720,
+    minWidth: 340,
+    minHeight: 460,
+    title: 'Plum Mini',
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  const window = miniWindow;
+  void window.loadURL(`${origin}/mini`);
+  const sameOrigin = (value: string) => {
+    try {
+      return isDesktopOrigin(value, origin);
+    } catch {
+      return false;
+    }
+  };
+  const external = (value: string) => {
+    try {
+      const url = new URL(value);
+      if (['http:', 'https:', 'mailto:'].includes(url.protocol)) void shell.openExternal(value);
+    } catch {
+      /* Invalid URL cannot be launched. */
+    }
+  };
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (sameOrigin(url) && appWindow && !appWindow.isDestroyed()) {
+      void appWindow.loadURL(url);
+      appWindow.show();
+      appWindow.focus();
+    } else external(url);
+    return { action: 'deny' };
+  });
+  window.webContents.on('will-navigate', (event, url) => {
+    if (!sameOrigin(url)) {
+      event.preventDefault();
+      external(url);
+    }
+  });
+  window.on('closed', () => {
+    if (miniWindow === window) miniWindow = null;
+  });
+  return window;
+}
+export function closeMiniWindow() {
+  const window = miniWindow;
+  miniWindow = null;
+  if (window && !window.isDestroyed()) window.destroy();
 }
 
 export function getSetupWindow(): BrowserWindow | null {

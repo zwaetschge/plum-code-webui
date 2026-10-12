@@ -1,3 +1,4 @@
+import { usePersonalization } from '@/components/assistant/usePersonalization';
 import { useChatDraft } from '@/hooks/useChatDraft';
 import { useState, useRef, useCallback, useMemo, memo, useEffect } from 'react';
 import {
@@ -136,6 +137,7 @@ function generateId() {
 }
 
 interface ChatInputProps {
+  conversation?: boolean;
   chatId: string | null;
   sessionId: string;
   onSendMessage: (message: string, options?: ChatSendOptions) => ChatSendResult;
@@ -169,6 +171,7 @@ interface ChatInputProps {
 }
 
 export const ChatInput = memo(function ChatInput({
+  conversation = false,
   sessionId,
   chatId,
   onSendMessage,
@@ -196,6 +199,7 @@ export const ChatInput = memo(function ChatInput({
   queueDepth = 0,
   onOpenRun,
 }: ChatInputProps) {
+  const { preferences } = usePersonalization();
   const [input, setInput] = useChatDraft(sessionId, chatId);
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [showCommandMenu, setShowCommandMenu] = useState(false);
@@ -220,7 +224,9 @@ export const ChatInput = memo(function ChatInput({
         inputRef.current?.focus();
       },
       [setInput]
-    )
+    ),
+    !conversation || preferences.voiceChat,
+    `${sessionId}:${chatId}`
   );
 
   useEffect(() => {
@@ -951,7 +957,7 @@ export const ChatInput = memo(function ChatInput({
             disabled={disabled || deliveryPending}
             className="composer-control-button composer-attach-button"
             title="Attach files (10 max, 25 MB each, 32 MB total)"
-            aria-label="Attach files"
+            aria-label={conversation ? 'Dateien anhängen' : 'Attach files'}
             onClick={() => fileInputRef.current?.click()}
           >
             <Paperclip className="h-4 w-4" />
@@ -976,7 +982,8 @@ export const ChatInput = memo(function ChatInput({
               onKeyDown={handleKeyDown}
               onPaste={handleComposerPaste}
               disabled={disabled || deliveryPending}
-              placeholder={inputPlaceholder}
+              aria-label={conversation ? 'Deine Nachricht' : 'Message'}
+              placeholder={conversation ? 'Frag Plum …' : inputPlaceholder}
               rows={1}
               className={cn(
                 'composer-textarea w-full min-h-[40px] max-h-[148px] md:max-h-[220px] bg-transparent border-0 focus:outline-none focus:ring-0 text-base md:text-sm resize-none placeholder:text-muted-foreground/60 text-foreground'
@@ -997,7 +1004,7 @@ export const ChatInput = memo(function ChatInput({
           <div className="composer-actions-right">
             {/* Dictation sits beside send; hidden entirely when the server has
                 no transcription service configured. */}
-            {voice.available && (
+            {voice.available && (!conversation || preferences.voiceChat) && (
               <Button
                 type="button"
                 size="icon"
@@ -1037,7 +1044,9 @@ export const ChatInput = memo(function ChatInput({
                 selectedCliTool && 'composer-control-tool'
               )}
               title={isActive ? activeSubmitLabel : 'Send'}
-              aria-label={isActive ? activeSubmitLabel : 'Send message'}
+              aria-label={
+                isActive ? activeSubmitLabel : conversation ? 'Nachricht senden' : 'Send message'
+              }
             >
               {isSending || deliveryPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1048,7 +1057,10 @@ export const ChatInput = memo(function ChatInput({
           </div>
         </div>
       </form>
-      <p id="chat-attachment-limits" className="px-2 text-xs text-muted-foreground">
+      <p
+        id="chat-attachment-limits"
+        className={conversation ? 'sr-only' : 'px-2 text-xs text-muted-foreground'}
+      >
         Drop files on the composer or paste while the message field is focused · 10 files max · 25
         MB each · 32 MB total
       </p>

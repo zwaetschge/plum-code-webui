@@ -7,8 +7,34 @@ import { Layout } from '@/components/layout/Layout';
 import { AdminRoute } from '@/components/AdminRoute';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Toaster } from '@/components/ui/toaster';
+import { nativeShell } from '@/lib/nativeShell';
+import { NativeAuthRecovery } from '@/components/NativeAuthRecovery';
 
 // Lazy load pages for code splitting
+const AssistantPage = lazy(() =>
+  import('@/pages/AssistantPage').then((m) => ({ default: m.AssistantPage }))
+);
+const MiniAssistantPage = lazy(() =>
+  import('@/pages/MiniAssistantPage').then((m) => ({ default: m.MiniAssistantPage }))
+);
+const MiniAssistantShell = lazy(() =>
+  import('@/pages/MiniAssistantPage').then((m) => ({ default: m.MiniAssistantShell }))
+);
+const ApiChatPage = lazy(() =>
+  import('@/pages/ApiChatPage').then((m) => ({ default: m.ApiChatPage }))
+);
+const OfficeConnectPage = lazy(() =>
+  import('@/pages/OfficeConnectPage').then((m) => ({ default: m.OfficeConnectPage }))
+);
+const SharedAssistantPage = lazy(() =>
+  import('@/pages/SharedAssistantPage').then((m) => ({ default: m.SharedAssistantPage }))
+);
+const CollaborativeDocumentPage = lazy(() =>
+  import('@/pages/CollaborativeDocumentPage').then((m) => ({
+    default: m.CollaborativeDocumentPage,
+  }))
+);
+const SwarmPage = lazy(() => import('@/pages/SwarmPage').then((m) => ({ default: m.SwarmPage })));
 const BasicLoginPage = lazy(() =>
   import('@/pages/BasicLoginPage').then((m) => ({ default: m.BasicLoginPage }))
 );
@@ -20,8 +46,15 @@ const ClaudeCallbackPage = lazy(() =>
   import('@/pages/ClaudeCallbackPage').then((m) => ({ default: m.ClaudeCallbackPage }))
 );
 const SetupPage = lazy(() => import('@/pages/SetupPage').then((m) => ({ default: m.SetupPage })));
+const TaskSessionsPage = lazy(() =>
+  import('@/pages/TaskSessionsPage').then((m) => ({ default: m.TaskSessionsPage }))
+);
 const DashboardPage = lazy(() =>
   import('@/pages/DashboardPage').then((m) => ({ default: m.DashboardPage }))
+);
+const ChatPage = lazy(() => import('@/pages/ChatPage').then((m) => ({ default: m.ChatPage })));
+const PersonalizationPage = lazy(() =>
+  import('@/pages/PersonalizationPage').then((m) => ({ default: m.PersonalizationPage }))
 );
 const SessionPage = lazy(() =>
   import('@/pages/SessionPage').then((m) => ({ default: m.SessionPage }))
@@ -54,7 +87,7 @@ function PageLoader() {
 // Route that requires basic auth (if enabled)
 function BasicAuthRoute({ children }: { children: React.ReactNode }) {
   const { isBasicAuthenticated, isBasicAuthEnabled, isLoading } = useBasicAuthStore();
-  const { isAuthenticated, isLoading: isUserLoading } = useAuthStore();
+  const { isAuthenticated, isLoading: isUserLoading, token } = useAuthStore();
   const location = useLocation();
 
   if (isLoading || isUserLoading) {
@@ -64,6 +97,8 @@ function BasicAuthRoute({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+
+  if (nativeShell() && token && !isAuthenticated) return <NativeAuthRecovery />;
 
   // If basic auth is disabled, allow access
   if (isBasicAuthEnabled === false) {
@@ -79,7 +114,7 @@ function BasicAuthRoute({ children }: { children: React.ReactNode }) {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, token } = useAuthStore();
   const {
     isBasicAuthenticated,
     isBasicAuthEnabled,
@@ -98,6 +133,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (nativeShell() && token && !isAuthenticated) return <NativeAuthRecovery />;
+
   // First check basic auth if enabled
   if (isBasicAuthEnabled === true && !isBasicAuthenticated && !isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
@@ -113,6 +150,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   const { initializeAuth: initializeBasicAuth } = useBasicAuthStore();
   const { initializeAuth: initializeUserAuth } = useAuthStore();
+  const account = useAuthStore((state) => state.user?.id);
 
   // Initialize both auth stores on mount. Running them in parallel lets the
   // UI finish loading as soon as persisted tokens are verified against the
@@ -121,10 +159,28 @@ export default function App() {
     initializeBasicAuth();
     initializeUserAuth();
   }, [initializeBasicAuth, initializeUserAuth]);
+  useEffect(() => {
+    const syncAccount = (event: StorageEvent) => {
+      if (
+        event.storageArea !== localStorage ||
+        (event.key !== 'claude-webui-auth' && event.key !== null)
+      )
+        return;
+      try {
+        const token =
+          JSON.parse(localStorage.getItem('claude-webui-auth') || '{}').state?.token ?? null;
+        if (token !== useAuthStore.getState().token) window.location.reload();
+      } catch {
+        window.location.reload();
+      }
+    };
+    window.addEventListener('storage', syncAccount);
+    return () => window.removeEventListener('storage', syncAccount);
+  }, []);
 
   return (
     <>
-      <ErrorBoundary>
+      <ErrorBoundary key={account ?? 'anonymous'}>
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/login" element={<BasicLoginPage />} />
@@ -146,7 +202,26 @@ export default function App() {
               }
             />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
+            <Route
+              path="/office-connect"
+              element={
+                <ProtectedRoute>
+                  <OfficeConnectPage />
+                </ProtectedRoute>
+              }
+            />
             <Route path="/auth/claude/callback" element={<ClaudeCallbackPage />} />
+            <Route
+              path="/mini"
+              element={
+                <ProtectedRoute>
+                  <MiniAssistantShell />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<MiniAssistantPage />} />
+              <Route path="chat/:id" element={<ApiChatPage />} />
+            </Route>
             <Route
               path="/"
               element={
@@ -155,7 +230,18 @@ export default function App() {
                 </ProtectedRoute>
               }
             >
-              <Route index element={<DashboardPage />} />
+              <Route index element={<AssistantPage />} />
+              <Route path="chat" element={<ChatPage />} />
+              <Route path="chat/personalization" element={<PersonalizationPage />} />
+              <Route path="chat/session/:id" element={<SessionPage />} />
+              <Route path="chat/model/:id" element={<ApiChatPage />} />
+              <Route path="tasks" element={<TaskSessionsPage />} />
+              <Route path="assistant/:section" element={<AssistantPage />} />
+              <Route path="swarm" element={<SwarmPage />} />
+              <Route path="shared/:token" element={<SharedAssistantPage />} />
+              <Route path="collaborate" element={<CollaborativeDocumentPage />} />
+              <Route path="collaborate/:id" element={<CollaborativeDocumentPage />} />
+              <Route path="code" element={<DashboardPage key="code" />} />
               <Route path="session/:id" element={<SessionPage />} />
               <Route path="monitor" element={<MonitorPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />

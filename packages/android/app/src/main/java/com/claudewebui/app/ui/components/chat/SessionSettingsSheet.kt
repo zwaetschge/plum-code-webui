@@ -158,21 +158,23 @@ fun SessionSettingsSheet(
             SettingsGroup(stringResource(R.string.component_reasoning), stringResource(R.string.component_applies_immediately)) {
                 val levels = ReasoningLevel.forProvider(session.cliProvider)
                 val fastActive = session.cliServiceTier.equals(ServiceTier.FAST.id, ignoreCase = true)
-                OptionRow(
-                    title = stringResource(R.string.component_provider_default),
-                    subtitle = null,
-                    selected = session.cliReasoning.isNullOrBlank() && !fastActive,
-                    enabled = !isApplying,
-                ) { onReasoningChange(null) }
-                levels.forEach { level ->
-                    OptionRow(
-                        title = level.localizedLabel(),
-                        subtitle = null,
-                        selected = !fastActive &&
-                            level.id.equals(session.cliReasoning, ignoreCase = true),
-                        enabled = !isApplying,
-                    ) { onReasoningChange(level.id) }
+                // Default plus the provider's levels on one animated rail; the
+                // deepest ones (ultra, ultracode, …) get the nebula look.
+                val stops = listOf(com.claudewebui.app.ui.screens.dashboard.EffortStop(null, stringResource(R.string.component_provider_default))) +
+                    levels.map { level ->
+                        com.claudewebui.app.ui.screens.dashboard.EffortStop(level.id, level.localizedLabel(), com.claudewebui.app.ui.screens.dashboard.isSpecialLevel(level.id))
+                    }
+                val railSelection = when {
+                    fastActive -> "\u0000none"
+                    session.cliReasoning.isNullOrBlank() -> null
+                    else -> levels.firstOrNull { it.id.equals(session.cliReasoning, ignoreCase = true) }?.id ?: "\u0000none"
                 }
+                com.claudewebui.app.ui.screens.dashboard.EffortRail(
+                    stops = stops,
+                    selectedId = railSelection,
+                    onSelect = { onReasoningChange(it) },
+                    enabled = !isApplying,
+                )
                 // A level the server set but this provider no longer lists
                 // (e.g. after a provider switch) would otherwise vanish from the
                 // sheet and read as stringResource(R.string.component_provider_default).

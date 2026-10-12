@@ -111,6 +111,7 @@ fun ChatScreen(
     // Checkpoints still open it on demand.
     var showSidePanel by remember(sessionId) { mutableStateOf(maxWidth >= 1100.dp) }
     var showSessionSettings by remember { mutableStateOf(false) }
+    var showModelEffort by remember { mutableStateOf(false) }
     var showAgents by remember { mutableStateOf(false) }
     var showToolLog by remember { mutableStateOf(false) }
     var showToolsMenu by remember { mutableStateOf(false) }
@@ -342,6 +343,7 @@ fun ChatScreen(
                 onToggleUsage = { showChatDetails = true },
                 onOpenToolLog = { showToolsMenu = true },
                 onOpenAgents = { showAgents = true },
+                onRestart = composerActions.onRestart,
                 onOpenSessionSettings = {
                     viewModel.loadAvailableModels()
                     showSessionSettings = true
@@ -381,6 +383,13 @@ fun ChatScreen(
                 onShowAttention = { showAttention = true },
                 onShowDetails = { showChatDetails = true },
                 onShowOutbox = { showOutbox = true },
+                modelLabel = displaySession?.cliModel?.takeIf { it.isNotBlank() && it != "unknown" }
+                    ?: stringResource(R.string.model_picker_default),
+                effortLabel = displaySession?.let { current ->
+                    ReasoningLevel.forProvider(current.cliProvider)
+                        .firstOrNull { it.id.equals(current.cliReasoning, ignoreCase = true) }?.localizedLabel()
+                },
+                onModelEffort = if (displaySession != null) ({ viewModel.loadAvailableModels(); showModelEffort = true }) else null,
             )
             }
         },
@@ -508,6 +517,25 @@ fun ChatScreen(
         ToolLogSheet(
             tools = displayUiState.toolHistory.values.sortedByDescending { it.timestamp },
             onDismiss = { showToolLog = false },
+        )
+    }
+
+    if (showModelEffort) displaySession?.let { session ->
+        val provider = session.cliProvider
+        val stops = listOf(com.claudewebui.app.ui.screens.dashboard.EffortStop(null, stringResource(R.string.component_provider_default))) +
+            ReasoningLevel.forProvider(provider).map { level ->
+                com.claudewebui.app.ui.screens.dashboard.EffortStop(level.id, level.localizedLabel(), com.claudewebui.app.ui.screens.dashboard.isSpecialLevel(level.id))
+            }
+        com.claudewebui.app.ui.screens.dashboard.ModelEffortSheet(
+            models = listOf(com.claudewebui.app.ui.screens.dashboard.ModelOption(provider.name, provider.displayName, "", stringResource(R.string.model_picker_default))) +
+                uiState.availableModels.map { com.claudewebui.app.ui.screens.dashboard.ModelOption(provider.name, provider.displayName, it) },
+            selectedGroup = provider.name,
+            selectedModel = session.cliModel?.takeIf { it.isNotBlank() && it != "unknown" } ?: "",
+            onSelectModel = { viewModel.setModel(it.model.ifBlank { null }) },
+            stops = stops,
+            effort = session.cliReasoning?.takeIf { it.isNotBlank() },
+            onEffort = { viewModel.setReasoning(it) },
+            onDismiss = { showModelEffort = false },
         )
     }
 

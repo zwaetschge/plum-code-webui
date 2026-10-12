@@ -1,6 +1,7 @@
 import { useAuthStore } from '@/stores/authStore';
+import { nativeShell } from '@/lib/nativeShell';
 
-const API_BASE = '';
+const API_BASE = nativeShell()?.apiBase ?? '';
 
 interface RequestConfig extends RequestInit {
   headers?: Record<string, string>;

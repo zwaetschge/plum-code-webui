@@ -1,3 +1,4 @@
+import { assertTaskTurnAllowed } from '../assistant/taskLimits.js';
 import { persistSubagentRun } from '../subagentHistory.js';
 import { subagentWaitOutcomes } from '../../utils/subagentStatus.js';
 import { normalizeReasoningLevel } from '../../utils/reasoningLevel.js';
@@ -109,6 +110,8 @@ import { sanitizeClaudeResumeTranscript } from '../../utils/claudeResumeTranscri
 import { buildOpenCodeProviderCredentialEnv } from '../../utils/opencodeProviderKeys.js';
 import { assertRunnerAccess } from '../../utils/runnerAccess.js';
 import { buildSessionExecutionPrompt } from '../sessionExecutionContext.js';
+import { buildAssistantContext } from '../assistant/context.js';
+import { temporaryRuntime } from '../assistant/temporary.js';
 import { materializeAttachments, type FileAttachmentData } from '../attachments.js';
 import { onSessionCompacted } from '../memoryOptimizer.js';
 import { persistMessageMedia, type PendingChatMedia } from '../chatMedia.js';
@@ -2876,6 +2879,7 @@ interface ClaudeProcess {
   // `codex exec resume <id>` on respawn for native context continuity instead
   // of transcript replay.
   codexSessionId?: string;
+  codexEphemeral?: boolean;
   // Image paths to attach via `--image` on the next codex respawn. Populated by
   // sendMessage when codex is the provider, consumed (and cleared) by respawnCodexProcess.
   codexPendingImages?: string[];
@@ -5025,6 +5029,8 @@ Discord Main Gateway:
     this.pendingModes.delete(sessionId); // Clear pending mode once used
     // Codex is the primary provider. Only very old rows can have NULL here.
     const cliProvider: CLIProvider = session.cli_provider || 'codex';
+    if ((await temporaryRuntime(sessionId)) && cliProvider !== 'codex')
+      throw new Error('Temporäre Gespräche unterstützen ausschliesslich Codex');
     const providerConfig = CLI_PROVIDERS[cliProvider];
     if (!(await getEnabledCliProvidersForUser(userId)).includes(cliProvider)) {
       throw new Error(`${providerConfig.name} is disabled in Settings`);
@@ -5494,7 +5500,10 @@ Discord Main Gateway:
       // Codex `exec` is single-shot per turn. Register the WebUI session as
       // running, but delay the actual child process until sendMessage() has the
       // user prompt.
-      const persistedCodexSessionId = session.claude_session_id || undefined;
+      const codexEphemeral = await temporaryRuntime(sessionId);
+      const persistedCodexSessionId = codexEphemeral
+        ? undefined
+        : session.claude_session_id || undefined;
       const shouldInjectStaticBootstrap = shouldInjectCodexStaticBootstrap(persistedCodexSessionId);
       const codexHome = CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir());
       const codexTokenBaseline = persistedCodexSessionId
@@ -5559,6 +5568,7 @@ Discord Main Gateway:
         lastContextLimitAt: undefined,
         codexIdle: true,
         codexSessionId: persistedCodexSessionId,
+        codexEphemeral,
         codexQueuedTurns: [],
         codexPendingImages: [],
         codexPendingExecCommand: undefined,
@@ -8078,8 +8088,16 @@ Discord Main Gateway:
 
     const allowedDirs: string[] = safeJsonParse<string[]>(session.allowed_directories, []);
 
-    const resumeSessionId = proc.codexPendingExecCommand ? undefined : proc.codexSessionId;
+    const codexEphemeral = await temporaryRuntime(sessionId);
+    proc.codexEphemeral = codexEphemeral;
+    if (codexEphemeral) {
+      proc.codexSessionId = undefined;
+      proc.codexLastReportedTokens = undefined;
+    }
+    const resumeSessionId =
+      codexEphemeral || proc.codexPendingExecCommand ? undefined : proc.codexSessionId;
     const args = getCLIArgs('codex', {
+      ephemeral: codexEphemeral,
       mode: proc.mode,
       allowedDirectories: allowedDirs,
       workingDirectory: session.working_directory,
@@ -9799,7 +9817,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     );
   }
 
-  private drainClaudeQueuedTurns(sessionId: string, proc: ClaudeProcess): void {
+  private async drainClaudeQueuedTurns(sessionId: string, proc: ClaudeProcess): Promise<void> {
     if (
       !isClaudeTransportProvider(proc.cliProvider) ||
       !proc.claudeIdle ||
@@ -9815,7 +9833,18 @@ The planning phase is complete. You are now in Auto-Accept mode.
 
     proc.claudeQueueDraining = true;
     try {
+      await assertTaskTurnAllowed(sessionId, proc.userId);
       this.dispatchClaudeTurn(sessionId, proc, nextTurn);
+    } catch (error) {
+      proc.claudeQueuedTurns ??= [];
+      proc.claudeQueuedTurns.unshift(nextTurn);
+      this.io
+        .to(`session:${sessionId}`)
+        .emit('session:error', {
+          sessionId,
+          error: error instanceof Error ? error.message : 'Task konnte nicht weiterarbeiten',
+        });
+      this.emitQueueState(sessionId, proc);
     } finally {
       proc.claudeQueueDraining = false;
     }
@@ -10573,6 +10602,19 @@ The planning phase is complete. You are now in Auto-Accept mode.
       while (proc.kimiIdle) {
         const nextTurn = proc.kimiQueuedTurns?.shift();
         if (!nextTurn) break;
+        try {
+          await assertTaskTurnAllowed(sessionId, proc.userId);
+        } catch (error) {
+          proc.kimiQueuedTurns ??= [];
+          proc.kimiQueuedTurns.unshift(nextTurn);
+          this.io
+            .to(`session:${sessionId}`)
+            .emit('session:error', {
+              sessionId,
+              error: error instanceof Error ? error.message : 'Task konnte nicht weiterarbeiten',
+            });
+          break;
+        }
         await this.dispatchKimiAcpTurn(sessionId, proc, nextTurn);
       }
     } finally {
@@ -10941,6 +10983,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     proc.codexSteerDraining = true;
     this.emitQueueState(sessionId, proc);
     try {
+      await assertTaskTurnAllowed(sessionId, proc.userId);
       await this.dispatchCodexTurn(sessionId, proc, nextTurn);
     } catch (err) {
       proc.codexQueuedTurns ??= [];
@@ -11109,6 +11152,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     let dispatchedSuccessfully = false;
     this.emitQueueState(sessionId, proc);
     try {
+      await assertTaskTurnAllowed(sessionId, proc.userId);
       await this.dispatchOpenCodeTurn(sessionId, proc, nextTurn);
       dispatchedSuccessfully = true;
     } catch (err) {
@@ -11160,6 +11204,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     }
   ): Promise<SendMessageResult> {
     await assertRunnerAccess(userId);
+    await assertTaskTurnAllowed(sessionId, userId);
     // Resolve once before reading attachments. Later cross-device switches may
     // change sessions.active_chat_id, but this turn remains pinned here.
     const targetChatId = await resolveSessionSendChatId(sessionId, userId, options?.chatId);
@@ -11327,6 +11372,8 @@ ${proc.contextReminder.summary}
         }
         proc.sessionStyleContextInjected = sessionStyleContext;
       }
+      const assistantContext = await buildAssistantContext(sessionId, userId, message);
+      if (assistantContext) messageForClaude = `${assistantContext}\n\n${messageForClaude}`;
     }
 
     // Add inline text content directly to the message

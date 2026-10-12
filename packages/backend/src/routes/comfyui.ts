@@ -44,17 +44,11 @@ router.use((req, res, next) => {
   return requireAuth(req, res, next);
 });
 
-const WORKFLOW_IDS = [
-  'z-image-turbo',
-  'flux2-klein-t2i',
-  'flux2-klein-edit',
-  'krea2-t2i',
-  'f2k-edit',
-  'f2k-inpaint',
-] as const;
+const WORKFLOW_IDS = ['krea2-t2i', 'qwen21-edit', 'qwen21-inpaint', 'qwen21-pixelart'] as const;
 
 const paramsSchema = z.object({
-  prompt: z.string().min(3).max(4000),
+  // Length rules per workflow live in validateParams (the pixel-art hint is optional).
+  prompt: z.string().max(4000).default(''),
   negative_prompt: z.string().max(2000).optional(),
   seed: z.number().int().nonnegative().optional(),
   steps: z.number().int().min(1).max(60).optional(),
@@ -66,9 +60,6 @@ const paramsSchema = z.object({
   unet: z.string().max(256).optional(),
   clip: z.string().max(256).optional(),
   vae: z.string().max(256).optional(),
-  lora_name: z.string().max(256).optional(),
-  lora_strength: z.number().min(0).max(2).optional(),
-  teacache_threshold: z.number().min(0).max(1).optional(),
   input_image: z.string().max(512).optional(),
   mask: z.string().max(512).optional(),
   mask_blend_pixels: z.number().min(0).max(256).optional(),

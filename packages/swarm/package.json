@@ -1,0 +1,34 @@
+{
+  "name": "@plum-code-webui/swarm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./runtime": "./dist/index.js",
+    "./protocol": "./dist/protocol/index.js"
+  },
+  "files": [
+    "dist",
+    "migrations",
+    "SOURCE.json"
+  ],
+  "scripts": {
+    "build": "tsc --noEmit false",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.mjs"
+  },
+  "dependencies": {
+    "fastify": "^5.2.1",
+    "pino-pretty": "^13.0.0",
+    "postgres": "^3.4.5",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.1",
+    "@fastify/websocket": "^11.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8",
+    "ws": "^8.18.0"
+  }
+}

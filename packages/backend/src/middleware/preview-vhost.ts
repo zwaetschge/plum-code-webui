@@ -42,9 +42,10 @@ proxy.on('error', (err, _req, res) => {
   }
 });
 
-function isPreviewHost(host: string | undefined): boolean {
+export function isPreviewHost(host: string | undefined): boolean {
   if (!config.previewHostname || !host) return false;
-  return host.toLowerCase() === config.previewHostname;
+  const normalized = host.toLowerCase();
+  return normalized === config.previewHostname || config.previewHostnameAliases.includes(normalized);
 }
 
 /**

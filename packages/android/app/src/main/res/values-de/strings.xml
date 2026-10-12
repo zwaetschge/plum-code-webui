@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Plum Code</string>
+    <string name="app_name">Plum</string>
     <string name="widget_label">Sitzungen und Agenten</string>
     <string name="widget_description">Aktive Sitzungen, arbeitende Agenten und ausstehende Freigaben auf einen Blick.</string>
     <string name="widget_label_approvals">Freigaben</string>
@@ -24,7 +24,18 @@
     <string name="widget_label_monitor">Monitor</string>
     <string name="widget_desc_monitor">Die vier Sitzungen aus dem Monitor-Tab mit ihrem aktuellen Stand.</string>
     <string name="widget_chart_description">Diagramm des täglichen Tokenverbrauchs</string>
-    <string name="tile_label">Plum Code</string>
+    <string name="tile_label">Plum</string>
     <string name="component_reasoning_ultrathink">Ultrathink</string>
     <string name="component_reasoning_ultracode">Ultracode (Workflows)</string>
+    <string name="assistant_tab_chat">Chat</string>
+    <string name="assistant_tab_task">Task</string>
+    <string name="assistant_tab_code">Code</string>
+    <string name="assistant_shell_more">Mehr</string>
+    <string name="assistant_navigation">Navigation öffnen</string>
+    <string name="assistant_move_to_code">Zu Code verschieben</string>
+    <string name="assistant_move_to_task">Zu Task verschieben</string>
+    <string name="assistant_memory_provider_choice">Anbieter für das Gedächtnis</string>
+    <string name="assistant_memory_model_choice">Modell für das Gedächtnis</string>
+    <string name="assistant_automatic">Automatisch</string>
+    <string name="assistant_surface_move_failed">Die Zuordnung konnte für %1$d Sessions nicht gespeichert werden.</string>
 </resources>

@@ -31,6 +31,13 @@ Notes on the multi-provider integration in Plum Code WebUI.
 
 Harnesses ship in the container. `${CONFIG_DIR}` (default `./config`) bind-mounts config homes across `docker compose up --build`.
 
+## Chat APIs versus Task/Code harnesses
+
+- Plum Chat creates only `/api/assistant/api-chats` API conversations; do not restore CLI providers to its composer. Task and Code use the existing CLI harness menus. Historical `/chat/session/:id` conversations remain readable and can be assigned to Task/Code.
+- API selectors prioritise `anthropic`, `mistral`, `deepseek`, then `z-ai`/`zai`, followed by other configured APIs (`frontend/src/lib/chatApiProviders.ts`). Provider credentials stay encrypted in the per-user registry; never embed them in web or Android assets.
+- Authenticated model catalogues determine configured models. GLM 5.3 was verified against this deployment's Coding Plan endpoint on 11 October 2026. API credits mentioned by a user are not a confirmed provider balance.
+- Mistral streaming can mix string deltas with `content` arrays. `apiTransport.ts` forwards only `type: text` blocks, preserves the complete visible response and excludes `thinking` blocks. Regression: `packages/backend/scripts/assistant-api-transport-tests.ts`.
+
 ## Provider switching and permission approvals
 
 - Never restore the removed handover-summary/handoff protocol.
@@ -241,7 +248,7 @@ Claude-backed MCP servers are registered under `mcpServers` in `config/claude/se
 | --- | --- | --- | --- | --- |
 | Codex `$imagegen` | `$imagegen ...` or natural image hint | gpt-image-2 | Codex plan limits | ad-hoc single images |
 | `openai-image.sh` | `bash /app/scripts/openai-image.sh ...` | gpt-image-2/1 | OpenAI API | reproducible batches and fixed filenames |
-| ComfyUI MCP tools | `generate_image` / `_quality` / `edit_image` / `inpaint_image` | Z-Image / Flux.2 Klein | local GPU | offline batches, style control, masked edits |
+| ComfyUI MCP tools | `generate_image` / `edit_image` / `inpaint_image` / `upscale_pixel_art` | Krea2 / Qwen-Image 2.1 | local GPU | offline batches, style control, instruction and masked edits, pixel-art redraw |
 
 - `/app/scripts/openai-image.sh` uses `curl + jq + base64`; `generate` and `edit` accept `--prompt`, `--output`, `--model`, `--size`, `--quality`, `--n`, and `--background`.
 - `buildIntegrationEnv()` exports `OPENAI_API_KEY` from `app_config.openai_api_key`, then process env. Script refuses without it.
@@ -252,15 +259,22 @@ Claude-backed MCP servers are registered under `mcpServers` in `config/claude/se
 WebUI talks directly to ComfyUI without a LoRA Tester sidecar. Workflows/settings/rate limits are in `packages/backend/src/services/comfyui/`; MCP bridges to `POST /api/comfyui/internal/generate`.
 
 - Script: `scripts/mcp-servers/comfyui.mjs` (zero-dependency Node stdio).
-- `generate_image`: Z-Image Turbo, about 5s/image, 9 steps, `dpmpp_2m_sde`, qwen3_4b CLIP.
-- `generate_image_quality`: Flux.2 Klein 9B, Turbo LoRA, TeaCache, 8 steps, `euler`, `SamplerCustomAdvanced`.
-- `edit_image`: Flux.2 Klein with ReferenceLatent. Accept only current-user session attachments such as `.claude-webui-attachments/` or owned generated images. `materializeInputImage()` validates ownership, real path, image type, and 25 MB limit. Bare ComfyUI filenames work only for that user’s Plum upload during the current process lifetime; arbitrary host paths fail closed.
-- `inpaint_image`: Flux.2 Klein through `InpaintCropImproved` → KSampler → `InpaintStitchImproved`. Repaints only white `mask` areas; outside the mask plus `mask_blend_pixels` feather is copied from source unchanged, and output keeps source resolution. `mask` passes same ownership gate as `input_image`. Use instead of `edit_image` when the rest of frame must survive; `edit_image` re-renders everything and may resize canvas by a few pixels.
+- `generate_image` (**the only T2I tool**): Krea2 Turbo INT8 ConvRot (`krea2-t2i`, `OTUNetLoaderW8A8`), 8 steps, `euler`/`simple`, qwen3vl_4b CLIP.
+- `edit_image`: Qwen-Image 2.1 instruction edit (`qwen21-edit`, input as `<image1>`, output follows its aspect ratio). Accept only current-user session attachments such as `.claude-webui-attachments/` or owned generated images. `materializeInputImage()` validates ownership, real path, image type, and 25 MB limit. Bare ComfyUI filenames work only for that user’s Plum upload during the current process lifetime; arbitrary host paths fail closed.
+- `inpaint_image`: Qwen-Image 2.1 (`qwen21-inpaint`) through `InpaintCropImproved` → Qwen edit of the crop → `SplitImageWithAlpha` → `InpaintStitchImproved`. Repaints only white `mask` areas; outside the mask plus `mask_blend_pixels` feather is copied from source unchanged, and output keeps source resolution. `mask` passes same ownership gate as `input_image`. Use instead of `edit_image` when the rest of frame must survive; `edit_image` re-renders everything and may resize canvas by a few pixels.
 - Masked workflow: build mask with ImageMagick (`magick -size WxH xc:black -fill white -draw ...`), write under `.claude-webui-attachments/`, inpaint, then verify edge with `magick compare`.
 - Overrides: `prompt`, `negative_prompt`, `seed`, `steps`, `cfg`, `sampler_name`, `aspect_ratio`, `megapixel`; edit-only `input_image`; inpaint-only `mask`, `mask_blend_pixels`, `mask_expand_pixels`, `mask_invert`; REST-only `unet`, `clip`, `vae`, `lora_name`, `lora_strength`, `teacache_threshold`, `filename_prefix`.
 - MCP inherits `WEBUI_HOOK_SECRET` and `WEBUI_SESSION_ID`, sending `X-Webui-Hook-Secret` and `X-Webui-Session-Id`; session ID identifies analytics user.
 - URL: `app_config.comfyui_url` → `$COMFYUI_URL` → `http://192.168.1.23:8188`. Settings → Integrations tests `/system_stats`; orchestrator rereads settings per job.
 - PNG output: `data/generated/<uuid>.png`, served as `/generated/<uuid>.png` behind passport auth. MCP returns `display_markdown` as `![alt](/generated/<uuid>.png)`.
+
+### REA (Reverse Engineer Anything)
+
+- Shared MCP `rea` runs `npx --yes rea-agents@6.3.0 mcp`; `npm_config_cache=/home/node/.npm-global/cache` keeps the pinned package across rebuilds. Default registration lives in `utils/mcpDefaults.ts`; existing operator entries are preserved.
+- The matching MIT-licensed skill `reverse-engineer-anything` and its references live in `~/.claude/skill-catalog/` (on demand). Search with `node /app/scripts/capability-catalog.mjs search "reverse engineering"`.
+- Static JavaScript/Electron directory and ASAR analysis needs no native engine. Native analysis uses Ghidra 12.1.4 with Zulu JDK 21.0.12.1 (musl x64), installed under `/home/node/.npm-global/tools/rea-native/` on this deployment. `python3 scripts/install-rea-native.py` downloads the pinned archives with SHA-256 verification and procps 4.0.6 through Alpine's signed package fetch. The shared `rea.env` carries `GHIDRA_INSTALL_DIR`, `JAVA_HOME`, `REA_ANALYSIS_PROVIDER=ghidra`, and a PATH prefix for `rea-native/procps/bin`; existing entries are preserved by default seeding.
+- REA's process ownership checks require procps-compatible `ps`; BusyBox `ps` fails before JVM launch. The scoped wrapper loads its own libproc2 without changing the system environment. An actual MCP `open_binary` → `analyze_function` → `close_binary` test recovered assembly and pseudocode for a native x86-64 ELF fixture. Alpine remains outside REA's officially supported host list; this test verifies the Ghidra path only. Hopper/IDA are optional alternatives and are not installed. Use ordinary repository tools for source-code architecture analysis.
+- New provider processes read the shared registry; persistent sessions need reconnect/restart to bind the new MCP. Codex mirrors it through `syncCodexConfig`.
 
 ### Home Assistant status lights
 
@@ -277,8 +291,12 @@ WebUI talks directly to ComfyUI without a LoRA Tester sidecar. Workflows/setting
 - Pair once with `adb_pair_wifi` and `adb_connect_wifi`; `/app/data/known-devices.json` persists registry and startup auto-reconnects.
 - Load `android-build` for full workflow. **Never call `adb` or `gradle` from `Bash` when this MCP is available.**
 - WebUI Android client builds from project `796aa064-f0bb-4031-bbf2-2da83a4bca94`; sync `packages/android` into its `workspacePath` with `cp` (no `rsync`; `app/src` is builder-owned—copy contents, do not delete tree).
+- Always deliver completed APKs to the Unraid share `/mnt/user/Zwischenspeicher/` and verify the copied file against the build artifact with SHA-256. Building an APK does not authorize device installation.
 
 ### Android app: home-screen widgets & Wear OS
+
+- Room session schema 9 persists `surface` in both mapping directions; never drop Task/Code assignment when serving cached sessions. Migration 8→9 keeps history, drafts and outbox.
+- The embedded assistant WebView loads its document after layout and sizes the root/dialogs using `--plum-native-height` from measured CSS pixels, updated on load/resize. WebView 113 resolved vh/dvh roots to 0 px despite `innerHeight=750`; do not regress to viewport units alone. Native Chat/Task/Code and personalization emulator evidence: `reports/plum-android-emulator-verification-2026-10-11.json`.
 
 - Android 1.5.0 uses `ApiHttp` + feature interfaces in `core/network/api`; `ApiClient` remains the compatibility facade. `AppError`/`apiCall` preserve coroutine cancellation and provide localized UI errors.
 - Chat controllers live in `ui/screens/chat/Chat*Controller.kt` plus `ChatHistoryLoader`/`ChatSocketBinder`. Room Paging 3 renders history; keep streaming/outbox outside its source. Replacement responses must pass their generation/thread acceptance check inside the Room transaction.
@@ -327,7 +345,7 @@ New Android env: none; app degrades gracefully when server features are unconfig
 
 ### `firefox` (Plum Browser extension, Firefox & Chrome)
 
-- Claude-in-Chrome equivalent for Firefox **and Chrome/Edge**. Extension source: `packages/firefox-extension/`. `src/` is shared; `src/targets/firefox` is MV2 with a background page and sidebar_action, and `src/targets/chrome` is MV3 with a service worker, a status side panel, the session chat as a popup window docked on the right (a side-panel iframe loses SameSite=Lax logins), MAIN-world `evaluate_js`/console, a DevTools screenshot fallback and a fixed ID `oaacdgkogibamjhjppjlhncjknlcigof`. Chrome download: `/api/browser-bridge/extension-chrome.zip`. The Docker builder runs `node packages/firefox-extension/scripts/build.mjs`; `GET /api/browser-bridge/extension.xpi` serves `data/firefox/plum-browser-firefox.xpi` (signed, if present) before the unsigned image copy.
+- Claude-in-Chrome equivalent for Firefox **and Chrome/Edge**. Extension source: `packages/firefox-extension/`. `src/` is shared; `src/targets/firefox` is MV2 with a background page and sidebar_action, and `src/targets/chrome` is MV3 with a service worker, a status side panel, the session chat as a popup window docked on the right (a side-panel iframe loses SameSite=Lax logins), MAIN-world `evaluate_js`/console, a DevTools screenshot fallback and a fixed ID `oaacdgkogibamjhjppjlhncjknlcigof`. Chrome downloads: `/api/browser-bridge/extension-chrome.zip` (generic) and `POST /api/browser-bridge/extension-chrome-paired.zip`, which bundles a fresh token as `plum-config.json` so Load unpacked connects without setup. The Docker builder runs `node packages/firefox-extension/scripts/build.mjs`; `GET /api/browser-bridge/extension.xpi` serves `data/firefox/plum-browser-firefox.xpi` (signed, if present) before the unsigned image copy.
 - Script: `scripts/mcp-servers/firefox.mjs`, registered by default in `WEBUI_DEFAULT_MCP_SERVERS`. It calls `POST /api/browser-bridge/internal/call` with the hook secret and `X-Webui-Session-Id`.
 - Transport: the extension dials out to `wss://<plum>/api/browser-bridge/ws` and falls back to `/mobile/api/browser-bridge/ws` behind Authelia. It authenticates in its first frame (`hello`) with a `plum_ff_` token from the `browser_tokens` table (migration `009`). The token is never in the URL, and `resolveAuthenticatedUserId` ignores the prefix, so it grants no REST access. Revocation closes the socket on the next heartbeat (≤ 60 s).
 - Several paired browsers: a session keeps its browser, but moves to the one the user focused last once its own has been idle for 10 min (the extension reports user focus as `state {active:true}`; agent actions in session windows do not count). MCP tools `browsers` and `select_browser` (`"chrome"`, `"auto"`) list and pin.
@@ -532,3 +550,40 @@ Docker, Docker Compose
 ## Key Directories
 packages/, scripts/
 <!-- webui-managed: project-context:end -->
+
+## Personal assistant surfaces and rollout
+
+- Chatbot references guide the layout. Preserve Plum's existing theme tokens and the user's selected `AppBackground` on assistant surfaces, including Chat and personalisation. Use translucent frosted material for chrome, composer and settings groups, with readable foregrounds, opaque blur fallbacks and E-Ink exceptions; do not replace the background with a separate neutral chat palette.
+
+- Chat starts at `/chat`, subscription/CLI conversations at `/chat/session/:id`, API conversations at `/chat/model/:id`. Preserve account isolation, the existing streaming/outbox/branch protocol and the separate API billing path. Chat uses `AssistantSidebar` and scoped `assistant-shell.css`; Code keeps its existing sidebar and panels.
+- New chat model/effort controls belong next to the message field; advanced profiles, system instructions, temporary conversations and source context use progressive disclosure. `getConversationReasoningOptions()` shares accepted choices with session controls; API connections do not advertise unsupported CLI effort settings.
+- The live native coordinator runs in the Plum-owned `plum-swarm-coordinator` Compose service, with the legacy `council-matrix` stopped. Keep `PLUM_SWARM_COORDINATOR_ENABLED=false` in the main WebUI while the dedicated writer is enabled. Do not run both writers. Health and original connected workers are recorded privately in `data/plum-live-native-handover.json`.
+- Frontend assets can be published atomically with the entry point last and old hashed assets retained, preserving active provider sessions. Keep the next container image in sync before recreation. Rollout evidence and outstanding APK/device checks live in `docs/plans/plum-assistant-todo.md`.
+- The Android builder currently writes as UID/GID 1100. Newly copied modules need a dedicated writable build output directory; do not recursively change source ownership or install an APK when the user requested build only.
+
+
+### Account personalisation
+
+- `/chat/personalization` is the account page; conversation options and immutable selected profiles stay separate.
+- `services/assistant/personalization.ts` owns the `assistantPersonalization` JSON namespace in `user_settings`, strict partial input, owner-scoped photos and optimistic revisions. Keep unrelated settings intact.
+- CLI/API context and MCP memory tools share `memoryPermission`; temporary chats exclude memory/voice history/account photos. Global Chat preferences do not automatically grant memory access to Code.
+- Read preferences for each new response. API turns record the personalisation revision. Separate Code instructions apply without Chat biography/writing-sample injection.
+- Automatic search settings are model behaviour preferences, not permission grants or new API tool support. Explicit selected project sources remain available. Do not claim an API chat used a browser or MCP.
+- Uploaded portrait/fullBody references remain private; attach explicitly or read with `plum_read_reference_photo` for a requested self-image/outfit task. Do not send every account photo in every turn.
+- Check `test:assistant-personalization` in backend and the real isolated HTTP browser fixture in frontend. Coordinate frontend/backend publication: publishing only new assets before the backend routes are active gives broken settings.
+
+### Unified long-term assistant memory
+
+- `services/assistant/memory.ts` owns consent-bound jobs, recall, provenance, corrections, full keyset backfill and permanent forgetting. Startup migrations `013-assistant-long-term-memory` and `014-assistant-semantic-memory` are additive; do not apply them manually to the live database while sessions work.
+- `memorySemantic.ts` uses the existing private bge-m3 endpoint (`PLUM_MEMORY_EMBEDDING_URL` → `EINBETTUNG_URL` → `http://schwarm-plum-relay:8080/einbettung`), revision-bound per-owner PostgreSQL vectors and overlapping long-note chunks. Full-text search is the outage fallback; old relevant memories must remain retrievable beyond recent-list caps.
+- Account learning/history/style/sharing opt-ins default off; profile, temporary and Code restrictions remain authoritative. `plum_process_memory` learns inside a current CLI turn, bound to the raw user contribution hash. Background extraction uses an owned API connection or the account-enabled existing Codex login (`cli:codex`); no admin helper account. Codex background work is ephemeral, ignores user config, disables tools and keeps the native shared OAuth refresh store.
+- `nativeMemory.ts` gates original `swarm.gedaechtnis` and registered Hermes MEMORY/USER files on the currently verified Matrix operator. `scripts/plum-hermes-memory.py` preserves the upstream lock, delimiter, size and threat guard. Native migration `0027_gedaechtnis_verworfen.sql` prevents forgotten task-result regeneration. Changes sync unchanged import copies and preserve later personal corrections; original forgetting removes owned import histories too. Existing Hermes conversation prompts refresh only in a new native conversation.
+- Memory/history administration is paginated and searched on the server. Transfer supports full owned JSON export and explicit JSON/TXT/Markdown imports. Fingerprints prevent repeated automatic learning after forgetting; remove historical revisions, vectors and linked summaries while retaining original chats. Only explicit native-original actions change separate agent stores.
+- Checks: `test:assistant-memory`, `test:assistant-memory-completion` (real bge-m3; `PLUM_MEMORY_REAL_CLI=1` adds actual Codex), `test:assistant-personalization`, plus both memory browser suites using isolated real REST fixtures. Implementation and activation notes: `docs/plans/plum-long-term-memory.md`.
+
+### Task- und Code-Sessions
+
+- `/tasks` verwaltet aufgabenorientierte CLI-Sessions; `/code` verwaltet Coding-Sessions. Beide verwenden `DashboardPage` und dieselbe `Sidebar`, jeweils nach `sessions.surface` gefiltert. Alte Sessions ohne Surface gelten als Code. Chat bleibt ein eigener Gesprächsbereich, nutzt aber denselben `Sidebar`-Rahmen (auch Personalisierung und Bibliothek). `ChatSidebarResources` erhält die API-Gespräche, Projekte und Bibliothek; CLI-Chatlinks bleiben `/chat/session/:id`. Keine separate Chat-Navigationsschale wieder einführen.
+- Einzel-/Mehrfachzuordnung erfolgt nur über `PATCH /api/sessions/:id/surface`; Identität, Verlauf, Workspace, Provider und laufender Prozess bleiben erhalten. Keine automatische Migration nach Namen. Neue Task-Sessions brauchen keinen Code-Projektordner.
+- Strukturierte Aufträge und Schwarm-Ergebnisse bleiben unter `/assistant/tasks`; alte `/tasks?resource=…`-Links leiten dorthin weiter. Androids Task-Einstieg ist `/tasks`; aktuelle Webdateien müssen vor APK-Build mitgebündelt werden.
+- Prüfung: `test:task-sessions` (1440/390/320 px, reale UI mit isolierter HTTP-Fixture, Einzel-/Mehrfachzuordnung mit Teilfehler, Reload, Erstellen ohne Projektordner); strukturierte Auftragsprüfungen verwenden `/assistant/tasks`.

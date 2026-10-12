@@ -110,6 +110,30 @@ export function FirefoxBrowserPanel() {
     }
   };
 
+  // Chrome package with address + a new pairing token inside: unzip, Load unpacked, done.
+  const [pairedBusy, setPairedBusy] = useState(false);
+  const downloadPairedChrome = async () => {
+    setDownloadError(null);
+    setPairedBusy(true);
+    try {
+      const response = await api.download('/api/browser-bridge/extension-chrome-paired.zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() || 'Chrome' }),
+      });
+      const fileName =
+        response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] ??
+        'plum-browser-chrome.zip';
+      saveBlob(await response.blob(), fileName);
+      setName('');
+      void queryClient.invalidateQueries({ queryKey: ['browser-tokens'] });
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : 'Download failed');
+    } finally {
+      setPairedBusy(false);
+    }
+  };
+
   const copy = (value: string, kind: 'token' | 'url') => {
     void navigator.clipboard.writeText(value);
     setCopied(kind);
@@ -166,6 +190,22 @@ export function FirefoxBrowserPanel() {
               .zip
             </Button>
           </div>
+          <Button
+            type="button"
+            size="sm"
+            className="mt-2 w-full"
+            onClick={() => void downloadPairedChrome()}
+            disabled={!status?.chromeExtensionAvailable || pairedBusy}
+          >
+            <Download className="mr-1 h-3.5 w-3.5" />
+            Download pre-paired{name.trim() ? ` for “${name.trim()}”` : ''}
+          </Button>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Already paired, no copy-paste: unzip, move the folder somewhere permanent, open{' '}
+            <code>chrome://extensions</code>, enable Developer mode, “Load unpacked”, pick the
+            folder. Name it via the field below (e.g. “Work Mac”). Each session opens its chat as a
+            slim window on the right; the Plum icon shows status and pause.
+          </p>
         </div>
       </div>
       {downloadError && <p className="text-xs text-destructive">{downloadError}</p>}

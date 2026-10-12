@@ -1,4 +1,5 @@
 import React from 'react';
+import { nativeShell } from '@/lib/nativeShell';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -48,7 +49,7 @@ function initializeClientPerformance() {
 initializeClientPerformance();
 
 function registerServiceWorker() {
-  if (!('serviceWorker' in navigator) || import.meta.env.DEV) {
+  if (!('serviceWorker' in navigator) || import.meta.env.DEV || nativeShell()) {
     return;
   }
 
