@@ -38,6 +38,7 @@ interface AssistantApi {
     suspend fun uploadAssistantApiImage(owner: String, id: String, filename: String, mimeType: String, bytes: ByteArray): ApiResponse<AssistantApiImage>
     suspend fun transcribeAssistantAudio(owner: String, bytes: ByteArray): ApiResponse<JsonObject>
     suspend fun speakAssistantText(owner: String, text: String, voice: String, language: String): ByteArray
+    suspend fun getAssistantVoices(): ApiResponse<List<AssistantVoiceOption>>
     suspend fun deliverAssistantApiCommand(owner: String, path: String, payload: JsonObject): ApiResponse<JsonObject>
     suspend fun createAssistantResource(collection: String, input: AssistantResourceInput): ApiResponse<AssistantResource>
     suspend fun updateAssistantResource(collection: String, id: String, input: AssistantResourceInput): ApiResponse<AssistantResource>
@@ -139,6 +140,7 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
             setBody(multipart)
         }.body()
     }
+    override suspend fun getAssistantVoices(): ApiResponse<List<AssistantVoiceOption>> = http.get("/api/assistant/voice/voices")
     override suspend fun speakAssistantText(owner: String, text: String, voice: String, language: String): ByteArray {
         require(owner == TokenStore.assistantOwnerKey())
         require(text.isNotBlank() && text.length <= 5000)

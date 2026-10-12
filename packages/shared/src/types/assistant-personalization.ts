@@ -28,6 +28,8 @@ export interface AssistantPersonalization {
   voiceHistory: boolean;
   webSearch: boolean;
   voiceChat: boolean;
+  /** Chosen read-aloud voice: an OmniVoice name or `mistral:<voice_id>`; empty keeps the profile's voice. */
+  voiceName: string;
   projectSearch: boolean;
   connectorSearch: boolean;
   referencePhotos: Record<
@@ -68,6 +70,7 @@ export const DEFAULT_PERSONALIZATION: AssistantPersonalization = {
   voiceHistory: false,
   webSearch: true,
   voiceChat: true,
+  voiceName: '',
   projectSearch: false,
   connectorSearch: false,
   referencePhotos: { portrait: null, fullBody: null },

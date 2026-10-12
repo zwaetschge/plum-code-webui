@@ -39,6 +39,7 @@ const preferences = z
     voiceHistory: z.boolean(),
     webSearch: z.boolean(),
     voiceChat: z.boolean(),
+    voiceName: z.string().trim().max(100),
     projectSearch: z.boolean(),
     connectorSearch: z.boolean(),
   })

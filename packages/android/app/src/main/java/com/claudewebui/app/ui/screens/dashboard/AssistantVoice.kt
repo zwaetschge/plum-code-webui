@@ -9,6 +9,12 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -115,65 +121,112 @@ internal fun AssistantDictation(owner: String, api: ApiClient, enabled: Boolean,
     }
 }
 
-/** Complete answer, bounded Unicode-safe chunks, one player per chat. */
+/** Speaks [text] through [voice] in bounded Unicode-safe chunks; returns when playback ends or is cancelled. */
+internal suspend fun speakThrough(context: android.content.Context, owner: String, api: ApiClient, text: String, voice: String, language: String) {
+    var start = 0
+    while (start < text.length) {
+        var end = minOf(start + 4500, text.length)
+        if (end < text.length && Character.isHighSurrogate(text[end - 1])) end--
+        val audio = api.speakAssistantText(owner, text.substring(start, end), voice.trim(), language.trim())
+        if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed")
+        val file = File.createTempFile("plum-speech-", ".wav", context.cacheDir)
+        val player = MediaPlayer()
+        try {
+            withContext(Dispatchers.IO) { file.writeBytes(audio) }
+            player.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            player.setDataSource(file.absolutePath)
+            suspendCancellableCoroutine<Unit> { wait ->
+                player.setOnPreparedListener { if (wait.isActive) it.start() }
+                player.setOnCompletionListener { if (wait.isActive) wait.resume(Unit) }
+                player.setOnErrorListener { _, _, _ -> if (wait.isActive) wait.resumeWithException(IllegalStateException(context.getString(R.string.assistant_voice_failed))); true }
+                wait.invokeOnCancellation { runCatching { player.stop() } }
+                player.prepareAsync()
+            }
+        } finally { player.release(); file.delete() }
+        start = end
+    }
+}
+
+/**
+ * Read-aloud as a slim player: starts as soon as [text] arrives, with the voice
+ * chosen in the personalization (no form), and closes itself when finished.
+ */
 @Composable
-internal fun AssistantReadAloud(owner: String, api: ApiClient, text: String?, onClose: () -> Unit) {
+internal fun AssistantReadAloud(owner: String, api: ApiClient, text: String?, voice: String, onClose: () -> Unit) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    var voice by remember { mutableStateOf("Rufus Beck") }
-    var language by remember { mutableStateOf("German") }
-    var playing by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
-    var request by remember { mutableIntStateOf(0) }
     val latestClose by rememberUpdatedState(onClose)
     DisposableEffect(owner, lifecycle) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) { playing = false; latestClose() } }
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) latestClose() }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(owner, text, playing, request) {
-        if (!playing || text.isNullOrBlank()) return@LaunchedEffect
-        try {
-            var start = 0
-            while (start < text.length) {
-                var end = minOf(start + 4500, text.length)
-                if (end < text.length && Character.isHighSurrogate(text[end - 1])) end--
-                val audio = api.speakAssistantText(owner, text.substring(start, end), voice.trim(), language.trim())
-                if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed")
-                val file = File.createTempFile("plum-speech-", ".wav", context.cacheDir)
-                val player = MediaPlayer()
-                try {
-                    withContext(Dispatchers.IO) { file.writeBytes(audio) }
-                    player.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                    player.setDataSource(file.absolutePath)
-                    suspendCancellableCoroutine<Unit> { wait ->
-                        player.setOnPreparedListener { if (wait.isActive) it.start() }
-                        player.setOnCompletionListener { if (wait.isActive) wait.resume(Unit) }
-                        player.setOnErrorListener { _, _, _ -> if (wait.isActive) wait.resumeWithException(IllegalStateException(context.getString(R.string.assistant_voice_failed))); true }
-                        wait.invokeOnCancellation { runCatching { player.stop() } }
-                        player.prepareAsync()
-                    }
-                } finally { player.release(); file.delete() }
-                start = end
-            }
-        } catch (cancelled: CancellationException) { throw cancelled }
+    LaunchedEffect(owner, text, voice) {
+        if (text.isNullOrBlank()) return@LaunchedEffect
+        failure = null
+        try { speakThrough(context, owner, api, text, voice.ifBlank { "Rufus Beck" }, "German"); latestClose() }
+        catch (cancelled: CancellationException) { throw cancelled }
         catch (error: Exception) { if (TokenStore.assistantOwnerKey() == owner) failure = error.message }
-        finally { playing = false }
     }
-    if (text != null) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.assistant_voice_engine))
-        // Mistral voices are addressed as `mistral:<voice_id>`, everything else is OmniVoice.
-        val mistral = voice.startsWith("mistral:")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = !mistral, enabled = !playing, onClick = { if (mistral) voice = "Rufus Beck" }, label = { Text("OmniVoice") })
-            FilterChip(selected = mistral, enabled = !playing, onClick = { if (!mistral) voice = "mistral:gb_jane_neutral" }, label = { Text("Mistral") })
+    if (text != null) Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(start = 16.dp, end = 4.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            if (failure == null) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            Text(failure ?: stringResource(R.string.assistant_reading), Modifier.weight(1f).padding(horizontal = 12.dp), style = MaterialTheme.typography.bodyMedium, color = if (failure != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface, maxLines = 2)
+            TextButton(onClick = { onClose() }) { Text(stringResource(R.string.assistant_close_audio)) }
         }
-        OutlinedTextField(voice, { voice = it.take(100) }, enabled = !playing, label = { Text(stringResource(R.string.assistant_voice_name)) }, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(language, { language = it.take(80) }, enabled = !playing, label = { Text(stringResource(R.string.assistant_voice_language)) }, modifier = Modifier.fillMaxWidth())
-        failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = voice.isNotBlank() && language.isNotBlank(), onClick = { if (playing) playing = false else { failure = null; request++; playing = true } }) { Text(stringResource(if (playing) R.string.assistant_stop_audio else R.string.assistant_read_aloud)) }
-            TextButton(onClick = { playing = false; onClose() }) { Text(stringResource(R.string.assistant_close_audio)) }
+    }
+}
+
+/** Fixed voice choice with a sample per voice, grouped by engine. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun VoicePickerSheet(owner: String, api: ApiClient, selected: String, onSelect: (String) -> Unit, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var voices by remember { mutableStateOf<List<com.claudewebui.app.data.model.AssistantVoiceOption>?>(null) }
+    var failed by remember { mutableStateOf(false) }
+    var sampling by remember { mutableStateOf<String?>(null) }
+    var job by remember { mutableStateOf<Job?>(null) }
+    LaunchedEffect(owner) {
+        try { val r = api.getAssistantVoices(); if (r.success) voices = r.data.orEmpty() else failed = true }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { failed = true }
+    }
+    DisposableEffect(Unit) { onDispose { job?.cancel() } }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 20.dp), contentPadding = PaddingValues(bottom = 28.dp)) {
+            item { Text(stringResource(R.string.assistant_voice_pick), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 8.dp)) }
+            if (failed) item { Text(stringResource(R.string.assistant_voice_failed), color = MaterialTheme.colorScheme.error) }
+            if (voices == null && !failed) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            voices.orEmpty().groupBy { it.engine == "mistral" }.toSortedMap(compareBy { it }).forEach { (mistral, group) ->
+                item { Text(if (mistral) "MISTRAL (API)" else "OMNIVOICE (LOKAL)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp)) }
+                items(group.size) { i ->
+                    val voice = group[i]
+                    val active = voice.key == selected
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                            .background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = .14f) else androidx.compose.ui.graphics.Color.Transparent)
+                            .clickable { onSelect(voice.key) }.padding(start = 12.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        Text(voice.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                        if (active) Icon(androidx.compose.material.icons.Icons.Outlined.Check, null, tint = MaterialTheme.colorScheme.primary)
+                        IconButton(onClick = {
+                            job?.cancel()
+                            if (sampling == voice.key) { sampling = null } else {
+                                sampling = voice.key
+                                job = scope.launch {
+                                    try { speakThrough(context, owner, api, context.getString(R.string.assistant_voice_sample), voice.key, "German") }
+                                    catch (cancelled: CancellationException) { throw cancelled }
+                                    catch (_: Exception) { failed = true }
+                                    finally { if (sampling == voice.key) sampling = null }
+                                }
+                            }
+                        }) { Icon(if (sampling == voice.key) androidx.compose.material.icons.Icons.Outlined.Stop else androidx.compose.material.icons.Icons.Outlined.PlayArrow, stringResource(R.string.assistant_voice_try)) }
+                    }
+                }
+            }
         }
     }
 }

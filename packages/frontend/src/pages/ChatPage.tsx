@@ -413,7 +413,7 @@ function ChatAccountPage({ owner }: { owner?: string }) {
             <VoiceComposer
               scopeKey={`${owner}:new-chat`}
               text=""
-              voice={String(chosenProfile?.body.voice ?? 'Rufus Beck')}
+              voice={preferences.voiceName || String(chosenProfile?.body.voice ?? 'Rufus Beck')}
               language={String(chosenProfile?.body.language ?? 'German')}
               onTranscription={(text) => {
                 setDraft((old) => [old, text].filter(Boolean).join('\n'));

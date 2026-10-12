@@ -1,3 +1,4 @@
+import { VoicePicker } from '@/components/assistant/VoicePicker';
 import { MemoryManagement, MemoryModelChoice } from '@/components/assistant/MemoryManagement';
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
@@ -403,6 +404,15 @@ function PersonalizationAccount({ owner }: { owner?: string }) {
               <ChevronRight size={18} />
             </button>
           ))}
+        </div>
+      </section>
+      <section aria-labelledby="personal-voice">
+        <h2 id="personal-voice">Stimme zum Vorlesen</h2>
+        <div className="personalization-group p-3">
+          <VoicePicker
+            value={value.voiceName}
+            onChange={(voiceName) => set('voiceName', voiceName)}
+          />
         </div>
       </section>
       <section aria-labelledby="personal-extra">

@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/compone
 import { ResourcePicker } from '@/components/assistant/ResourcePicker';
 import { VoiceComposer } from '@/components/assistant/VoiceComposer';
 import { AssistantOutbox } from '@/components/assistant/AssistantOutbox';
+import { ReadAloudButton } from '@/components/assistant/ReadAloud';
 import {
   ModelEffortPicker,
   effortPayload,
@@ -94,6 +95,8 @@ export function ApiChatPage() {
     setCopied('');
   }, [scope]);
   const [effort, setEffort] = useEffortChoice();
+  const speechVoice = (profileVoice: unknown) =>
+    preferences.voiceName || String(profileVoice ?? 'Rufus Beck');
   const providers = useQuery({
     queryKey: ['assistant', 'api-chat-providers', owner],
     select: orderChatApiProviders,
@@ -498,6 +501,14 @@ export function ApiChatPage() {
                         <Copy size={13} />
                         {copied === item.id ? 'Kopiert' : 'Kopieren'}
                       </Button>
+                      {item.response && (
+                        <ReadAloudButton
+                          text={item.response}
+                          voice={speechVoice(profile.data?.body.voice)}
+                          language={String(profile.data?.body.language ?? 'German')}
+                          onError={setError}
+                        />
+                      )}
                       <details>
                         <summary className="cursor-pointer rounded-md px-3 py-2 text-xs">
                           Weitere Aktionen
@@ -640,7 +651,7 @@ export function ApiChatPage() {
             <div className="px-4 pb-3">
               <VoiceComposer
                 scopeKey={scope}
-                voice={String(profile.data?.body.voice ?? 'Rufus Beck')}
+                voice={speechVoice(profile.data?.body.voice)}
                 language={String(profile.data?.body.language ?? 'German')}
                 text={spoken?.response ?? ''}
                 onSend={transmit}

@@ -300,7 +300,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                 }
                             }
                         }
-                        item(key = "read-aloud") { key(owner, chatId, readText) { AssistantReadAloud(owner, api, if (voiceEnabled) readText else null) { readText = null } } }
+                        item(key = "read-aloud") { key(owner, chatId, readText) { AssistantReadAloud(owner, api, if (voiceEnabled) readText else null, personalization?.voiceName.orEmpty()) { readText = null } } }
                     }
                 }
             }

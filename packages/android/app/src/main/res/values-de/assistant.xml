@@ -174,4 +174,8 @@
     <string name="model_picker_none">Keine Modellverbindung</string>
     <string name="model_picker_default">Standard</string>
     <string name="effort_ultra">Ultra</string>
+    <string name="assistant_reading">Liest vor …</string>
+    <string name="assistant_voice_pick">Stimme</string>
+    <string name="assistant_voice_try">Probe anhören</string>
+    <string name="assistant_voice_sample">Hallo! So klinge ich, wenn ich dir etwas vorlese.</string>
 </resources>

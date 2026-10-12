@@ -35,6 +35,7 @@ private fun PersonalizationAccount(owner: String, api: ApiClient, onClose: () ->
     val scope = rememberCoroutineScope()
     var providers by remember { mutableStateOf<List<com.claudewebui.app.data.model.AssistantApiProvider>>(emptyList()) }
     var draft by remember { mutableStateOf(AssistantPersonalization()) }
+    var showVoicePicker by remember { mutableStateOf(false) }
     var baseline by remember { mutableStateOf<AssistantPersonalization?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -159,6 +160,9 @@ private fun PersonalizationAccount(owner: String, api: ApiClient, onClose: () ->
                         PreferenceToggle(R.string.assistant_voice_history, draft.voiceHistory, !busy) { draft = draft.copy(voiceHistory = it) }
                         PreferenceToggle(R.string.assistant_web_search, draft.webSearch, !busy) { draft = draft.copy(webSearch = it) }
                         PreferenceToggle(R.string.assistant_voice_chat, draft.voiceChat, !busy) { draft = draft.copy(voiceChat = it) }
+                        TextButton(onClick = { showVoicePicker = true }, enabled = !busy) {
+                            Text(stringResource(R.string.assistant_voice_pick) + ": " + draft.voiceName.ifBlank { stringResource(R.string.model_picker_default) })
+                        }
                         PreferenceToggle(R.string.assistant_project_search, draft.projectSearch, !busy) { draft = draft.copy(projectSearch = it) }
                         PreferenceToggle(R.string.assistant_connector_search, draft.connectorSearch, !busy) { draft = draft.copy(connectorSearch = it) }
                     } }
@@ -176,6 +180,7 @@ private fun PersonalizationAccount(owner: String, api: ApiClient, onClose: () ->
         }
     }
     if (confirmClose) AlertDialog(onDismissRequest = { confirmClose = false }, title = { Text(stringResource(R.string.assistant_unsaved)) }, text = { Text(stringResource(R.string.assistant_unsaved_detail)) }, confirmButton = { TextButton(onClick = { destination?.let(onOpenFeature) ?: onClose() }) { Text(stringResource(R.string.assistant_discard)) } }, dismissButton = { TextButton(onClick = { confirmClose = false }) { Text(stringResource(R.string.assistant_continue_editing)) } })
+    if (showVoicePicker) VoicePickerSheet(owner, api, draft.voiceName, { draft = draft.copy(voiceName = it) }, { showVoicePicker = false })
 }
 
 @Composable private fun PersonalizationGroup(title: Int, content: @Composable ColumnScope.() -> Unit) {

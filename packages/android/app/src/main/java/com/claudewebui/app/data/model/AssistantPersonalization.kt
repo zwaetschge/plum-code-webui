@@ -7,6 +7,13 @@ import kotlinx.serialization.json.*
 data class AssistantReferencePhoto(val id: String, val filename: String, val mimeType: String, val byteLength: Long)
 
 @Serializable
+data class AssistantVoiceOption(val id: String? = null, val name: String? = null, val engine: String? = null) {
+    /** What is stored and sent: OmniVoice by name, Mistral as `mistral:<id>`. */
+    val key: String get() = if (engine == "mistral") id.orEmpty() else (name ?: id).orEmpty()
+    val label: String get() = (name ?: id).orEmpty()
+}
+
+@Serializable
 data class AssistantPersonalization(
     val revision: Long = 0,
     val memoryEnabled: Boolean = false,
@@ -35,6 +42,7 @@ data class AssistantPersonalization(
     val voiceHistory: Boolean = false,
     val webSearch: Boolean = true,
     val voiceChat: Boolean = true,
+    val voiceName: String = "",
     val projectSearch: Boolean = false,
     val connectorSearch: Boolean = false,
     val referencePhotos: Map<String, AssistantReferencePhoto?> = mapOf("portrait" to null, "fullBody" to null),
