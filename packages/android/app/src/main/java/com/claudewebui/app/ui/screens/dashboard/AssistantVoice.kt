@@ -162,6 +162,12 @@ internal fun AssistantReadAloud(owner: String, api: ApiClient, text: String?, on
     }
     if (text != null) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.assistant_voice_engine))
+        // Mistral voices are addressed as `mistral:<voice_id>`, everything else is OmniVoice.
+        val mistral = voice.startsWith("mistral:")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = !mistral, enabled = !playing, onClick = { if (mistral) voice = "Rufus Beck" }, label = { Text("OmniVoice") })
+            FilterChip(selected = mistral, enabled = !playing, onClick = { if (!mistral) voice = "mistral:gb_jane_neutral" }, label = { Text("Mistral") })
+        }
         OutlinedTextField(voice, { voice = it.take(100) }, enabled = !playing, label = { Text(stringResource(R.string.assistant_voice_name)) }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(language, { language = it.take(80) }, enabled = !playing, label = { Text(stringResource(R.string.assistant_voice_language)) }, modifier = Modifier.fillMaxWidth())
         failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }

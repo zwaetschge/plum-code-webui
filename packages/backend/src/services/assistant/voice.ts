@@ -3,6 +3,104 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { resolveConfigHome } from '../../utils/configPaths.js';
 import { AppError } from '../../middleware/errorHandler.js';
+import { readOpenCodeProvidersForUser } from '../../utils/opencodeProviderKeys.js';
+import { safeDecrypt } from '../../utils/encryption.js';
+
+/** Voices from the Mistral API are addressed as `mistral:<voice_id>`; everything else is OmniVoice. */
+export const MISTRAL_VOICE_PREFIX = 'mistral:';
+const MISTRAL_API = 'https://api.mistral.ai';
+const MISTRAL_TTS_MODEL = 'voxtral-mini-tts-2603';
+/** Always offered, even when the voice list endpoint is unavailable. */
+const MISTRAL_PRESET_VOICES = [{ id: 'gb_jane_neutral', name: 'Jane (Neutral)' }];
+
+async function mistralKey(userId: string): Promise<string | null> {
+  const providers = await readOpenCodeProvidersForUser(userId);
+  const mistral = providers.find((provider) => provider.id === 'mistral');
+  if (!mistral?.enabled || !mistral.apiKey) return null;
+  return safeDecrypt(mistral.apiKey) || null;
+}
+
+export function parseMistralVoices(payload: unknown): Array<{ id: string; name: string }> {
+  const list = Array.isArray(payload)
+    ? payload
+    : (((payload as { data?: unknown; voices?: unknown; items?: unknown } | null)?.data ??
+        (payload as { voices?: unknown } | null)?.voices ??
+        (payload as { items?: unknown } | null)?.items ??
+        []) as unknown[]);
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((item) => {
+    const voice = item as { id?: unknown; slug?: unknown; name?: unknown };
+    const id =
+      typeof voice.id === 'string' ? voice.id : typeof voice.slug === 'string' ? voice.slug : '';
+    if (!id || id.length > 100) return [];
+    return [{ id, name: typeof voice.name === 'string' && voice.name ? voice.name : id }];
+  });
+}
+
+async function mistralVoices(userId: string) {
+  const key = await mistralKey(userId);
+  if (!key) return [];
+  let voices = MISTRAL_PRESET_VOICES;
+  try {
+    const response = await fetch(`${MISTRAL_API}/v1/audio/voices`, {
+      headers: { Authorization: `Bearer ${key}` },
+      redirect: 'error',
+      signal: AbortSignal.timeout(15000),
+    });
+    if (response.ok) {
+      const parsed = parseMistralVoices(await response.json());
+      if (parsed.length) voices = parsed;
+    } else await response.body?.cancel();
+  } catch {
+    /* the preset voice keeps the engine usable */
+  }
+  return voices.map((voice) => ({
+    id: `${MISTRAL_VOICE_PREFIX}${voice.id}`,
+    name: voice.name,
+    engine: 'mistral',
+  }));
+}
+
+async function mistralSpeech(userId: string, voiceId: string, text: string) {
+  const key = await mistralKey(userId);
+  if (!key)
+    throw new AppError(
+      'Für Mistral-Stimmen fehlt eine aktive Mistral-API-Verbindung.',
+      409,
+      'VOICE_NOT_CONFIGURED'
+    );
+  const response = await fetch(`${MISTRAL_API}/v1/audio/speech`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: MISTRAL_TTS_MODEL,
+      input: text,
+      voice_id: voiceId,
+      response_format: 'wav',
+    }),
+    redirect: 'error',
+    signal: AbortSignal.timeout(120000),
+  }).catch(() => {
+    throw new AppError('Mistral ist nicht erreichbar', 503, 'VOICE_UNAVAILABLE');
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new AppError(
+      response.status === 403
+        ? 'Mistral hat den Text abgelehnt (Moderation).'
+        : 'Mistral konnte die Sprachausgabe nicht erzeugen.',
+      response.status === 429 ? 429 : 502,
+      'VOICE_REQUEST_FAILED'
+    );
+  }
+  const body = (await response.json().catch(() => null)) as { audio_data?: unknown } | null;
+  if (typeof body?.audio_data !== 'string' || body.audio_data.length > 90 * 1024 * 1024)
+    throw new AppError('Mistral hat kein Audio geliefert', 502, 'VOICE_RESPONSE_INVALID');
+  const audio = Buffer.from(body.audio_data, 'base64');
+  if (audio.subarray(0, 4).toString('ascii') !== 'RIFF')
+    throw new AppError('Mistral hat kein WAV-Audio geliefert', 502, 'VOICE_RESPONSE_INVALID');
+  return audio;
+}
 
 async function vocariumUrl(): Promise<string> {
   let registered = '';
@@ -67,20 +165,30 @@ async function voiceJson(response: Response): Promise<Record<string, unknown> | 
   }
 }
 export async function assistantVoices(userId: string) {
-  const response = await call(userId, '/api/voices');
-  const data = await voiceJson(response);
-  const voices = Array.isArray(data) ? data : ((data as { voices?: unknown[] }).voices ?? []);
-  return voices.filter(
-    (voice) =>
-      typeof voice === 'object' &&
-      voice !== null &&
-      (voice as { engine?: string }).engine === 'omnivoice'
-  );
+  // OmniVoice may be down while Mistral still works (and vice versa), so neither blocks the other.
+  const omni = await call(userId, '/api/voices')
+    .then(async (response) => {
+      const data = await voiceJson(response);
+      const voices = Array.isArray(data) ? data : ((data as { voices?: unknown[] }).voices ?? []);
+      return voices.filter(
+        (voice) =>
+          typeof voice === 'object' &&
+          voice !== null &&
+          (voice as { engine?: string }).engine === 'omnivoice'
+      );
+    })
+    .catch(() => null);
+  const mistral = await mistralVoices(userId).catch(() => []);
+  if (omni === null && !mistral.length)
+    throw new AppError('Vocarium ist nicht erreichbar', 503, 'VOICE_UNAVAILABLE');
+  return [...(omni ?? []), ...mistral];
 }
 export async function assistantSpeech(
   userId: string,
   input: { text: string; voice: string; language: string }
 ) {
+  if (input.voice.startsWith(MISTRAL_VOICE_PREFIX))
+    return mistralSpeech(userId, input.voice.slice(MISTRAL_VOICE_PREFIX.length), input.text);
   // Engine is explicit and cannot silently fall back to Kikiri or Edge.
   const response = await call(userId, '/api/generate', {
     method: 'POST',

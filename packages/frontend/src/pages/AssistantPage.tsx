@@ -42,6 +42,7 @@ import { ArtifactViewer } from '@/components/assistant/ArtifactViewer';
 import { CoursePlayer } from '@/components/assistant/CoursePlayer';
 import { MeetingAudio } from '@/components/assistant/MeetingAudio';
 import { OfficeSource } from '@/components/assistant/OfficeSource';
+import { VoiceSelect } from '@/components/assistant/VoiceSelect';
 import { ResourcePicker } from '@/components/assistant/ResourcePicker';
 import { LessonEditor, type EditableLesson } from '@/components/assistant/LessonEditor';
 import { VoiceComposer } from '@/components/assistant/VoiceComposer';
@@ -152,7 +153,7 @@ const FIELD_LABELS: Record<string, string> = {
   goal: 'Ziel',
   provider: 'Provider',
   language: 'Sprache',
-  voice: 'OmniVoice-Stimme',
+  voice: 'Stimme',
   memory: 'Gedächtnis',
   description: 'Beschreibung',
   text: 'Inhalt',
@@ -652,6 +653,15 @@ function AssistantAccountPage() {
               ))}
           </select>
         </label>
+      );
+    if (key === 'voice')
+      return (
+        <VoiceSelect
+          key={key}
+          label={FIELD_LABELS[key] || key}
+          value={String(value ?? '')}
+          onChange={(next) => setBody({ ...body, [key]: next })}
+        />
       );
     return (
       <label key={key} className="grid gap-2 text-sm">
