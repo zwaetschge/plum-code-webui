@@ -67,7 +67,10 @@ const send = (method, params) =>
 try {
   await send('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'plum-mcp-call', version: '1' } });
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
-  if (cmd === 'tools' || cmd === 'schema') {
+  if (cmd === 'size') {
+    const { tools } = await send('tools/list', {});
+    console.log(`${tools.length}\t${JSON.stringify(tools).length}`);
+  } else if (cmd === 'tools' || cmd === 'schema') {
     const { tools } = await send('tools/list', {});
     if (cmd === 'tools') for (const t of tools) console.log(`${t.name}\t${(t.description ?? '').split('\n')[0].slice(0, 110)}`);
     else console.log(JSON.stringify(tools.find((t) => t.name === tool)?.inputSchema ?? null, null, 2));
