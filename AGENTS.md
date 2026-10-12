@@ -27,7 +27,7 @@ It triggers `repair-bot` (sidecar in `docker-compose.override.yml`), which build
 
 ## Android
 
-- Use the `android-builder` MCP; **never** `adb`/`gradle` from Bash. Project `796aa064-f0bb-4031-bbf2-2da83a4bca94`.
+- `android-builder` (and vocarium, godot, blender, meshy) are **not** loaded per session: load the `mcp-on-demand` skill and call them via `node scripts/mcp-call.mjs call <server> <tool> '<json>'`. **Never** `adb`/`gradle` directly. Project `796aa064-f0bb-4031-bbf2-2da83a4bca94`.
 - Builds run from a second copy: `cp -a packages/android/app/src/main/. $WORKSPACE/app/src/main/` (no `rsync`, never delete `app/src`). A build takes 8–10 min; a second `android_build` while one runs is dropped. Success = new APK mtime; failure = `android_get_project` → `status: error` (no logs). Typical causes: missing imports (`rememberSaveable`, `InfiniteTransition.animateFloat`), `AnimatedContent`+`togetherWith`.
 - Always copy the finished APK to `/mnt/user/Zwischenspeicher/` and verify with SHA-256. Building does not authorize installing on a device.
 - Debug deep links render screens without login: `claudewebui://preview`, `preview-chat`, `preview-analytics`, `preview-monitor`.

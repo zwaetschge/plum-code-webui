@@ -41,7 +41,7 @@ Schema in `packages/backend/src/config.ts` (Zod, fails fast). Required: `SESSION
 
 ## MCP bridges (details in history)
 
-`android-builder` (always use it, never `adb`/`gradle` in Bash), `comfyui-images` (Krea2 text-to-image, Qwen edit/inpaint, Gemini via Antigravity), `firefox` (Plum Browser extension), `godot` / `blender` (Godot engine runs in the `plum-godot` container). They bind at spawn.
+`android-builder` (on demand via `scripts/mcp-call.mjs`, skill `mcp-on-demand`; never `adb`/`gradle` in Bash), `comfyui-images` (Krea2 text-to-image, Qwen edit/inpaint, Gemini via Antigravity), `firefox` (Plum Browser extension), `godot` / `blender` (Godot engine runs in the `plum-godot` container). They bind at spawn.
 
 ## Pitfalls
 
