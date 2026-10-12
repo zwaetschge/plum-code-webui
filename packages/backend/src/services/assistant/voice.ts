@@ -190,16 +190,24 @@ export async function assistantSpeech(
   if (input.voice.startsWith(MISTRAL_VOICE_PREFIX))
     return mistralSpeech(userId, input.voice.slice(MISTRAL_VOICE_PREFIX.length), input.text);
   // Engine is explicit and cannot silently fall back to Kikiri or Edge.
-  const response = await call(userId, '/api/generate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      text: input.text,
-      voice_id: input.voice,
-      language: input.language,
-      engine: 'omnivoice',
-      response_format: 'wav',
-    }),
+  // Vocarium ids use hyphens ("Rufus-Beck") while profiles and clients store the
+  // spoken name ("Rufus Beck"), so the hyphenated form is tried when the name is unknown.
+  const request = (voice: string) =>
+    call(userId, '/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: input.text,
+        voice_id: voice,
+        language: input.language,
+        engine: 'omnivoice',
+        response_format: 'wav',
+      }),
+    });
+  const hyphenated = input.voice.trim().replace(/\s+/g, '-');
+  const response = await request(input.voice).catch((failure) => {
+    if (hyphenated === input.voice) throw failure;
+    return request(hyphenated);
   });
   const chunks: Uint8Array[] = [];
   let size = 0;
