@@ -308,6 +308,9 @@ async function main() {
           // Socket.IO upgrades same-origin XHR to WebSocket. Browsers differ on
           // whether 'self' implicitly covers ws:/wss:, so we list both explicitly.
           connectSrc: ["'self'", 'ws:', 'wss:'],
+          // Read-aloud and voice samples play fetched audio from blob: URLs; without
+          // media-src the browser falls back to default-src and blocks them.
+          mediaSrc: ["'self'", 'blob:'],
           fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
           frameSrc: ["'self'"],
           objectSrc: ["'none'"],
