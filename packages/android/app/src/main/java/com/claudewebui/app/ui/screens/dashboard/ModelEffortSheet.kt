@@ -1,6 +1,10 @@
 package com.claudewebui.app.ui.screens.dashboard
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.drawBehind
@@ -80,7 +84,10 @@ internal fun isSpecialLevel(id: String?): Boolean =
 internal fun EffortRail(stops: List<EffortStop>, selectedId: String?, onSelect: (String?) -> Unit, enabled: Boolean = true) {
     val palette = PlumTheme.palette
     val reduce = com.claudewebui.app.ui.theme.LocalReduceMotion.current
-    val found = stops.indexOfFirst { it.id == selectedId }
+    // The thumb follows the finger and the tap at once; the caller's value
+    // (often a server round trip) catches up afterwards.
+    var pending by remember(selectedId) { mutableStateOf<Int?>(null) }
+    val found = pending ?: stops.indexOfFirst { it.id == selectedId }
     val index = found.coerceAtLeast(0)
     val current = stops[index]
     val special = found >= 0 && current.special
@@ -134,14 +141,30 @@ internal fun EffortRail(stops: List<EffortStop>, selectedId: String?, onSelect: 
                     .then(if (nebula > 0f) Modifier.border(2.dp, violet.copy(alpha = .85f * nebula), CircleShape) else Modifier)
                     .clip(CircleShape).background(palette.segmentSelected),
             )
-            Row(Modifier.fillMaxSize()) {
+            val railPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+            val stopAt = { x: Float -> (x / (railPx / stops.size)).toInt().coerceIn(0, stops.lastIndex) }
+            val commit = { i: Int -> pending = i; if (stops[i].id != selectedId) onSelect(stops[i].id) }
+            Row(
+                Modifier.fillMaxSize()
+                    .pointerInput(enabled, stops.size) {
+                        if (!enabled) return@pointerInput
+                        detectTapGestures { commit(stopAt(it.x)) }
+                    }
+                    .pointerInput(enabled, stops.size) {
+                        if (!enabled) return@pointerInput
+                        detectHorizontalDragGestures(
+                            onDragStart = { pending = stopAt(it.x) },
+                            onDragEnd = { pending?.let(commit) },
+                            onDragCancel = { pending = null },
+                        ) { change, _ -> change.consume(); pending = stopAt(change.position.x) }
+                    },
+            ) {
                 stops.forEachIndexed { i, stop ->
                     val active = i == found
                     val dot by animateColorAsState(if (active) Color.Transparent else palette.muted.copy(alpha = .55f), tween(160), label = "effort_dot")
                     Box(
-                        Modifier.weight(1f).fillMaxHeight().clip(CircleShape)
-                            .semantics { selected = active; role = Role.RadioButton; contentDescription = stop.label }
-                            .clickable(enabled = enabled) { onSelect(stop.id) },
+                        Modifier.weight(1f).fillMaxHeight()
+                            .semantics { selected = active; role = Role.RadioButton; contentDescription = stop.label; onClick { if (enabled) commit(i); enabled } },
                         contentAlignment = Alignment.Center,
                     ) { Box(Modifier.size(6.dp).clip(CircleShape).background(dot)) }
                 }

@@ -685,6 +685,7 @@ private fun compactMarkdown(text: String): androidx.compose.ui.text.AnnotatedStr
                     }
                 }
                 com.claudewebui.app.ui.components.chat.MarkdownBlock.HorizontalRule -> append("———")
+                is com.claudewebui.app.ui.components.chat.MarkdownBlock.Image -> append("🖼 " + block.alt.ifBlank { "Bild" })
             }
         }
     }

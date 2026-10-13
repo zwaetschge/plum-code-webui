@@ -1,3 +1,4 @@
+import { resolveAuthenticatedUserId } from './middleware/auth.js';
 import { startMemoryWorker } from './services/assistant/memory.js';
 import express from 'express';
 import fs from 'fs';
@@ -490,7 +491,10 @@ async function main() {
     '/generated',
     (req, res, next) => {
       if (req.isAuthenticated && req.isAuthenticated()) return next();
-      res.status(401).send('unauthorized');
+      // The Android app has no cookie session; its image loader sends the JWT.
+      resolveAuthenticatedUserId(req)
+        .then((userId) => (userId ? next() : res.status(401).send('unauthorized')))
+        .catch(() => res.status(401).send('unauthorized'));
     },
     express.static(generatedDir, {
       fallthrough: false,

@@ -423,13 +423,13 @@ private fun MessageMediaImages(message: Message, onImageClick: (String) -> Unit)
         AsyncImage(
             model = url,
             contentDescription = media.altText ?: media.filename,
-            contentScale = ContentScale.Crop,
+            contentScale = ContentScale.Fit,
             modifier = Modifier
-                .widthIn(max = 240.dp)
+                .widthIn(max = 320.dp)
+                .heightIn(max = 400.dp)
                 .padding(bottom = componentTokens.spacing.xs)
                 .clip(RoundedCornerShape(componentTokens.radius.md))
-                .clickable { onImageClick(url) }
-                .aspectRatio(1f),
+                .clickable { onImageClick(url) },
         )
     }
 }
@@ -693,6 +693,29 @@ private fun FullScreenImageDialog(url: String, onDismiss: () -> Unit) {
 
 // ── Markdown Renderer ─────────────────────────────────────────────────────────
 
+/** Relative paths (`/generated/…`) resolve against the server; auth comes from the app ImageLoader. */
+@Composable
+private fun MarkdownImage(block: MarkdownBlock.Image) {
+    val server = com.claudewebui.app.core.security.TokenStore.getServerUrl()?.trimEnd('/')
+    val url = when {
+        block.url.startsWith("http://") || block.url.startsWith("https://") -> block.url
+        block.url.startsWith("/") && server != null -> server + block.url
+        else -> return
+    }
+    var preview by remember { mutableStateOf(false) }
+    AsyncImage(
+        model = url,
+        contentDescription = block.alt.ifBlank { null },
+        contentScale = ContentScale.Fit,
+        modifier = Modifier
+            .widthIn(max = 420.dp)
+            .heightIn(max = 480.dp)
+            .clip(RoundedCornerShape(PlumTheme.tokens.radius.md))
+            .clickable { preview = true },
+    )
+    if (preview) FullScreenImageDialog(url = url, onDismiss = { preview = false })
+}
+
 @Composable
 fun MarkdownContent(
     text: String,
@@ -708,6 +731,7 @@ fun MarkdownContent(
     ) {
         for (block in parsed) {
             when (block) {
+                is MarkdownBlock.Image -> MarkdownImage(block)
                 is MarkdownBlock.Paragraph -> {
                     LinkedText(
                         text = block.annotated,
@@ -907,6 +931,7 @@ sealed class MarkdownBlock {
         val indent: Int,
     ) : MarkdownBlock()
     object HorizontalRule : MarkdownBlock()
+    data class Image(val url: String, val alt: String) : MarkdownBlock()
     data class Table(
         val header: List<AnnotatedString>,
         val rows: List<List<AnnotatedString>>,
@@ -917,6 +942,8 @@ sealed class MarkdownBlock {
 // inside the line loop re-compiled these for every single line of every message.
 private val MD_HEADING = Regex("^(#{1,6})\\s+(.+)$")
 private val MD_HRULE = Regex("[-*_]{3,}")
+// A line that is just `![alt](url)`, as the image tools emit it.
+private val MD_IMAGE = Regex("^!\\[([^\\]]*)\\]\\(([^)\\s]+)(?:\\s+\"[^\"]*\")?\\)$")
 private val MD_ORDERED_ITEM = Regex("^(\\s*)(\\d+)\\.\\s+(.+)$")
 private val MD_UNORDERED_ITEM = Regex("^(\\s*)[-*+]\\s+(.+)$")
 private val MD_UNORDERED_LINE = Regex("^\\s*[-*+]\\s+.+")
@@ -961,6 +988,14 @@ fun parseMarkdown(text: String): List<MarkdownBlock> {
             }
             blocks.add(MarkdownBlock.Code(codeLines.joinToString("\n"), lang))
             i++ // skip closing ```
+            continue
+        }
+
+        // Standalone image
+        val imageMatch = MD_IMAGE.matchEntire(trimmed)
+        if (imageMatch != null) {
+            blocks.add(MarkdownBlock.Image(imageMatch.groupValues[2], imageMatch.groupValues[1]))
+            i++
             continue
         }
 
