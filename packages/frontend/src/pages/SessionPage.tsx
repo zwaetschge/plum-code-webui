@@ -3135,23 +3135,9 @@ export function SessionPage() {
           }
         />
         <SessionModeChip value={sessionMode} onChange={handleModeChange} />
-        {designStyleName && (
-          // The design preset is only hinted at here; it is chosen via ⋯ → Darstellung.
-          <button
-            type="button"
-            className="plum-model-trigger plum-chip plum-preset-hint"
-            onClick={() => setDesignDialogOpen(true)}
-            title={`Design-Vorgabe: ${designStyleName}`}
-            aria-label={`Design-Vorgabe: ${designStyleName}`}
-          >
-            <Palette size={13} aria-hidden />
-            <span className="plum-model-trigger-name">{designStyleName}</span>
-          </button>
-        )}
       </>
     );
   }, [
-    designStyleName,
     composerSurface,
     settings?.cliProviderModelLists,
     cliProviders,
@@ -3402,10 +3388,8 @@ export function SessionPage() {
       : DOCKED_PANEL_KEYS;
   const hasVisiblePinnedPanel = visibleDockedPanels.some((panel) => pinnedPanels[panel]);
 
-  // Fortschritt appears by itself once the run has todos or subagents.
   const activeAgentCount = agentCounts.active + agentCounts.waiting;
   const progressBadgeCount = pendingTasksCount + activeAgentCount;
-  const hasProgress = currentTodos.length > 0 || scopedAgentRuns.length > 0;
   const hasStaticPreview =
     typeof window !== 'undefined' &&
     !!window.localStorage.getItem(`webpreview_active_file_v1:${session.id}`);
@@ -4101,9 +4085,8 @@ export function SessionPage() {
   };
 
   /**
-   * Session tools in the sidebar block. Code: Dateien, Versionen, Vorschau,
-   * Verbindungen; Task: Dateien, Verbindungen. Fortschritt shows up by itself
-   * once the run has todos or subagents. Rarely used tools sit in ⋯.
+   * Session tools in the sidebar block: Dateien, Vorschau (Code), Verbindungen.
+   * Versionen sits in ⋯; Fortschritt opens from the composer's agent/todo strip.
    */
   const renderSessionMenu = (mobile = false) => {
     const closeMobile = () => {
@@ -4153,6 +4136,17 @@ export function SessionPage() {
                   </span>
                 )}
               </DropdownMenuItem>
+              {isCodeSession && (
+                <DropdownMenuItem onSelect={() => openOverflowPanel('versions')}>
+                  <GitBranch className="mr-2 h-4 w-4" />
+                  Versionen
+                  {uncommittedCount > 0 && (
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {uncommittedCount}
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onSelect={() => openOverflowPanel('mesh')}>
                 <Network className="mr-2 h-4 w-4" />
                 Session Mesh
@@ -4259,12 +4253,6 @@ export function SessionPage() {
             onClick: () => openView('chat'),
           })}
         <div className="session-primary-tools">
-          {(hasProgress || pinnedPanels.progress) &&
-            renderPanelMenuItem('progress', {
-              badge: progressBadgeCount,
-              badgePulse:
-                activeAgentCount > 0 || currentTodos.some((t) => t.status === 'in_progress'),
-            })}
           {renderSideMenuItem({
             id: 'files',
             label: 'Dateien',
@@ -4281,7 +4269,6 @@ export function SessionPage() {
               active: mainView === 'editor',
               nested: true,
             })}
-          {isCodeSession && renderPanelMenuItem('versions', { badge: uncommittedCount })}
           {isCodeSession && showPreviewTool && renderPanelMenuItem('preview')}
           {renderPanelMenuItem('connections', {
             onOpen: () => setConnectionsFocus(null),

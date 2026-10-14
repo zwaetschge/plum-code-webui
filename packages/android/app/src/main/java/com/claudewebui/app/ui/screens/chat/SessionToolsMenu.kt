@@ -5,9 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cable
-import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Preview
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,21 +18,15 @@ import com.claudewebui.app.R
 import com.claudewebui.app.ui.theme.PlumTheme
 
 /**
- * Tools of the open session. Code: Dateien, Versionen, Vorschau (only while a
- * dev server answers) and Verbindungen; Task: Dateien and Verbindungen.
- * Fortschritt appears by itself once the run has todos or subagents. Notes,
- * log, mesh and appearance live in the header's overflow menu.
+ * Tools of the open session: Dateien, Vorschau (Code, only while a dev server
+ * answers) and Verbindungen. Notes, log, mesh and appearance live in the
+ * header's overflow menu.
  */
 @Composable
 internal fun SessionToolsMenu(
     surface: String,
-    showProgress: Boolean,
-    progressCount: Int,
-    uncommittedCount: Int,
     previewRunning: Boolean,
-    onProgress: () -> Unit,
     onFiles: () -> Unit,
-    onVersions: () -> Unit,
     onPreview: () -> Unit,
     onConnections: () -> Unit,
 ) {
@@ -45,32 +37,14 @@ internal fun SessionToolsMenu(
         verticalArrangement = Arrangement.spacedBy(t.spacing.xs),
     ) {
         Text(stringResource(R.string.chat_tools), style = MaterialTheme.typography.titleLarge)
-        if (showProgress) {
-            ToolRow(
-                icon = Icons.Outlined.Checklist,
-                label = stringResource(R.string.session_tool_progress),
-                detail = progressCount.takeIf { it > 0 }?.let { stringResource(R.string.session_tool_progress_count, it) },
-                badge = progressCount,
-                onClick = onProgress,
-            )
-        }
         ToolRow(Icons.Outlined.FolderOpen, stringResource(R.string.chat_files), onClick = onFiles)
-        if (isCode) {
+        if (isCode && previewRunning) {
             ToolRow(
-                icon = Icons.Outlined.History,
-                label = stringResource(R.string.session_tool_versions),
-                detail = uncommittedCount.takeIf { it > 0 }?.let { stringResource(R.string.session_tool_uncommitted, it) },
-                badge = uncommittedCount,
-                onClick = onVersions,
+                icon = Icons.Outlined.Preview,
+                label = stringResource(R.string.session_tool_preview),
+                detail = stringResource(R.string.session_tool_preview_running),
+                onClick = onPreview,
             )
-            if (previewRunning) {
-                ToolRow(
-                    icon = Icons.Outlined.Preview,
-                    label = stringResource(R.string.session_tool_preview),
-                    detail = stringResource(R.string.session_tool_preview_running),
-                    onClick = onPreview,
-                )
-            }
         }
         ToolRow(
             icon = Icons.Outlined.Cable,

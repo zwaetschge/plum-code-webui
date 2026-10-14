@@ -100,7 +100,7 @@ internal class ChatTopBarActions(
     val onEditTitle: () -> Unit,
     val onTitleSaved: (String) -> Unit,
     val onToggleUsage: () -> Unit,
-    /** Opens the session tools (Dateien, Versionen, Vorschau, Verbindungen). */
+    /** Opens the session tools (Dateien, Vorschau, Verbindungen). */
     val onOpenTools: () -> Unit,
     val onOpenToolLog: () -> Unit,
     val onOpenSessionSettings: () -> Unit,
@@ -114,6 +114,8 @@ internal class ChatTopBarActions(
     val onArchive: () -> Unit = {},
     /** ⋯ → Darstellung: design preset cards (Code/Task). */
     val onOpenAppearance: () -> Unit = {},
+    /** ⋯ → Versionen: Git, GitHub and checkpoints (Code). */
+    val onOpenVersions: () -> Unit = {},
 )
 
 // ── Top Bar ───────────────────────────────────────────────────────────────────
@@ -273,6 +275,7 @@ internal fun ChatTopBar(
                 if (!isChatSurface) {
                     item(stringResource(R.string.chat_panel_notes), Icons.Outlined.StickyNote2, actions.onNavigateToNotes)
                     item(stringResource(R.string.session_menu_tool_log), Icons.Outlined.Terminal, actions.onOpenToolLog)
+                    if (session?.surface == "code") item(stringResource(R.string.session_tool_versions), Icons.Outlined.History, actions.onOpenVersions)
                     item(stringResource(R.string.session_menu_mesh), Icons.Outlined.Hub, actions.onOpenSessionSettings)
                     item(stringResource(R.string.session_menu_appearance), Icons.Outlined.Palette, actions.onOpenAppearance)
                     item(stringResource(R.string.chat_memory), Icons.Outlined.Psychology, actions.onNavigateToMemory)

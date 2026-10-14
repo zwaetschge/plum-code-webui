@@ -353,6 +353,9 @@ fun ChatScreen(
                     showSessionSettings = true
                 },
                 onOpenAppearance = { showDesignPresets = true },
+                onOpenVersions = {
+                    if (isWideLayout) { sidePanel = ChatSidePanel.GIT; showSidePanel = true } else showVersions = true
+                },
                 onNavigateToNotes = {
                     if (isWideLayout) { sidePanel = ChatSidePanel.NOTES; showSidePanel = true }
                     else onNavigateToNotes(sessionId)
@@ -412,9 +415,6 @@ fun ChatScreen(
                 // Task: writing style as `+` preset; Code has none (design only via ⋯ → Darstellung).
                 presetLabel = uiState.writingStyles.presetName(displaySession?.writingStyleSkill),
                 onOpenPreset = if (displaySession?.surface == "task") ({ showWritingStyle = true }) else null,
-                designHint = uiState.designStyles.presetName(displaySession?.designStyleSkill, design = true)
-                    .takeIf { displaySession?.surface?.let { it != "chat" } == true },
-                onDesignHint = { showDesignPresets = true },
             )
             }
         },
@@ -554,21 +554,11 @@ fun ChatScreen(
     LaunchedEffect(showToolsMenu) { if (showToolsMenu) viewModel.refreshToolSignals() }
     if (showToolsMenu && !isChatSurface) {
         ModalBottomSheet(onDismissRequest = { showToolsMenu = false }, containerColor = MaterialTheme.colorScheme.background) {
-            val agents = displayUiState.agentRuns.filter { it.chatId == displayUiState.activeChatId }
-            val openTodos = displayUiState.todos.count { it.status != TodoStatus.COMPLETED }
             val workingDirectory = displaySession?.workingDirectory ?: ""
             SessionToolsMenu(
                 surface = displaySession?.surface ?: "code",
-                showProgress = displayUiState.todos.isNotEmpty() || agents.isNotEmpty(),
-                progressCount = openTodos + agents.count { it.isActive },
-                uncommittedCount = displayUiState.uncommittedCount,
                 previewRunning = displayUiState.previewRunning,
-                onProgress = { showToolsMenu = false; showProgress = true },
                 onFiles = { showToolsMenu = false; onNavigateToFiles(workingDirectory) },
-                onVersions = {
-                    showToolsMenu = false
-                    if (isWideLayout) { sidePanel = ChatSidePanel.GIT; showSidePanel = true } else showVersions = true
-                },
                 // The dev tools screen opens on its preview tab.
                 onPreview = { showToolsMenu = false; onNavigateToDevTools(workingDirectory) },
                 onConnections = { showToolsMenu = false; showConnections = true },
