@@ -171,13 +171,13 @@ export function ChatSidebarResources({
       <NavLink
         to="/chat/personalization"
         onClick={onNavigate}
-        title="Personalisierung"
+        title="Chat-Einstellungen"
         className={({ isActive }) =>
           cn(row, isActive && 'is-active', collapsed && 'justify-center')
         }
       >
         <SlidersHorizontal className="h-4 w-4 shrink-0" />
-        {!collapsed && 'Personalisierung'}
+        {!collapsed && 'Chat-Einstellungen'}
       </NavLink>
     </>
   );

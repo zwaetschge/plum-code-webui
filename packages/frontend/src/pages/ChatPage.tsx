@@ -133,18 +133,6 @@ function ChatAccountPage({ owner }: { owner?: string }) {
   };
   return (
     <div className="plum-chat-page">
-      <header className="plum-chat-header plum-new-chat-header">
-        <span className="plum-chat-title">Plum Chat</span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label="Personalisierung öffnen"
-          onClick={() => navigate('/chat/personalization')}
-        >
-          <SlidersHorizontal size={16} />
-        </Button>
-      </header>
       <div className="plum-chat-welcome">
         <h1>
           {firstName

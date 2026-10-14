@@ -1,5 +1,6 @@
 import { orderChatApiProviders } from '@/lib/chatApiProviders';
 import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { WritingStyleMenu } from '@/components/presets/WritingStyleMenu';
 import { usePersonalization } from '@/components/assistant/usePersonalization';
 import { ArrowUp, Copy, Mic, SlidersHorizontal } from 'lucide-react';
@@ -262,24 +263,8 @@ export function ApiChatPage() {
   };
   return (
     <main className="plum-api-conversation">
-      <header className="plum-chat-header">
-        <div>
-          <Link to={chatHome} className="text-xs text-muted-foreground">
-            Plum Chat
-          </Link>
-          <h1 className="max-w-[50vw] truncate text-base font-medium">{chat.title}</h1>
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Gesprächsoptionen"
-          disabled={!!running || busy}
-          onClick={openPersonalization}
-        >
-          <SlidersHorizontal size={17} />
-        </Button>
-      </header>
+      {/* No top bar: the title shows in the sidebar, options sit in the `+` menu. */}
+      <h1 className="sr-only">{chat.title}</h1>
       <div
         ref={scroll}
         className="plum-api-scroll"
@@ -695,6 +680,10 @@ export function ApiChatPage() {
                     })
                   }
                 />
+                <DropdownMenuItem disabled={!!running || busy} onSelect={openPersonalization}>
+                  <SlidersHorizontal className="mr-2 h-4 w-4" />
+                  Gesprächsoptionen
+                </DropdownMenuItem>
               </ComposerPlusMenu>
             </div>
             <div className="plum-composer-model-tools">
