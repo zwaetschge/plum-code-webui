@@ -843,106 +843,6 @@ export const ChatInput = memo(function ChatInput({
           aria-describedby="chat-attachment-limits"
         />
 
-        {showStatusStrip && (
-          <div className={cn('composer-brief-row', `is-${composerTone}`)}>
-            {showStatusBubble && (
-              <div
-                className="composer-now-brief"
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                <span className="composer-brief-indicator">
-                  {isActive ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-3 w-3" />
-                  )}
-                </span>
-                <span className="composer-brief-copy">
-                  <span className="composer-brief-label">{composerBriefLabel}</span>
-                  {composerBriefDetail && (
-                    <span className="composer-brief-detail">{composerBriefDetail}</span>
-                  )}
-                </span>
-                {queueDepth > 0 && <span className="composer-brief-count">{queueDepth}</span>}
-                {onOpenRun && isActive && (
-                  <button type="button" className="composer-brief-run" onClick={onOpenRun}>
-                    Details
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div className="composer-brief-actions">
-              {onInterrupt && canInterrupt && (
-                <button
-                  type="button"
-                  className="composer-bubble-button composer-session-action is-interrupt"
-                  onClick={onInterrupt}
-                  aria-label={isExecutingTool ? 'Cancel tool' : 'Interrupt current run'}
-                  title={isExecutingTool ? 'Cancel the active tool' : 'Interrupt the current run'}
-                >
-                  <StopCircle className="h-3.5 w-3.5" />
-                  <span>{isExecutingTool ? 'Cancel tool' : 'Interrupt'}</span>
-                </button>
-              )}
-              {showActiveFollowupButton && (
-                <button
-                  type="button"
-                  className={cn(
-                    'composer-bubble-button is-followup',
-                    activeFollowupMode === 'steer' && 'is-active',
-                    activeFollowupMode === 'queue' && !canToggleActiveFollowupMode && 'is-active'
-                  )}
-                  onClick={
-                    canToggleActiveFollowupMode
-                      ? () => onActiveFollowupModeChange?.(activeFollowupMode !== 'steer')
-                      : undefined
-                  }
-                  tabIndex={canToggleActiveFollowupMode ? undefined : -1}
-                  aria-pressed={
-                    activeFollowupMode === 'steer' ||
-                    (activeFollowupMode === 'queue' && !canToggleActiveFollowupMode)
-                  }
-                  aria-disabled={!canToggleActiveFollowupMode}
-                  aria-label={
-                    canToggleActiveFollowupMode
-                      ? 'Toggle active-send steering mode'
-                      : 'Follow-up queue is active'
-                  }
-                  title={
-                    activeFollowupMode === 'steer'
-                      ? 'Steering is active. New messages preempt the active Codex turn.'
-                      : 'Follow-up mode is active. New messages wait until the current turn finishes.'
-                  }
-                >
-                  <MessageCircle className="h-3.5 w-3.5" />
-                  <span>{activeFollowupMode === 'steer' ? 'Steering' : 'Follow-up'}</span>
-                </button>
-              )}
-              {showFastModeButton && (
-                <button
-                  type="button"
-                  className={cn('composer-bubble-button is-fast', fastModeActive && 'is-active')}
-                  onClick={onFastModeToggle}
-                  disabled={fastModePending}
-                  aria-pressed={fastModeActive}
-                  aria-label={fastModeActive ? 'Disable fast mode' : 'Enable fast mode'}
-                  title={fastModeActive ? 'Disable Fast mode' : 'Enable Fast mode'}
-                >
-                  {fastModePending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Zap className="h-3.5 w-3.5" />
-                  )}
-                  <span>Fast</span>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
         <div className="composer-input-shell">
           {plusMenu ? (
             <ComposerPlusMenu
@@ -1060,8 +960,115 @@ export const ChatInput = memo(function ChatInput({
             </Button>
           </div>
         </div>
-        {(toolbar || onRestart) && (
+        {(toolbar || onRestart || showStatusStrip) && (
           <div className="composer-chip-row">
+            {/* Run state, interrupt and follow-up/steer sit beside the run settings. */}
+            {showStatusStrip && (
+              <div className={cn('composer-brief-row', `is-${composerTone}`)}>
+                {showStatusBubble && (
+                  <div
+                    className="composer-now-brief"
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                  >
+                    <span className="composer-brief-indicator">
+                      {isActive ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-3 w-3" />
+                      )}
+                    </span>
+                    <span className="composer-brief-copy">
+                      <span className="composer-brief-label">{composerBriefLabel}</span>
+                      {composerBriefDetail && (
+                        <span className="composer-brief-detail">{composerBriefDetail}</span>
+                      )}
+                    </span>
+                    {queueDepth > 0 && <span className="composer-brief-count">{queueDepth}</span>}
+                    {onOpenRun && isActive && (
+                      <button type="button" className="composer-brief-run" onClick={onOpenRun}>
+                        Details
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <div className="composer-brief-actions">
+                  {onInterrupt && canInterrupt && (
+                    <button
+                      type="button"
+                      className="composer-bubble-button composer-session-action is-interrupt"
+                      onClick={onInterrupt}
+                      aria-label={isExecutingTool ? 'Cancel tool' : 'Interrupt current run'}
+                      title={
+                        isExecutingTool ? 'Cancel the active tool' : 'Interrupt the current run'
+                      }
+                    >
+                      <StopCircle className="h-3.5 w-3.5" />
+                      <span>{isExecutingTool ? 'Cancel tool' : 'Interrupt'}</span>
+                    </button>
+                  )}
+                  {showActiveFollowupButton && (
+                    <button
+                      type="button"
+                      className={cn(
+                        'composer-bubble-button is-followup',
+                        activeFollowupMode === 'steer' && 'is-active',
+                        activeFollowupMode === 'queue' &&
+                          !canToggleActiveFollowupMode &&
+                          'is-active'
+                      )}
+                      onClick={
+                        canToggleActiveFollowupMode
+                          ? () => onActiveFollowupModeChange?.(activeFollowupMode !== 'steer')
+                          : undefined
+                      }
+                      tabIndex={canToggleActiveFollowupMode ? undefined : -1}
+                      aria-pressed={
+                        activeFollowupMode === 'steer' ||
+                        (activeFollowupMode === 'queue' && !canToggleActiveFollowupMode)
+                      }
+                      aria-disabled={!canToggleActiveFollowupMode}
+                      aria-label={
+                        canToggleActiveFollowupMode
+                          ? 'Toggle active-send steering mode'
+                          : 'Follow-up queue is active'
+                      }
+                      title={
+                        activeFollowupMode === 'steer'
+                          ? 'Steering is active. New messages preempt the active Codex turn.'
+                          : 'Follow-up mode is active. New messages wait until the current turn finishes.'
+                      }
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" />
+                      <span>{activeFollowupMode === 'steer' ? 'Steering' : 'Follow-up'}</span>
+                    </button>
+                  )}
+                  {showFastModeButton && (
+                    <button
+                      type="button"
+                      className={cn(
+                        'composer-bubble-button is-fast',
+                        fastModeActive && 'is-active'
+                      )}
+                      onClick={onFastModeToggle}
+                      disabled={fastModePending}
+                      aria-pressed={fastModeActive}
+                      aria-label={fastModeActive ? 'Disable fast mode' : 'Enable fast mode'}
+                      title={fastModeActive ? 'Disable Fast mode' : 'Enable Fast mode'}
+                    >
+                      {fastModePending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Zap className="h-3.5 w-3.5" />
+                      )}
+                      <span>Fast</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             {toolbar}
             {onRestart && (
               // Restart sits right of the run settings, as a quiet icon chip.

@@ -986,6 +986,13 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
   }
 }
 
+/* The run strip (state, interrupt, follow-up/steer) leads the chip row. */
+.composer-chip-row .composer-brief-row {
+  flex: 1 1 260px;
+  min-width: 0;
+  margin: 0;
+}
+
 /* Subagent bubble beside the model chip; restart as icon chip at the end. */
 .plum-agents-chip {
   color: hsl(var(--muted-foreground));

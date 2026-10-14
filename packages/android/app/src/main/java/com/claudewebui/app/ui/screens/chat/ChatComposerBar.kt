@@ -180,9 +180,12 @@ internal fun ChatComposerBar(
         ) {
             val showActions = activity.needsAttention || activity.queuedCount > 0 ||
                 outboxPendingCount > 0 || composer.isWorking
-            if (showActions) FlowRow(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = t.spacing.md),
+            // Model, thinking depth and execution mode live in the chat bar;
+            // run state (attention, queue, interrupt) sits beside them, as in the WebUI.
+            if (showActions || onModelEffort != null || (mode != null && onModeChange != null)) FlowRow(
+                Modifier.fillMaxWidth().padding(start = t.spacing.md, end = t.spacing.md, top = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
+                verticalArrangement = Arrangement.Center,
             ) {
                 if (activity.needsAttention) {
                     TextButton(onClick = onShowAttention, modifier = actionModifier, contentPadding = actionPadding) { Text(stringResource(R.string.chat_attention), color = PlumAmber) }
@@ -198,23 +201,12 @@ internal fun ChatComposerBar(
                         Text(stringResource(R.string.chat_interrupt), color = MaterialTheme.colorScheme.error)
                     }
                 }
-            }
-
-            // Model, thinking depth and execution mode live in the chat bar, as in the WebUI.
-            if (onModelEffort != null || (mode != null && onModeChange != null)) Row(
-                Modifier.fillMaxWidth().padding(start = t.spacing.md, end = t.spacing.md, top = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
                 if (agents.isNotEmpty()) AgentsChip(agents, onAgents)
                 if (onModelEffort != null) com.claudewebui.app.ui.screens.dashboard.ModelEffortChip(
                     model = modelLabel.orEmpty(), effortLabel = effortLabel, enabled = true, onClick = onModelEffort,
                 )
                 if (mode != null && onModeChange != null) SessionModeChip(mode, onModeChange)
-                if (onRestart != null) {
-                    Spacer(Modifier.weight(1f))
-                    RestartChip(onRestart)
-                }
+                if (onRestart != null) RestartChip(onRestart)
             }
 
             // Thinking/tool indicator sits just above input
