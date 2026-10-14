@@ -16,13 +16,25 @@ function useSidebarEdge(open: boolean) {
   const [edge, setEdge] = useState(0);
   useLayoutEffect(() => {
     if (!open) return;
-    const sidebar = document.querySelector<HTMLElement>(SIDEBAR_SELECTOR);
-    if (!sidebar) return setEdge(0);
-    const update = () => setEdge(Math.round(sidebar.getBoundingClientRect().right));
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(sidebar);
-    return () => observer.disconnect();
+    let observer: ResizeObserver | null = null;
+    let timer = 0;
+    // The sidebar may mount after a deep link opens the popup; wait for it.
+    const attach = () => {
+      const sidebar = document.querySelector<HTMLElement>(SIDEBAR_SELECTOR);
+      if (!sidebar) {
+        timer = window.setTimeout(attach, 150);
+        return;
+      }
+      const update = () => setEdge(Math.round(sidebar.getBoundingClientRect().right));
+      update();
+      observer = new ResizeObserver(update);
+      observer.observe(sidebar);
+    };
+    attach();
+    return () => {
+      window.clearTimeout(timer);
+      observer?.disconnect();
+    };
   }, [open]);
   return edge;
 }

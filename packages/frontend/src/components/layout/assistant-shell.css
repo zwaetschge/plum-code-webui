@@ -8,9 +8,12 @@
   height: 100dvh;
 }
 .dark .plum-assistant-shell {
-  --assistant-glass: hsl(var(--card) / 0.68);
-  --assistant-chrome: hsl(var(--card) / 0.58);
-  --assistant-glass-edge: hsl(0 0% 100% / 0.19);
+  /* Frosted glass: a light tint over the backdrop, not a dark card colour. */
+  --assistant-glass:
+    linear-gradient(145deg, hsl(0 0% 100% / 0.1), hsl(0 0% 100% / 0.03) 60%),
+    hsl(var(--card) / 0.22);
+  --assistant-chrome: hsl(var(--card) / 0.3);
+  --assistant-glass-edge: hsl(0 0% 100% / 0.16);
 }
 .assistant-sidebar {
   width: 240px;
@@ -1024,4 +1027,61 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
   justify-content: center;
   padding: 0;
   color: hsl(var(--muted-foreground));
+}
+
+/* Frosted glass for every surface inside the assistant shell: cards, fields,
+   outline buttons and the library popup share the composer's material. */
+.plum-assistant-shell {
+  --frost-surface:
+    linear-gradient(145deg, hsl(0 0% 100% / 0.09), hsl(0 0% 100% / 0.025) 60%),
+    hsl(var(--card) / 0.18);
+  --frost-field: hsl(0 0% 100% / 0.05);
+  --frost-edge: hsl(0 0% 100% / 0.14);
+}
+html:not(.dark) .plum-assistant-shell {
+  --frost-surface:
+    linear-gradient(145deg, hsl(0 0% 100% / 0.55), hsl(0 0% 100% / 0.3) 60%),
+    hsl(var(--card) / 0.35);
+  --frost-field: hsl(0 0% 100% / 0.4);
+  --frost-edge: hsl(var(--foreground) / 0.12);
+}
+.plum-assistant-shell :is(.bg-card, details.rounded-md, details.rounded-lg) {
+  background: var(--frost-surface);
+  border-color: var(--frost-edge);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+}
+.plum-assistant-shell
+  :is(
+    input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']),
+    textarea,
+    select
+  ):not(.plum-message-composer *, .chat-composer-form *) {
+  background-color: var(--frost-field);
+  border-color: var(--frost-edge);
+}
+.plum-assistant-shell .bg-background:not(input, textarea, select) {
+  background: var(--frost-field);
+  border-color: var(--frost-edge);
+}
+.plum-assistant-shell .border-dashed {
+  border-color: hsl(0 0% 100% / 0.18);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .plum-assistant-shell .bg-card {
+    background: hsl(var(--card));
+  }
+}
+html.eink .plum-assistant-shell .bg-card {
+  background: hsl(var(--card));
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Gecko bans live blur on most surfaces (index.css); the chat composer and
+   the library popup are single glass panes like the code composer, so they
+   keep it. */
+html.plum-engine-gecko body :is(.plum-message-composer, .library-popup) {
+  -webkit-backdrop-filter: blur(24px) saturate(160%) !important;
+  backdrop-filter: blur(24px) saturate(160%) !important;
 }

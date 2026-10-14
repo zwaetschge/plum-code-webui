@@ -8858,19 +8858,20 @@ html.dark .chat-composer-form.glass-chrome {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  height: auto;
   border-radius: 18px;
-  border: 1px solid hsl(var(--foreground) / 0.1);
-  background: hsl(var(--background) / 0.86);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--frost-edge, hsl(0 0% 100% / 0.14));
+  background: var(--frost-surface, hsl(var(--card) / 0.3));
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
   box-shadow:
     0 24px 60px -24px rgb(0 0 0 / 0.65),
     inset 0 1px 0 hsl(var(--foreground) / 0.08);
   animation: library-popup-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+/* Transform only: paused animations (hidden tab) must not leave it invisible. */
 @keyframes library-popup-in {
   from {
-    opacity: 0;
     transform: translateX(-12px);
   }
 }
@@ -8891,7 +8892,7 @@ html.dark .chat-composer-form.glass-chrome {
   align-items: center;
   gap: 6px;
   padding: 10px 10px 10px 12px;
-  border-bottom: 1px solid hsl(var(--border) / 0.4);
+  border-bottom: 1px solid var(--frost-edge, hsl(0 0% 100% / 0.12));
 }
 .library-panel-close {
   display: inline-flex;
