@@ -8847,24 +8847,82 @@ html.dark .chat-composer-form.glass-chrome {
   padding: 0 4px;
   font-size: 8px;
 }
-/* Library side panel: section switcher on top, content scrolls below. */
-.library-panel {
+/* Library popup: docked right of the left sidebar, over the chat. */
+.library-popup {
+  position: fixed;
+  z-index: 45;
+  top: 10px;
+  bottom: 10px;
+  left: calc(var(--library-left, 0px) + 8px);
+  width: min(640px, calc(100vw - var(--library-left, 0px) - 24px));
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid hsl(var(--foreground) / 0.1);
+  background: hsl(var(--background) / 0.86);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  box-shadow:
+    0 24px 60px -24px rgb(0 0 0 / 0.65),
+    inset 0 1px 0 hsl(var(--foreground) / 0.08);
+  animation: library-popup-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes library-popup-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-popup {
+    animation: none;
+  }
+}
+@media (max-width: 767px) {
+  .library-popup {
+    inset: 0;
+    width: auto;
+    border-radius: 0;
+  }
+}
+.library-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 10px 12px;
+  border-bottom: 1px solid hsl(var(--border) / 0.4);
+}
+.library-panel-close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: hsl(var(--muted-foreground));
+}
+.library-panel-close:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--foreground) / 0.08);
+}
+.library-panel-close:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+}
+.library-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .library-panel-tabs {
-  position: sticky;
-  top: 0;
-  z-index: 5;
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   gap: 4px;
   overflow-x: auto;
-  padding: 14px 64px 10px 16px;
   scrollbar-width: none;
-  background: hsl(var(--background) / 0.82);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid hsl(var(--border) / 0.4);
 }
 .library-panel-tabs::-webkit-scrollbar {
   display: none;
