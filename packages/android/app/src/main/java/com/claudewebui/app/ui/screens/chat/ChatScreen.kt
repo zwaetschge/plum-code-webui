@@ -388,7 +388,6 @@ fun ChatScreen(
         bottomBar = {
             Column {
             val currentAgents = uiState.agentRuns.filter { it.chatId == uiState.activeChatId }
-            if (currentAgents.isNotEmpty()) SubagentSummary(currentAgents) { showProgress = true }
             TaskProgressSummary(displayUiState.todos) { showProgress = true }
             ChatComposerBar(
                 composer = ChatComposerState.from(uiState),
@@ -415,6 +414,9 @@ fun ChatScreen(
                 // Task: writing style as `+` preset; Code has none (design only via ⋯ → Darstellung).
                 presetLabel = uiState.writingStyles.presetName(displaySession?.writingStyleSkill),
                 onOpenPreset = if (displaySession?.surface == "task") ({ showWritingStyle = true }) else null,
+                agents = currentAgents,
+                onAgents = { showProgress = true },
+                onRestart = composerActions.onRestart.takeIf { displaySession?.surface?.let { it != "chat" } == true },
             )
             }
         },

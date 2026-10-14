@@ -13,13 +13,19 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -138,9 +144,11 @@ internal fun ChatComposerBar(
     /** Task: writing style shown in the `+` menu; null onOpenPreset keeps the plain attach button. */
     presetLabel: String? = null,
     onOpenPreset: (() -> Unit)? = null,
-    /** Small hint for the session's design preset (Code/Task); chosen via ⋯ → Darstellung. */
-    designHint: String? = null,
-    onDesignHint: (() -> Unit)? = null,
+    /** Subagents of the open chat as a bubble beside the model chip; opens Fortschritt. */
+    agents: List<com.claudewebui.app.data.model.SubagentRun> = emptyList(),
+    onAgents: () -> Unit = {},
+    /** Restart icon chip right of the run settings (Task/Code); null hides it. */
+    onRestart: (() -> Unit)? = null,
 ) {
     val t = PlumTheme.tokens
     val palette = LocalPlumPalette.current
@@ -198,11 +206,15 @@ internal fun ChatComposerBar(
                 horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (agents.isNotEmpty()) AgentsChip(agents, onAgents)
                 if (onModelEffort != null) com.claudewebui.app.ui.screens.dashboard.ModelEffortChip(
                     model = modelLabel.orEmpty(), effortLabel = effortLabel, enabled = true, onClick = onModelEffort,
                 )
                 if (mode != null && onModeChange != null) SessionModeChip(mode, onModeChange)
-                if (designHint != null && onDesignHint != null) DesignHintChip(designHint, onDesignHint)
+                if (onRestart != null) {
+                    Spacer(Modifier.weight(1f))
+                    RestartChip(onRestart)
+                }
             }
 
             // Thinking/tool indicator sits just above input
@@ -387,24 +399,61 @@ private val CHAT_BAR_MODES = listOf(
 )
 
 @Composable
-private fun DesignHintChip(label: String, onClick: () -> Unit) {
+private fun AgentsChip(runs: List<com.claudewebui.app.data.model.SubagentRun>, onClick: () -> Unit) {
+    val palette = LocalPlumPalette.current
+    val active = runs.count { it.isActive && it.activity != "waiting" }
+    val waiting = runs.count { it.isActive && it.activity == "waiting" }
+    val done = runs.count { it.state == "completed" }
+    val label = when {
+        active > 0 -> stringResource(R.string.agents_chip_active, active)
+        waiting > 0 -> stringResource(R.string.agents_chip_waiting, waiting)
+        else -> stringResource(R.string.agents_chip_done, done)
+    }
+    val pulse = if (active > 0) {
+        rememberInfiniteTransition(label = "agents").animateFloat(
+            initialValue = 1f, targetValue = .45f,
+            animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "agentsPulse",
+        ).value
+    } else 1f
+    Surface(
+        onClick = onClick,
+        shape = androidx.compose.foundation.shape.CircleShape,
+        color = palette.segmentTrack,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp, if (active > 0) palette.accent.copy(alpha = .5f) else palette.border.copy(alpha = .6f),
+        ),
+        modifier = Modifier.heightIn(min = 36.dp),
+    ) {
+        Row(Modifier.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Outlined.Groups,
+                contentDescription = null,
+                tint = if (active > 0) palette.accent.copy(alpha = pulse) else palette.muted,
+                modifier = Modifier.size(15.dp),
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge, color = if (active > 0) palette.text else palette.muted, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun RestartChip(onClick: () -> Unit) {
     val palette = LocalPlumPalette.current
     Surface(
         onClick = onClick,
         shape = androidx.compose.foundation.shape.CircleShape,
         color = androidx.compose.ui.graphics.Color.Transparent,
         border = androidx.compose.foundation.BorderStroke(1.dp, palette.border.copy(alpha = .6f)),
-        modifier = Modifier.heightIn(min = 36.dp).widthIn(max = 160.dp),
+        modifier = Modifier.size(36.dp),
     ) {
-        Row(Modifier.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(contentAlignment = Alignment.Center) {
             Icon(
-                Icons.Outlined.Palette,
-                contentDescription = stringResource(R.string.preset_design_title),
+                Icons.Outlined.RestartAlt,
+                contentDescription = stringResource(R.string.chat_restart_session),
                 tint = palette.muted,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(17.dp),
             )
-            Spacer(Modifier.width(5.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge, color = palette.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
     }
 }

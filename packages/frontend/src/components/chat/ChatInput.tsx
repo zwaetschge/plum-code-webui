@@ -452,8 +452,7 @@ export const ChatInput = memo(function ChatInput({
       : '');
   const composerBriefLabel = composerStatusLabel;
   const composerBriefDetail = composerStatusDetail;
-  const showStatusStrip =
-    !!isActive || queueDepth > 0 || showFastModeButton || !!selectedToolName || !!onRestart;
+  const showStatusStrip = !!isActive || queueDepth > 0 || showFastModeButton || !!selectedToolName;
   const showStatusBubble = !!composerBriefLabel || !!composerBriefDetail;
   const composerTone = isActive
     ? steersWhileActive
@@ -888,18 +887,6 @@ export const ChatInput = memo(function ChatInput({
                   <span>{isExecutingTool ? 'Cancel tool' : 'Interrupt'}</span>
                 </button>
               )}
-              {onRestart && (
-                <button
-                  type="button"
-                  className="composer-bubble-button composer-session-action"
-                  onClick={onRestart}
-                  aria-label="Restart session"
-                  title="Restart session with fresh CLI context; queued follow-ups will be cleared"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  <span>Restart</span>
-                </button>
-              )}
               {showActiveFollowupButton && (
                 <button
                   type="button"
@@ -1073,12 +1060,25 @@ export const ChatInput = memo(function ChatInput({
             </Button>
           </div>
         </div>
-        {toolbar && <div className="composer-chip-row">{toolbar}</div>}
+        {(toolbar || onRestart) && (
+          <div className="composer-chip-row">
+            {toolbar}
+            {onRestart && (
+              // Restart sits right of the run settings, as a quiet icon chip.
+              <button
+                type="button"
+                className="plum-model-trigger plum-chip plum-restart-chip"
+                onClick={onRestart}
+                aria-label="Session neu starten"
+                title="Session mit frischem CLI-Kontext neu starten; wartende Nachrichten werden verworfen"
+              >
+                <RotateCcw size={14} aria-hidden />
+              </button>
+            )}
+          </div>
+        )}
       </form>
-      <p
-        id="chat-attachment-limits"
-        className={conversation ? 'sr-only' : 'px-2 text-xs text-muted-foreground'}
-      >
+      <p id="chat-attachment-limits" className="sr-only">
         Drop files on the composer or paste while the message field is focused · 10 files max · 25
         MB each · 32 MB total
       </p>

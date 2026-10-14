@@ -4667,21 +4667,6 @@ export function SessionPage() {
         {mainView === 'chat' && (
           <div ref={setInputBarEl} className="composer-wrap shrink-0">
             <div className="composer-inner">
-              {scopedAgentRuns.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => openRightPanel('progress')}
-                  className="session-agents-summary mb-2 flex w-full items-center gap-2 border px-3 py-2 text-left text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-                >
-                  <Brain className="h-4 w-4 shrink-0" />
-                  <span>
-                    <strong>{agentCounts.active} Agenten aktiv</strong> · {agentCounts.waiting}{' '}
-                    warten · {agentCounts.completed} fertig
-                  </span>
-                  <span className="ml-auto">Anzeigen</span>
-                </button>
-              )}
-
               {showSavedIndicator && (
                 <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground animate-fade-in pb-2">
                   <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
@@ -4730,7 +4715,33 @@ export function SessionPage() {
                 }
                 queueDepth={queuedDepth}
                 onOpenRun={handleOpenRunOverview}
-                toolbar={composerToolbar}
+                toolbar={
+                  <>
+                    {scopedAgentRuns.length > 0 && (
+                      // Subagents as a bubble beside the model chip; opens Fortschritt.
+                      <button
+                        type="button"
+                        onClick={() => openRightPanel('progress')}
+                        className={cn(
+                          'plum-model-trigger plum-chip plum-agents-chip',
+                          agentCounts.active > 0 && 'is-live'
+                        )}
+                        title={`${agentCounts.active} Agenten aktiv · ${agentCounts.waiting} warten · ${agentCounts.completed} fertig`}
+                        aria-label={`Agenten: ${agentCounts.active} aktiv, ${agentCounts.waiting} warten, ${agentCounts.completed} fertig`}
+                      >
+                        <Brain size={13} aria-hidden />
+                        <span className="plum-model-trigger-name">
+                          {agentCounts.active > 0
+                            ? `${agentCounts.active} aktiv`
+                            : agentCounts.waiting > 0
+                              ? `${agentCounts.waiting} warten`
+                              : `${agentCounts.completed} Agenten`}
+                        </span>
+                      </button>
+                    )}
+                    {composerToolbar}
+                  </>
+                }
                 plusMenu={composerPlusMenu}
               />
             </div>

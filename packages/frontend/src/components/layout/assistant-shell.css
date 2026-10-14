@@ -986,12 +986,35 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
   }
 }
 
-/* Design preset hint in the Code/Task chat bar (chosen via ⋯ → Darstellung). */
-.plum-preset-hint {
-  max-width: 170px;
-  border-style: dashed;
+/* Subagent bubble beside the model chip; restart as icon chip at the end. */
+.plum-agents-chip {
   color: hsl(var(--muted-foreground));
 }
-.plum-preset-hint:hover {
+.plum-agents-chip:hover,
+.plum-restart-chip:hover {
   color: hsl(var(--foreground));
+}
+.plum-agents-chip.is-live {
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--primary) / 0.5);
+}
+.plum-agents-chip.is-live svg {
+  color: hsl(var(--primary));
+  animation: plum-agents-pulse 1.6s ease-in-out infinite;
+}
+@keyframes plum-agents-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plum-agents-chip.is-live svg {
+    animation: none;
+  }
+}
+.plum-restart-chip {
+  width: 30px;
+  justify-content: center;
+  padding: 0;
+  color: hsl(var(--muted-foreground));
 }

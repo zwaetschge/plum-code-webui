@@ -21,4 +21,7 @@
     <string name="session_goal_placeholder">Goal of this session</string>
     <string name="session_goal_hint">Sent as /goal (Codex only).</string>
     <string name="chat_archive_failed">Archiving failed</string>
+    <string name="agents_chip_active">%1$d active</string>
+    <string name="agents_chip_waiting">%1$d waiting</string>
+    <string name="agents_chip_done">%1$d agents</string>
 </resources>
