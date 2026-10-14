@@ -28,6 +28,7 @@
     "test:runtime-analytics": "tsx scripts/runtime-analytics-regression-tests.ts",
     "test:usage-limit-history": "tsx scripts/usage-limit-history-regression-tests.ts",
     "test:security-boundaries": "tsx scripts/security-boundaries-regression-tests.ts",
+    "test:ssh-connections": "tsx scripts/ssh-connections-regression-tests.ts",
     "test:migrations": "tsx scripts/migration-dry-run.ts",
     "test:assistant-api-chat": "tsx --conditions=development scripts/assistant-api-chat-regression-tests.ts",
     "test:assistant-voice": "tsx --conditions=development scripts/assistant-voice-regression-tests.ts",

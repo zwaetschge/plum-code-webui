@@ -1082,3 +1082,19 @@ CREATE TABLE IF NOT EXISTS browser_tokens (
  created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 CREATE INDEX IF NOT EXISTS idx_browser_tokens_user ON browser_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS connections (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL,
+ config_json TEXT NOT NULL DEFAULT '{}', secret_enc TEXT,
+ created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+ updated_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+CREATE INDEX IF NOT EXISTS idx_connections_user ON connections(user_id, kind);
+
+CREATE TABLE IF NOT EXISTS session_connections (
+ session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+ connection_id TEXT NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+ created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+ PRIMARY KEY (session_id, connection_id)
+);
+CREATE INDEX IF NOT EXISTS idx_session_connections_connection ON session_connections(connection_id);

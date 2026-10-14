@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ExitToApp
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.AdminPanelSettings
+import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.ViewColumn
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Brightness4
@@ -114,6 +115,7 @@ fun SettingsScreen(
     onNavigateToAgents: () -> Unit,
     onNavigateToPermissions: () -> Unit,
     onNavigateToIntegrations: () -> Unit,
+    onNavigateToConnections: () -> Unit = {},
     onNavigateToOperations: () -> Unit,
     onLoggedOut: () -> Unit,
     onNavigateMain: (MainDestination) -> Unit = {},
@@ -191,6 +193,7 @@ fun SettingsScreen(
                         add(Triple(screenResources.getString(R.string.settings_security_f25ce), "permissions berechtigungen", onNavigateToPermissions))
                         add(Triple(screenResources.getString(R.string.settings_mcp_servers_3c23b), "tools mcp", onNavigateToMcp))
                         add(Triple(screenResources.getString(R.string.settings_integrations_a7881), "discord home assistant comfyui", onNavigateToIntegrations))
+                        add(Triple(screenResources.getString(R.string.connections_title), "ssh host server verbindungen connections jump schlüssel key", onNavigateToConnections))
                         add(Triple(screenResources.getString(R.string.settings_control_gateway_3cd41), "gateway token supervisor hermes api", { jump("gateway") }))
                         add(Triple(screenResources.getString(R.string.settings_firefox_browser_title), "browser firefox chrome edge erweiterung extension koppeln pair steuerung", { jump("browser") }))
                         add(Triple(screenResources.getString(R.string.settings_codex_plugins_cba13), "codex plugins", { jump("codex-plugins") }))
@@ -430,6 +433,13 @@ fun SettingsScreen(
                                 screenResources.getString(R.string.settings_comfyui_discord_home_assistant_b5f60),
                                 PlumMuted,
                                 onNavigateToIntegrations,
+                            )
+                            CompactSettingRow(
+                                Icons.Outlined.Dns,
+                                screenResources.getString(R.string.connections_title),
+                                screenResources.getString(R.string.connections_settings_entry_hint),
+                                PlumMuted,
+                                onNavigateToConnections,
                             )
                             CompactSettingRow(
                                 Icons.Outlined.AdminPanelSettings,

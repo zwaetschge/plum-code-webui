@@ -13,7 +13,7 @@ export interface ConnectionSection {
 
 /**
  * Verbindungen: one container with a section per connection kind (Android
- * devices, browser; SSH hosts follow). Sections are independent and stay
+ * devices, SSH hosts, browser). Sections are independent and stay
  * open by default so a single tap reaches each one.
  */
 export function ConnectionsPanel({

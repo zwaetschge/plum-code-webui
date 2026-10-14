@@ -110,6 +110,13 @@ import {
 import { sanitizeClaudeResumeTranscript } from '../../utils/claudeResumeTranscript.js';
 import { buildOpenCodeProviderCredentialEnv } from '../../utils/opencodeProviderKeys.js';
 import { assertRunnerAccess } from '../../utils/runnerAccess.js';
+import {
+  buildSshEnvForSession,
+  cleanupSessionSsh,
+  formatSshContext,
+  prepareSessionSsh,
+  sshContextSignature,
+} from '../connections/sshRuntime.js';
 import { buildSessionExecutionPrompt } from '../sessionExecutionContext.js';
 import { buildAssistantContext } from '../assistant/context.js';
 import { temporaryRuntime } from '../assistant/temporary.js';
@@ -1579,6 +1586,18 @@ async function buildAndroidDeviceEnvForSession(
     : {};
 }
 
+/** Session-scoped env from Verbindungen: Android device serial and SSH config. */
+async function buildSessionConnectionEnv(
+  sessionId: string,
+  userId?: string
+): Promise<Record<string, string>> {
+  const [android, ssh] = await Promise.all([
+    buildAndroidDeviceEnvForSession(sessionId, userId),
+    buildSshEnvForSession(sessionId, userId).catch(() => ({})),
+  ]);
+  return { ...android, ...ssh };
+}
+
 async function buildAndroidDeviceContext(
   sessionId: string,
   userId: string
@@ -2791,6 +2810,8 @@ interface ClaudeProcess {
   sessionStyleContextInjected?: string | null;
   modePromptInjected: SessionMode | null;
   androidDeviceSerialInjected?: string | null;
+  /** Signature of the SSH hosts the agent was last told about (see formatSshContext). */
+  sshContextInjected?: string | null;
   discordGatewayContextInjected?: string | null;
   lastContextLimitAt?: number;
   codexIdle?: boolean; // True when codex process exited after turn.completed, awaiting respawn
@@ -5161,7 +5182,7 @@ Discord Main Gateway:
       const shouldInjectStaticBootstrap = shouldInjectCodexStaticBootstrap(persistedSessionId);
       const extraEnv: Record<string, string> = {
         ...(await buildIntegrationEnv()),
-        ...(await buildAndroidDeviceEnvForSession(sessionId, userId)),
+        ...(await buildSessionConnectionEnv(sessionId, userId)),
       };
       // Kimi exposes its ACP agent as a subcommand (`kimi acp`); Vibe ships a
       // dedicated `vibe-acp` entry point that takes no arguments.
@@ -5611,7 +5632,7 @@ Discord Main Gateway:
     extraEnv.WEBUI_SESSION_MODE = effectiveMode;
     extraEnv.WEBUI_CONFIG_HOME = configHome;
     Object.assign(extraEnv, await buildIntegrationEnv());
-    Object.assign(extraEnv, await buildAndroidDeviceEnvForSession(sessionId, userId));
+    Object.assign(extraEnv, await buildSessionConnectionEnv(sessionId, userId));
     // Use regular spawn for CLI providers
     const proc: ChildProcess = spawnManagedProcess(providerConfig.command, args, {
       cwd: session.working_directory,
@@ -8056,7 +8077,7 @@ Discord Main Gateway:
       // Ignore
     }
     Object.assign(extraEnv, await buildIntegrationEnv());
-    Object.assign(extraEnv, await buildAndroidDeviceEnvForSession(sessionId, proc.userId));
+    Object.assign(extraEnv, await buildSessionConnectionEnv(sessionId, proc.userId));
 
     proc.codexDescendantUsageBaseline = await this.readCodexDescendantUsage(resumeSessionId);
     // Keep the per-thread baseline in step with the aggregate one, otherwise a
@@ -9758,12 +9779,10 @@ The planning phase is complete. You are now in Auto-Accept mode.
     } catch (error) {
       proc.claudeQueuedTurns ??= [];
       proc.claudeQueuedTurns.unshift(nextTurn);
-      this.io
-        .to(`session:${sessionId}`)
-        .emit('session:error', {
-          sessionId,
-          error: error instanceof Error ? error.message : 'Task konnte nicht weiterarbeiten',
-        });
+      this.io.to(`session:${sessionId}`).emit('session:error', {
+        sessionId,
+        error: error instanceof Error ? error.message : 'Task konnte nicht weiterarbeiten',
+      });
       this.emitQueueState(sessionId, proc);
     } finally {
       proc.claudeQueueDraining = false;
@@ -10527,12 +10546,10 @@ The planning phase is complete. You are now in Auto-Accept mode.
         } catch (error) {
           proc.kimiQueuedTurns ??= [];
           proc.kimiQueuedTurns.unshift(nextTurn);
-          this.io
-            .to(`session:${sessionId}`)
-            .emit('session:error', {
-              sessionId,
-              error: error instanceof Error ? error.message : 'Task konnte nicht weiterarbeiten',
-            });
+          this.io.to(`session:${sessionId}`).emit('session:error', {
+            sessionId,
+            error: error instanceof Error ? error.message : 'Task konnte nicht weiterarbeiten',
+          });
           break;
         }
         await this.dispatchKimiAcpTurn(sessionId, proc, nextTurn);
@@ -10598,7 +10615,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
 
     const extraEnv: Record<string, string> = {};
     Object.assign(extraEnv, await buildIntegrationEnv());
-    Object.assign(extraEnv, await buildAndroidDeviceEnvForSession(sessionId, proc.userId));
+    Object.assign(extraEnv, await buildSessionConnectionEnv(sessionId, proc.userId));
 
     console.log(
       `[KIMI] Respawning process for next message [${sessionId}] args=${args
@@ -11274,6 +11291,18 @@ ${proc.contextReminder.summary}
     }
 
     if (!codexReviewCommand && !providerNativeSlashCommand) {
+      const sshBundle = await prepareSessionSsh(sessionId, userId).catch(() => null);
+      const sshSignature = sshContextSignature(sshBundle);
+      if (sshBundle && sshSignature !== proc.sshContextInjected) {
+        messageForClaude = `${formatSshContext(sshBundle)}\n\n${messageForClaude}`;
+        proc.sshContextInjected = sshSignature;
+      } else if (!sshBundle && proc.sshContextInjected) {
+        messageForClaude = `<system-reminder>\nNo SSH connections are attached to this Plum session any more; the earlier aliases no longer work.\n</system-reminder>\n\n${messageForClaude}`;
+        proc.sshContextInjected = null;
+      }
+    }
+
+    if (!codexReviewCommand && !providerNativeSlashCommand) {
       const sessionStyleContext = await buildSessionStyleContext(
         sessionId,
         userId,
@@ -11835,6 +11864,7 @@ ${proc.contextReminder.summary}
     // this is belt-and-braces rather than load-bearing, but a stopped session
     // should not leave a working credential behind.
     modelRouter.unregisterSession(sessionId);
+    void cleanupSessionSsh(sessionId);
 
     // Nothing is waiting on an answer once the process is gone; a question left
     // in the registry would keep a stopped session flagged as needing you.
@@ -12192,6 +12222,10 @@ ${proc.contextReminder.summary}
     // An older child's delayed exit/error must never remove a replacement
     // process that already owns the same WebUI session.
     if (expected && proc !== expected) return;
+
+    // Materialized SSH keys live only as long as the session process; a
+    // respawn writes them again from the attached connections.
+    void cleanupSessionSsh(sessionId);
 
     // Never let a scheduled post-compaction nudge fire into a dead stdin.
     this.clearPiCompactResumeTimer(proc);
@@ -12570,7 +12604,7 @@ ${proc.contextReminder.summary}
         ...(isClaudeTransportProvider(cliProvider)
           ? await buildClaudeTransportEnv(cliProvider, userId, configHome, sessionId)
           : process.env),
-        ...(await buildAndroidDeviceEnvForSession(sessionId, userId)),
+        ...(await buildSessionConnectionEnv(sessionId, userId)),
         ...(cliProvider === 'claude' ? claudeContextWindowEnv(requestedModel) : {}),
         WEBUI_SESSION_ID: sessionId,
         WEBUI_BACKEND_URL: `http://localhost:${config.port}`,

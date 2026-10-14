@@ -21,6 +21,7 @@ import com.claudewebui.app.ui.screens.filemanager.FileManagerViewModel
 import com.claudewebui.app.ui.screens.devtools.DevToolsViewModel
 import com.claudewebui.app.ui.screens.memory.MemoryViewModel
 import com.claudewebui.app.ui.screens.operations.OperationsViewModel
+import com.claudewebui.app.ui.screens.settings.ConnectionsViewModel
 import com.claudewebui.app.ui.screens.settings.IntegrationsViewModel
 import com.claudewebui.app.ui.screens.settings.SettingsViewModel
 import org.koin.android.ext.koin.androidContext
@@ -101,4 +102,9 @@ val viewModelModule = module {
 
     // IntegrationsViewModel(apiClient)
     viewModel { IntegrationsViewModel(get()) }
+
+    // ConnectionsViewModel(sessionId, connectionsApi, context) — settings pass "" (no session)
+    viewModel { (sessionId: String) ->
+        ConnectionsViewModel(sessionId.takeIf { it.isNotBlank() }, get(), androidContext())
+    }
 }

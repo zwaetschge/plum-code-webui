@@ -107,6 +107,9 @@ sealed class Routes(val route: String) {
     /** ComfyUI / Discord / Home Assistant status and connection probes */
     object SettingsIntegrations : Routes("settings/integrations")
 
+    /** Saved SSH hosts that sessions can attach (Verbindungen) */
+    object SettingsConnections : Routes("settings/connections")
+
     /** Containers, watchdogs, users and the audit log */
     object Operations : Routes("operations")
 

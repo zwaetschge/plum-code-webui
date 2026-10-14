@@ -46,6 +46,7 @@ import {
   Square,
   ChevronDown,
   Smartphone,
+  Server as ServerIcon,
   Network,
   Link2,
   SendHorizontal,
@@ -102,6 +103,7 @@ import { designLabel, useStyleLibrary } from '@/components/presets/useStyleLibra
 import { ToolLogPanel } from '@/components/session/ToolLogPanel';
 import { VersionsPanel, type VersionsTab } from '@/components/session/VersionsPanel';
 import { ConnectionsPanel } from '@/components/session/ConnectionsPanel';
+import { SessionSshPanel } from '@/components/session/SessionSshPanel';
 import { ProgressPanel } from '@/components/session/ProgressPanel';
 import { SessionGoalBar } from '@/components/session/SessionGoalBar';
 import { Notepad } from '@/components/notepad';
@@ -3737,6 +3739,12 @@ export function SessionPage() {
               icon: <Smartphone className="h-3.5 w-3.5" />,
               summary: session.androidDeviceSerial ? 'Gerät angehängt' : undefined,
               content: <AndroidDevicePanel sessionId={session.id} />,
+            },
+            {
+              id: 'ssh',
+              title: 'SSH-Hosts',
+              icon: <ServerIcon className="h-3.5 w-3.5" />,
+              content: <SessionSshPanel sessionId={session.id} />,
             },
             {
               id: 'browser',

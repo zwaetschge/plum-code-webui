@@ -11,7 +11,7 @@
     <string name="session_tool_preview">Vorschau</string>
     <string name="session_tool_preview_running">Dev-Server läuft</string>
     <string name="session_tool_connections">Verbindungen</string>
-    <string name="session_tool_connections_hint">Android-Geräte · Browser</string>
+    <string name="session_tool_connections_hint">Android-Geräte · SSH-Hosts · Browser</string>
     <string name="session_tool_github">GitHub</string>
     <string name="session_tool_android_devices">Android-Geräte</string>
     <string name="session_tool_browser">Browser</string>

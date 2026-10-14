@@ -79,6 +79,8 @@ import opencodeRoutes from './routes/opencode.js';
 import setupRoutes from './routes/setup.js';
 import gatewayRoutes from './routes/gateway.js';
 import browserBridgeRoutes from './routes/browserBridge.js';
+import connectionsRoutes, { sessionConnectionsRouter } from './routes/connections.js';
+import { resetSessionSshBundles } from './services/connections/sshRuntime.js';
 import { browserBridge } from './services/browserBridge/bridge.js';
 import memoriesRoutes from './routes/memories.js';
 import androidRoutes from './routes/android.js';
@@ -272,6 +274,8 @@ async function main() {
     await getProcessManager().stopSession(id, userId);
   });
   await startAssistantCoordinator();
+  // Materialized SSH keys belong to session processes, none of which survive a restart.
+  await resetSessionSshBundles();
   // Firefox extension relay; its own upgrade path and token auth.
   browserBridge.attach(httpServer);
   attachNotificationIo(io);
@@ -429,7 +433,9 @@ async function main() {
   // Routes
   app.use('/auth', authRoutes);
   app.use('/api/basic-auth', basicAuthRoutes);
+  app.use('/api/sessions', sessionConnectionsRouter);
   app.use('/api/sessions', sessionRoutes);
+  app.use('/api/connections', connectionsRoutes);
   app.use('/api/assistant', assistantRoutes);
   app.use('/published', publicationRoutes);
   app.use('/api/office', officeRoutes);

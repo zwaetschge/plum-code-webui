@@ -19,6 +19,8 @@ import com.claudewebui.app.core.network.api.CheckpointsApi
 import com.claudewebui.app.core.network.api.CheckpointsApiImpl
 import com.claudewebui.app.core.network.api.ConfigLibraryApi
 import com.claudewebui.app.core.network.api.ConfigLibraryApiImpl
+import com.claudewebui.app.core.network.api.ConnectionsApi
+import com.claudewebui.app.core.network.api.ConnectionsApiImpl
 import com.claudewebui.app.core.network.api.FilesApi
 import com.claudewebui.app.core.network.api.FilesApiImpl
 import com.claudewebui.app.core.network.api.GatewayApi
@@ -91,6 +93,8 @@ val networkModule = module {
     single<OracleBrowserApi> { OracleBrowserApiImpl(get()) }
     single<AndroidDevicesApi> { AndroidDevicesApiImpl(get()) }
     single<WorkspaceApi> { WorkspaceApiImpl(get()) }
+    // Injected directly by ConnectionsViewModel; not part of the ApiClient facade.
+    single<ConnectionsApi> { ConnectionsApiImpl(get()) }
 
     /**
      * The facade every repository and ViewModel injects. Composed from the

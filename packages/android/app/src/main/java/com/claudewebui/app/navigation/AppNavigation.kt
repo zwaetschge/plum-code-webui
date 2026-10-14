@@ -56,6 +56,7 @@ import com.claudewebui.app.ui.screens.settings.CliToolsScreen
 import com.claudewebui.app.ui.screens.filemanager.FileEditorScreen
 import com.claudewebui.app.ui.screens.notes.NotesScreen
 import com.claudewebui.app.ui.screens.settings.IntegrationsScreen
+import com.claudewebui.app.ui.screens.settings.ConnectionsScreen
 import com.claudewebui.app.ui.screens.operations.OperationsScreen
 import com.claudewebui.app.ui.screens.devtools.DevToolsScreen
 import com.claudewebui.app.ui.screens.memory.MemoryScreen
@@ -420,6 +421,9 @@ fun AppNavigation(
                     onNavigateToIntegrations = {
                         navController.navigate(Routes.SettingsIntegrations.route)
                     },
+                    onNavigateToConnections = {
+                        navController.navigate(Routes.SettingsConnections.route)
+                    },
                     onNavigateToOperations = { navController.navigate(Routes.Operations.route) },
                     onLoggedOut = {
                         socketManager.disconnect()
@@ -477,6 +481,13 @@ fun AppNavigation(
             composable(route = Routes.SettingsIntegrations.route) {
                 IntegrationsScreen(
                     viewModel = koinViewModel(),
+                    onNavigateBack = { navController.popBackStack() },
+                )
+            }
+
+            composable(route = Routes.SettingsConnections.route) {
+                ConnectionsScreen(
+                    viewModel = koinViewModel(parameters = { parametersOf("") }),
                     onNavigateBack = { navController.popBackStack() },
                 )
             }

@@ -704,16 +704,17 @@ export function ApiChatPage() {
                 model={String(chat.body.model)}
                 disabled={!!running || busy}
                 onSelect={(providerId, value) => {
-                  // Without the loaded settings a patch would drop profile and sources.
-                  if (!configuration) return;
-                  const current = configuration;
+                  // Keep profile and sources as stored on the chat; the options dialog
+                  // state is only loaded once it is opened.
+                  const profileId = chat.body.profileId ? String(chat.body.profileId) : null;
+                  const sourceIds = (chat.body.sourceIds ?? []) as string[];
                   void invoke(async () => {
                     await api.patch(`/api/assistant/api-chats/${id}`, {
                       title: chat.title,
                       providerId,
                       model: value,
-                      profileId: current.profile[0] ?? null,
-                      sourceIds: current.sources,
+                      profileId,
+                      sourceIds,
                       expectedRevision: chat.revision,
                     });
                     void cache.invalidateQueries({ queryKey: ['assistant', 'api-chats'] });

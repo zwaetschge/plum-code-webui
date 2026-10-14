@@ -26,6 +26,7 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  Cable,
   Zap,
   AlertCircle,
   Loader2,
@@ -116,6 +117,7 @@ import { HomeAssistantSettingsCard } from '@/components/integrations/HomeAssista
 import { CliDeviceLoginDialog } from '@/components/settings/CliDeviceLoginDialog';
 import { GatewayTokensPanel } from '@/components/settings/GatewayTokensPanel';
 import { FirefoxBrowserPanel } from '@/components/settings/FirefoxBrowserPanel';
+import { SshConnectionsPanel } from '@/components/settings/SshConnectionsPanel';
 import { SubagentUpstreamsSection } from '@/components/settings/SubagentUpstreamsSection';
 import { CliSubagentsSection } from '@/components/settings/CliSubagentsSection';
 import { ProviderLoginsPanel } from '@/components/settings/ProviderLoginsPanel';
@@ -273,6 +275,7 @@ type SettingsTab =
   | 'security'
   | 'api-keys'
   | 'integrations'
+  | 'connections'
   | 'diagnostics'
   | 'extensions'
   | 'admin';
@@ -296,6 +299,7 @@ type SettingsDestination =
   | 'agents'
   | 'extensions'
   | 'integrations'
+  | 'connections'
   | 'usage'
   | 'security'
   | 'system'
@@ -359,6 +363,7 @@ const SETTINGS_TABS = new Set<SettingsTab>([
   'security',
   'api-keys',
   'integrations',
+  'connections',
   'diagnostics',
   'extensions',
   'admin',
@@ -548,6 +553,16 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
       { id: 'comfyui-integration', label: 'ComfyUI' },
       { id: 'discord-integration', label: 'Discord' },
     ],
+  },
+  {
+    value: 'connections',
+    tab: 'connections',
+    group: 'Services',
+    label: 'Verbindungen',
+    description: 'SSH-Hosts für Agenten, mit Test und Schlüsselwahl',
+    icon: Cable,
+    keywords: ['ssh', 'server', 'host', 'jump', 'key', 'schlüssel'],
+    sections: [{ id: 'ssh-connections', label: 'SSH-Hosts' }],
   },
   {
     value: 'usage',
@@ -3949,6 +3964,21 @@ export function SettingsPage() {
                     </CardContent>
                   </Card>
                 </section>
+              </TabsContent>
+
+              {/* Connections Tab */}
+              <TabsContent value="connections" className="settings-pane-rail mt-0">
+                <div className="settings-pane-column">
+                  <section id="ssh-connections">
+                    <SettingsPanel
+                      eyebrow="Verbindungen"
+                      title="SSH-Hosts"
+                      description="Hosts, die du an Sessions hängen kannst. Der Agent der Session erreicht sie dann über einen Alias (ssh -F $PLUM_SSH_CONFIG <alias>). Schlüssel werden nie angezeigt."
+                    >
+                      <SshConnectionsPanel />
+                    </SettingsPanel>
+                  </section>
+                </div>
               </TabsContent>
 
               {/* Integrations Tab */}
