@@ -204,14 +204,6 @@ export function Layout() {
     location.pathname.startsWith('/assistant/') ||
     location.pathname === '/swarm' ||
     location.pathname.startsWith('/collaborate');
-  const sessionSurfaceFilter =
-    activeSession?.surface === 'task' ||
-    location.pathname === '/tasks' ||
-    location.pathname === '/assistant/tasks'
-      ? 'task'
-      : isChatRoute || activeSession?.surface === 'chat' || (assistantSurface && !activeSession)
-        ? 'chat'
-        : 'code';
   const headerTitle =
     activeSession?.name ??
     (isChatRoute
@@ -297,8 +289,6 @@ export function Layout() {
         {isDesktopLayout && (
           <div className="hidden md:block relative z-10">
             <Sidebar
-              surface={sessionSurfaceFilter}
-              navigationOnly={location.pathname === '/'}
               contextUsage={isFullBleed ? headerUsage : undefined}
               contextStats={headerContextStats}
               contextSession={activeSession}
@@ -316,7 +306,6 @@ export function Layout() {
             )}
           >
             <Sidebar
-              surface={sessionSurfaceFilter}
               onNavigate={handleNavigation}
               mobile
               contextUsage={isFullBleed ? headerUsage : undefined}

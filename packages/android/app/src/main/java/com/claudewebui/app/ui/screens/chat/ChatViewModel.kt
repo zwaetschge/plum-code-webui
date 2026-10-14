@@ -797,6 +797,13 @@ class ChatViewModel(
     fun setMode(mode: SessionMode) {
         socketManager.setMode(sessionId, mode)
         _uiState.update { it.copy(sessionMode = mode, settingsNotice = appContext.getString(R.string.chat_mode_set, mode.localizedLabel(appContext))) }
+        // Same as the WebUI: the socket switches the live run, the PATCH keeps
+        // the choice on the session row for the next load and other devices.
+        viewModelScope.launch {
+            sessionRepository.setMode(sessionId, mode).onFailure { error ->
+                android.util.Log.w("ChatViewModel", "Failed to persist session mode", error)
+            }
+        }
     }
 
     fun loadAllowedDirectories() {

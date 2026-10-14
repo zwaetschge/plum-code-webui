@@ -13422,63 +13422,202 @@ html.eink ::selection {
 .app-sidebar-unified:has(.sidebar-refined-header.is-collapsed) {
   width: 64px;
 }
-.app-sidebar-unified .sidebar-primary-links {
+/* Zone ①: mode pill (Chat · Task · Code · Schwarm). */
+.sidebar-mode-pill {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 2px;
+  padding: 3px;
+  margin: 2px 0 4px;
+  border-radius: 999px;
+  background: hsl(var(--foreground) / 0.06);
 }
-.app-sidebar-unified .sidebar-primary-links .sidebar-nav-item {
-  padding-inline: 10px;
-  gap: 8px;
-  font-size: 12px;
-}
-.app-sidebar-unified:has(.sidebar-refined-header.is-collapsed) .sidebar-primary-links {
+.sidebar-mode-pill.is-collapsed {
   grid-template-columns: 1fr;
+  border-radius: 12px;
 }
-.sidebar-view-switch {
-  display: flex;
-  flex-shrink: 0;
-  gap: 4px;
-  padding: 10px 0;
-}
-.sidebar-view-switch button {
-  flex: 1;
+.sidebar-mode-pill-item {
   display: inline-flex;
-  gap: 6px;
   align-items: center;
   justify-content: center;
-  min-height: 40px;
-  border-radius: 8px;
+  gap: 5px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 6px;
+  border-radius: 999px;
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
-}
-.sidebar-view-switch button[aria-selected='true'] {
-  background: hsl(var(--primary) / 0.14);
-  color: hsl(var(--foreground));
-}
-.sidebar-view-switch.is-collapsed {
-  flex-direction: column;
-}
-.sidebar-view-switch.is-collapsed button {
-  flex: none;
-}
-.sidebar-session-tools {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.sidebar-session-tools.hidden {
-  display: none;
-}
-.sidebar-tools-session-name {
-  flex-shrink: 0;
-  padding: 4px 8px 10px;
-  font-size: 13px;
   font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+.sidebar-mode-pill-item > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.sidebar-mode-pill-item:hover {
+  color: hsl(var(--foreground));
+}
+.sidebar-mode-pill-item.is-active {
+  background: hsl(var(--primary) / 0.18);
+  color: hsl(var(--foreground));
+}
+.sidebar-mode-pill.is-collapsed .sidebar-mode-pill-item {
+  border-radius: 10px;
+}
+.app-sidebar-mobile .sidebar-mode-pill-item {
+  min-height: 44px;
+}
+.sidebar-new-item {
+  margin-bottom: 2px;
+}
+/* Zone ②: task filters, swarm block, session tools. */
+.sidebar-task-filters {
+  display: flex;
+  gap: 4px;
+  padding: 0 2px;
+}
+.sidebar-task-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--foreground) / 0.05);
+}
+.sidebar-task-filter.is-active {
+  color: hsl(var(--foreground));
+  background: hsl(var(--primary) / 0.18);
+}
+.sidebar-task-filter.is-needs-you.is-active {
+  background: hsl(38 92% 52% / 0.2);
+}
+.sidebar-task-filter-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.app-sidebar-mobile .sidebar-task-filter {
+  min-height: 40px;
+}
+.sidebar-swarm-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sidebar-swarm-agent {
+  cursor: default;
+}
+.sidebar-swarm-agent .sidebar-session-run-dot.is-visible {
+  display: block;
+}
+.sidebar-swarm-emergency {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  margin: 8px 4px 0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: hsl(0 0% 100%);
+  background: hsl(0 72% 48%);
+}
+.sidebar-swarm-emergency:hover {
+  background: hsl(0 72% 42%);
+}
+.sidebar-swarm-emergency.is-collapsed {
+  margin-inline: 0;
+}
+.sidebar-tools-block {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 58%;
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  border-top: 1px solid hsl(var(--foreground) / 0.08);
+}
+.sidebar-tools-block.hidden {
+  display: none;
+}
+.sidebar-tools-block:not(.is-open) {
+  flex: none;
+}
+.sidebar-tools-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: hsl(var(--foreground));
+}
+.sidebar-tools-toggle:hover {
+  background: hsl(var(--foreground) / 0.05);
+}
+.sidebar-tools-toggle-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+.sidebar-tools-chevron {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+  transition: transform 160ms ease;
+}
+.sidebar-tools-chevron.is-collapsed {
+  transform: rotate(-90deg);
+}
+.sidebar-tools-toggle .sidebar-session-run-dot {
+  margin-left: 0;
+}
+.sidebar-tools-session-name {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: hsl(var(--muted-foreground));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Zone ③: global pages as one icon row; narrow sidebar uses "Mehr". */
+.sidebar-global-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 2px 2px 4px;
+}
+.sidebar-global-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  border-radius: 8px;
+  color: hsl(var(--muted-foreground));
+}
+.sidebar-global-item:hover {
+  background: hsl(var(--foreground) / 0.06);
+  color: hsl(var(--foreground));
+}
+.sidebar-global-item.is-active {
+  background: hsl(var(--primary) / 0.14);
+  color: hsl(var(--foreground));
+}
+.app-sidebar-mobile .sidebar-global-item {
+  height: 44px;
+}
+.sidebar-global-more {
+  gap: 2px;
+  width: 100%;
 }
 .sidebar-session-tools-slot {
   overflow-y: auto;
@@ -13486,6 +13625,9 @@ html.eink ::selection {
   min-height: 0;
   flex: 1;
   padding: 0 4px 12px;
+}
+.sidebar-session-tools-slot.hidden {
+  display: none;
 }
 .sidebar-session-tools-slot .session-side-menu-group {
   margin: 4px 0 8px;
@@ -13495,9 +13637,6 @@ html.eink ::selection {
 }
 .sidebar-session-tools-slot .session-side-menu-group-trigger {
   width: 100%;
-}
-.app-sidebar-mobile .sidebar-view-switch button {
-  min-height: 44px;
 }
 .session-content-dock {
   padding: 8px 8px 8px 0;
@@ -13518,8 +13657,9 @@ html.eink ::selection {
   flex: 1;
 }
 @media (max-height: 560px) {
-  .app-sidebar-unified .sidebar-session-tools:not(.hidden) {
+  .app-sidebar-unified .sidebar-tools-block.is-open {
     flex: none;
+    max-height: none;
     height: 60dvh;
     min-height: 240px;
   }

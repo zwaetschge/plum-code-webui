@@ -104,7 +104,7 @@ export function visibleMatrixMessages(events: Event[]): Event[] {
 export function SwarmPage() {
   const account = useAuthStore((state) => state.user?.id);
   const cache = useQueryClient();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const [roomId, setRoomId] = useState(params.get('room') ?? '');
   const [threadId, setThreadId] = useState<string | undefined>(params.get('thread') ?? undefined);
   const importStop = useRef(false);
@@ -171,6 +171,33 @@ export function SwarmPage() {
     }
     setText(command);
   };
+  // Sidebar links change `?room=` while this page stays mounted.
+  // The initial `?room=`/`?thread=` pair is already in state, so only later changes apply.
+  const roomParam = params.get('room');
+  const appliedRoomParam = useRef(roomParam);
+  useEffect(() => {
+    if (!roomParam || roomParam === appliedRoomParam.current) return;
+    appliedRoomParam.current = roomParam;
+    setRoomId(roomParam);
+    setThreadId(undefined);
+  }, [roomParam]);
+  // The sidebar Not-Aus only prepares the stop command; sending it stays a
+  // deliberate second step with the usual order delay.
+  const prepareParam = params.get('prepare');
+  const prepareRef = useRef(prepareCommand);
+  prepareRef.current = prepareCommand;
+  useEffect(() => {
+    if (prepareParam !== 'stop' || !rooms.data) return;
+    prepareRef.current('!stop');
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete('prepare');
+        return next;
+      },
+      { replace: true }
+    );
+  }, [prepareParam, rooms.data, setParams]);
   const allEvents = useMemo(
     () =>
       Array.from(

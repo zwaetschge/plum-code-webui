@@ -14,6 +14,7 @@ import com.claudewebui.app.data.model.Session
 import com.claudewebui.app.data.model.StyleKind
 import com.claudewebui.app.data.model.SessionChatList
 import com.claudewebui.app.data.model.SessionLifecycleEvent
+import com.claudewebui.app.data.model.SessionMode
 import com.claudewebui.app.data.model.SessionStatus
 import com.claudewebui.app.data.model.SwitchProviderInput
 import com.claudewebui.app.data.model.UpdateSessionInput
@@ -293,6 +294,24 @@ class SessionRepository(
         }
         dao.insert(response.data.toEntity())
         response.data
+    }
+
+    /**
+     * Persist the permission mode so it survives app restarts and other clients.
+     * The socket event stays the runtime signal; this only writes the row.
+     */
+    suspend fun setMode(id: String, mode: SessionMode): Result<Unit> = apiCall {
+        val wire = when (mode) {
+            SessionMode.PLANNING -> "planning"
+            SessionMode.AUTO_ACCEPT -> "auto-accept"
+            SessionMode.MANUAL -> "manual"
+            SessionMode.DANGER -> "danger"
+        }
+        val response = api.setSessionMode(id, wire)
+        if (!response.success) {
+            error(response.error?.message ?: "Failed to set mode")
+        }
+        dao.getByIdOnce(id)?.let { dao.update(it.copy(mode = mode.name)) }
     }
 
     /** Toggle Codex's Fast service tier; independent of the reasoning level. */

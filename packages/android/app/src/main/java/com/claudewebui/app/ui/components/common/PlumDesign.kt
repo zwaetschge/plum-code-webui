@@ -41,6 +41,7 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -154,6 +155,18 @@ enum class MainDestination(
     SETTINGS(R.string.component_settings, Icons.Outlined.Settings);
 
     val label: String @Composable get() = stringResource(labelRes)
+
+    /**
+     * Same grouping as the WebUI sidebar: the work area first (its Chat · Task ·
+     * Code · Schwarm pill lives inside [SESSIONS]), then the global pages, then
+     * settings. Rail and "Mehr" menu draw a divider where the group changes.
+     */
+    val navGroup: Int
+        get() = when (this) {
+            SESSIONS -> 0
+            SETTINGS -> 2
+            else -> 1
+        }
 }
 
 /**
@@ -641,7 +654,14 @@ fun PlumNavRail(
             ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            MainDestination.entries.forEach { destination ->
+            MainDestination.entries.forEachIndexed { index, destination ->
+                if (index > 0 && MainDestination.entries[index - 1].navGroup != destination.navGroup) {
+                    HorizontalDivider(
+                        modifier = Modifier.fillMaxWidth(0.6f).padding(vertical = tokens.spacing.xxs),
+                        thickness = tokens.border.hairline,
+                        color = PlumMuted.copy(alpha = 0.3f),
+                    )
+                }
                 val active = destination == selected
                 Column(
                     modifier = Modifier
@@ -933,7 +953,8 @@ fun PlumBottomBar(
                 if (!compact) Text(more, style = MaterialTheme.typography.labelSmall, color = PlumMuted, maxLines = 1)
             }
             DropdownMenu(expanded, { expanded = false }) {
-                secondary.forEach { destination ->
+                secondary.forEachIndexed { index, destination ->
+                    if (index > 0 && secondary[index - 1].navGroup != destination.navGroup) HorizontalDivider()
                     DropdownMenuItem(text = { Text(destination.label) }, leadingIcon = { Icon(destination.icon, null) },
                         onClick = { expanded = false; onNavigate(destination) })
                 }

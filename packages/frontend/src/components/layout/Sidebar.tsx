@@ -1,16 +1,24 @@
 import { ChatSidebarResources } from './ChatSidebarResources';
-import { Inbox, LayoutGrid, MessageSquare, ListTodo, Code2, Bot } from 'lucide-react';
+import { SwarmSidebarSection } from './SwarmSidebarSection';
+import { Inbox, MessageSquare, ListTodo, Code2, Bot, Network } from 'lucide-react';
 import { SessionSurfaceMenuItem } from '@/components/session/SessionSurfaceMenuItem';
 import { sessionSurface } from '@/lib/sessionSurface';
+import {
+  SIDEBAR_MODE_HOME,
+  readRememberedSidebarMode,
+  rememberSidebarMode,
+  routeSidebarMode,
+  type SidebarMode,
+} from '@/lib/sidebarMode';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import {
   LayoutDashboard,
+  LayoutGrid,
   PanelLeftClose,
   PanelLeftOpen,
   Wrench,
-  List,
   Settings,
   Star,
   BarChart3,
@@ -33,9 +41,8 @@ import {
   Loader2,
   ServerCog,
   Plus,
-  SlidersHorizontal,
 } from 'lucide-react';
-import { useSessionMenu, type NavigationView } from './SessionMenuContext';
+import { useSessionMenu } from './SessionMenuContext';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -64,25 +71,38 @@ import {
 import type { ApiResponse, Session } from '@plum-code-webui/shared';
 import type { UsageData } from '@plum-code-webui/shared';
 
-const baseNavItems = [
-  { icon: LayoutDashboard, label: 'Übersicht', path: '/' },
-  { icon: MessageSquare, label: 'Plum Chat', path: '/chat' },
-  { icon: ListTodo, label: 'Plum Task', path: '/tasks' },
-  { icon: Code2, label: 'Plum Code', path: '/code' },
-  { icon: Bot, label: 'Agenten', path: '/assistant/agents' },
-  { icon: Inbox, label: 'Schwarm', path: '/swarm' },
-  { icon: LayoutGrid, label: 'Monitor', path: '/monitor' },
-  { icon: BarChart3, label: 'Analytics', path: '/analytics' },
-  { icon: ServerCog, label: 'Operations', path: '/operations' },
-  { icon: Settings, label: 'General Settings', path: '/settings' },
+/** Zone ①: the work modes. The route decides which one is active. */
+const MODE_ITEMS: { mode: SidebarMode; label: string; icon: typeof Code2 }[] = [
+  { mode: 'chat', label: 'Chat', icon: MessageSquare },
+  { mode: 'task', label: 'Task', icon: ListTodo },
+  { mode: 'code', label: 'Code', icon: Code2 },
+  { mode: 'swarm', label: 'Schwarm', icon: Network },
 ];
+
+/** Zone ③: pages that belong to no mode. `path: null` opens the outbox panel. */
+const GLOBAL_ITEMS: { label: string; path: string | null; icon: typeof Code2 }[] = [
+  { label: 'Übersicht', path: '/', icon: LayoutDashboard },
+  { label: 'Agenten', path: '/assistant/agents', icon: Bot },
+  { label: 'Monitor', path: '/monitor', icon: LayoutGrid },
+  { label: 'Analytics', path: '/analytics', icon: BarChart3 },
+  { label: 'Outbox', path: null, icon: Inbox },
+  { label: 'Operations', path: '/operations', icon: ServerCog },
+];
+
+const NEW_ITEM: Record<Exclude<SidebarMode, 'swarm'>, { label: string; path: string }> = {
+  chat: { label: 'Neuer Chat', path: '/chat' },
+  task: { label: 'Neue Aufgabe', path: '/tasks?new=true' },
+  code: { label: 'Neue Session', path: '/code?new=true' },
+};
+
+type TaskFilter = 'all' | 'working' | 'needs-you';
 
 type SortMode = 'updated' | 'created' | 'name';
 
 const SORT_OPTIONS: { value: SortMode; label: string; icon: typeof Clock }[] = [
-  { value: 'updated', label: 'Recently active', icon: Clock },
-  { value: 'created', label: 'Newest', icon: CalendarPlus },
-  { value: 'name', label: 'Name (A-Z)', icon: ArrowDownAZ },
+  { value: 'updated', label: 'Zuletzt aktiv', icon: Clock },
+  { value: 'created', label: 'Neueste', icon: CalendarPlus },
+  { value: 'name', label: 'Name (A–Z)', icon: ArrowDownAZ },
 ];
 
 const COLOR_VALUES: Record<string, string> = {
@@ -101,10 +121,8 @@ const FAVORITES_GROUP_ID = '__favorites__';
 const RECENT_GROUP_ID = '__recent__';
 
 interface SidebarProps {
-  surface?: 'code' | 'task' | 'chat';
   onNavigate?: () => void;
   mobile?: boolean;
-  navigationOnly?: boolean;
   contextUsage?: UsageData;
   contextStats?: {
     contextSnapshots: number;
@@ -114,16 +132,13 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  surface = 'code',
   onNavigate,
   mobile,
-  navigationOnly = false,
   contextUsage,
   contextStats,
   contextSession,
 }: SidebarProps) {
   const location = useLocation();
-  const surfaceHome = surface === 'chat' ? '/chat' : surface === 'task' ? '/tasks' : '/code';
   const sessionMenu = useSessionMenu();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -173,6 +188,9 @@ export function Sidebar({
     return () => window.removeEventListener('plum:expand-navigation', expand);
   }, []);
   const [searchQuery, setSearchQuery] = useState('');
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>('all');
+  const [toolsOpen, setToolsOpen] = useState(true);
+  const toolsBlockRef = useRef<HTMLElement>(null);
   const [sortMode, setSortMode] = useState<SortMode>('updated');
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<Record<string, boolean>>({});
   const [collapsedSessionFlyout, setCollapsedSessionFlyout] = useState<{
@@ -191,7 +209,7 @@ export function Sidebar({
   const [editName, setEditName] = useState('');
   const [iconUploadSessionId, setIconUploadSessionId] = useState<string | null>(null);
   const [iconBusySessionId, setIconBusySessionId] = useState<string | null>(null);
-  const isCollapsed = mobile ? false : navigationOnly ? true : collapsed;
+  const isCollapsed = mobile ? false : collapsed;
 
   useEffect(() => {
     fetchCategories();
@@ -215,9 +233,49 @@ export function Sidebar({
         : null,
     [activeId, contextSession, sessions]
   );
+  // Zone ①: the route decides the mode; global pages keep the last one used.
+  const routeMode = routeSidebarMode(location.pathname, activeSession);
+  const [rememberedMode, setRememberedMode] = useState<SidebarMode>(readRememberedSidebarMode);
+  useEffect(() => {
+    if (!routeMode || routeMode === rememberedMode) return;
+    setRememberedMode(routeMode);
+    rememberSidebarMode(routeMode);
+  }, [rememberedMode, routeMode]);
+  const mode: SidebarMode = routeMode ?? rememberedMode;
+  const surfaceHome = SIDEBAR_MODE_HOME[mode];
+
+  // Requests for the session tools (mobile header, keyboard shortcuts) open
+  // the tools block instead of switching a tab.
+  useEffect(() => {
+    if (sessionMenu.view === 'tools') setToolsOpen(true);
+  }, [sessionMenu.view]);
+  useEffect(() => {
+    const reveal = () => {
+      setToolsOpen(true);
+      window.requestAnimationFrame(() =>
+        toolsBlockRef.current?.scrollIntoView({ block: 'nearest' })
+      );
+    };
+    window.addEventListener('plum:expand-navigation', reveal);
+    return () => window.removeEventListener('plum:expand-navigation', reveal);
+  }, []);
+
+  const runStateOf = (session: Session) =>
+    getSessionRunState(session, {
+      activity: activity[session.id],
+      activeAgent: activeAgent[session.id],
+      agentRuns: agentRuns[session.id],
+      streamingContent: streamingSessionIds.includes(session.id) ? 'streaming' : undefined,
+      tools: toolExecutions[session.id],
+      queue: queueState[session.id],
+      lifecycle: lifecycle[session.id],
+      pendingApprovals: pendingApprovalCounts[session.id],
+    });
+
   const filteredSessions = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    let list = sessions.filter((session) => sessionSurface(session) === surface);
+    if (mode === 'swarm') return [];
+    let list = sessions.filter((session) => sessionSurface(session) === mode);
 
     if (q) {
       list = list.filter(
@@ -225,6 +283,22 @@ export function Sidebar({
           s.name.toLowerCase().includes(q) ||
           s.workingDirectory.toLowerCase().includes(q) ||
           (s.lastMessage ?? '').toLowerCase().includes(q)
+      );
+    }
+
+    if (mode === 'task' && taskFilter !== 'all') {
+      list = list.filter(
+        (session) =>
+          getSessionRunState(session, {
+            activity: activity[session.id],
+            activeAgent: activeAgent[session.id],
+            agentRuns: agentRuns[session.id],
+            streamingContent: streamingSessionIds.includes(session.id) ? 'streaming' : undefined,
+            tools: toolExecutions[session.id],
+            queue: queueState[session.id],
+            lifecycle: lifecycle[session.id],
+            pendingApprovals: pendingApprovalCounts[session.id],
+          }).tone === taskFilter
       );
     }
 
@@ -274,13 +348,14 @@ export function Sidebar({
     activity,
     agentRuns,
     lifecycle,
+    mode,
     pendingApprovalCounts,
     queueState,
     searchQuery,
     sessions,
-    surface,
     sortMode,
     streamingSessionIds,
+    taskFilter,
     toolExecutions,
   ]);
 
@@ -314,7 +389,7 @@ export function Sidebar({
     if (favoriteSessions.length > 0) {
       priorityGroups.push({
         id: FAVORITES_GROUP_ID,
-        label: 'Favorites',
+        label: 'Favoriten',
         sessions: favoriteSessions,
         hasWorking: getHasWorking(favoriteSessions),
       });
@@ -331,7 +406,7 @@ export function Sidebar({
     if (recentSessions.length > 0) {
       priorityGroups.push({
         id: RECENT_GROUP_ID,
-        label: 'Recent Sessions',
+        label: 'Zuletzt',
         sessions: recentSessions,
         hasWorking: getHasWorking(recentSessions),
       });
@@ -365,7 +440,7 @@ export function Sidebar({
     if (uncategorized.length > 0) {
       groups.push({
         id: UNCATEGORIZED_GROUP_ID,
-        label: 'Uncategorized',
+        label: 'Ohne Kategorie',
         sessions: uncategorized,
         hasWorking: getHasWorking(uncategorized),
       });
@@ -629,10 +704,11 @@ export function Sidebar({
     setCollapsedCategoryIds((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
   };
 
-  const getCategoryAbbreviation = (label: string) => {
-    if (label === 'Favorites') return '★';
-    if (label === 'Recent Sessions') return 'R';
-    if (label === 'Uncategorized') return '•';
+  const getCategoryAbbreviation = (group: { id: string; label: string }) => {
+    if (group.id === FAVORITES_GROUP_ID) return '★';
+    if (group.id === RECENT_GROUP_ID) return 'Z';
+    if (group.id === UNCATEGORIZED_GROUP_ID) return '•';
+    const label = group.label;
     const initials = label
       .trim()
       .split(/\s+/)
@@ -681,7 +757,8 @@ export function Sidebar({
   };
 
   const renderSessionRow = (session: Session) => {
-    const isActive = location.pathname === `/session/${session.id}`;
+    const isActive = activeId === session.id;
+    const isChatSession = sessionSurface(session) === 'chat';
     const isEditing = editingId === session.id;
     const sessionProviderLabel = session.cliProvider
       ? CLI_PROVIDER_LABEL[session.cliProvider] || session.cliProvider
@@ -744,13 +821,13 @@ export function Sidebar({
         onBlur={() => hideCollapsedSessionFlyout(session.id)}
       >
         <Link
-          to={surface === 'chat' ? `/chat/session/${session.id}` : `/session/${session.id}`}
+          to={isChatSession ? `/chat/session/${session.id}` : `/session/${session.id}`}
           title={`${session.name} · ${sessionRunState.detail}`}
           aria-current={isActive ? 'page' : undefined}
           onClick={handleLinkClick}
           aria-label={
             isCollapsed
-              ? `${session.name}${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`
+              ? `${session.name}${unreadCount > 0 ? `, ${unreadCount} ungelesen` : ''}`
               : undefined
           }
           className={cn(
@@ -784,7 +861,7 @@ export function Sidebar({
               {unreadCount > 0 && (
                 <span
                   className="sidebar-session-unread"
-                  aria-label={`${unreadCount} unread ${unreadCount === 1 ? 'message' : 'messages'}`}
+                  aria-label={`${unreadCount} ${unreadCount === 1 ? 'ungelesene Nachricht' : 'ungelesene Nachrichten'}`}
                 >
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
@@ -805,8 +882,8 @@ export function Sidebar({
               <button
                 className="sidebar-session-options"
                 onClick={(e) => e.stopPropagation()}
-                title="Session options"
-                aria-label={`Options for ${session.name}`}
+                title="Session-Optionen"
+                aria-label={`Optionen für ${session.name}`}
               >
                 <MoreHorizontal className="h-3.5 w-3.5" />
               </button>
@@ -816,7 +893,7 @@ export function Sidebar({
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => startRename(session)} className="cursor-pointer">
                 <Pencil className="mr-2 h-3.5 w-3.5" />
-                Rename
+                Umbenennen
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => handleToggleStar(session.id, session.starred)}
@@ -828,12 +905,12 @@ export function Sidebar({
                     session.starred && 'fill-amber-500 text-amber-500'
                   )}
                 />
-                {session.starred ? 'Unstar' : 'Star'}
+                {session.starred ? 'Favorit entfernen' : 'Als Favorit'}
               </DropdownMenuItem>
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger className="cursor-pointer">
                   <ImageIcon className="mr-2 h-3.5 w-3.5" />
-                  Icon
+                  Symbol
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="w-52">
                   <DropdownMenuItem
@@ -849,7 +926,7 @@ export function Sidebar({
                     ) : (
                       <Sparkles className="mr-2 h-3.5 w-3.5" />
                     )}
-                    {iconBusySessionId === session.id ? 'Generating...' : 'Generate'}
+                    {iconBusySessionId === session.id ? 'Wird erzeugt …' : 'Erzeugen'}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={(event) => {
@@ -860,7 +937,7 @@ export function Sidebar({
                     className="cursor-pointer"
                   >
                     <Upload className="mr-2 h-3.5 w-3.5" />
-                    Upload image
+                    Bild hochladen
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={(event) => {
@@ -871,7 +948,7 @@ export function Sidebar({
                     className="cursor-pointer"
                   >
                     <FolderInput className="mr-2 h-3.5 w-3.5" />
-                    Use project icon
+                    Projektsymbol verwenden
                   </DropdownMenuItem>
                   {session.iconUrl && (
                     <>
@@ -885,7 +962,7 @@ export function Sidebar({
                         className="cursor-pointer"
                       >
                         <RotateCcw className="mr-2 h-3.5 w-3.5" />
-                        Reset icon
+                        Symbol zurücksetzen
                       </DropdownMenuItem>
                     </>
                   )}
@@ -894,7 +971,7 @@ export function Sidebar({
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger className="cursor-pointer">
                   <Folder className="mr-2 h-3.5 w-3.5" />
-                  Category
+                  Kategorie
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="w-48">
                   <DropdownMenuItem
@@ -902,7 +979,7 @@ export function Sidebar({
                     className="cursor-pointer"
                   >
                     <span className="mr-2 h-2.5 w-2.5 rounded-full border border-muted-foreground/40" />
-                    None
+                    Keine
                     {!session.category && <span className="ml-auto text-primary">•</span>}
                   </DropdownMenuItem>
                   {categories.length > 0 && <DropdownMenuSeparator />}
@@ -930,7 +1007,7 @@ export function Sidebar({
                 className="cursor-pointer text-destructive focus:text-destructive"
               >
                 <Trash2 className="mr-2 h-3.5 w-3.5" />
-                Delete
+                Löschen
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -939,35 +1016,30 @@ export function Sidebar({
     );
   };
 
-  const selectNavigationView = (view: NavigationView) => {
-    setCollapsed(false);
-    sessionMenu.setView(view);
-  };
-  const onViewKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  const focusModeItem = (event: KeyboardEvent<HTMLAnchorElement>) => {
+    const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'];
+    if (!keys.includes(event.key)) return;
+    const items = Array.from(
+      event.currentTarget.parentElement?.querySelectorAll<HTMLAnchorElement>('[data-mode]') ?? []
+    );
+    const index = items.indexOf(event.currentTarget);
+    if (index < 0 || !items.length) return;
     event.preventDefault();
     const next =
       event.key === 'Home'
-        ? 'sessions'
+        ? 0
         : event.key === 'End'
-          ? 'tools'
-          : sessionMenu.view === 'tools'
-            ? 'sessions'
-            : 'tools';
-    selectNavigationView(next);
-    event.currentTarget.parentElement
-      ?.querySelector<HTMLButtonElement>(`[data-navigation-view="${next}"]`)
-      ?.focus();
+          ? items.length - 1
+          : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+            ? (index - 1 + items.length) % items.length
+            : (index + 1) % items.length;
+    items[next]?.focus();
   };
-  const viewId = mobile ? 'mobile-navigation' : 'desktop-navigation';
 
-  const renderNavigationItem = (item: (typeof baseNavItems)[number]) => {
+  const renderNavigationItem = (item: { icon: typeof Code2; label: string; path: string }) => {
     const Icon = item.icon;
     const selected =
-      item.path === '/'
-        ? location.pathname === '/'
-        : location.pathname.startsWith(item.path) ||
-          (Boolean(activeId) && item.path === surfaceHome);
+      item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path);
     return (
       <Link
         key={item.path}
@@ -988,35 +1060,165 @@ export function Sidebar({
     );
   };
 
+  const openGlobalItem = (item: (typeof GLOBAL_ITEMS)[number]) => {
+    handleLinkClick();
+    if (item.path) navigate(item.path);
+    else window.dispatchEvent(new Event('plum:open-outbox'));
+  };
+
+  const isGlobalItemActive = (item: (typeof GLOBAL_ITEMS)[number]) =>
+    item.path === '/'
+      ? location.pathname === '/'
+      : item.path !== null && location.pathname.startsWith(item.path);
+
+  const taskCounts = useMemo(() => {
+    const counts = { working: 0, 'needs-you': 0 };
+    if (mode !== 'task') return counts;
+    for (const session of sessions) {
+      if (sessionSurface(session) !== 'task') continue;
+      const tone = getSessionRunState(session, {
+        activity: activity[session.id],
+        activeAgent: activeAgent[session.id],
+        agentRuns: agentRuns[session.id],
+        streamingContent: streamingSessionIds.includes(session.id) ? 'streaming' : undefined,
+        tools: toolExecutions[session.id],
+        queue: queueState[session.id],
+        lifecycle: lifecycle[session.id],
+        pendingApprovals: pendingApprovalCounts[session.id],
+      }).tone;
+      if (tone === 'working' || tone === 'needs-you') counts[tone] += 1;
+    }
+    return counts;
+  }, [
+    activeAgent,
+    activity,
+    agentRuns,
+    lifecycle,
+    mode,
+    pendingApprovalCounts,
+    queueState,
+    sessions,
+    streamingSessionIds,
+    toolExecutions,
+  ]);
+
+  const chatSessions = useMemo(
+    () => (mode === 'chat' ? filteredSessions : []),
+    [filteredSessions, mode]
+  );
+  const newItem = mode === 'swarm' ? null : NEW_ITEM[mode];
+  const showToolsBlock = Boolean(activeId);
+  const activeRunState = activeSession ? runStateOf(activeSession) : null;
+
+  const renderSessionGroups = () =>
+    filteredSessions.length === 0
+      ? !isCollapsed && (
+          <div className="px-3 py-3 text-center">
+            <p className="text-xs text-muted-foreground/70">
+              {searchQuery || taskFilter !== 'all'
+                ? 'Keine Treffer'
+                : mode === 'task'
+                  ? 'Noch keine Aufgaben'
+                  : 'Noch keine Sessions'}
+            </p>
+            {(searchQuery || taskFilter !== 'all') && (
+              <Button
+                variant="link"
+                size="sm"
+                className="text-xs mt-1 h-auto p-0"
+                onClick={() => {
+                  setSearchQuery('');
+                  setTaskFilter('all');
+                }}
+              >
+                Filter zurücksetzen
+              </Button>
+            )}
+          </div>
+        )
+      : sessionGroups.map((group) => {
+          const isGroupCollapsed = searchQuery.trim()
+            ? false
+            : (collapsedCategoryIds[group.id] ?? false);
+          return (
+            <div
+              key={group.id}
+              className={cn(
+                'sidebar-session-group',
+                isCollapsed && 'is-collapsed',
+                group.hasWorking && 'has-working'
+              )}
+            >
+              <button
+                type="button"
+                className={cn('sidebar-session-group-trigger', isCollapsed && 'is-collapsed')}
+                onClick={() => toggleSessionGroup(group.id)}
+                onMouseEnter={(e) => showCollapsedCategoryFlyout(group, e.currentTarget)}
+                onMouseLeave={() => hideCollapsedCategoryFlyout(group.id)}
+                onFocus={(e) => showCollapsedCategoryFlyout(group, e.currentTarget)}
+                onBlur={() => hideCollapsedCategoryFlyout(group.id)}
+                aria-expanded={!isGroupCollapsed}
+                aria-label={isCollapsed ? `${group.label} (${group.sessions.length})` : undefined}
+              >
+                {isCollapsed ? (
+                  <>
+                    <span className="sidebar-session-group-bubble">
+                      {getCategoryAbbreviation(group)}
+                    </span>
+                    <span className="sidebar-session-group-count">{group.sessions.length}</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown
+                      className={cn(
+                        'sidebar-session-group-chevron',
+                        isGroupCollapsed && 'is-collapsed'
+                      )}
+                    />
+                    <span className="sidebar-session-group-title">{group.label}</span>
+                    <span className="sidebar-session-group-count">{group.sessions.length}</span>
+                  </>
+                )}
+              </button>
+              {!isGroupCollapsed && (
+                <div className="sidebar-session-group-items">
+                  {group.sessions.map(renderSessionRow)}
+                </div>
+              )}
+            </div>
+          );
+        });
+
   return (
     <div
       className={cn(
         'app-sidebar-shell app-sidebar-refined flex flex-col h-full transition-all duration-300',
         activeId && 'app-sidebar-unified',
         mobile ? 'app-sidebar-mobile w-full' : '',
-        navigationOnly && !mobile && 'app-sidebar-navigation-only',
         !mobile && (isCollapsed ? 'w-16' : 'w-[272px]')
       )}
+      data-sidebar-mode={mode}
     >
+      {/* Zone ①: brand, notifications and the mode pill. */}
       <div className={cn('sidebar-header sidebar-refined-header', isCollapsed && 'is-collapsed')}>
         <Link
           to={surfaceHome}
           onClick={handleLinkClick}
           className="sidebar-brand"
-          aria-label="Plum home"
-          title="Plum home"
+          aria-label="Plum Startseite"
+          title="Plum Startseite"
         >
           <ProviderLogo provider="plum" className="h-6 w-6 shrink-0 text-primary" />
           {!isCollapsed && <span>Plum</span>}
         </Link>
         {!isCollapsed && <NotificationCenter />}
-        {!mobile && !navigationOnly && (
+        {!mobile && (
           <button
             type="button"
             className="sidebar-collapse-button"
             onClick={() => setCollapsed(!isCollapsed)}
-            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={isCollapsed ? 'Seitenleiste ausklappen' : 'Seitenleiste einklappen'}
+            title={isCollapsed ? 'Seitenleiste ausklappen' : 'Seitenleiste einklappen'}
           >
             {isCollapsed ? (
               <PanelLeftOpen className="h-4 w-4" />
@@ -1028,192 +1230,168 @@ export function Sidebar({
       </div>
 
       <nav
-        aria-label="Main navigation"
-        className="sidebar-main-navigation flex-1 flex flex-col min-h-0 px-2 pt-2 pb-0"
+        aria-label="Hauptnavigation"
+        className="sidebar-main-navigation flex-1 flex flex-col min-h-0 px-2 pt-1 pb-0"
       >
-        <div className="sidebar-primary-links shrink-0">
-          {baseNavItems
-            .filter((item) => !['/operations', '/settings'].includes(item.path))
-            .map(renderNavigationItem)}
-          {/* Notification centre lives with the main navigation: it spans every
-            session rather than belonging to the one currently open. */}
+        <div
+          className={cn('sidebar-mode-pill shrink-0', isCollapsed && 'is-collapsed')}
+          role="group"
+          aria-label="Modus"
+        >
+          {MODE_ITEMS.map((item) => {
+            const Icon = item.icon;
+            const selected = mode === item.mode;
+            return (
+              <Link
+                key={item.mode}
+                to={SIDEBAR_MODE_HOME[item.mode]}
+                data-mode={item.mode}
+                onClick={() => {
+                  setRememberedMode(item.mode);
+                  rememberSidebarMode(item.mode);
+                  handleLinkClick();
+                }}
+                onKeyDown={focusModeItem}
+                aria-current={selected ? (routeMode === item.mode ? 'page' : 'true') : undefined}
+                aria-label={`Plum ${item.label}`}
+                title={item.label}
+                className={cn('sidebar-mode-pill-item', selected && 'is-active')}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {!isCollapsed && <span>{item.label}</span>}
+              </Link>
+            );
+          })}
+        </div>
 
-          <button
-            type="button"
-            aria-label="Outbox"
-            title="Outbox"
-            className={cn(
-              'sidebar-nav-item flex shrink-0 items-center gap-3 px-3 py-2 text-sm font-medium',
-              isCollapsed && 'is-collapsed'
-            )}
-            onClick={() => {
-              handleLinkClick();
-              window.dispatchEvent(new Event('plum:open-outbox'));
-            }}
-          >
-            <Inbox className="h-4 w-4 shrink-0" />
-            {!isCollapsed && <span>Outbox</span>}
-          </button>
-          {surface === 'chat' && (
+        {/* Zone ②: the list of the active mode, then the open session's tools. */}
+        <div className="sidebar-sessions pt-2 flex flex-col flex-1 min-h-0">
+          {newItem && (
             <Link
-              to="/chat"
+              to={newItem.path}
               onClick={handleLinkClick}
-              aria-label="Neuer Chat"
-              title="Neuer Chat"
+              aria-label={newItem.label}
+              title={newItem.label}
               className={cn(
-                'sidebar-nav-item flex items-center gap-3 px-3 py-2 text-sm font-medium',
+                'sidebar-nav-item sidebar-new-item flex shrink-0 items-center gap-3 px-3 py-2 text-sm font-medium',
                 isCollapsed && 'is-collapsed'
               )}
             >
               <Plus className="h-4 w-4 shrink-0" />
-              {!isCollapsed && 'Neuer Chat'}
+              {!isCollapsed && newItem.label}
             </Link>
           )}
-        </div>
 
-        {activeId && (
-          <div
-            className={cn('sidebar-view-switch', isCollapsed && 'is-collapsed')}
-            role="tablist"
-            aria-label="Navigation section"
-          >
-            {(['sessions', 'tools'] as const).map((view) => (
-              <button
-                key={view}
-                type="button"
-                role="tab"
-                data-navigation-view={view}
-                id={`${viewId}-${view}-tab`}
-                aria-controls={`${viewId}-${view}`}
-                aria-selected={sessionMenu.view === view}
-                tabIndex={sessionMenu.view === view ? 0 : -1}
-                title={view === 'sessions' ? 'Sessions' : 'Session tools'}
-                aria-label={view === 'sessions' ? 'Sessions' : 'Session tools'}
-                onClick={() => selectNavigationView(view)}
-                onKeyDown={onViewKeyDown}
-              >
-                {view === 'sessions' ? (
-                  <List className="h-4 w-4" />
-                ) : (
-                  <Wrench className="h-4 w-4" />
-                )}
-                {!isCollapsed && (view === 'sessions' ? 'Sessions' : 'Session tools')}
-              </button>
-            ))}
-          </div>
-        )}
-        {activeId && (
-          <div
-            className={cn(
-              'sidebar-session-tools',
-              (isCollapsed || sessionMenu.view !== 'tools') && 'hidden'
-            )}
-            role="tabpanel"
-            id={`${viewId}-tools`}
-            aria-labelledby={`${viewId}-tools-tab`}
-          >
-            <p className="sidebar-tools-session-name" title={activeSession?.name}>
-              {activeSession?.name}
-            </p>
-            <div
-              ref={mobile ? sessionMenu.setMobileTarget : sessionMenu.setDesktopTarget}
-              className="sidebar-session-tools-slot session-menu-refined"
-            />
-          </div>
-        )}
-
-        {/* Sessions section. The dashboard itself is the primary wide session surface. */}
-        <div
-          className={cn(
-            'sidebar-sessions pt-3 flex flex-col flex-1 min-h-0',
-            (navigationOnly || (activeId && sessionMenu.view !== 'sessions')) && 'hidden'
-          )}
-          role={activeId ? 'tabpanel' : undefined}
-          id={`${viewId}-sessions`}
-          aria-labelledby={activeId ? `${viewId}-sessions-tab` : undefined}
-        >
-          <div
-            className={cn(
-              'flex items-center px-3 py-1.5 shrink-0',
-              isCollapsed ? 'hidden' : 'justify-between'
-            )}
-          >
-            {!isCollapsed && (
+          {mode !== 'swarm' && mode !== 'chat' && !isCollapsed && (
+            <div className="flex items-center justify-between px-3 py-1.5 shrink-0">
               <div className="flex items-center gap-2">
                 <span className="sidebar-section-label">
-                  {surface === 'chat' ? 'Gespräche' : 'Sessions'}
+                  {mode === 'task' ? 'Aufgaben' : 'Sessions'}
                 </span>
                 {workingCount > 0 && (
-                  <span className="session-run-count" title={`${workingCount} sessions working`}>
-                    {workingCount} active
+                  <span className="session-run-count" title={`${workingCount} laufen gerade`}>
+                    {workingCount} aktiv
                   </span>
                 )}
               </div>
-            )}
-            <div className="flex items-center gap-0.5">
-              {!isCollapsed && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="sidebar-sort-button h-8 w-8 rounded-lg"
-                      aria-label="Sort sessions"
-                      title="Sort sessions"
-                    >
-                      <ArrowUpDown className="h-3.5 w-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent navigation align="end" className="w-48">
-                    <DropdownMenuLabel>Sort by</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    {SORT_OPTIONS.map((opt) => {
-                      const Icon = opt.icon;
-                      return (
-                        <DropdownMenuItem
-                          key={opt.value}
-                          onClick={() => setSortMode(opt.value)}
-                          className="cursor-pointer"
-                        >
-                          <Icon className="mr-2 h-4 w-4" />
-                          <span className="flex-1">{opt.label}</span>
-                          {sortMode === opt.value && <span className="text-primary">•</span>}
-                        </DropdownMenuItem>
-                      );
-                    })}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="sidebar-sort-button h-8 w-8 rounded-lg"
+                    aria-label="Sortieren"
+                    title="Sortieren"
+                  >
+                    <ArrowUpDown className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent navigation align="end" className="w-48">
+                  <DropdownMenuLabel>Sortieren nach</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {SORT_OPTIONS.map((opt) => {
+                    const Icon = opt.icon;
+                    return (
+                      <DropdownMenuItem
+                        key={opt.value}
+                        onClick={() => setSortMode(opt.value)}
+                        className="cursor-pointer"
+                      >
+                        <Icon className="mr-2 h-4 w-4" />
+                        <span className="flex-1">{opt.label}</span>
+                        {sortMode === opt.value && <span className="text-primary">•</span>}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-          </div>
+          )}
 
-          {/* Search (only when expanded) */}
-          {!isCollapsed && (
+          {mode !== 'swarm' && !isCollapsed && (
             <div className="px-2 pb-1 space-y-1.5 shrink-0">
               <div className="sidebar-session-search relative">
                 <Search className="absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={surface === 'chat' ? 'Gespräche suchen' : 'Search sessions...'}
-                  aria-label={surface === 'chat' ? 'Gespräche suchen' : 'Search sessions'}
+                  placeholder={
+                    mode === 'chat'
+                      ? 'Gespräche suchen'
+                      : mode === 'task'
+                        ? 'Aufgaben suchen'
+                        : 'Sessions suchen'
+                  }
+                  aria-label={
+                    mode === 'chat'
+                      ? 'Gespräche suchen'
+                      : mode === 'task'
+                        ? 'Aufgaben suchen'
+                        : 'Sessions suchen'
+                  }
                   className="h-9 rounded-full border-0 bg-transparent pl-8 pr-8 text-xs shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                 />
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery('')}
                     className="absolute right-0 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full hover:bg-muted"
-                    title="Clear search"
-                    aria-label="Clear search"
+                    title="Suche leeren"
+                    aria-label="Suche leeren"
                   >
                     <X className="h-3 w-3 text-muted-foreground" />
                   </button>
                 )}
               </div>
+              {mode === 'task' && (
+                <div className="sidebar-task-filters" role="group" aria-label="Aufgaben filtern">
+                  {(
+                    [
+                      ['working', 'Läuft'],
+                      ['needs-you', 'Braucht dich'],
+                    ] as const
+                  ).map(([filter, label]) => (
+                    <button
+                      key={filter}
+                      type="button"
+                      aria-pressed={taskFilter === filter}
+                      className={cn(
+                        'sidebar-task-filter',
+                        `is-${filter}`,
+                        taskFilter === filter && 'is-active'
+                      )}
+                      onClick={() => setTaskFilter(taskFilter === filter ? 'all' : filter)}
+                    >
+                      {label}
+                      {taskCounts[filter] > 0 && (
+                        <span className="sidebar-task-filter-count">{taskCounts[filter]}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {/* Session list — scrollable, no slice */}
           <div
             className="sidebar-session-scroll flex-1 min-h-0 overflow-y-auto"
             onScroll={() => {
@@ -1222,106 +1400,84 @@ export function Sidebar({
             }}
           >
             <div className="sidebar-session-scroll-content mt-1">
-              {surface === 'chat' && (
+              {mode === 'chat' ? (
                 <ChatSidebarResources
                   search={searchQuery}
                   collapsed={isCollapsed}
                   onNavigate={handleLinkClick}
+                  chatSessions={chatSessions}
+                  renderSession={renderSessionRow}
                 />
+              ) : mode === 'swarm' ? (
+                <SwarmSidebarSection collapsed={isCollapsed} onNavigate={handleLinkClick} />
+              ) : (
+                renderSessionGroups()
               )}
-              {filteredSessions.length === 0
-                ? !isCollapsed && (
-                    <div className="px-3 py-3 text-center">
-                      <p className="text-xs text-muted-foreground/70">
-                        {searchQuery
-                          ? 'No matches'
-                          : surface === 'chat'
-                            ? 'Frühere Agentengespräche erscheinen hier.'
-                            : 'No sessions'}
-                      </p>
-                      {searchQuery && (
-                        <Button
-                          variant="link"
-                          size="sm"
-                          className="text-xs mt-1 h-auto p-0"
-                          onClick={() => setSearchQuery('')}
-                        >
-                          Clear filters
-                        </Button>
-                      )}
-                    </div>
-                  )
-                : sessionGroups.map((group) => {
-                    const isGroupCollapsed = searchQuery.trim()
-                      ? false
-                      : (collapsedCategoryIds[group.id] ?? false);
-                    return (
-                      <div
-                        key={group.id}
-                        className={cn(
-                          'sidebar-session-group',
-                          isCollapsed && 'is-collapsed',
-                          group.hasWorking && 'has-working'
-                        )}
-                      >
-                        <button
-                          type="button"
-                          className={cn(
-                            'sidebar-session-group-trigger',
-                            isCollapsed && 'is-collapsed'
-                          )}
-                          onClick={() => toggleSessionGroup(group.id)}
-                          onMouseEnter={(e) => showCollapsedCategoryFlyout(group, e.currentTarget)}
-                          onMouseLeave={() => hideCollapsedCategoryFlyout(group.id)}
-                          onFocus={(e) => showCollapsedCategoryFlyout(group, e.currentTarget)}
-                          onBlur={() => hideCollapsedCategoryFlyout(group.id)}
-                          aria-expanded={!isGroupCollapsed}
-                          aria-label={
-                            isCollapsed ? `${group.label} (${group.sessions.length})` : undefined
-                          }
-                        >
-                          {isCollapsed ? (
-                            <>
-                              <span className="sidebar-session-group-bubble">
-                                {getCategoryAbbreviation(group.label)}
-                              </span>
-                              <span className="sidebar-session-group-count">
-                                {group.sessions.length}
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <ChevronDown
-                                className={cn(
-                                  'sidebar-session-group-chevron',
-                                  isGroupCollapsed && 'is-collapsed'
-                                )}
-                              />
-                              <span className="sidebar-session-group-title">{group.label}</span>
-                              <span className="sidebar-session-group-count">
-                                {group.sessions.length}
-                              </span>
-                            </>
-                          )}
-                        </button>
-                        {!isGroupCollapsed && (
-                          <div className="sidebar-session-group-items">
-                            {group.sessions.map(renderSessionRow)}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
             </div>
           </div>
+
+          {showToolsBlock && isCollapsed && (
+            <button
+              type="button"
+              className="sidebar-nav-item is-collapsed flex shrink-0 items-center justify-center px-2 py-2"
+              aria-label="Werkzeuge der Session öffnen"
+              title="Werkzeuge der Session"
+              onClick={() => {
+                setCollapsed(false);
+                setToolsOpen(true);
+              }}
+            >
+              <Wrench className="h-4 w-4" />
+            </button>
+          )}
+          {showToolsBlock && (
+            <section
+              ref={toolsBlockRef}
+              className={cn('sidebar-tools-block', toolsOpen && 'is-open', isCollapsed && 'hidden')}
+              aria-label="Werkzeuge der Session"
+            >
+              <button
+                type="button"
+                className="sidebar-tools-toggle"
+                aria-expanded={toolsOpen}
+                aria-controls={mobile ? 'mobile-session-tools' : 'desktop-session-tools'}
+                onClick={() => setToolsOpen((open) => !open)}
+              >
+                <Wrench className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-left">
+                  <span className="sidebar-tools-toggle-label">Werkzeuge</span>
+                  {activeSession?.name && (
+                    <span className="sidebar-tools-session-name" title={activeSession.name}>
+                      {activeSession.name}
+                    </span>
+                  )}
+                </span>
+                {activeRunState && activeRunState.tone !== 'idle' && (
+                  <span
+                    className={cn('sidebar-session-run-dot', `is-${activeRunState.tone}`)}
+                    title={activeRunState.detail}
+                    aria-hidden="true"
+                  />
+                )}
+                <ChevronDown
+                  className={cn('sidebar-tools-chevron h-3.5 w-3.5', !toolsOpen && 'is-collapsed')}
+                />
+              </button>
+              {/* Always mounted: SessionPage portals its controls into this slot. */}
+              <div
+                id={mobile ? 'mobile-session-tools' : 'desktop-session-tools'}
+                ref={mobile ? sessionMenu.setMobileTarget : sessionMenu.setDesktopTarget}
+                className={cn(
+                  'sidebar-session-tools-slot session-menu-refined',
+                  !toolsOpen && 'hidden'
+                )}
+              />
+            </section>
+          )}
         </div>
+
+        {/* Zone ③: usage, global pages, settings. */}
         <div className="sidebar-footer shrink-0">
-          {surface === 'chat' &&
-            renderNavigationItem({
-              icon: SlidersHorizontal,
-              label: 'Personalisierung',
-              path: '/chat/personalization',
-            })}
           {contextUsage && (
             <div className={cn('sidebar-context-slot shrink-0', isCollapsed && 'is-collapsed')}>
               <ContextPopover
@@ -1338,9 +1494,69 @@ export function Sidebar({
             </div>
           )}
 
-          {baseNavItems
-            .filter((item) => ['/operations', '/settings'].includes(item.path))
-            .map(renderNavigationItem)}
+          {isCollapsed ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="sidebar-nav-item is-collapsed sidebar-global-more flex items-center justify-center px-2 py-2"
+                  aria-label="Mehr Seiten"
+                  title="Mehr"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent navigation side="right" align="end" className="w-52">
+                {GLOBAL_ITEMS.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <DropdownMenuItem
+                      key={item.label}
+                      onSelect={() => openGlobalItem(item)}
+                      className="cursor-pointer"
+                    >
+                      <Icon className="mr-2 h-4 w-4" />
+                      {item.label}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <div className="sidebar-global-row" role="group" aria-label="Weitere Seiten">
+              {GLOBAL_ITEMS.map((item) => {
+                const Icon = item.icon;
+                const selected = isGlobalItemActive(item);
+                return item.path ? (
+                  <Link
+                    key={item.label}
+                    to={item.path}
+                    onClick={handleLinkClick}
+                    aria-label={item.label}
+                    aria-current={selected ? 'page' : undefined}
+                    title={item.label}
+                    className={cn('sidebar-global-item', selected && 'is-active')}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </Link>
+                ) : (
+                  <button
+                    key={item.label}
+                    type="button"
+                    aria-label={item.label}
+                    title={item.label}
+                    className="sidebar-global-item"
+                    onClick={() => openGlobalItem(item)}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {renderNavigationItem({ icon: Settings, label: 'Einstellungen', path: '/settings' })}
         </div>
       </nav>
       {collapsedSessionFlyout && (
