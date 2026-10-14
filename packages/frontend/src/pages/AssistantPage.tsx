@@ -68,10 +68,107 @@ const SECTIONS = [
   ['/assistant/courses', 'Lernen'],
   ['/assistant/event-subscriptions', 'Quellenbeobachtung'],
 ] as const;
+/** What each library page is for, in plain words (title, intro, button, empty state). */
+const SECTION_INFO: Record<string, { title: string; intro: string; add: string; empty: string }> = {
+  projects: {
+    title: 'Projekte',
+    intro: 'Bündle Quellen und Anweisungen zu einem Thema. Plum nutzt sie in passenden Gesprächen.',
+    add: 'Neues Projekt',
+    empty: 'Lege ein Projekt an, zum Beispiel „Steuern 2026“ oder „Hausbau“.',
+  },
+  sources: {
+    title: 'Quellen',
+    intro: 'Dokumente, Notizen und Webseiten, auf die sich Plum beim Antworten stützen darf.',
+    add: 'Text hinzufügen',
+    empty: 'Lade eine Datei hoch oder füge einen Text hinzu.',
+  },
+  artifacts: {
+    title: 'Ergebnisse',
+    intro: 'Was Plum für dich erstellt hat: Dokumente, Tabellen, Präsentationen, Bilder.',
+    add: 'Neues Ergebnis',
+    empty: 'Ergebnisse aus Chats und Aufgaben landen automatisch hier.',
+  },
+  memory: {
+    title: 'Gedächtnis',
+    intro: 'Was sich Plum über dich merkt. Du kannst Einträge prüfen, ändern oder löschen.',
+    add: 'Etwas merken',
+    empty: 'Noch nichts gemerkt. Schreib z. B. „Ich bin Vegetarier“ oder „Antworte kurz“.',
+  },
+  profiles: {
+    title: 'Profile',
+    intro: 'Rollen für Gespräche: eigene Anweisungen, Sprache, Stimme und Gedächtnis.',
+    add: 'Neues Profil',
+    empty: 'Lege ein Profil an, zum Beispiel „Lernpartner“ oder „Lektor“.',
+  },
+  agents: {
+    title: 'Agenten',
+    intro: 'Deine Agenten mit Zustand und Fähigkeiten.',
+    add: 'Neuer Agent',
+    empty: 'Noch keine Agenten.',
+  },
+  routines: {
+    title: 'Routinen',
+    intro: 'Wiederkehrende Aufträge, etwa ein Morgenbriefing an Werktagen.',
+    add: 'Neue Routine',
+    empty: 'Starte mit einer Vorlage wie dem Morgenbriefing.',
+  },
+  collections: {
+    title: 'Sammlungen',
+    intro: 'Fasse Quellen, Ergebnisse und Gespräche zu einer Mappe zusammen.',
+    add: 'Neue Sammlung',
+    empty: 'Lege eine Sammlung an, um Zusammengehöriges zu bündeln.',
+  },
+  meetings: {
+    title: 'Besprechungen',
+    intro: 'Aufnahmen und Transkripte mit Protokoll und daraus abgeleiteten Aufgaben.',
+    add: 'Neue Besprechung',
+    empty: 'Füge ein Transkript ein oder nimm eine Besprechung auf.',
+  },
+  courses: {
+    title: 'Kurse',
+    intro: 'Lernpfade mit Lektionen und Fragen, aus deinen Quellen erstellt.',
+    add: 'Neuer Kurs',
+    empty: 'Lege einen Kurs an oder lass Plum einen aus deinen Quellen erstellen.',
+  },
+  'event-subscriptions': {
+    title: 'Ereignisse',
+    intro: 'Beobachte eine Quelle und lass Plum handeln, sobald sie sich ändert.',
+    add: 'Neue Beobachtung',
+    empty: 'Wähle eine Quelle aus, die Plum für dich im Blick behalten soll.',
+  },
+};
+/** German labels for stored enum values in the editor. */
+const OPTION_LABELS: Record<string, string> = {
+  personal: 'Persönlich',
+  project: 'Nur in einem Projekt',
+  agent: 'Nur für einen Agenten',
+  off: 'Aus',
+  read: 'Nur lesen',
+  'read-write': 'Lesen und merken',
+  document: 'Dokument',
+  table: 'Tabelle',
+  slides: 'Präsentation',
+  code: 'Code',
+  design: 'Design',
+  research: 'Recherche',
+  dataset: 'Datensatz',
+  notebook: 'Notebook',
+  image: 'Bild',
+  audio: 'Audio',
+  video: 'Video',
+  latex: 'LaTeX',
+  app: 'App',
+  markdown: 'Markdown',
+  json: 'JSON',
+  csv: 'CSV',
+  html: 'HTML',
+  text: 'Text',
+};
 const LABELS: Record<string, string> = Object.fromEntries(
   SECTIONS.map(([path, label]) => [path.split('/').pop() || 'overview', label])
 );
 LABELS.sources = 'Quellen';
+for (const [key, info] of Object.entries(SECTION_INFO)) LABELS[key] = info.title;
 const PROVIDERS: CLIProvider[] = ['codex', 'opencode', 'pi', 'kimi', 'vibe', 'zai', 'claude'];
 const STATUS: Record<string, string> = {
   draft: 'Entwurf',
@@ -157,7 +254,7 @@ const FIELD_LABELS: Record<string, string> = {
   memory: 'Gedächtnis',
   description: 'Beschreibung',
   text: 'Inhalt',
-  scope: 'Geltungsbereich',
+  scope: 'Gilt für',
   content: 'Ergebnis',
   type: 'Ergebnistyp',
   format: 'Format',
@@ -171,7 +268,7 @@ const FIELD_LABELS: Record<string, string> = {
   transcript: 'Transkript',
   summary: 'Protokoll',
   model: 'Modell (leer = Standard)',
-  projectId: 'Wissensprojekt',
+  projectId: 'Projekt',
   profileId: 'Profil',
   agentId: 'Agent',
   parentId: 'Übergeordneter Auftrag',
@@ -457,6 +554,8 @@ function AssistantAccountPage() {
     save.mutate();
   };
   const renderField = (key: string, value: unknown) => {
+    if (section === 'memory' && key === 'projectId' && body.scope !== 'project') return null;
+    if (section === 'memory' && key === 'agentId' && body.scope !== 'agent') return null;
     if (
       [
         'sessionId',
@@ -673,7 +772,9 @@ function AssistantAccountPage() {
             onChange={(e) => setBody({ ...body, [key]: e.target.value })}
           >
             {options.map((option) => (
-              <option key={option}>{option}</option>
+              <option key={option} value={option}>
+                {OPTION_LABELS[option] ?? option}
+              </option>
             ))}
           </select>
         ) : [
@@ -705,6 +806,7 @@ function AssistantAccountPage() {
       </label>
     );
   };
+  const sectionInfo = SECTION_INFO[section];
   const TaskWorkspace = section === 'tasks' ? 'div' : Fragment;
   const TaskListColumn = section === 'tasks' ? 'div' : Fragment;
   const TaskToolbar = section === 'tasks' ? 'div' : Fragment;
@@ -717,20 +819,31 @@ function AssistantAccountPage() {
     >
       <AssistantOutbox />
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            {section === 'tasks'
-              ? 'Deine Aufgaben, gemeinsam erledigt'
-              : 'Dein persönlicher Assistent'}
-          </p>
+        <div className="min-w-0 max-w-2xl">
+          {section === 'tasks' && (
+            <p className="text-sm text-muted-foreground">Deine Aufgaben, gemeinsam erledigt</p>
+          )}
           <h1 className="text-2xl font-semibold">
             {section === 'overview' ? 'Plum' : LABELS[section] || section}
           </h1>
+          {sectionInfo && <p className="mt-1 text-sm text-muted-foreground">{sectionInfo.intro}</p>}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={refresh} aria-label="Aktualisieren">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={refresh}
+            aria-label="Aktualisieren"
+            title="Aktualisieren"
+          >
             <RefreshCw className="h-4 w-4" />
           </Button>
+          {sectionInfo && !!TEMPLATES[section] && !creating && (
+            <Button onClick={() => edit()}>
+              <Plus className="mr-2 h-4 w-4" />
+              {sectionInfo.add}
+            </Button>
+          )}
           {section === 'tasks' && !creating && (
             <Button onClick={() => edit()}>
               <Plus className="mr-2 h-4 w-4" />
@@ -1070,12 +1183,6 @@ function AssistantAccountPage() {
                       onChange={(e) => setSearch(e.target.value)}
                     />
                   </label>
-                  {section !== 'tasks' && (
-                    <Button onClick={() => edit()}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Neu
-                    </Button>
-                  )}
                   {section === 'projects' && (
                     <Button variant="outline" onClick={() => navigate('/assistant/sources')}>
                       <BookOpen className="mr-2 h-4 w-4" />
@@ -1138,7 +1245,18 @@ function AssistantAccountPage() {
                       selectedId={selected?.id}
                     />
                   ) : (
-                    <ResourceList items={visible} onSelect={setSelected} />
+                    <ResourceList
+                      items={visible}
+                      onSelect={setSelected}
+                      empty={
+                        sectionInfo &&
+                        !search && {
+                          text: sectionInfo.empty,
+                          action: sectionInfo.add,
+                          onAction: () => edit(),
+                        }
+                      }
+                    />
                   )}
                   {resources.hasNextPage && (
                     <Button
@@ -1169,8 +1287,8 @@ function AssistantAccountPage() {
                       ? 'Aufgabe bearbeiten'
                       : 'Neue Aufgabe'
                     : editing
-                      ? 'Bearbeiten'
-                      : 'Neu erstellen'}
+                      ? `${sectionInfo?.title ?? 'Eintrag'} bearbeiten`
+                      : (sectionInfo?.add ?? 'Neu erstellen')}
                 </h2>
                 <Button
                   type="button"
@@ -1667,14 +1785,24 @@ function AssistantAccountPage() {
 function ResourceList({
   items,
   onSelect,
+  empty,
 }: {
   items: AssistantResource[];
   onSelect: (item: AssistantResource) => void;
+  empty?: { text: string; action: string; onAction: () => void } | false;
 }) {
   if (!items.length)
-    return (
+    return empty ? (
+      <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+        <p>{empty.text}</p>
+        <Button size="sm" onClick={empty.onAction}>
+          <Plus className="mr-2 h-4 w-4" />
+          {empty.action}
+        </Button>
+      </div>
+    ) : (
       <p className="rounded-md border border-dashed p-5 text-sm text-muted-foreground">
-        Hier gibt es noch keine Einträge.
+        Noch keine Einträge.
       </p>
     );
   return (
