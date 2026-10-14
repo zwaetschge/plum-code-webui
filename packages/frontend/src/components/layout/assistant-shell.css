@@ -296,12 +296,6 @@
   border-radius: 8px;
   font-size: 11px;
 }
-.plum-chat-tools-button {
-  font-size: 12px;
-  padding: 8px 12px;
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
-}
 .plum-assistant-shell .session-surface-chat {
   background: transparent;
   --font-body: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;

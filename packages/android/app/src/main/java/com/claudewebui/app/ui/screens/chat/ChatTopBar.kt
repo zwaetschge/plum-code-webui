@@ -23,7 +23,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -100,21 +99,19 @@ internal class ChatTopBarActions(
     val onNavigateBack: () -> Unit,
     val onEditTitle: () -> Unit,
     val onTitleSaved: (String) -> Unit,
-    val onNavigateToFiles: () -> Unit,
-    val onNavigateToGit: () -> Unit,
-    val onNavigateToCheckpoints: () -> Unit,
     val onToggleUsage: () -> Unit,
+    /** Opens the session tools (Dateien, Versionen, Vorschau, Verbindungen). */
+    val onOpenTools: () -> Unit,
     val onOpenToolLog: () -> Unit,
     val onOpenSessionSettings: () -> Unit,
     val onNavigateToNotes: () -> Unit,
     val onNavigateToMemory: () -> Unit,
-    val onNavigateToDevTools: () -> Unit,
     val onSearch: () -> Unit,
     val onSwitchChat: (String) -> Unit,
     val onNewChat: () -> Unit,
     val onDeleteChat: (String) -> Unit,
-    val onOpenAgents: () -> Unit = {},
     val onRestart: () -> Unit = {},
+    val onArchive: () -> Unit = {},
 )
 
 // ── Top Bar ───────────────────────────────────────────────────────────────────
@@ -134,6 +131,7 @@ internal fun ChatTopBar(
     var editTitleText by remember(session?.name) { mutableStateOf(session?.name ?: "") }
     val focusRequester = remember { FocusRequester() }
     var showMenu by remember { mutableStateOf(false) }
+    val isChatSurface = session?.surface == "chat"
     val largeText = LocalDensity.current.fontScale >= 1.5f
 
     LaunchedEffect(header.isEditingTitle) {
@@ -265,18 +263,23 @@ internal fun ChatTopBar(
                     }
                 }
                 HorizontalDivider()
-                item(stringResource(R.string.chat_files), Icons.Outlined.FolderOpen, actions.onNavigateToFiles)
-                item(stringResource(R.string.chat_panel_git), Icons.Outlined.MergeType, actions.onNavigateToGit)
-                item(stringResource(R.string.chat_checks), Icons.Outlined.Security, actions.onNavigateToCheckpoints)
+                // Chat sessions (agent chats) have no session tools; task and
+                // code sessions reach theirs here, the rest stays in this menu.
+                if (!isChatSurface) item(stringResource(R.string.chat_tools), Icons.Outlined.Handyman, actions.onOpenTools)
                 item(stringResource(R.string.chat_stats), Icons.Outlined.BarChart, actions.onToggleUsage)
-                item(stringResource(R.string.agents_title), Icons.Outlined.Groups, actions.onOpenAgents)
-                item(stringResource(R.string.chat_tools), Icons.Outlined.Terminal, actions.onOpenToolLog)
                 HorizontalDivider()
+                if (!isChatSurface) {
+                    item(stringResource(R.string.chat_panel_notes), Icons.Outlined.StickyNote2, actions.onNavigateToNotes)
+                    item(stringResource(R.string.session_menu_tool_log), Icons.Outlined.Terminal, actions.onOpenToolLog)
+                    item(stringResource(R.string.session_menu_mesh), Icons.Outlined.Hub, actions.onOpenSessionSettings)
+                    item(stringResource(R.string.session_menu_appearance), Icons.Outlined.Palette, actions.onOpenSessionSettings)
+                    item(stringResource(R.string.chat_memory), Icons.Outlined.Psychology, actions.onNavigateToMemory)
+                }
                 item(stringResource(R.string.chat_settings), Icons.Outlined.Tune, actions.onOpenSessionSettings)
-                item(stringResource(R.string.chat_panel_notes), Icons.Outlined.StickyNote2, actions.onNavigateToNotes)
-                item(stringResource(R.string.chat_memory), Icons.Outlined.Psychology, actions.onNavigateToMemory)
-                item(stringResource(R.string.chat_dev_tools), Icons.Outlined.Dns, actions.onNavigateToDevTools)
+                HorizontalDivider()
+                item(stringResource(R.string.session_menu_rename), Icons.Outlined.Edit, actions.onEditTitle)
                 item(stringResource(R.string.chat_restart_session), Icons.Outlined.Refresh, actions.onRestart)
+                item(stringResource(R.string.action_archive), Icons.Outlined.Archive, actions.onArchive)
             }
         }
     }

@@ -1,11 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="session_menu_tasks">Aufgaben</string>
-    <string name="session_menu_agent_activity">%1$d aktiv · %2$d warten</string>
-    <string name="session_menu_tool_log">Werkzeugprotokoll</string>
-    <string name="session_menu_more">Weitere Werkzeuge</string>
-    <string name="session_menu_less">Weniger Werkzeuge</string>
-    <string name="session_menu_runtime">Modell &amp; Ausführung</string>
-    <string name="session_menu_appearance">Gestaltung</string>
-    <string name="session_menu_default_appearance">Standardgestaltung</string>
+    <string name="session_menu_tool_log">Protokoll</string>
+    <string name="session_menu_appearance">Darstellung</string>
+    <string name="session_menu_mesh">Session Mesh</string>
+    <string name="session_menu_rename">Umbenennen</string>
+    <string name="session_tool_progress">Fortschritt</string>
+    <string name="session_tool_progress_count">%1$d offen</string>
+    <string name="session_tool_versions">Versionen</string>
+    <string name="session_tool_uncommitted">%1$d ungesichert</string>
+    <string name="session_tool_preview">Vorschau</string>
+    <string name="session_tool_preview_running">Dev-Server läuft</string>
+    <string name="session_tool_connections">Verbindungen</string>
+    <string name="session_tool_connections_hint">Android-Geräte · Browser</string>
+    <string name="session_tool_github">GitHub</string>
+    <string name="session_tool_android_devices">Android-Geräte</string>
+    <string name="session_tool_browser">Browser</string>
+    <string name="session_goal">Ziel</string>
+    <string name="session_goal_set">Ziel setzen</string>
+    <string name="session_goal_none">Kein Ziel gesetzt. Setze es oben im Chat.</string>
+    <string name="session_goal_placeholder">Ziel dieser Session</string>
+    <string name="session_goal_hint">Wird als /goal gesendet (nur Codex).</string>
+    <string name="chat_archive_failed">Archivieren fehlgeschlagen</string>
 </resources>

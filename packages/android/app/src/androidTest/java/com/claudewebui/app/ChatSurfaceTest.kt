@@ -56,12 +56,10 @@ class ChatSurfaceTest {
         compose.onNodeWithText("Task 40").assertIsDisplayed()
     }
 
-    @Test fun narrowHeaderKeepsTabsOnOneLineAndToolsReachable() {
+    @Test fun narrowHeaderKeepsToolsReachableFromOverflowMenu() {
         var fontScale by mutableStateOf(1f)
         var toolsOpened = false
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val labels = listOf(R.string.chat_tab, R.string.chat_files, R.string.chat_panel_git,
-            R.string.chat_checks, R.string.chat_stats, R.string.chat_tools).map { context.getString(it) }
         compose.setContent {
             val density = LocalDensity.current.density
             CompositionLocalProvider(LocalDensity provides Density(density, fontScale)) {
@@ -70,8 +68,13 @@ class ChatSurfaceTest {
                         ChatTopBar(
                             previewSession(),
                             ChatHeaderState.from(previewChatState(), false),
-                            ChatTopBarActions({}, {}, {}, {}, {}, {}, {}, { toolsOpened = true },
-                                {}, {}, {}, {}, {}, {}, {}, {}),
+                            ChatTopBarActions(
+                                onNavigateBack = {}, onEditTitle = {}, onTitleSaved = {},
+                                onToggleUsage = {}, onOpenTools = { toolsOpened = true },
+                                onOpenToolLog = {}, onOpenSessionSettings = {},
+                                onNavigateToNotes = {}, onNavigateToMemory = {}, onSearch = {},
+                                onSwitchChat = {}, onNewChat = {}, onDeleteChat = {},
+                            ),
                         )
                     }
                 }
@@ -79,14 +82,8 @@ class ChatSurfaceTest {
         }
         for (scale in listOf(1f, 2f)) {
             compose.runOnIdle { fontScale = scale }
-            val heights = labels.map { label ->
-                val tab = compose.onNodeWithText(label)
-                tab.performScrollTo().assertIsDisplayed()
-                tab.fetchSemanticsNode().boundsInRoot.height
-            }
-            assertTrue("All tabs must stay on one row at font scale $scale",
-                heights.max() - heights.min() < 2f)
-            compose.onNodeWithText(labels.last()).performClick()
+            compose.onNodeWithContentDescription(context.getString(R.string.chat_more)).performClick()
+            compose.onNodeWithText(context.getString(R.string.chat_tools)).performClick()
             compose.runOnIdle { assertTrue(toolsOpened); toolsOpened = false }
             screenshot("chat-header-$scale.png")
         }

@@ -521,26 +521,26 @@ export function Sidebar({
     try {
       await api.put(`/api/sessions/${id}`, { name: trimmed });
       updateSession(id, { name: trimmed });
-      toast({ title: 'Session renamed' });
+      toast({ title: 'Session umbenannt' });
     } catch (err) {
       const msg =
         err instanceof ApiError
           ? err.message
           : err instanceof Error
             ? err.message
-            : 'Rename failed';
-      toast({ title: 'Rename failed', description: msg, variant: 'destructive' });
+            : 'Umbenennen fehlgeschlagen';
+      toast({ title: 'Umbenennen fehlgeschlagen', description: msg, variant: 'destructive' });
     } finally {
       cancelRename();
     }
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete session "${name}"? This cannot be undone.`)) return;
+    if (!confirm(`Session «${name}» löschen? Das lässt sich nicht rückgängig machen.`)) return;
     try {
       await api.delete(`/api/sessions/${id}`);
       removeSession(id);
-      toast({ title: 'Session deleted' });
+      toast({ title: 'Session gelöscht' });
       if (activeId === id) navigate(surfaceHome);
     } catch (err) {
       const msg =
@@ -548,8 +548,8 @@ export function Sidebar({
           ? err.message
           : err instanceof Error
             ? err.message
-            : 'Delete failed';
-      toast({ title: 'Delete failed', description: msg, variant: 'destructive' });
+            : 'Löschen fehlgeschlagen';
+      toast({ title: 'Löschen fehlgeschlagen', description: msg, variant: 'destructive' });
     }
   };
 
@@ -559,8 +559,16 @@ export function Sidebar({
       updateSession(id, { starred: !currentlyStarred });
     } catch (err) {
       const msg =
-        err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed';
-      toast({ title: 'Failed to update star', description: msg, variant: 'destructive' });
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Fehlgeschlagen';
+      toast({
+        title: 'Stern konnte nicht gesetzt werden',
+        description: msg,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -570,8 +578,16 @@ export function Sidebar({
       updateSession(id, { category: categoryId });
     } catch (err) {
       const msg =
-        err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed';
-      toast({ title: 'Failed to update category', description: msg, variant: 'destructive' });
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Fehlgeschlagen';
+      toast({
+        title: 'Kategorie konnte nicht geändert werden',
+        description: msg,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -594,8 +610,8 @@ export function Sidebar({
     if (iconBusySessionId) return;
     setIconBusySessionId(session.id);
     toast({
-      title: 'Generating icon',
-      description: 'This can take a moment.',
+      title: 'Symbol wird erzeugt',
+      description: 'Das kann einen Moment dauern.',
     });
     try {
       const response = await api.post<ApiResponse<Session>>(
@@ -603,12 +619,12 @@ export function Sidebar({
       );
       await applyIconSession(response.data.data);
       toast({
-        title: 'Session icon updated',
+        title: 'Session-Symbol aktualisiert',
       });
     } catch (err) {
       toast({
-        title: 'Icon generation failed',
-        description: getErrorMessage(err, 'Failed to generate icon'),
+        title: 'Symbol konnte nicht erzeugt werden',
+        description: getErrorMessage(err, 'Symbol konnte nicht erzeugt werden'),
         variant: 'destructive',
       });
     } finally {
@@ -624,11 +640,14 @@ export function Sidebar({
         `/api/sessions/${session.id}/icon/project`
       );
       await applyIconSession(response.data.data);
-      toast({ title: 'Project icon applied' });
+      toast({ title: 'Projektsymbol übernommen' });
     } catch (err) {
       toast({
-        title: 'Project icon not found',
-        description: getErrorMessage(err, 'No usable icon was found in this project'),
+        title: 'Kein Projektsymbol gefunden',
+        description: getErrorMessage(
+          err,
+          'In diesem Projekt wurde kein brauchbares Symbol gefunden'
+        ),
         variant: 'destructive',
       });
     } finally {
@@ -658,11 +677,11 @@ export function Sidebar({
         formData
       );
       await applyIconSession(response.data.data);
-      toast({ title: 'Session icon uploaded' });
+      toast({ title: 'Session-Symbol hochgeladen' });
     } catch (err) {
       toast({
-        title: 'Icon upload failed',
-        description: getErrorMessage(err, 'Failed to upload icon'),
+        title: 'Symbol-Upload fehlgeschlagen',
+        description: getErrorMessage(err, 'Symbol konnte nicht hochgeladen werden'),
         variant: 'destructive',
       });
     } finally {
@@ -678,11 +697,11 @@ export function Sidebar({
     try {
       const response = await api.delete<ApiResponse<Session>>(`/api/sessions/${session.id}/icon`);
       await applyIconSession(response.data.data);
-      toast({ title: 'Session icon reset' });
+      toast({ title: 'Session-Symbol zurückgesetzt' });
     } catch (err) {
       toast({
-        title: 'Failed to reset icon',
-        description: getErrorMessage(err, 'Failed to reset icon'),
+        title: 'Symbol konnte nicht zurückgesetzt werden',
+        description: getErrorMessage(err, 'Symbol konnte nicht zurückgesetzt werden'),
         variant: 'destructive',
       });
     } finally {
@@ -1107,7 +1126,12 @@ export function Sidebar({
     [filteredSessions, mode]
   );
   const newItem = mode === 'swarm' ? null : NEW_ITEM[mode];
-  const showToolsBlock = Boolean(activeId);
+  // Chat sessions (API model chats) and the swarm have no session tools; the
+  // block belongs to task and code sessions only.
+  const showToolsBlock =
+    Boolean(activeId) &&
+    !location.pathname.startsWith('/chat/') &&
+    (activeSession ? sessionSurface(activeSession) !== 'chat' : true);
   const activeRunState = activeSession ? runStateOf(activeSession) : null;
 
   const renderSessionGroups = () =>

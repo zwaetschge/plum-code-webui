@@ -11,6 +11,7 @@ import com.claudewebui.app.core.network.AppError
 import com.claudewebui.app.core.network.toAppError
 import com.claudewebui.app.core.diagnostics.Breadcrumbs
 import com.claudewebui.app.core.network.SocketManager
+import com.claudewebui.app.core.network.apiCall
 import com.claudewebui.app.core.notifications.LocalNotificationManager
 import com.claudewebui.app.data.local.entity.OutboxEntity
 import com.claudewebui.app.data.local.entity.SessionReadStateEntity
@@ -803,6 +804,41 @@ class ChatViewModel(
             sessionRepository.setMode(sessionId, mode).onFailure { error ->
                 android.util.Log.w("ChatViewModel", "Failed to persist session mode", error)
             }
+        }
+    }
+
+    /**
+     * Signals for the code tools: uncommitted changes (badge on Versionen) and
+     * a reachable dev server (Vorschau is shown only then). Task and chat
+     * sessions have neither tool, so nothing is fetched for them.
+     */
+    fun refreshToolSignals() {
+        val current = session.value ?: return
+        val path = current.workingDirectory
+        if (current.surface != "code" || path.isBlank()) {
+            _uiState.update { it.copy(uncommittedCount = 0, previewRunning = false) }
+            return
+        }
+        viewModelScope.launch {
+            val status = apiCall { api.gitStatus(path) }.getOrNull()?.data
+            val ports = apiCall { api.getPreviewPorts(path) }.getOrNull()
+            _uiState.update { state ->
+                state.copy(
+                    uncommittedCount = status?.let { (it.staged + it.unstaged + it.untracked).toSet().size } ?: 0,
+                    previewRunning = ports?.ports?.any { it.reachable } == true,
+                )
+            }
+        }
+    }
+
+    /** Archive keeps the transcript and usage; the session leaves the lists. */
+    fun archiveSession(onArchived: () -> Unit) {
+        viewModelScope.launch {
+            apiCall {
+                val response = api.bulkSessions(BulkSessionInput(listOf(sessionId), "archive"))
+                check(response.success) { response.error?.message ?: "Archive failed" }
+            }.onSuccess { onArchived() }
+                .onFailure { failure -> reportError(failure.message ?: appContext.getString(R.string.chat_archive_failed)) }
         }
     }
 

@@ -112,6 +112,11 @@ data class ChatUiState(
     val restoreAnchorOffset: Int = 0,
     val presenceViewers: List<PresenceViewer> = emptyList(),
 
+    // Code tools: Versionen shows a badge for uncommitted changes, Vorschau
+    // only appears while a dev server answers.
+    val uncommittedCount: Int = 0,
+    val previewRunning: Boolean = false,
+
     // Session settings (provider / model / reasoning / mode)
     val sessionMode: SessionMode = SessionMode.AUTO_ACCEPT,
     val availableModels: List<String> = emptyList(),

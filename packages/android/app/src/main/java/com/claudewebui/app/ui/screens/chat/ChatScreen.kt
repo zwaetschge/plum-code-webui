@@ -112,7 +112,9 @@ fun ChatScreen(
     var showSidePanel by remember(sessionId) { mutableStateOf(maxWidth >= 1100.dp) }
     var showSessionSettings by remember { mutableStateOf(false) }
     var showModelEffort by remember { mutableStateOf(false) }
-    var showAgents by remember { mutableStateOf(false) }
+    var showProgress by remember { mutableStateOf(false) }
+    var showVersions by remember(sessionId) { mutableStateOf(false) }
+    var showConnections by remember(sessionId) { mutableStateOf(false) }
     var showToolLog by remember { mutableStateOf(false) }
     var showToolsMenu by remember { mutableStateOf(false) }
     var showChatDetails by remember(sessionId) { mutableStateOf(false) }
@@ -125,6 +127,14 @@ fun ChatScreen(
     val isDesignPreview = BuildConfig.DEBUG && sessionId == "preview"
     val displaySession = session ?: if (isDesignPreview) previewSession() else null
     val displayUiState = if (isDesignPreview) previewChatState() else uiState
+
+    // Chat sessions (agent chats) have no session tools; task and code do.
+    val isChatSurface = displaySession?.surface == "chat"
+    val currentGoal = remember(messages) { latestGoal(messages) }
+    var submittedGoal by remember(sessionId, displayUiState.activeChatId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(currentGoal) { submittedGoal = null }
+    val displayedGoal = submittedGoal ?: currentGoal
+    LaunchedEffect(displaySession?.id, displaySession?.surface) { viewModel.refreshToolSignals() }
 
     val needsAttention = displayUiState.pendingPermission != null || displayUiState.pendingLegacyPermission != null || displayUiState.pendingQuestion != null
     LaunchedEffect(needsAttention) { if (!needsAttention) showAttention = false }
@@ -311,7 +321,8 @@ fun ChatScreen(
             // showed through its glass. Nothing in the header is needed
             // while typing, so it yields the space.
             val keyboardOwnsTheScreen = WindowInsets.isImeVisible && isShortWindow()
-            if (!keyboardOwnsTheScreen) ChatTopBar(
+            if (!keyboardOwnsTheScreen) Column {
+            ChatTopBar(
                 session = displaySession,
                 header = ChatHeaderState.from(displayUiState, uiState.isEditingTitle),
                 // A landscape phone or tablet has ~600dp of height: the tab row
@@ -324,26 +335,17 @@ fun ChatScreen(
                 navigationLabel = navigationLabel,
                 actions = remember(
                     viewModel, displaySession?.workingDirectory, isWideLayout, onNavigateBack,
-                    onNavigateToFiles, onNavigateToGit, onNavigateToCheckpoints,
-                    onNavigateToNotes, onNavigateToMemory, onNavigateToDevTools,
+                    onNavigateToNotes, onNavigateToMemory,
                 ) {
                     ChatTopBarActions(
                 onNavigateBack = onNavigateBack,
                 onEditTitle = { viewModel.setEditingTitle(true) },
                 onTitleSaved = { viewModel.updateTitle(it) },
-                onNavigateToFiles = { onNavigateToFiles(displaySession?.workingDirectory ?: "") },
-                onNavigateToGit = {
-                    if (isWideLayout) { sidePanel = ChatSidePanel.GIT; showSidePanel = true }
-                    else onNavigateToGit(displaySession?.workingDirectory ?: "")
-                },
-                onNavigateToCheckpoints = {
-                    if (isWideLayout) { sidePanel = ChatSidePanel.CHECKPOINTS; showSidePanel = true }
-                    else onNavigateToCheckpoints(sessionId)
-                },
                 onToggleUsage = { showChatDetails = true },
-                onOpenToolLog = { showToolsMenu = true },
-                onOpenAgents = { showAgents = true },
+                onOpenTools = { showToolsMenu = true },
+                onOpenToolLog = { showToolLog = true },
                 onRestart = composerActions.onRestart,
+                onArchive = { viewModel.archiveSession(onArchived = onNavigateBack) },
                 onOpenSessionSettings = {
                     viewModel.loadAvailableModels()
                     showSessionSettings = true
@@ -356,9 +358,6 @@ fun ChatScreen(
                 onNavigateToMemory = {
                     onNavigateToMemory(displaySession?.workingDirectory ?: "")
                 },
-                onNavigateToDevTools = {
-                    onNavigateToDevTools(displaySession?.workingDirectory ?: "")
-                },
                 onSwitchChat = viewModel::switchChat,
                 onNewChat = viewModel::newChat,
                 onDeleteChat = viewModel::deleteChat,
@@ -366,12 +365,25 @@ fun ChatScreen(
                     )
                 },
             )
+            // The goal of the run sits right under the header (task and code).
+            if (!isChatSurface) {
+                SessionGoalChip(
+                    goal = displayedGoal,
+                    canSetGoal = displaySession?.cliProvider == CLIProvider.CODEX,
+                    onSetGoal = { objective ->
+                        submittedGoal = objective
+                        viewModel.sendMessage("/goal $objective")
+                    },
+                    modifier = Modifier.padding(bottom = t.spacing.xs),
+                )
+            }
+            }
         },
         bottomBar = {
             Column {
             val currentAgents = uiState.agentRuns.filter { it.chatId == uiState.activeChatId }
-            if (currentAgents.isNotEmpty()) SubagentSummary(currentAgents) { showAgents = true }
-            TaskProgressSummary(displayUiState.todos) { showChatDetails = true }
+            if (currentAgents.isNotEmpty()) SubagentSummary(currentAgents) { showProgress = true }
+            TaskProgressSummary(displayUiState.todos) { showProgress = true }
             ChatComposerBar(
                 composer = ChatComposerState.from(uiState),
                 activity = ChatActivityState.from(displayUiState),
@@ -468,15 +480,19 @@ fun ChatScreen(
         }
     }
 
-    if (isWideLayout && showSidePanel) {
+    // Chat sessions keep the full width; task sessions only have notes here.
+    if (isWideLayout && showSidePanel && !isChatSurface) {
+        val sideTabs = if (displaySession?.surface == "task") listOf(ChatSidePanel.NOTES) else ChatSidePanel.entries
         VerticalDivider(Modifier.fillMaxHeight())
         ChatSessionSidePanel(
             sessionId = sessionId,
-            panel = sidePanel,
+            panel = if (sidePanel in sideTabs) sidePanel else sideTabs.first(),
             onPanelChange = { sidePanel = it },
             onClose = { showSidePanel = false },
             storeOwner = sessionStoreOwner,
             modifier = Modifier.width(360.dp).fillMaxHeight(),
+            workingDirectory = displaySession?.workingDirectory ?: "",
+            tabs = sideTabs,
         )
     }
     }
@@ -491,28 +507,62 @@ fun ChatScreen(
         }
     }
 
-    if (showAgents) {
-        ModalBottomSheet(onDismissRequest = { showAgents = false }, containerColor = MaterialTheme.colorScheme.background) {
-            SubagentPanel(uiState, viewModel::loadMoreAgents)
+    if (showProgress) {
+        ModalBottomSheet(onDismissRequest = { showProgress = false }, containerColor = MaterialTheme.colorScheme.background) {
+            SubagentPanel(
+                state = uiState,
+                onLoadMore = viewModel::loadMoreAgents,
+                title = stringResource(R.string.session_tool_progress),
+                leading = { progressItems(displayedGoal, displayUiState.todos) },
+            )
         }
     }
-    if (showToolsMenu) {
+    if (showVersions) {
+        ModalBottomSheet(onDismissRequest = { showVersions = false }, containerColor = MaterialTheme.colorScheme.background) {
+            var versionsTab by remember { mutableStateOf(ChatSidePanel.GIT) }
+            ChatSessionSidePanel(
+                sessionId = sessionId,
+                panel = versionsTab,
+                onPanelChange = { versionsTab = it },
+                onClose = { showVersions = false },
+                storeOwner = sessionStoreOwner,
+                modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f),
+                workingDirectory = displaySession?.workingDirectory ?: "",
+                tabs = VersionTabs,
+            )
+        }
+    }
+    if (showConnections) {
+        ModalBottomSheet(onDismissRequest = { showConnections = false }, containerColor = MaterialTheme.colorScheme.background) {
+            SessionConnectionsPanel(
+                sessionId = sessionId,
+                workingDirectory = displaySession?.workingDirectory ?: "",
+                storeOwner = sessionStoreOwner,
+                modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f),
+            )
+        }
+    }
+    LaunchedEffect(showToolsMenu) { if (showToolsMenu) viewModel.refreshToolSignals() }
+    if (showToolsMenu && !isChatSurface) {
         ModalBottomSheet(onDismissRequest = { showToolsMenu = false }, containerColor = MaterialTheme.colorScheme.background) {
             val agents = displayUiState.agentRuns.filter { it.chatId == displayUiState.activeChatId }
-            val openRuntime = { showToolsMenu = false; viewModel.loadAvailableModels(); showSessionSettings = true }
+            val openTodos = displayUiState.todos.count { it.status != TodoStatus.COMPLETED }
+            val workingDirectory = displaySession?.workingDirectory ?: ""
             SessionToolsMenu(
-                appearanceSummary = listOfNotNull(displaySession?.designStyleSkill, displaySession?.writingStyleSkill).joinToString(" · ").ifBlank { stringResource(R.string.session_menu_default_appearance) },
-                activeAgents = agents.count { it.isActive }, waitingAgents = agents.count { it.isActive && it.activity == "waiting" },
-                onTasks = { showToolsMenu = false; showChatDetails = true },
-                onAgents = { showToolsMenu = false; showAgents = true },
-                onFiles = { showToolsMenu = false; onNavigateToFiles(displaySession?.workingDirectory ?: "") },
-                onGit = { showToolsMenu = false; if (isWideLayout) { sidePanel = ChatSidePanel.GIT; showSidePanel = true } else onNavigateToGit(displaySession?.workingDirectory ?: "") },
-                onNotes = { showToolsMenu = false; if (isWideLayout) { sidePanel = ChatSidePanel.NOTES; showSidePanel = true } else onNavigateToNotes(sessionId) },
-                onLog = { showToolsMenu = false; showToolLog = true },
-                onChecks = { showToolsMenu = false; onNavigateToCheckpoints(sessionId) },
-                onMemory = { showToolsMenu = false; onNavigateToMemory(displaySession?.workingDirectory ?: "") },
-                onDevTools = { showToolsMenu = false; onNavigateToDevTools(displaySession?.workingDirectory ?: "") },
-                onAppearance = openRuntime,
+                surface = displaySession?.surface ?: "code",
+                showProgress = displayUiState.todos.isNotEmpty() || agents.isNotEmpty(),
+                progressCount = openTodos + agents.count { it.isActive },
+                uncommittedCount = displayUiState.uncommittedCount,
+                previewRunning = displayUiState.previewRunning,
+                onProgress = { showToolsMenu = false; showProgress = true },
+                onFiles = { showToolsMenu = false; onNavigateToFiles(workingDirectory) },
+                onVersions = {
+                    showToolsMenu = false
+                    if (isWideLayout) { sidePanel = ChatSidePanel.GIT; showSidePanel = true } else showVersions = true
+                },
+                // The dev tools screen opens on its preview tab.
+                onPreview = { showToolsMenu = false; onNavigateToDevTools(workingDirectory) },
+                onConnections = { showToolsMenu = false; showConnections = true },
             )
         }
     }

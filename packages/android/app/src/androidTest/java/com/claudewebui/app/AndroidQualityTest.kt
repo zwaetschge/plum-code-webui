@@ -53,23 +53,35 @@ class AndroidQualityTest {
         compose.runOnIdle { assertTrue(opened) }
     }
 
-    @Test fun sessionToolsKeepWorkVisibleAndConfigurationReachable() {
+    @Test fun sessionToolsGroupCodeToolsAndShowProgressOnlyWithWork() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         var destination = ""
+        var hasWork by mutableStateOf(true)
         compose.setContent { ClaudeWebUITheme(darkTheme = true) {
             com.claudewebui.app.ui.screens.chat.SessionToolsMenu(
-                "Default", 3, 1,
-                { destination = "tasks" }, { destination = "agents" }, {}, {}, {}, {}, {}, {}, {},
-                { destination = "appearance" },
+                surface = "code",
+                showProgress = hasWork,
+                progressCount = 3,
+                uncommittedCount = 2,
+                previewRunning = false,
+                onProgress = { destination = "progress" },
+                onFiles = { destination = "files" },
+                onVersions = { destination = "versions" },
+                onPreview = { destination = "preview" },
+                onConnections = { destination = "connections" },
             )
         } }
-        compose.onNodeWithText(context.getString(R.string.session_menu_agent_activity, 3, 1)).assertIsDisplayed().performClick()
-        compose.runOnIdle { assertEquals("agents", destination) }
-        compose.onNodeWithText(context.getString(R.string.session_menu_tasks)).performClick()
-        compose.runOnIdle { assertEquals("tasks", destination) }
-        // Model, effort and mode moved to the chat bar; the menu keeps appearance.
-        compose.onNodeWithText(context.getString(R.string.session_menu_appearance)).performScrollTo().performClick()
-        compose.runOnIdle { assertEquals("appearance", destination) }
+        compose.onNodeWithText(context.getString(R.string.session_tool_progress)).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals("progress", destination) }
+        compose.onNodeWithText(context.getString(R.string.session_tool_uncommitted, 2)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.session_tool_versions)).performClick()
+        compose.runOnIdle { assertEquals("versions", destination) }
+        // Without a reachable dev server there is no preview entry.
+        compose.onNodeWithText(context.getString(R.string.session_tool_preview)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.session_tool_connections)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals("connections", destination) }
+        compose.runOnIdle { hasWork = false }
+        compose.onNodeWithText(context.getString(R.string.session_tool_progress)).assertDoesNotExist()
     }
 
     @Test fun readButPendingApprovalCanStillBeAnswered() {

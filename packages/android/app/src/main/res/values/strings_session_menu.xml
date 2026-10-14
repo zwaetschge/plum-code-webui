@@ -1,11 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="session_menu_tasks">Tasks</string>
-    <string name="session_menu_agent_activity">%1$d active · %2$d waiting</string>
-    <string name="session_menu_tool_log">Tool log</string>
-    <string name="session_menu_more">More tools</string>
-    <string name="session_menu_less">Fewer tools</string>
-    <string name="session_menu_runtime">Model &amp; execution</string>
+    <string name="session_menu_tool_log">Log</string>
     <string name="session_menu_appearance">Appearance</string>
-    <string name="session_menu_default_appearance">Default appearance</string>
+    <string name="session_menu_mesh">Session mesh</string>
+    <string name="session_menu_rename">Rename</string>
+    <string name="session_tool_progress">Progress</string>
+    <string name="session_tool_progress_count">%1$d open</string>
+    <string name="session_tool_versions">Versions</string>
+    <string name="session_tool_uncommitted">%1$d uncommitted</string>
+    <string name="session_tool_preview">Preview</string>
+    <string name="session_tool_preview_running">Dev server running</string>
+    <string name="session_tool_connections">Connections</string>
+    <string name="session_tool_connections_hint">Android devices · Browser</string>
+    <string name="session_tool_github">GitHub</string>
+    <string name="session_tool_android_devices">Android devices</string>
+    <string name="session_tool_browser">Browser</string>
+    <string name="session_goal">Goal</string>
+    <string name="session_goal_set">Set goal</string>
+    <string name="session_goal_none">No goal set. Set it at the top of the chat.</string>
+    <string name="session_goal_placeholder">Goal of this session</string>
+    <string name="session_goal_hint">Sent as /goal (Codex only).</string>
+    <string name="chat_archive_failed">Archiving failed</string>
 </resources>

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -59,7 +60,13 @@ internal fun SubagentSummary(runs: List<SubagentRun>, onClick: () -> Unit) {
 }
 
 @Composable
-internal fun SubagentPanel(state: ChatUiState, onLoadMore: () -> Unit) {
+internal fun SubagentPanel(
+    state: ChatUiState,
+    onLoadMore: () -> Unit,
+    title: String? = null,
+    /** Fortschritt puts goal and todos above the agents in the same list. */
+    leading: (LazyListScope.() -> Unit)? = null,
+) {
     val runs = state.agentRuns.filter { it.chatId == state.activeChatId }
     var filter by remember { mutableIntStateOf(0) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -67,8 +74,10 @@ internal fun SubagentPanel(state: ChatUiState, onLoadMore: () -> Unit) {
         while (runs.any { it.isActive }) { now = System.currentTimeMillis(); delay(1_000) }
     }
     LazyColumn(Modifier.fillMaxWidth().fillMaxHeight(0.85f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (title != null) item { Text(title, style = MaterialTheme.typography.titleLarge) }
+        leading?.invoke(this)
         item {
-            Text(stringResource(R.string.agents_title), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.agents_title), style = if (title != null) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge)
             Text(stringResource(R.string.agents_summary, runs.count { it.isActive }, runs.count { it.isActive && it.activity == "waiting" }, state.agentTotals?.completed ?: runs.count { it.state == "completed" }), style = MaterialTheme.typography.bodyMedium)
             Text(stringResource(R.string.agents_counts, runs.count { it.state == "queued" }, state.agentTotals?.failed ?: runs.count { it.state == "failed" }, state.agentTotals?.interrupted ?: runs.count { it.state in listOf("interrupted", "cancelled") }), style = MaterialTheme.typography.bodySmall)
             Text(stringResource(R.string.agents_scope), style = MaterialTheme.typography.bodySmall)

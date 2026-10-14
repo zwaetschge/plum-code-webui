@@ -9794,168 +9794,211 @@ html.dark .chat-composer-form.glass-chrome {
   outline: none;
   transform: translateY(-1px);
 }
-.session-goal-task-panel {
-  display: flex;
-  min-height: 100%;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px;
-}
-.session-goal-card {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border: 1px solid hsl(var(--foreground) / 0.085);
-  border-radius: 14px;
-  background:
-    radial-gradient(circle at 14% 0%, hsl(var(--primary) / 0.12), transparent 44%),
-    linear-gradient(180deg, hsl(var(--card) / 0.46), hsl(var(--background) / 0.2));
-  box-shadow: inset 0 1px 0 hsl(var(--foreground) / 0.08);
-  padding: 9px;
-}
-.session-goal-card-header {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-}
-.session-goal-icon {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  color: hsl(var(--foreground) / 0.9);
-  background:
-    radial-gradient(circle at 35% 22%, hsl(var(--primary) / 0.24), transparent 38%),
-    linear-gradient(180deg, hsl(var(--card) / 0.52), hsl(var(--primary) / 0.07));
-  box-shadow: inset 0 1px 0 hsl(var(--foreground) / 0.12);
-}
-.session-goal-copy {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 3px;
-}
-.session-goal-title {
-  color: hsl(var(--foreground) / 0.92);
-  font: 760 11px/1 var(--font-ui);
-}
-.session-goal-kicker {
-  color: hsl(var(--muted-foreground));
-  font: 720 9px/1 var(--font-ui);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.session-goal-input {
-  width: 100%;
-  min-height: 72px;
-  resize: vertical;
-  border: 1px solid hsl(var(--foreground) / 0.08);
-  border-radius: 10px;
-  background: hsl(var(--background) / 0.28);
-  color: hsl(var(--foreground) / 0.9);
-  font: 500 12px/1.45 var(--font-ui);
-  outline: none;
-  padding: 9px 10px;
-  transition:
-    border-color 0.14s ease,
-    background 0.14s ease,
-    box-shadow 0.14s ease;
-}
-.session-goal-input::placeholder {
-  color: hsl(var(--muted-foreground) / 0.7);
-}
-.session-goal-input:focus {
-  border-color: hsl(var(--primary) / 0.42);
-  background: hsl(var(--background) / 0.38);
-  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.1);
-}
-.session-goal-input:disabled {
-  cursor: not-allowed;
-  opacity: 0.52;
-}
-.session-goal-footer {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.session-goal-status {
-  min-width: 0;
-  overflow: hidden;
-  color: hsl(var(--muted-foreground));
-  font: 650 10px/1 var(--font-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.session-goal-status.is-error {
-  color: hsl(var(--destructive) / 0.9);
-}
-.session-goal-submit {
-  display: inline-flex;
-  min-height: 30px;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  border: 0;
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 35% 12%, hsl(var(--primary) / 0.22), transparent 42%),
-    linear-gradient(180deg, hsl(var(--primary) / 0.2), hsl(var(--primary) / 0.08));
-  color: hsl(var(--foreground) / 0.92);
-  font: 760 10px/1 var(--font-ui);
-  padding: 0 12px;
-  transition:
-    box-shadow 0.14s ease,
-    opacity 0.14s ease,
-    transform 0.14s ease;
-}
-.session-goal-submit:hover,
-.session-goal-submit:focus-visible {
-  box-shadow:
-    inset 0 1px 0 hsl(var(--foreground) / 0.12),
-    inset 0 0 18px hsl(var(--primary) / 0.12);
-  outline: none;
-  transform: translateY(-1px);
-}
-.session-goal-submit:disabled {
-  cursor: not-allowed;
-  opacity: 0.42;
-  transform: none;
-}
 .session-task-list {
   display: flex;
   min-height: 0;
   flex-direction: column;
   gap: 6px;
 }
-.session-task-empty {
+
+/* Fortschritt: goal, todos and subagents of the run. */
+.session-progress-panel {
   display: flex;
-  min-height: 160px;
-  flex: 1;
+  min-height: 100%;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: hsl(var(--muted-foreground));
-  font: 600 12px/1.2 var(--font-ui);
-  text-align: center;
+  gap: 10px;
+  padding: 8px;
 }
-.session-task-empty-icon {
-  display: inline-flex;
-  width: 40px;
-  height: 40px;
+.session-progress-goal {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid hsl(var(--foreground) / 0.085);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 14% 0%, hsl(var(--primary) / 0.12), transparent 44%),
+    linear-gradient(180deg, hsl(var(--card) / 0.46), hsl(var(--background) / 0.2));
+  color: hsl(var(--foreground) / 0.88);
+  padding: 10px;
+}
+.session-progress-heading {
+  display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 6px;
+  color: hsl(var(--muted-foreground));
+  font: 720 10px/1.2 var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.session-progress-goal-text {
+  margin-top: 4px;
+  color: hsl(var(--foreground) / 0.9);
+  font: 500 12px/1.45 var(--font-ui);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.session-progress-goal-text.is-empty {
+  color: hsl(var(--muted-foreground));
+}
+.session-progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.session-progress-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+.session-progress-empty {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+.session-progress-agents {
+  border-top: 1px solid hsl(var(--foreground) / 0.07);
+}
+.session-progress-agents > section {
+  height: auto;
+  padding: 8px 0 0;
+}
+.session-progress-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+.session-progress-actions button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid hsl(var(--foreground) / 0.1);
   border-radius: 999px;
-  background: hsl(var(--foreground) / 0.05);
-  color: hsl(var(--muted-foreground) / 0.62);
+  color: hsl(var(--foreground) / 0.85);
+  font: 650 11px/1 var(--font-ui);
+  padding: 0 12px;
+}
+.session-progress-actions button:hover,
+.session-progress-actions button:focus-visible {
+  background: hsl(var(--foreground) / 0.06);
+}
+
+/* Verbindungen: one collapsible section per connection kind. */
+.session-connection-section {
+  border: 1px solid hsl(var(--foreground) / 0.08);
+  border-radius: 12px;
+  background: hsl(var(--background) / 0.2);
+}
+.session-connection-summary {
+  display: flex;
+  min-height: 40px;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  gap: 8px;
+  color: hsl(var(--foreground) / 0.9);
+  font: 680 12px/1.2 var(--font-ui);
+  padding: 0 10px;
+}
+.session-connection-summary::-webkit-details-marker {
+  display: none;
+}
+.session-connection-icon {
+  display: inline-flex;
+  color: hsl(var(--muted-foreground));
+}
+.session-connection-state {
+  color: hsl(var(--muted-foreground));
+  font: 600 10px/1 var(--font-ui);
+}
+.session-connection-chevron {
+  color: hsl(var(--muted-foreground));
+  transition: transform 0.14s ease;
+}
+.session-connection-section:not([open]) .session-connection-chevron {
+  transform: rotate(-90deg);
+}
+.session-connection-body {
+  border-top: 1px solid hsl(var(--foreground) / 0.06);
+  max-height: 70vh;
+  overflow: auto;
+}
+
+/* Goal of the run, shown in the chat header of task and code sessions. */
+.chat-topbar.has-goal {
+  justify-content: center;
+  padding: 8px 16px 0;
+}
+.session-goal-bar {
+  display: inline-flex;
+  min-height: 32px;
+  max-width: min(640px, 100%);
+  align-items: center;
+  gap: 6px;
+  border: 1px solid hsl(var(--foreground) / 0.09);
+  border-radius: 999px;
+  background: hsl(var(--card) / 0.62);
+  box-shadow: 0 10px 30px -22px hsl(var(--shadow-color) / 0.8);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  color: hsl(var(--foreground) / 0.88);
+  font: 600 12px/1.2 var(--font-ui);
+  padding: 0 12px;
+}
+.session-goal-bar.is-empty {
+  color: hsl(var(--muted-foreground));
+  border-style: dashed;
+  background: hsl(var(--card) / 0.32);
+}
+.session-goal-bar:not(:disabled):hover {
+  border-color: hsl(var(--primary) / 0.32);
+}
+.session-goal-bar:disabled {
+  cursor: default;
+}
+.session-goal-bar-label {
+  flex: 0 0 auto;
+  color: hsl(var(--muted-foreground));
+  font-weight: 720;
+}
+.session-goal-bar-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-goal-bar.is-editing {
+  width: min(640px, 100%);
+}
+.session-goal-bar-input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+.session-goal-bar-submit {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: hsl(var(--primary) / 0.16);
+  font: 720 11px/1 var(--font-ui);
+  padding: 6px 10px;
+}
+.session-goal-bar-submit:disabled {
+  opacity: 0.45;
+}
+.session-goal-bar-cancel {
+  display: inline-flex;
+  color: hsl(var(--muted-foreground));
+}
+@media (max-width: 640px) {
+  .chat-topbar.has-goal {
+    display: flex;
+    padding: 8px 56px 0;
+  }
 }
 .session-docked-browser-panel {
   flex-grow: 1.65;
@@ -13120,35 +13163,12 @@ html.eink ::selection {
 .session-menu-more:disabled {
   opacity: 0.4;
 }
-.session-menu-configure {
-  display: flex;
-  flex-direction: column;
-  text-align: left;
-  padding: 8px;
-  min-height: 44px;
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-}
-.session-menu-configure span {
-  font-size: 10px;
-}
-.session-menu-secondary > summary {
-  cursor: pointer;
-  padding: 10px 8px;
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-}
 .session-menu-refined button:focus-visible,
 .session-menu-refined summary:focus-visible {
   outline: 2px solid hsl(var(--primary));
   outline-offset: 2px;
 }
-.session-menu-refined .session-menu-agents .session-side-menu-label {
-  white-space: normal;
-  text-align: left;
-}
 .session-right-dock.is-collapsed .session-menu-summary,
-.session-right-dock.is-collapsed .session-menu-configure,
 .session-right-dock.is-collapsed .session-thread-controls {
   display: none;
 }

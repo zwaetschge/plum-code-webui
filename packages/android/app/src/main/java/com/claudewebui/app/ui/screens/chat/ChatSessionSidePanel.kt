@@ -10,16 +10,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModelStoreOwner
 import com.claudewebui.app.R
+import com.claudewebui.app.ui.screens.devtools.DevToolsTab
+import com.claudewebui.app.ui.screens.devtools.DevToolsViewModel
+import com.claudewebui.app.ui.screens.devtools.GitHubCollabPanel
 import com.claudewebui.app.ui.screens.notes.NotesScreen
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.claudewebui.app.ui.screens.notes.NotesViewModel
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
 
 internal enum class ChatSidePanel(val label: Int) {
     GIT(R.string.chat_panel_git),
+    GITHUB(R.string.session_tool_github),
     CHECKPOINTS(R.string.chat_panel_checkpoints),
     NOTES(R.string.chat_panel_notes),
 }
+
+/** Versionen: Git, GitHub and Checkpoints of one code session as tabs. */
+internal val VersionTabs = listOf(ChatSidePanel.GIT, ChatSidePanel.GITHUB, ChatSidePanel.CHECKPOINTS)
 
 /** Existing session tools remain interactive alongside the transcript on tablets. */
 @Composable
@@ -30,11 +39,13 @@ internal fun ChatSessionSidePanel(
     onClose: () -> Unit,
     storeOwner: ViewModelStoreOwner,
     modifier: Modifier = Modifier,
+    workingDirectory: String = "",
+    tabs: List<ChatSidePanel> = ChatSidePanel.entries,
 ) {
     val t = PlumTheme.tokens
     Column(modifier.statusBarsPadding()) {
-        TabRow(selectedTabIndex = panel.ordinal) {
-            ChatSidePanel.entries.forEach { option ->
+        TabRow(selectedTabIndex = tabs.indexOf(panel).coerceAtLeast(0)) {
+            tabs.forEach { option ->
                 Tab(
                     selected = panel == option,
                     onClick = { onPanelChange(option) },
@@ -67,6 +78,17 @@ internal fun ChatSessionSidePanel(
                         onRefresh = vm::refreshGitStatus,
                     )
                     state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(t.spacing.lg)) }
+                }
+                ChatSidePanel.GITHUB -> {
+                    val vm: DevToolsViewModel = koinViewModel(
+                        viewModelStoreOwner = storeOwner,
+                        parameters = { parametersOf(sessionId, workingDirectory) },
+                    )
+                    val state by vm.uiState.collectAsStateWithLifecycle()
+                    LaunchedEffect(vm) { vm.selectTab(DevToolsTab.GITHUB) }
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(t.spacing.md)) {
+                        GitHubCollabPanel(state = state, viewModel = vm)
+                    }
                 }
                 ChatSidePanel.CHECKPOINTS -> {
                     val vm: CheckpointViewModel = koinViewModel(

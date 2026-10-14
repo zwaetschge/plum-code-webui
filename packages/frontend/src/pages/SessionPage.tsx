@@ -10,14 +10,12 @@ import { useSessionMenu } from '@/components/layout/SessionMenuContext';
 import { SubagentPanel } from '@/components/session/SubagentPanel';
 import { isActiveAgent, subagentCounts } from '@plum-code-webui/shared';
 import {
-  Fragment,
   useEffect,
   useRef,
   useState,
   useCallback,
   useMemo,
   useSyncExternalStore,
-  type FormEvent,
   type ReactElement,
   type ReactNode,
 } from 'react';
@@ -37,7 +35,6 @@ import {
   Globe,
   ListTodo,
   Circle,
-  CheckCircle,
   Loader2,
   MessageSquare,
   Code2,
@@ -48,7 +45,6 @@ import {
   RotateCcw,
   Square,
   ChevronDown,
-  ChevronRight,
   PenLine,
   Smartphone,
   Network,
@@ -56,14 +52,14 @@ import {
   SendHorizontal,
   Lightbulb,
   GitBranch,
-  GitPullRequest,
-  History,
   StickyNote,
   MonitorPlay,
   ScrollText,
   BookmarkPlus,
   Download,
   MoreHorizontal,
+  Archive,
+  Cable,
 } from 'lucide-react';
 import 'katex/dist/katex.min.css';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
@@ -82,6 +78,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -102,10 +101,11 @@ import { ToolExecutionCard } from '@/components/chat/ToolExecutionCard';
 import { ToolDetailDialog } from '@/components/session/ToolDetailDialog';
 import { AndroidDevicePanel } from '@/components/session/AndroidDevicePanel';
 import { SessionStyleLibraryPanel } from '@/components/session/SessionStyleLibraryPanel';
-import { CheckpointsPanel } from '@/components/session/CheckpointsPanel';
 import { ToolLogPanel } from '@/components/session/ToolLogPanel';
-import { GitPanel } from '@/components/git-panel';
-import { GitHubPanel } from '@/components/github/GitHubPanel';
+import { VersionsPanel, type VersionsTab } from '@/components/session/VersionsPanel';
+import { ConnectionsPanel } from '@/components/session/ConnectionsPanel';
+import { ProgressPanel } from '@/components/session/ProgressPanel';
+import { SessionGoalBar } from '@/components/session/SessionGoalBar';
 import { Notepad } from '@/components/notepad';
 import { WebPreview } from '@/components/preview';
 import { TodoFloatingStrip } from '@/components/session/TaskWorkbench';
@@ -160,6 +160,7 @@ import type {
   HomeAssistantStatus,
   SessionReadState,
   MessageHistorySnapshot,
+  GitStatus,
 } from '@plum-code-webui/shared';
 import { normalizeUsageSnapshot } from '@plum-code-webui/shared';
 import { cn } from '@/lib/utils';
@@ -192,50 +193,19 @@ const EMPTY_AGENT_RUNS: SubagentRun[] = [];
 const IDLE_ACTIVITY: ActivityState = { type: 'idle' };
 type WorkspaceSheetPanel = Exclude<DockablePanel, 'files' | 'tools'>;
 type MobileSheetPanel = WorkspaceSheetPanel;
-const CLI_SUBAGENT_OFF = '__off__';
-const CLI_SUBAGENT_DEFAULT_MODEL = '__default__';
-
-interface CliSubagentSummary {
-  id: string;
-  label: string;
-  provider: string;
-  model?: string;
-  enabled: boolean;
-}
-
-type RightMenuGroupId =
-  | 'chat'
-  | 'session'
-  | 'view'
-  | 'runtime'
-  | 'subagents'
-  | 'styles'
-  | 'workspace';
 const DOCKED_PANEL_KEYS: WorkspaceSheetPanel[] = [
-  'agents',
-  'tasks',
+  'progress',
+  'versions',
+  'preview',
+  'connections',
+  'notes',
+  'toolLog',
   'mesh',
   'designStyle',
   'writingStyle',
-  'android',
-  'browser',
-  'git',
-  'github',
-  'checkpoints',
-  'notes',
-  'preview',
-  'toolLog',
 ];
-const STYLE_PANEL_KEYS: WorkspaceSheetPanel[] = ['designStyle', 'writingStyle'];
-const DEFAULT_RIGHT_MENU_GROUPS: Record<RightMenuGroupId, boolean> = {
-  chat: true,
-  session: true,
-  view: true,
-  runtime: false,
-  subagents: false,
-  styles: false,
-  workspace: true,
-};
+/** Code-only tools; task and chat sessions have no repository or dev server. */
+const CODE_ONLY_PANEL_KEYS: WorkspaceSheetPanel[] = ['versions', 'preview'];
 const ACTIVE_FOLLOWUP_MODE_DEFAULT: ActiveFollowupMode = 'queue';
 const MESSAGE_HISTORY_PAGE_SIZE = 500;
 const MESSAGE_JUMP_WINDOW_SIZE = 160;
@@ -549,10 +519,11 @@ export function SessionPage() {
   const autoGoalBySessionRef = useRef<Record<string, string>>({});
   const [showAllowedDirsDialog, setShowAllowedDirsDialog] = useState(false);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
-  const [showAgentConfig, setShowAgentConfig] = useState(false);
+  const [showRuntimeDialog, setShowRuntimeDialog] = useState(false);
+  const [versionsTab, setVersionsTab] = useState<VersionsTab>('git');
+  const [connectionsFocus, setConnectionsFocus] = useState<string | null>(null);
   const [templateNameDraft, setTemplateNameDraft] = useState<string | null>(null);
   const [mobileSheetPanel, setMobileSheetPanel] = useState<MobileSheetPanel | null>(null);
-  const [goalDraft, setGoalDraft] = useState('');
   const [meshTargetSessionId, setMeshTargetSessionId] = useState('');
   const [meshRoleDraft, setMeshRoleDraft] = useState('peer consultant');
   const [meshDelegationTargetId, setMeshDelegationTargetId] = useState('');
@@ -726,19 +697,6 @@ export function SessionPage() {
   const [configTab, setConfigTab] = useState<'memories' | 'agents'>('memories');
   const isDesktopLayout = useIsDesktopLayout();
   const isDockLayout = useMediaQuery('(min-width: 1024px)');
-  const [rightMenuGroupsOpen, setRightMenuGroupsOpen] = useState<Record<RightMenuGroupId, boolean>>(
-    () => {
-      if (typeof window === 'undefined') return DEFAULT_RIGHT_MENU_GROUPS;
-      try {
-        const saved = window.localStorage.getItem('chat.rightMenuGroupsOpen.v2');
-        if (!saved) return DEFAULT_RIGHT_MENU_GROUPS;
-        const parsed = JSON.parse(saved) as Partial<Record<RightMenuGroupId, boolean>>;
-        return { ...DEFAULT_RIGHT_MENU_GROUPS, ...parsed };
-      } catch {
-        return DEFAULT_RIGHT_MENU_GROUPS;
-      }
-    }
-  );
   const [runCockpitOpen, setRunCockpitOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem('chat.runCockpitOpen') === '1';
@@ -747,13 +705,6 @@ export function SessionPage() {
     section: RunCockpitSection;
     version: number;
   }>({ section: 'overview', version: 0 });
-  const toggleRightMenuGroup = useCallback((groupId: RightMenuGroupId) => {
-    setRightMenuGroupsOpen((prev) => {
-      const next = { ...prev, [groupId]: !prev[groupId] };
-      window.localStorage.setItem('chat.rightMenuGroupsOpen.v2', JSON.stringify(next));
-      return next;
-    });
-  }, []);
   const openRunCockpitSection = useCallback(
     (section: RunCockpitSection = 'overview') => {
       closeNavigation();
@@ -1515,6 +1466,68 @@ export function SessionPage() {
   const scopedAgentRuns = currentAgentRuns.filter(
     (run) => (run.chatId ?? null) === activeHistoryChatId
   );
+
+  // Signals for the code tools: Versionen shows a badge for uncommitted
+  // changes, Vorschau only appears while a dev server answers. Both share the
+  // cache keys of the panels themselves, so opening a panel reuses the data.
+  const isCodeSurface = !!session && (!session.surface || session.surface === 'code');
+  const toolWorkingDirectory = session?.workingDirectory ?? '';
+  const gitStatusQuery = useQuery({
+    queryKey: ['git-status', toolWorkingDirectory],
+    enabled: isCodeSurface && !!toolWorkingDirectory,
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<GitStatus>>(
+        `/api/git/status?path=${encodeURIComponent(toolWorkingDirectory)}`
+      );
+      return response.data.success && response.data.data ? response.data.data : null;
+    },
+    retry: false,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  });
+  const uncommittedCount = gitStatusQuery.data
+    ? new Set([
+        ...gitStatusQuery.data.staged,
+        ...gitStatusQuery.data.unstaged,
+        ...gitStatusQuery.data.untracked,
+      ]).size
+    : 0;
+  const previewPortsQuery = useQuery({
+    queryKey: ['preview-running', toolWorkingDirectory],
+    enabled: isCodeSurface && !!toolWorkingDirectory,
+    queryFn: async () => {
+      const params = new URLSearchParams({ projectPath: toolWorkingDirectory });
+      const response = await api.get<{
+        ports?: Array<{ port: number; reachable: boolean; source: string }>;
+        startCommands?: Array<{ running: boolean }>;
+      }>(`/api/preview/ports?${params.toString()}`);
+      const ports = response.data.ports ?? [];
+      return (
+        ports.some((port) => port.reachable) ||
+        (response.data.startCommands ?? []).some((command) => command.running)
+      );
+    },
+    retry: false,
+    // The port probe is rate limited (12/min); one scan a minute is plenty.
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+  });
+  const previewRunning = previewPortsQuery.data === true;
+
+  // The goal is the latest `/goal …` the user sent in this chat thread.
+  const currentGoal = useMemo(() => {
+    for (let index = sessionMessages.length - 1; index >= 0; index -= 1) {
+      const message = sessionMessages[index];
+      if (!message || message.role !== 'user' || typeof message.content !== 'string') continue;
+      const match = /^\/goal\s+([\s\S]+)$/i.exec(message.content.trim());
+      if (match?.[1]) return match[1].trim();
+    }
+    return null;
+  }, [sessionMessages]);
+  // A freshly set goal shows at once; the transcript catches up afterwards.
+  const [submittedGoal, setSubmittedGoal] = useState<string | null>(null);
+  useEffect(() => setSubmittedGoal(null), [currentGoal, id, activeHistoryChatId]);
+  const displayedGoal = submittedGoal ?? currentGoal;
   const agentCounts = subagentCounts(scopedAgentRuns);
   const agentPanel = (
     <SubagentPanel
@@ -2250,64 +2263,6 @@ export function SessionPage() {
     },
   });
 
-  // Whole CLIs this account may hand work to through the `subagents` MCP tool.
-  // Independent of the provider running the session and of the model router
-  // above, so it is listed for every harness -- otherwise a configured target
-  // (pi, say) has no surface at all until it happens to be running.
-  const { data: cliSubagents = [] } = useQuery({
-    queryKey: ['cli-subagents'],
-    queryFn: async () => {
-      const response = await api.get<ApiResponse<CliSubagentSummary[]>>(
-        '/api/settings/cli-subagents'
-      );
-      return response.data.data ?? [];
-    },
-    staleTime: 60_000,
-  });
-
-  const cliSubagentsSaveMutation = useMutation({
-    mutationFn: async (next: CliSubagentSummary[]) => {
-      const response = await api.put<ApiResponse<CliSubagentSummary[]>>(
-        '/api/settings/cli-subagents',
-        next.map((entry) => ({
-          id: entry.id,
-          label: entry.label,
-          provider: entry.provider,
-          model: entry.model ?? '',
-          enabled: entry.enabled,
-        }))
-      );
-      return response.data.data ?? [];
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(['cli-subagents'], data);
-      toast({
-        title: 'Subagenten aktualisiert',
-        description: 'Neue Sessions und neu gestartete Harnesses nutzen die Auswahl.',
-      });
-    },
-  });
-
-  /**
-   * One control per delegable CLI: off, provider default, or a specific model.
-   * A worker's model is worth choosing per task -- pi alone routes a couple of
-   * dozen -- so the pick belongs next to the switch, not only in Settings.
-   */
-  const applyCliSubagentChoice = useCallback(
-    (entryId: string, choice: string) => {
-      if (cliSubagentsSaveMutation.isPending) return;
-      cliSubagentsSaveMutation.mutate(
-        cliSubagents.map((entry) => {
-          if (entry.id !== entryId) return entry;
-          if (choice === CLI_SUBAGENT_OFF) return { ...entry, enabled: false };
-          if (choice === CLI_SUBAGENT_DEFAULT_MODEL) return { ...entry, enabled: true, model: '' };
-          return { ...entry, enabled: true, model: choice };
-        })
-      );
-    },
-    [cliSubagents, cliSubagentsSaveMutation]
-  );
-
   const sessionReasoningMutation = useMutation({
     mutationFn: async (reasoning: string | null) => {
       const response = await api.patch<ApiResponse<Session>>(`/api/sessions/${id}/reasoning`, {
@@ -2521,7 +2476,6 @@ export function SessionPage() {
     // goal box showed another session's text, the tool detail dialog described a
     // call that never happened here, and the editor stayed open on a file from a
     // different working directory.
-    setGoalDraft('');
     setSelectedCliTool(null);
     setSelectedToolDetail(null);
     setMainView('chat');
@@ -3261,16 +3215,13 @@ export function SessionPage() {
     clearStreamingContent(id);
   }, [clearStreamingContent, id]);
 
-  const handleGoalSubmit = useCallback(
-    async (event?: FormEvent<HTMLFormElement>) => {
-      event?.preventDefault();
-      const objective = goalDraft.trim();
+  const handleSetGoal = useCallback(
+    async (objective: string) => {
       if (!objective || !id) return;
-
       await handleCommandExecute(`/goal ${objective}`);
-      setGoalDraft('');
+      setSubmittedGoal(objective);
     },
-    [goalDraft, handleCommandExecute, id]
+    [handleCommandExecute, id]
   );
 
   const meshPeers = useMemo(() => meshPeersQuery.data || [], [meshPeersQuery.data]);
@@ -3384,20 +3335,13 @@ export function SessionPage() {
     );
   }
 
-  const goalObjective = goalDraft.trim();
   const canUseCodexGoal = sessionProvider === 'codex';
-  const goalObjectiveTooLong = goalObjective.length > 4000;
+  const sessionSurfaceKind = session.surface || 'code';
   const visibleDockedPanels: WorkspaceSheetPanel[] =
-    session.surface && session.surface !== 'code'
-      ? DOCKED_PANEL_KEYS.filter(
-          (panel) => !['git', 'github', 'checkpoints', 'agentsEditor'].includes(panel)
-        )
+    sessionSurfaceKind !== 'code'
+      ? DOCKED_PANEL_KEYS.filter((panel) => !CODE_ONLY_PANEL_KEYS.includes(panel))
       : DOCKED_PANEL_KEYS;
   const hasVisiblePinnedPanel = visibleDockedPanels.some((panel) => pinnedPanels[panel]);
-  const styleMenuPanels = visibleDockedPanels.filter((panel) => STYLE_PANEL_KEYS.includes(panel));
-  const workspaceMenuPanels = visibleDockedPanels.filter(
-    (panel) => !STYLE_PANEL_KEYS.includes(panel)
-  );
   const handleStyleSessionUpdated = (updatedSession: Session) => {
     queryClient.setQueryData(['session', id], updatedSession);
     if (id) {
@@ -3406,92 +3350,21 @@ export function SessionPage() {
     queryClient.invalidateQueries({ queryKey: ['sessions'] });
   };
 
-  const tasksBody = (
-    <div className="session-goal-task-panel">
-      <form className="session-goal-card" onSubmit={handleGoalSubmit}>
-        <div className="session-goal-card-header">
-          <span className="session-goal-icon">
-            <ListTodo className="h-4 w-4" />
-          </span>
-          <span className="session-goal-copy">
-            <span className="session-goal-title">Goal</span>
-            <span className="session-goal-kicker">{canUseCodexGoal ? '/goal' : 'Codex only'}</span>
-          </span>
-        </div>
-        <textarea
-          className="session-goal-input"
-          value={goalDraft}
-          onChange={(event) => setGoalDraft(event.target.value)}
-          disabled={!canUseCodexGoal}
-          rows={3}
-          maxLength={4200}
-          placeholder={
-            canUseCodexGoal ? 'Objective for this session' : 'Switch to Codex to set a goal'
-          }
-        />
-        <div className="session-goal-footer">
-          <span className={cn('session-goal-status', goalObjectiveTooLong && 'is-error')}>
-            {!canUseCodexGoal
-              ? 'Unavailable'
-              : goalObjectiveTooLong
-                ? 'Max 4,000 chars'
-                : 'Auto on long tasks'}
-          </span>
-          <button
-            type="submit"
-            className="session-goal-submit"
-            disabled={!canUseCodexGoal || !goalObjective || goalObjectiveTooLong}
-          >
-            Set /goal
-          </button>
-        </div>
-      </form>
-
-      {currentTodos.length === 0 ? (
-        <div className="session-task-empty">
-          <div className="session-task-empty-icon">
-            <ListTodo className="h-5 w-5" />
-          </div>
-          <span>No active tasks</span>
-        </div>
-      ) : (
-        <div className="session-task-list">
-          {currentTodos.map((todo, index) => (
-            <div
-              key={index}
-              className={cn(
-                'flex items-start gap-2.5 p-2.5 rounded-lg text-xs transition-all',
-                todo.status === 'completed' && 'bg-foreground/[0.02] text-muted-foreground',
-                todo.status === 'in_progress' && 'bg-primary/10 border border-primary/30 shadow-sm',
-                todo.status === 'pending' && 'bg-foreground/[0.03]'
-              )}
-            >
-              <div className="shrink-0 mt-0.5">
-                {todo.status === 'completed' && (
-                  <CheckCircle className="h-4 w-4 text-emerald-500/80" />
-                )}
-                {todo.status === 'in_progress' && (
-                  <Loader2 className="h-4 w-4 text-primary animate-spin" />
-                )}
-                {todo.status === 'pending' && (
-                  <Circle className="h-4 w-4 text-muted-foreground/60" />
-                )}
-              </div>
-              <p
-                className={cn(
-                  'flex-1 leading-relaxed',
-                  todo.status === 'completed' && 'line-through opacity-70',
-                  todo.status === 'in_progress' && 'font-medium text-foreground'
-                )}
-              >
-                {todo.status === 'in_progress' && todo.activeForm ? todo.activeForm : todo.content}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  // Fortschritt appears by itself once the run has todos or subagents.
+  const activeAgentCount = agentCounts.active + agentCounts.waiting;
+  const progressBadgeCount = pendingTasksCount + activeAgentCount;
+  const hasProgress = currentTodos.length > 0 || scopedAgentRuns.length > 0;
+  const hasStaticPreview =
+    typeof window !== 'undefined' &&
+    !!window.localStorage.getItem(`webpreview_active_file_v1:${session.id}`);
+  const showPreviewTool = previewRunning || hasStaticPreview || pinnedPanels.preview;
+  // The goal lives in the chat header of task and code sessions.
+  const showGoalBar =
+    sessionSurfaceKind !== 'chat' && mainView === 'chat' && (!!displayedGoal || canUseCodexGoal);
+  const openSettingsAgents = () => {
+    closeNavigation();
+    navigate('/settings?tab=general&generalTab=subagents&section=cli-subagents');
+  };
 
   const meshBody = (
     <div className="flex h-full flex-col gap-3 overflow-auto p-3 text-sm">
@@ -3737,20 +3610,30 @@ export function SessionPage() {
     { title: string; icon: ReactElement; badge?: ReactElement | null }
   > = {
     files: {
-      title: 'Files',
+      title: 'Dateien',
       icon: <FolderOpen className="h-3.5 w-3.5" />,
       badge: null,
     },
-    agents: {
-      title: 'Agenten',
-      icon: <Brain className="h-3.5 w-3.5" />,
-      badge: <span className="panel-badge">{agentCounts.active}</span>,
-    },
-    tasks: {
-      title: 'Goal & Tasks',
+    progress: {
+      title: 'Fortschritt',
       icon: <ListTodo className="h-3.5 w-3.5" />,
       badge:
-        pendingTasksCount > 0 ? <span className="panel-badge">{pendingTasksCount}</span> : null,
+        progressBadgeCount > 0 ? <span className="panel-badge">{progressBadgeCount}</span> : null,
+    },
+    versions: {
+      title: 'Versionen',
+      icon: <GitBranch className="h-3.5 w-3.5" />,
+      badge: uncommittedCount > 0 ? <span className="panel-badge">{uncommittedCount}</span> : null,
+    },
+    preview: {
+      title: 'Vorschau',
+      icon: <MonitorPlay className="h-3.5 w-3.5" />,
+      badge: null,
+    },
+    connections: {
+      title: 'Verbindungen',
+      icon: <Cable className="h-3.5 w-3.5" />,
+      badge: session.androidDeviceSerial ? <span className="panel-badge">1</span> : null,
     },
     mesh: {
       title: 'Session Mesh',
@@ -3758,57 +3641,27 @@ export function SessionPage() {
       badge: meshPeers.length > 0 ? <span className="panel-badge">{meshPeers.length}</span> : null,
     },
     config: {
-      title: 'Config',
+      title: 'Konfiguration',
       icon: <Brain className="h-3.5 w-3.5" />,
       badge: null,
     },
     designStyle: {
-      title: 'Design Styles',
+      title: 'Design-Vorgabe',
       icon: <Palette className="h-3.5 w-3.5" />,
-      badge: session.designStyleSkill ? <span className="panel-badge">On</span> : null,
+      badge: session.designStyleSkill ? <span className="panel-badge">An</span> : null,
     },
     writingStyle: {
-      title: 'Writing Styles',
+      title: 'Schreibstil',
       icon: <PenLine className="h-3.5 w-3.5" />,
-      badge: session.writingStyleSkill ? <span className="panel-badge">On</span> : null,
-    },
-    browser: {
-      title: 'Browser',
-      icon: <Globe className="h-3.5 w-3.5" />,
-      badge: null,
-    },
-    android: {
-      title: 'Android',
-      icon: <Smartphone className="h-3.5 w-3.5" />,
-      badge: session.androidDeviceSerial ? <span className="panel-badge">1</span> : null,
-    },
-    git: {
-      title: 'Git',
-      icon: <GitBranch className="h-3.5 w-3.5" />,
-      badge: null,
-    },
-    github: {
-      title: 'GitHub',
-      icon: <GitPullRequest className="h-3.5 w-3.5" />,
-      badge: null,
-    },
-    checkpoints: {
-      title: 'Checkpoints',
-      icon: <History className="h-3.5 w-3.5" />,
-      badge: null,
+      badge: session.writingStyleSkill ? <span className="panel-badge">An</span> : null,
     },
     notes: {
-      title: 'Notes',
+      title: 'Notizen',
       icon: <StickyNote className="h-3.5 w-3.5" />,
       badge: null,
     },
-    preview: {
-      title: 'Preview',
-      icon: <MonitorPlay className="h-3.5 w-3.5" />,
-      badge: null,
-    },
     toolLog: {
-      title: 'Tool Log',
+      title: 'Protokoll',
       icon: <ScrollText className="h-3.5 w-3.5" />,
       badge:
         currentToolExecutions.length > 0 ? (
@@ -3819,9 +3672,18 @@ export function SessionPage() {
 
   const renderPanelBody = (panel: WorkspaceSheetPanel) => {
     let body: ReactElement | null = null;
-    if (panel === 'agents') body = agentPanel;
-    else if (panel === 'tasks') body = <div className="h-full overflow-auto">{tasksBody}</div>;
-    else if (panel === 'mesh') body = meshBody;
+    if (panel === 'progress') {
+      body = (
+        <ProgressPanel
+          goal={displayedGoal}
+          todos={currentTodos}
+          agents={agentPanel}
+          agentCount={scopedAgentRuns.length}
+          onOpenRun={handleOpenRunOverview}
+          onConfigureAgents={openSettingsAgents}
+        />
+      );
+    } else if (panel === 'mesh') body = meshBody;
     else if (panel === 'config') body = renderConfigBody('h-full');
     else if (panel === 'designStyle') {
       body = (
@@ -3845,21 +3707,44 @@ export function SessionPage() {
           className="h-full"
         />
       );
-    } else if (panel === 'android') {
-      body = <AndroidDevicePanel sessionId={session.id} className="h-full" />;
-    } else if (panel === 'browser') {
+    } else if (panel === 'connections') {
       body = (
-        <div className="flex h-full flex-col overflow-auto">
-          <BrowserLivePanel sessionId={session.id} />
-          <OracleBrowserPanel sessionId={session.id} className="min-h-[24rem] flex-1" />
-        </div>
+        <ConnectionsPanel
+          className="h-full"
+          focus={connectionsFocus}
+          sections={[
+            {
+              id: 'android',
+              title: 'Android-Geräte',
+              icon: <Smartphone className="h-3.5 w-3.5" />,
+              summary: session.androidDeviceSerial ? 'Gerät angehängt' : undefined,
+              content: <AndroidDevicePanel sessionId={session.id} />,
+            },
+            {
+              id: 'browser',
+              title: 'Browser',
+              icon: <Globe className="h-3.5 w-3.5" />,
+              content: (
+                <div className="flex flex-col">
+                  <BrowserLivePanel sessionId={session.id} />
+                  <OracleBrowserPanel sessionId={session.id} className="min-h-[24rem]" />
+                </div>
+              ),
+            },
+          ]}
+        />
       );
-    } else if (panel === 'git') {
-      body = <GitPanel workingDirectory={session.workingDirectory} className="h-full" />;
-    } else if (panel === 'github') {
-      body = <GitHubPanel workingDirectory={session.workingDirectory} className="h-full" />;
-    } else if (panel === 'checkpoints') {
-      body = <CheckpointsPanel sessionId={session.id} className="h-full" />;
+    } else if (panel === 'versions') {
+      body = (
+        <VersionsPanel
+          sessionId={session.id}
+          workingDirectory={session.workingDirectory}
+          tab={versionsTab}
+          onTabChange={setVersionsTab}
+          uncommittedCount={uncommittedCount}
+          className="h-full"
+        />
+      );
     } else if (panel === 'notes') {
       body = (
         <Notepad
@@ -3893,7 +3778,7 @@ export function SessionPage() {
         key={panel}
         className={cn(
           'session-docked-panel',
-          panel === 'browser' && 'session-docked-browser-panel'
+          panel === 'connections' && 'session-docked-browser-panel'
         )}
       >
         <div className="session-docked-panel-header">
@@ -3969,56 +3854,6 @@ export function SessionPage() {
       {children}
     </label>
   );
-
-  const renderCliSubagentField = (
-    entry: CliSubagentSummary,
-    variant: 'sidebar' | 'mobile' = 'sidebar'
-  ) => {
-    const fieldKey = `${variant === 'mobile' ? 'mobile-' : ''}cli-subagent-${entry.id || entry.provider}`;
-    // The worker runs the provider's own CLI, so its model catalogue is exactly
-    // the one that provider offers a session -- pi's is the long one.
-    const providerInfo = cliProviders?.find((provider) => provider.id === entry.provider);
-    const models = providerInfo?.models ?? [];
-    const labels = providerInfo?.modelLabels ?? {};
-    const providerDefault = providerInfo?.defaultModel;
-    const selected = !entry.enabled ? CLI_SUBAGENT_OFF : entry.model || CLI_SUBAGENT_DEFAULT_MODEL;
-    const displayValue = !entry.enabled
-      ? 'Aus'
-      : entry.model
-        ? labels[entry.model] || entry.model
-        : `Default${providerDefault ? ` · ${labels[providerDefault] || providerDefault}` : ''}`;
-
-    return renderRuntimeField({
-      id: fieldKey,
-      label: entry.label || entry.provider,
-      value: displayValue,
-      icon: <Network className="h-3.5 w-3.5" />,
-      children: (
-        <RuntimeSelect
-          id={fieldKey}
-          className="session-runtime-select"
-          value={selected}
-          onValueChange={(value) => applyCliSubagentChoice(entry.id, value)}
-          aria-label={`Subagent ${entry.label || entry.provider}`}
-          disabled={cliSubagentsSaveMutation.isPending}
-        >
-          <option value={CLI_SUBAGENT_OFF}>Aus (nicht delegierbar)</option>
-          <option value={CLI_SUBAGENT_DEFAULT_MODEL}>
-            Default
-            {providerDefault ? ` (${labels[providerDefault] || providerDefault})` : ''}
-          </option>
-          {models.map((model) => (
-            <option key={`${entry.id}-${model}`} value={model}>
-              {labels[model] || model}
-            </option>
-          ))}
-          {entry.model && !models.includes(entry.model) && (
-            <option value={entry.model}>{entry.model}</option>
-          )}
-        </RuntimeSelect>
-      ),
-    });
-  };
 
   // Model, provider, thinking depth and mode live in the chat bar now (chips in
   // the composer); the session menu only keeps the CLI tool and status light.
@@ -4201,76 +4036,49 @@ export function SessionPage() {
     </button>
   );
 
-  const renderSideMenuGroup = ({
-    id: groupId,
-    label,
-    icon,
-    children,
-    open,
-    badge,
-    badgePulse,
-    summary,
-  }: {
-    id: RightMenuGroupId;
-    summary?: string;
-    label: string;
-    icon: ReactElement;
-    children: ReactNode;
-    open?: boolean;
-    badge?: number;
-    badgePulse?: boolean;
-  }) => {
-    const isOpen = open ?? rightMenuGroupsOpen[groupId];
-    return (
-      <div className={cn('session-side-menu-group', isOpen && 'is-open')}>
-        <button
-          type="button"
-          className={cn('session-side-menu-group-trigger', isOpen && 'is-open')}
-          onClick={() => toggleRightMenuGroup(groupId)}
-          aria-expanded={isOpen}
-          title={label}
-        >
-          <span className="session-side-menu-icon">{icon}</span>
-          <span className="session-side-menu-group-title">
-            {label}
-            {summary && <small className="session-menu-summary">{summary}</small>}
-          </span>
-          {badge && badge > 0 ? (
-            <span className={cn('session-side-menu-badge', badgePulse && 'is-pulsing')}>
-              {badge}
-            </span>
-          ) : null}
-          <span className="session-side-menu-group-caret">
-            <ChevronRight className="h-3 w-3" />
-          </span>
-        </button>
-        {isOpen && <div className="session-side-menu-group-body">{children}</div>}
-      </div>
-    );
-  };
-
-  const renderPanelMenuItem = (panel: WorkspaceSheetPanel, nested = false) => {
+  const renderPanelMenuItem = (
+    panel: WorkspaceSheetPanel,
+    options: { badge?: number; badgePulse?: boolean; onOpen?: () => void } = {}
+  ) => {
     const meta = panelMeta[panel];
     const isActive = pinnedPanels[panel];
-    let badgeCount = 0;
-    if (panel === 'tasks') badgeCount = pendingTasksCount;
-    else if (panel === 'mesh') badgeCount = meshPeers.length;
-    else if (panel === 'designStyle' && session.designStyleSkill) badgeCount = 1;
-    else if (panel === 'writingStyle' && session.writingStyleSkill) badgeCount = 1;
-    else if (panel === 'android' && session.androidDeviceSerial) badgeCount = 1;
-
     return renderSideMenuItem({
       id: `panel-${panel}`,
       label: meta.title,
       icon: meta.icon,
-      onClick: () => openRightPanel(panel),
+      onClick: () => {
+        options.onOpen?.();
+        openRightPanel(panel);
+      },
       active: isActive,
-      badge: badgeCount,
-      title: isActive ? `Close ${meta.title}` : `Open ${meta.title}`,
-      nested,
+      badge: options.badge,
+      badgePulse: options.badgePulse,
+      title: isActive ? `${meta.title} schliessen` : `${meta.title} öffnen`,
     });
   };
 
+  const archiveSession = async () => {
+    if (!id) return;
+    try {
+      await api.post('/api/sessions/bulk', { ids: [id], action: 'archive' });
+      useSessionStore.getState().removeSession(id);
+      void queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      toast({ title: 'Session archiviert' });
+      navigate(sessionSurfaceKind === 'task' ? '/tasks' : '/code');
+    } catch (error) {
+      toast({
+        title: 'Archivieren fehlgeschlagen',
+        description: error instanceof Error ? error.message : undefined,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  /**
+   * Session tools in the sidebar block. Code: Dateien, Versionen, Vorschau,
+   * Verbindungen; Task: Dateien, Verbindungen. Fortschritt shows up by itself
+   * once the run has todos or subagents. Rarely used tools sit in ⋯.
+   */
   const renderSessionMenu = (mobile = false) => {
     const closeMobile = () => {
       if (mobile) closeNavigation();
@@ -4279,10 +4087,11 @@ export function SessionPage() {
       setMainView(view);
       closeMobile();
     };
-    const secondaryPanels = workspaceMenuPanels.filter(
-      (p) => !['tasks', 'agents', 'git', 'preview', 'notes'].includes(p)
-    );
-    const enabledAgents = cliSubagents.filter((entry) => entry.enabled).length;
+    const isCodeSession = sessionSurfaceKind === 'code';
+    const openOverflowPanel = (panel: WorkspaceSheetPanel) => {
+      closeMobile();
+      openRightPanel(panel);
+    };
     return (
       <>
         <div className="session-menu-chat-row">
@@ -4299,12 +4108,70 @@ export function SessionPage() {
           <DropdownMenu>
             <DropdownMenuTrigger
               className="session-menu-more"
-              aria-label="Session actions"
-              title="Session actions"
+              aria-label="Weitere Session-Aktionen"
+              title="Weitere Session-Aktionen"
             >
               <MoreHorizontal className="h-4 w-4" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent navigation align="start">
+            <DropdownMenuContent navigation align="start" className="w-60">
+              <DropdownMenuItem onSelect={() => openOverflowPanel('notes')}>
+                <StickyNote className="mr-2 h-4 w-4" />
+                Notizen
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => openOverflowPanel('toolLog')}>
+                <ScrollText className="mr-2 h-4 w-4" />
+                Protokoll
+                {currentToolExecutions.length > 0 && (
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {currentToolExecutions.length}
+                  </span>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => openOverflowPanel('mesh')}>
+                <Network className="mr-2 h-4 w-4" />
+                Session Mesh
+                {meshPeers.length > 0 && (
+                  <span className="ml-auto text-xs text-muted-foreground">{meshPeers.length}</span>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <Palette className="mr-2 h-4 w-4" />
+                  Darstellung
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem onSelect={() => openOverflowPanel('designStyle')}>
+                    <Palette className="mr-2 h-4 w-4" />
+                    Design-Vorgabe
+                    {session.designStyleSkill && (
+                      <span className="ml-auto max-w-24 truncate text-xs text-muted-foreground">
+                        {session.designStyleSkill}
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => openOverflowPanel('writingStyle')}>
+                    <PenLine className="mr-2 h-4 w-4" />
+                    Schreibstil
+                    {session.writingStyleSkill && (
+                      <span className="ml-auto max-w-24 truncate text-xs text-muted-foreground">
+                        {session.writingStyleSkill}
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              {hasSessionRuntimeExtras && (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    closeMobile();
+                    setShowRuntimeDialog(true);
+                  }}
+                >
+                  <Wrench className="mr-2 h-4 w-4" />
+                  CLI-Werkzeug &amp; Statuslicht
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
               <DropdownMenuItem
                 onSelect={() => {
                   closeMobile();
@@ -4312,7 +4179,7 @@ export function SessionPage() {
                 }}
               >
                 <Pencil className="mr-2 h-4 w-4" />
-                Rename
+                Umbenennen
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => {
@@ -4321,7 +4188,7 @@ export function SessionPage() {
                 }}
               >
                 <BookmarkPlus className="mr-2 h-4 w-4" />
-                Save as template
+                Als Vorlage speichern
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => {
@@ -4330,7 +4197,7 @@ export function SessionPage() {
                 }}
               >
                 <Download className="mr-2 h-4 w-4" />
-                Export transcript
+                Verlauf exportieren
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => {
@@ -4339,7 +4206,7 @@ export function SessionPage() {
                 }}
               >
                 <FolderKey className="mr-2 h-4 w-4" />
-                Directories
+                Verzeichnisse
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -4349,7 +4216,16 @@ export function SessionPage() {
                 }}
               >
                 <RotateCcw className="mr-2 h-4 w-4" />
-                Restart session
+                Session neu starten
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  closeMobile();
+                  void archiveSession();
+                }}
+              >
+                <Archive className="mr-2 h-4 w-4" />
+                Archivieren
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -4357,103 +4233,47 @@ export function SessionPage() {
         {(canInterruptActiveRun || isExecutingTool) &&
           renderSideMenuItem({
             id: 'stop-run',
-            label: isExecutingTool ? 'Cancel tool' : 'Stop current run',
+            label: isExecutingTool ? 'Werkzeug abbrechen' : 'Lauf stoppen',
             icon: <Square className="h-4 w-4" />,
             onClick: isExecutingTool ? handleCancelCliTool : handleInterrupt,
           })}
         {mainView !== 'chat' &&
           renderSideMenuItem({
             id: 'back-chat',
-            label: 'Back to chat',
+            label: 'Zurück zum Chat',
             icon: <MessageSquare className="h-4 w-4" />,
             onClick: () => openView('chat'),
           })}
-        {renderSideMenuGroup({
-          id: 'workspace',
-          label: 'Tools',
-          icon: <Wrench className="h-4 w-4" />,
-          children: (
-            <>
-              <div className="session-primary-tools">
-                {renderPanelMenuItem('tasks')}
-                <button
-                  type="button"
-                  className={cn(
-                    'session-side-menu-item session-menu-agents',
-                    pinnedPanels.agents && 'is-active'
-                  )}
-                  onClick={() => openRightPanel('agents')}
-                  title="Agent activity"
-                >
-                  <span className="session-side-menu-icon">
-                    <Brain className="h-4 w-4" />
-                  </span>
-                  <span className="session-side-menu-label">
-                    Agents
-                    <small className="session-menu-summary">
-                      {agentCounts.active} active · {agentCounts.waiting} waiting
-                    </small>
-                  </span>
-                </button>
-                {renderSideMenuItem({
-                  id: 'files',
-                  label: 'Files',
-                  icon: <FolderOpen className="h-4 w-4" />,
-                  onClick: () => openView('files'),
-                  active: mainView === 'files',
-                })}
-                {hasOpenFiles &&
-                  renderSideMenuItem({
-                    id: 'editor',
-                    label: 'Editor',
-                    icon: <Code2 className="h-4 w-4" />,
-                    onClick: () => openView('editor'),
-                    active: mainView === 'editor',
-                  })}
-                {(!session.surface || session.surface === 'code') && renderPanelMenuItem('git')}
-                {renderPanelMenuItem('preview')}
-                {renderPanelMenuItem('notes')}
-              </div>
-              <details className="session-menu-secondary">
-                <summary>More tools</summary>
-                {secondaryPanels.map((p) => renderPanelMenuItem(p))}
-              </details>
-              <button
-                type="button"
-                className="session-menu-configure"
-                onClick={() => {
-                  closeMobile();
-                  setShowAgentConfig(true);
-                }}
-              >
-                Configure agents <span>{enabledAgents} configured</span>
-              </button>
-            </>
-          ),
-        })}
-        {hasSessionRuntimeExtras &&
-          renderSideMenuGroup({
-            id: 'runtime',
-            label: 'CLI-Werkzeug & Statuslicht',
-            icon: <Wrench className="h-4 w-4" />,
-            summary:
-              [
-                selectedToolName || (cliTools?.length ? 'Kein Werkzeug' : ''),
-                session.homeAssistantEntityId ? 'Licht aktiv' : '',
-              ]
-                .filter(Boolean)
-                .join(' · ') || 'Nicht gesetzt',
-            children: renderSessionRuntimeControls(mobile ? 'mobile' : 'sidebar'),
+        <div className="session-primary-tools">
+          {(hasProgress || pinnedPanels.progress) &&
+            renderPanelMenuItem('progress', {
+              badge: progressBadgeCount,
+              badgePulse:
+                activeAgentCount > 0 || currentTodos.some((t) => t.status === 'in_progress'),
+            })}
+          {renderSideMenuItem({
+            id: 'files',
+            label: 'Dateien',
+            icon: <FolderOpen className="h-4 w-4" />,
+            onClick: () => openView('files'),
+            active: mainView === 'files',
           })}
-        {renderSideMenuGroup({
-          id: 'styles',
-          label: 'Appearance',
-          icon: <Palette className="h-4 w-4" />,
-          summary:
-            [session.designStyleSkill, session.writingStyleSkill].filter(Boolean).join(' · ') ||
-            'Default appearance',
-          children: styleMenuPanels.map((p) => renderPanelMenuItem(p)),
-        })}
+          {hasOpenFiles &&
+            renderSideMenuItem({
+              id: 'editor',
+              label: 'Editor',
+              icon: <Code2 className="h-4 w-4" />,
+              onClick: () => openView('editor'),
+              active: mainView === 'editor',
+              nested: true,
+            })}
+          {isCodeSession && renderPanelMenuItem('versions', { badge: uncommittedCount })}
+          {isCodeSession && showPreviewTool && renderPanelMenuItem('preview')}
+          {renderPanelMenuItem('connections', {
+            onOpen: () => setConnectionsFocus(null),
+            badge: session.androidDeviceSerial ? 1 : 0,
+          })}
+        </div>
       </>
     );
   };
@@ -4491,10 +4311,21 @@ export function SessionPage() {
         )}
       >
         {/* Session Header measurement point; visible runtime controls live in the left session menu. */}
-        <div ref={setHeaderBarEl} className={cn('chat-topbar relative shrink-0', 'is-empty')}>
+        <div
+          ref={setHeaderBarEl}
+          className={cn('chat-topbar relative shrink-0', showGoalBar ? 'has-goal' : 'is-empty')}
+        >
           <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
             {messageJumpStatus}
           </span>
+          {showGoalBar && (
+            <SessionGoalBar
+              key={`${session.id}:${activeHistoryChatId ?? ''}`}
+              goal={displayedGoal}
+              canSetGoal={canUseCodexGoal}
+              onSetGoal={handleSetGoal}
+            />
+          )}
         </div>
 
         {session.surface === 'chat' && (
@@ -4525,13 +4356,6 @@ export function SessionPage() {
                 </select>
               </label>
             </div>
-            <button
-              type="button"
-              className="plum-chat-tools-button"
-              onClick={() => window.dispatchEvent(new Event('session:open-mobile-right-menu'))}
-            >
-              Gesprächswerkzeuge
-            </button>
           </header>
         )}
 
@@ -4845,11 +4669,7 @@ export function SessionPage() {
               {scopedAgentRuns.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => {
-                    if (window.matchMedia('(max-width: 1023px)').matches)
-                      setMobileSheetPanel('agents');
-                    else openRightPanel('agents');
-                  }}
+                  onClick={() => openRightPanel('progress')}
                   className="session-agents-summary mb-2 flex w-full items-center gap-2 border px-3 py-2 text-left text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
                 >
                   <Brain className="h-4 w-4 shrink-0" />
@@ -4872,7 +4692,7 @@ export function SessionPage() {
                 pendingTasksCount={pendingTasksCount}
                 completedTasksCount={completedTasksCount}
                 totalTasksCount={totalTasksCount}
-                onOpenTasks={() => openRightPanel('tasks')}
+                onOpenTasks={() => openRightPanel('progress')}
               />
               <ChatInput
                 conversation={session.surface === 'chat'}
@@ -4918,6 +4738,7 @@ export function SessionPage() {
       {/* /main column */}
 
       {sessionMenu.target &&
+        sessionSurfaceKind !== 'chat' &&
         createPortal(
           <nav aria-label="Session tools">{renderSessionMenu(!isDesktopLayout)}</nav>,
           sessionMenu.target
@@ -4930,13 +4751,13 @@ export function SessionPage() {
           <div
             className={cn(
               'session-right-dock session-content-dock hidden lg:flex',
-              !runCockpitOpen && pinnedPanels.browser && 'has-browser'
+              !runCockpitOpen && pinnedPanels.connections && 'has-browser'
             )}
           >
             <div
               className={cn(
                 'session-docked-panel-column',
-                !runCockpitOpen && pinnedPanels.browser && 'is-browser-active'
+                !runCockpitOpen && pinnedPanels.connections && 'is-browser-active'
               )}
             >
               {runCockpitOpen
@@ -4961,28 +4782,15 @@ export function SessionPage() {
         </SheetContent>
       </Sheet>
 
-      <Dialog open={showAgentConfig} onOpenChange={setShowAgentConfig}>
+      <Dialog open={showRuntimeDialog} onOpenChange={setShowRuntimeDialog}>
         <DialogContent className="navigation-dialog max-h-[85dvh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Configure agents</DialogTitle>
+            <DialogTitle>CLI-Werkzeug &amp; Statuslicht</DialogTitle>
             <DialogDescription>
-              Choose which workers this session can delegate to. Configured workers are not
-              necessarily active.
+              Werkzeug für die Chatbar und das Statuslicht dieser Session.
             </DialogDescription>
           </DialogHeader>
-          {cliSubagents.length ? (
-            <div className="session-runtime-controls">
-              {cliSubagents.map((entry) => (
-                <Fragment key={entry.id || entry.provider}>
-                  {renderCliSubagentField(entry)}
-                </Fragment>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No workers configured. Add workers in Settings → Subagents.
-            </p>
-          )}
+          {renderSessionRuntimeControls('mobile')}
         </DialogContent>
       </Dialog>
 
