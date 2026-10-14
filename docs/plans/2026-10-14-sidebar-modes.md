@@ -91,8 +91,16 @@ Eine Liste „Verbindungen" (global in Einstellungen, pro Session angehängt im 
 | P4 Presets | Schreibstil ins `+`-Menü (Chat/Task); Design-Vorgabe als Karten | Kein Style-Block mehr in der Sidebar |
 | P5 Verbindungen | Backend + UI Android/SSH/Browser, SSH-Test, Session-Zuordnung, Agent-Aliase | SSH-Host anlegen, testen, an Session hängen, Agent erreicht ihn |
 
-## Offene Entscheidungen
+## Entscheidungen (2026-10-14)
 
-1. Notizen behalten (im ⋯-Menü) oder ganz entfernen?
-2. SSH: nur für Agenten nutzbar, oder auch ein Terminal in der WebUI (Phase 2 von P5)?
-3. Schreibstil-Preset auch in Task oder nur in Chat?
+1. Notizen bleiben, im ⋯-Menü der Session.
+2. SSH: zuerst nur für Agenten (Aliase) plus Testknopf; WebUI-Terminal später.
+3. Schreibstil-Preset in Chat **und** Task.
+
+## Arbeitsregeln für die Umsetzung
+
+- Jede Phase: WebUI (`packages/frontend`) und Android (`packages/android`) im selben Durchgang; Backend/shared wo nötig.
+- Prüfen: `pnpm --filter @plum-code-webui/frontend exec tsc --noEmit`, Backend `cd packages/backend && pnpm exec tsc --noEmit`, eslint auf geänderten Dateien, prettier.
+- Android-Build über `node scripts/mcp-call.mjs call android-builder android_build '{"projectId":"796aa064-f0bb-4031-bbf2-2da83a4bca94"}'` nach `cp -a packages/android/app/src/main/. /mnt/user/AI/plum-code/android-app-creator/projects/796aa064-f0bb-4031-bbf2-2da83a4bca94/app/src/main/`; Erfolg = neue mtime von `app/build/outputs/apk/debug/app-debug.apk` (8–12 min), Fehler = `android_get_project` → `status: error` (keine Logs; häufig fehlende Imports, nicht erschöpfende `when`, `AnimatedContent`+`togetherWith` vermeiden).
+- Kein Container-Rebuild durch die Phase (das macht der Hauptagent am Ende).
+- Abschluss: ein Commit pro Phase, Kurzbericht (was, wo, was ungeprüft).
