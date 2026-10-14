@@ -761,8 +761,8 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
-  padding: 2px 4px 2px;
+  gap: 8px;
+  padding: 6px 8px 4px;
 }
 .plum-chip {
   min-height: 30px;
@@ -989,13 +989,6 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
   }
 }
 
-/* The run strip (state, interrupt, follow-up/steer) leads the chip row. */
-.composer-chip-row .composer-brief-row {
-  flex: 1 1 260px;
-  min-width: 0;
-  margin: 0;
-}
-
 /* Subagent bubble beside the model chip; restart as icon chip at the end. */
 .plum-agents-chip {
   color: hsl(var(--muted-foreground));
@@ -1084,4 +1077,28 @@ html.eink .plum-assistant-shell .bg-card {
 html.plum-engine-gecko body :is(.plum-message-composer, .library-popup) {
   -webkit-backdrop-filter: blur(24px) saturate(160%) !important;
   backdrop-filter: blur(24px) saturate(160%) !important;
+}
+
+/* Agent status bubble above the chat bar: frosted, always present. */
+.composer-wrap .composer-brief-row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 4px 8px;
+}
+.composer-wrap .composer-now-brief {
+  min-height: 32px;
+  padding: 3px 12px 3px 5px;
+  border-color: hsl(0 0% 100% / 0.14);
+  background:
+    linear-gradient(145deg, hsl(0 0% 100% / 0.1), hsl(0 0% 100% / 0.03) 60%),
+    hsl(var(--card) / 0.22);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+}
+.composer-wrap .composer-brief-actions {
+  margin-left: 0;
+}
+.composer-brief-row.is-idle .composer-brief-indicator {
+  color: hsl(152 60% 52%);
 }

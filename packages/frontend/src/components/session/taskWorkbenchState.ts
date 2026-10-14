@@ -105,26 +105,33 @@ export function getTaskWorkbenchState({
         ? 'No plan yet'
         : 'No task list';
 
-  const composerStatusLabel = isActive
-    ? composerSteersWhileActive
-      ? 'Steering active run'
-      : composerQueuesWhileActive
-        ? queuedDepth > 0
-          ? `${queuedDepth} queued`
-          : 'Follow-up queue'
-        : 'Run active'
-    : hasSelectedTool
-      ? selectedToolName || 'Tool selected'
-      : '';
+  // The bubble above the chat bar always names what the agent is doing now.
+  const composerStatusLabel =
+    sessionStatus === 'error'
+      ? 'Braucht dich'
+      : isActive
+        ? composerSteersWhileActive
+          ? 'Arbeitet · lenkbar'
+          : queuedDepth > 0
+            ? `Arbeitet · ${queuedDepth} in der Warteschlange`
+            : 'Arbeitet'
+        : hasSelectedTool
+          ? selectedToolName || 'Werkzeug gewählt'
+          : 'Wartet auf dich';
 
-  const composerStatusDetail =
-    activeTodoText ||
-    activityMessage ||
-    runtimeActivityDetail ||
-    activeAgentDetail ||
-    (isActive && composerQueuesWhileActive ? 'Waiting behind current run.' : undefined) ||
-    (isActive && composerSteersWhileActive ? 'Updating current run.' : undefined) ||
-    '';
+  const composerStatusDetail = isActive
+    ? activeTodoText ||
+      activityMessage ||
+      runtimeActivityDetail ||
+      activeAgentDetail ||
+      (composerQueuesWhileActive
+        ? 'Neue Nachrichten warten, bis der Lauf fertig ist.'
+        : composerSteersWhileActive
+          ? 'Neue Nachrichten fließen direkt in den Lauf.'
+          : '')
+    : sessionStatus === 'error'
+      ? activityMessage || 'Der letzte Lauf ist fehlgeschlagen.'
+      : '';
 
   return {
     headerTone,
