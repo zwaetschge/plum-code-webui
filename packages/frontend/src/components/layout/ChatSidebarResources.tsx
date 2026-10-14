@@ -1,24 +1,42 @@
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, Library, MessageCircle, SlidersHorizontal } from 'lucide-react';
+import {
+  BellRing,
+  BookOpen,
+  Bot,
+  Brain,
+  CalendarClock,
+  ChevronDown,
+  FileStack,
+  FolderKanban,
+  GraduationCap,
+  Layers,
+  Library,
+  MessageCircle,
+  Repeat,
+  SlidersHorizontal,
+  UserRound,
+  Users,
+} from 'lucide-react';
 import type { AssistantResource, Session } from '@plum-code-webui/shared';
 import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/lib/utils';
 
-const libraries = [
-  ['profiles', 'Profile'],
-  ['projects', 'Projekte'],
-  ['sources', 'Quellen'],
-  ['artifacts', 'Ergebnisse'],
-  ['memory', 'Gedächtnis'],
-  ['routines', 'Routinen'],
-  ['collections', 'Sammlungen'],
-  ['meetings', 'Besprechungen'],
-  ['courses', 'Kurse'],
-  ['agents', 'Agenten'],
-  ['event-subscriptions', 'Ereignisse'],
+const libraries: [path: string, label: string, icon: ComponentType<{ className?: string }>][] = [
+  ['/assistant/projects', 'Projekte', FolderKanban],
+  ['/assistant/sources', 'Quellen', BookOpen],
+  ['/assistant/artifacts', 'Ergebnisse', FileStack],
+  ['/assistant/memory', 'Gedächtnis', Brain],
+  ['/assistant/profiles', 'Profile', UserRound],
+  ['/assistant/agents', 'Agenten', Bot],
+  ['/assistant/routines', 'Routinen', Repeat],
+  ['/assistant/collections', 'Sammlungen', Layers],
+  ['/assistant/meetings', 'Besprechungen', CalendarClock],
+  ['/assistant/courses', 'Kurse', GraduationCap],
+  ['/assistant/event-subscriptions', 'Ereignisse', BellRing],
+  ['/collaborate', 'Dokumente', Users],
 ];
 
 const DAY_MS = 86_400_000;
@@ -128,7 +146,7 @@ export function ChatSidebarResources({
           </p>
         )}
       </nav>
-      <details className="sidebar-session-group" aria-label="Bibliothek">
+      <details className="sidebar-session-group sidebar-library" aria-label="Bibliothek">
         <summary
           className={cn(
             'sidebar-session-group-trigger flex items-center gap-2 cursor-pointer text-xs',
@@ -140,32 +158,28 @@ export function ChatSidebarResources({
           {!collapsed && (
             <>
               <span className="flex-1">Bibliothek</span>
-              <ChevronDown className="h-3 w-3" />
+              <ChevronDown className="sidebar-library-chevron h-3 w-3" />
             </>
           )}
         </summary>
-        <nav aria-label="Bibliothekseinträge">
-          {libraries.map(([slug, label]) => (
+        {/* Icon tiles instead of a long text list; one column when the rail is collapsed. */}
+        <nav
+          aria-label="Bibliothekseinträge"
+          className={cn('sidebar-library-grid', collapsed && 'is-collapsed')}
+        >
+          {libraries.map(([to, label, Icon]) => (
             <NavLink
-              key={slug}
-              to={`/assistant/${slug}`}
+              key={to}
+              to={to}
               onClick={onNavigate}
               title={label}
-              className={({ isActive }) =>
-                cn(row, isActive && 'is-active', collapsed && 'justify-center')
-              }
+              aria-label={label}
+              className={({ isActive }) => cn('sidebar-library-tile', isActive && 'is-active')}
             >
-              {collapsed ? <Library className="h-4 w-4" /> : label}
+              <Icon className="h-4 w-4 shrink-0" />
+              {!collapsed && <span>{label}</span>}
             </NavLink>
           ))}
-          <NavLink
-            to="/collaborate"
-            onClick={onNavigate}
-            className={row}
-            title="Gemeinsame Dokumente"
-          >
-            {collapsed ? <Library className="h-4 w-4" /> : 'Gemeinsame Dokumente'}
-          </NavLink>
         </nav>
       </details>
       <NavLink

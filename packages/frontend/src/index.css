@@ -8847,6 +8847,70 @@ html.dark .chat-composer-form.glass-chrome {
   padding: 0 4px;
   font-size: 8px;
 }
+/* Chat library: compact icon tiles, three per row. */
+.sidebar-library-chevron {
+  transition: transform 0.18s ease;
+}
+.sidebar-library[open] .sidebar-library-chevron {
+  transform: rotate(180deg);
+}
+.sidebar-library-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 2px 4px 0;
+}
+.sidebar-library-grid.is-collapsed {
+  grid-template-columns: 1fr;
+}
+.sidebar-library-tile {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 2px;
+  border-radius: 10px;
+  border: 1px solid hsl(var(--foreground) / 0.06);
+  background: hsl(var(--foreground) / 0.035);
+  color: hsl(var(--muted-foreground));
+  font-size: 10.5px;
+  line-height: 1.1;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease;
+}
+.sidebar-library-tile > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-library-tile:hover {
+  color: hsl(var(--foreground));
+  background: hsl(var(--foreground) / 0.07);
+}
+.sidebar-library-tile:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 1px;
+}
+.sidebar-library-tile.is-active {
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--primary) / 0.45);
+  background: hsl(var(--primary) / 0.16);
+}
+.sidebar-library-grid.is-collapsed .sidebar-library-tile {
+  min-height: 36px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-library-chevron,
+  .sidebar-library-tile {
+    transition: none;
+  }
+}
 .sidebar-session-group-chevron {
   width: 12px;
   height: 12px;
