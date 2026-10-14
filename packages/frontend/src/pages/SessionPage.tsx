@@ -45,7 +45,6 @@ import {
   RotateCcw,
   Square,
   ChevronDown,
-  PenLine,
   Smartphone,
   Network,
   Link2,
@@ -78,9 +77,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -100,7 +96,9 @@ import { MessageBubble } from '@/components/chat/MessageBubble';
 import { ToolExecutionCard } from '@/components/chat/ToolExecutionCard';
 import { ToolDetailDialog } from '@/components/session/ToolDetailDialog';
 import { AndroidDevicePanel } from '@/components/session/AndroidDevicePanel';
-import { SessionStyleLibraryPanel } from '@/components/session/SessionStyleLibraryPanel';
+import { DesignPresetDialog } from '@/components/presets/DesignPresetDialog';
+import { WritingStyleMenu } from '@/components/presets/WritingStyleMenu';
+import { designLabel, useStyleLibrary } from '@/components/presets/useStyleLibrary';
 import { ToolLogPanel } from '@/components/session/ToolLogPanel';
 import { VersionsPanel, type VersionsTab } from '@/components/session/VersionsPanel';
 import { ConnectionsPanel } from '@/components/session/ConnectionsPanel';
@@ -201,8 +199,6 @@ const DOCKED_PANEL_KEYS: WorkspaceSheetPanel[] = [
   'notes',
   'toolLog',
   'mesh',
-  'designStyle',
-  'writingStyle',
 ];
 /** Code-only tools; task and chat sessions have no repository or dev server. */
 const CODE_ONLY_PANEL_KEYS: WorkspaceSheetPanel[] = ['versions', 'preview'];
@@ -2309,6 +2305,41 @@ export function SessionPage() {
     },
   });
 
+  /** Session presets: design (Code/Task, ⋯ → Darstellung) and writing style (Task `+`). */
+  const sessionStyleMutation = useMutation({
+    mutationFn: async (payload: {
+      designStyleSkill?: string | null;
+      writingStyleSkill?: string | null;
+    }) => {
+      const response = await api.patch<ApiResponse<Session>>(`/api/sessions/${id}/styles`, payload);
+      return response.data;
+    },
+    onSuccess: (data, payload) => {
+      if (data.success && data.data && id) {
+        queryClient.setQueryData(['session', id], data.data);
+        useSessionStore.getState().updateSession(id, data.data);
+        queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        toast({
+          title: 'designStyleSkill' in payload ? 'Design-Vorgabe gesetzt' : 'Schreibstil gesetzt',
+          description: 'Gilt ab der nächsten Nachricht.',
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Vorgabe konnte nicht gesetzt werden',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+  const [designDialogOpen, setDesignDialogOpen] = useState(false);
+  const styleLibrary = useStyleLibrary(!!session && session.surface !== 'chat');
+  const sessionDesignStyle = session?.designStyleSkill ?? null;
+  const sessionWritingStyle = session?.writingStyleSkill ?? null;
+  const designStyleName = designLabel(styleLibrary.data?.designStyles, sessionDesignStyle);
+  const changeSessionStyle = sessionStyleMutation.mutate;
+
   const linkPeerMutation = useMutation({
     mutationFn: async ({ targetSessionId, role }: { targetSessionId: string; role: string }) => {
       const response = await api.post<ApiResponse<SessionPeerLink>>(`/api/sessions/${id}/peers`, {
@@ -3102,9 +3133,23 @@ export function SessionPage() {
           }
         />
         <SessionModeChip value={sessionMode} onChange={handleModeChange} />
+        {designStyleName && (
+          // The design preset is only hinted at here; it is chosen via ⋯ → Darstellung.
+          <button
+            type="button"
+            className="plum-model-trigger plum-chip plum-preset-hint"
+            onClick={() => setDesignDialogOpen(true)}
+            title={`Design-Vorgabe: ${designStyleName}`}
+            aria-label={`Design-Vorgabe: ${designStyleName}`}
+          >
+            <Palette size={13} aria-hidden />
+            <span className="plum-model-trigger-name">{designStyleName}</span>
+          </button>
+        )}
       </>
     );
   }, [
+    designStyleName,
     composerSurface,
     settings?.cliProviderModelLists,
     cliProviders,
@@ -3130,6 +3175,18 @@ export function SessionPage() {
     sessionMode,
     handleModeChange,
   ]);
+
+  /** Task sessions pick their writing style from the composer's `+`. */
+  const composerPlusMenu = useMemo(
+    () =>
+      composerSurface === 'task' ? (
+        <WritingStyleMenu
+          value={sessionWritingStyle}
+          onChange={(writingStyleSkill) => changeSessionStyle({ writingStyleSkill })}
+        />
+      ) : null,
+    [composerSurface, sessionWritingStyle, changeSessionStyle]
+  );
 
   /** Freeze this session's provider/model/directory setup as a reusable start. */
   const handleSaveTemplate = useCallback(
@@ -3342,13 +3399,6 @@ export function SessionPage() {
       ? DOCKED_PANEL_KEYS.filter((panel) => !CODE_ONLY_PANEL_KEYS.includes(panel))
       : DOCKED_PANEL_KEYS;
   const hasVisiblePinnedPanel = visibleDockedPanels.some((panel) => pinnedPanels[panel]);
-  const handleStyleSessionUpdated = (updatedSession: Session) => {
-    queryClient.setQueryData(['session', id], updatedSession);
-    if (id) {
-      useSessionStore.getState().updateSession(id, updatedSession);
-    }
-    queryClient.invalidateQueries({ queryKey: ['sessions'] });
-  };
 
   // Fortschritt appears by itself once the run has todos or subagents.
   const activeAgentCount = agentCounts.active + agentCounts.waiting;
@@ -3645,16 +3695,6 @@ export function SessionPage() {
       icon: <Brain className="h-3.5 w-3.5" />,
       badge: null,
     },
-    designStyle: {
-      title: 'Design-Vorgabe',
-      icon: <Palette className="h-3.5 w-3.5" />,
-      badge: session.designStyleSkill ? <span className="panel-badge">An</span> : null,
-    },
-    writingStyle: {
-      title: 'Schreibstil',
-      icon: <PenLine className="h-3.5 w-3.5" />,
-      badge: session.writingStyleSkill ? <span className="panel-badge">An</span> : null,
-    },
     notes: {
       title: 'Notizen',
       icon: <StickyNote className="h-3.5 w-3.5" />,
@@ -3685,29 +3725,7 @@ export function SessionPage() {
       );
     } else if (panel === 'mesh') body = meshBody;
     else if (panel === 'config') body = renderConfigBody('h-full');
-    else if (panel === 'designStyle') {
-      body = (
-        <SessionStyleLibraryPanel
-          sessionId={session.id}
-          provider={sessionProvider}
-          kind="design"
-          selectedSkill={session.designStyleSkill}
-          onSessionUpdated={handleStyleSessionUpdated}
-          className="h-full"
-        />
-      );
-    } else if (panel === 'writingStyle') {
-      body = (
-        <SessionStyleLibraryPanel
-          sessionId={session.id}
-          provider={sessionProvider}
-          kind="writing"
-          selectedSkill={session.writingStyleSkill}
-          onSessionUpdated={handleStyleSessionUpdated}
-          className="h-full"
-        />
-      );
-    } else if (panel === 'connections') {
+    else if (panel === 'connections') {
       body = (
         <ConnectionsPanel
           className="h-full"
@@ -4134,32 +4152,20 @@ export function SessionPage() {
                   <span className="ml-auto text-xs text-muted-foreground">{meshPeers.length}</span>
                 )}
               </DropdownMenuItem>
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
+              {sessionSurfaceKind !== 'chat' && (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    closeMobile();
+                    setDesignDialogOpen(true);
+                  }}
+                >
                   <Palette className="mr-2 h-4 w-4" />
                   Darstellung
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  <DropdownMenuItem onSelect={() => openOverflowPanel('designStyle')}>
-                    <Palette className="mr-2 h-4 w-4" />
-                    Design-Vorgabe
-                    {session.designStyleSkill && (
-                      <span className="ml-auto max-w-24 truncate text-xs text-muted-foreground">
-                        {session.designStyleSkill}
-                      </span>
-                    )}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => openOverflowPanel('writingStyle')}>
-                    <PenLine className="mr-2 h-4 w-4" />
-                    Schreibstil
-                    {session.writingStyleSkill && (
-                      <span className="ml-auto max-w-24 truncate text-xs text-muted-foreground">
-                        {session.writingStyleSkill}
-                      </span>
-                    )}
-                  </DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
+                  <span className="ml-auto max-w-28 truncate text-xs text-muted-foreground">
+                    {designStyleName ?? 'Keine'}
+                  </span>
+                </DropdownMenuItem>
+              )}
               {hasSessionRuntimeExtras && (
                 <DropdownMenuItem
                   onSelect={() => {
@@ -4730,6 +4736,7 @@ export function SessionPage() {
                 queueDepth={queuedDepth}
                 onOpenRun={handleOpenRunOverview}
                 toolbar={composerToolbar}
+                plusMenu={composerPlusMenu}
               />
             </div>
           </div>
@@ -4828,6 +4835,16 @@ export function SessionPage() {
         session={session}
         open={showRenameDialog}
         onOpenChange={setShowRenameDialog}
+      />
+
+      <DesignPresetDialog
+        open={designDialogOpen}
+        onOpenChange={setDesignDialogOpen}
+        value={sessionDesignStyle}
+        pending={sessionStyleMutation.isPending}
+        onSelect={(designStyleSkill) =>
+          changeSessionStyle({ designStyleSkill }, { onSuccess: () => setDesignDialogOpen(false) })
+        }
       />
 
       <Dialog

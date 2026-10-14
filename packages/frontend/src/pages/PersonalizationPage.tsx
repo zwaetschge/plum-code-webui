@@ -13,6 +13,12 @@ import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { DesignPresetDialog } from '@/components/presets/DesignPresetDialog';
+import {
+  WRITING_STYLE_GROUPS,
+  designLabel,
+  useStyleLibrary,
+} from '@/components/presets/useStyleLibrary';
 import './personalization.css';
 
 export function PersonalizationPage() {
@@ -28,6 +34,8 @@ function PersonalizationAccount({ owner }: { owner?: string }) {
     [notice, setNotice] = useState('');
   const [dialog, setDialog] = useState<'memory' | 'writing' | 'instructions' | null>(null),
     [area, setArea] = useState<'chat' | 'task' | 'code'>('chat');
+  const [designPicker, setDesignPicker] = useState(false);
+  const styleLibrary = useStyleLibrary();
   useEffect(() => {
     if (new URLSearchParams(location.search).get('view') === 'memory') setDialog('memory');
   }, []);
@@ -238,6 +246,70 @@ function PersonalizationAccount({ owner }: { owner?: string }) {
           </button>
         </div>
       </section>
+      <section aria-labelledby="personal-presets">
+        <h2 id="personal-presets">Vorgaben für neue Gespräche</h2>
+        <div className="personalization-group">
+          <div className="personalization-row">
+            <div>
+              <label htmlFor="personal-writing-preset">Schreibstil in Chat und Task</label>
+              <p>Startwert für „Stil" im +-Menü. Pro Gespräch änderbar.</p>
+            </div>
+            <select
+              id="personal-writing-preset"
+              value={value.defaultWritingStyle}
+              disabled={busy}
+              onChange={(e) => set('defaultWritingStyle', e.target.value)}
+            >
+              <option value="">Kein Stil</option>
+              {value.defaultWritingStyle &&
+                !styleLibrary.data?.writingStyles.some(
+                  (item) => item.baseName === value.defaultWritingStyle
+                ) && <option value={value.defaultWritingStyle}>{value.defaultWritingStyle}</option>}
+              {WRITING_STYLE_GROUPS.map((group) => {
+                const items = (styleLibrary.data?.writingStyles ?? []).filter(
+                  (item) => (item.writingStyleType ?? 'persona') === group.type
+                );
+                return items.length ? (
+                  <optgroup key={group.type} label={group.label}>
+                    {items.map((item) => (
+                      <option key={item.id} value={item.baseName}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null;
+              })}
+            </select>
+          </div>
+          <button
+            type="button"
+            className="personalization-row personalization-action"
+            disabled={busy}
+            onClick={() => setDesignPicker(true)}
+          >
+            <span>
+              Design-Vorgabe in Code und Task
+              <small>
+                {designLabel(styleLibrary.data?.designStyles, value.defaultDesignStyle || null) ??
+                  'Keine'}{' '}
+                · gilt für neue Sessions, änderbar über ⋯ → Darstellung
+              </small>
+            </span>
+            <ChevronRight size={18} />
+          </button>
+        </div>
+      </section>
+      <DesignPresetDialog
+        open={designPicker}
+        onOpenChange={setDesignPicker}
+        value={value.defaultDesignStyle || null}
+        title="Standard-Design-Vorgabe"
+        description="Neue Code- und Task-Sessions starten mit dieser Vorgabe. Speichern nicht vergessen."
+        onSelect={(next) => {
+          set('defaultDesignStyle', next ?? '');
+          setDesignPicker(false);
+        }}
+      />
       <section aria-labelledby="personal-photos">
         <h2 id="personal-photos">Referenzfotos</h2>
         <div className="personalization-group">

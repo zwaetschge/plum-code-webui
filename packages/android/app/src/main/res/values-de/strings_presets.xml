@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="preset_style_label">Stil: %1$s</string>
+    <string name="preset_style_none">Kein Stil</string>
+    <string name="preset_style_title">Schreibstil</string>
+    <string name="preset_style_caption">Gilt für die nächsten Antworten dieses Gesprächs.</string>
+    <string name="preset_style_group_prose">Schreibstile</string>
+    <string name="preset_style_group_author">Autorenstile</string>
+    <string name="preset_style_group_persona">Personas</string>
+    <string name="preset_attach_file">Dateien anhängen</string>
+    <string name="preset_design_title">Design-Vorgabe</string>
+    <string name="preset_design_caption">Gilt für Oberflächen, die der Agent in dieser Session baut oder ändert.</string>
+    <string name="preset_design_none">Ohne Design-Vorgabe</string>
+    <string name="preset_design_search">Alle Design-Vorgaben durchsuchen</string>
+    <string name="preset_design_more">%1$d weitere Vorgaben über die Suche</string>
+    <string name="preset_design_empty">Keine Design-Vorgabe gefunden.</string>
+    <string name="preset_defaults_title">Vorgaben für neue Gespräche</string>
+    <string name="preset_default_writing">Schreibstil in Chat und Task</string>
+    <string name="preset_default_design">Design-Vorgabe in Code und Task</string>
+    <string name="preset_default_design_caption">Startwert für neue Sessions, änderbar über ⋯ → Darstellung.</string>
+    <string name="preset_default_design_title">Standard-Design-Vorgabe</string>
+</resources>

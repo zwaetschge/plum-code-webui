@@ -13,8 +13,6 @@ export type DockablePanel =
   | 'progress'
   | 'config'
   | 'mesh'
-  | 'designStyle'
-  | 'writingStyle'
   | 'tools'
   | 'connections'
   | 'versions'
@@ -27,8 +25,6 @@ const DOCKABLE_PANELS: DockablePanel[] = [
   'progress',
   'config',
   'mesh',
-  'designStyle',
-  'writingStyle',
   'tools',
   'connections',
   'versions',

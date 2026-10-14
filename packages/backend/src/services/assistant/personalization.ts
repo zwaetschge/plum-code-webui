@@ -42,6 +42,9 @@ const preferences = z
     voiceName: z.string().trim().max(100),
     projectSearch: z.boolean(),
     connectorSearch: z.boolean(),
+    // Style-library baseNames; validated against the library when applied.
+    defaultWritingStyle: z.union([z.literal(''), z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/)]),
+    defaultDesignStyle: z.union([z.literal(''), z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/)]),
   })
   .strict();
 export const PERSONALIZATION_INPUT = z

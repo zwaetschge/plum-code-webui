@@ -86,7 +86,8 @@ import {
   type OpenCodeUsageCounters,
 } from '../opencode/OpencodeServer.js';
 import { resolveConfigHome } from '../../utils/configPaths.js';
-import { listSkillLibrary, readSkillLibraryItem } from '../../utils/skillLibrary.js';
+import { listSkillLibrary } from '../../utils/skillLibrary.js';
+import { buildSessionStyleContextFromSelection } from '../../utils/styleContext.js';
 import { scanProject, formatProjectContext } from '../../utils/projectScanner.js';
 import { safeJsonParse } from '../../utils/json.js';
 import {
@@ -318,7 +319,6 @@ const WEBUI_MANAGED_BLOCK_START = '<!-- webui-managed: shared-config:start -->';
 const WEBUI_MANAGED_BLOCK_END = '<!-- webui-managed: shared-config:end -->';
 const PROJECT_CONTEXT_BLOCK_START = '<!-- webui-managed: project-context:start -->';
 const PROJECT_CONTEXT_BLOCK_END = '<!-- webui-managed: project-context:end -->';
-const STYLE_TEMPLATE_MAX_CHARS = 12000;
 
 interface SharedAgent {
   name: string;
@@ -2069,92 +2069,6 @@ function formatSkillsSummary(skills: SharedSkill[], agents: SharedAgent[]): stri
   ].join('\n');
 }
 
-function truncateStyleTemplate(content: string): string {
-  const trimmed = content.trim();
-  if (trimmed.length <= STYLE_TEMPLATE_MAX_CHARS) return trimmed;
-  return `${trimmed.slice(0, STYLE_TEMPLATE_MAX_CHARS).trimEnd()}\n\n[Template truncated by WebUI: continue following the visible guidance and load the skill file if more detail is needed.]`;
-}
-
-async function buildSessionStyleContextFromSelection(
-  selection: { designStyleSkill?: string | null; writingStyleSkill?: string | null },
-  configHome: string
-): Promise<string | null> {
-  if (!selection.designStyleSkill && !selection.writingStyleSkill) {
-    return null;
-  }
-
-  const lines: string[] = [];
-  lines.push('<session-style-library>');
-  lines.push(
-    'The following templates are active for this WebUI session. They override generic style defaults but do not override explicit user instructions in the current prompt.'
-  );
-
-  if (selection.designStyleSkill) {
-    const style = await readSkillLibraryItem(configHome, selection.designStyleSkill);
-    if (style?.libraryKind === 'design') {
-      lines.push('');
-      lines.push(`## Active UI Style Template: ${style.name}`);
-      lines.push(`Source: ~/.claude/skills/${style.baseName}/SKILL.md`);
-      if (style.description) lines.push(`Description: ${style.description}`);
-      lines.push(
-        'Apply this template whenever the user asks for frontend, WebUI, interface, visual design, layout, component, page, app, or styling work.'
-      );
-      lines.push('');
-      lines.push(truncateStyleTemplate(style.content));
-
-      if (style.designMd) {
-        lines.push('');
-        lines.push(`## Active DESIGN.md: ${style.designMd.name}`);
-        lines.push(`Source: ~/.claude/skills/${style.baseName}/DESIGN.md`);
-        lines.push(
-          'Treat this DESIGN.md as the structured source of truth for visual identity tokens and rationale. Use token values when they conflict with generic style preferences.'
-        );
-        lines.push('');
-        lines.push('```markdown');
-        lines.push(truncateStyleTemplate(style.designMd.raw));
-        lines.push('```');
-      }
-    }
-  }
-
-  if (selection.writingStyleSkill) {
-    const style = await readSkillLibraryItem(configHome, selection.writingStyleSkill);
-    if (style?.libraryKind === 'writing') {
-      const styleType = style.writingStyleType || 'persona';
-      lines.push('');
-      lines.push(
-        `## Active ${
-          styleType === 'author'
-            ? 'Author Style'
-            : styleType === 'prose'
-              ? 'Writing Style'
-              : 'Persona'
-        } Template: ${style.name}`
-      );
-      lines.push(`Source: ~/.claude/skills/${style.baseName}/SKILL.md`);
-      if (style.description) lines.push(`Description: ${style.description}`);
-      if (styleType === 'author') {
-        lines.push(
-          'Apply this template as an authorial prose influence for narrative, copy, and longer explanations. Do not claim to be the author, do not quote or recreate existing passages, and keep code, commands, filenames, and technical facts precise.'
-        );
-      } else if (styleType === 'prose') {
-        lines.push(
-          'Apply this template to prose quality, tone, copy, emails, explanations, and narrative text. Keep code, commands, filenames, and technical facts precise.'
-        );
-      } else {
-        lines.push(
-          'Apply this template as the assistant persona or voice for prose, explanations, copy, and narrative text. Keep code, commands, filenames, and technical facts precise.'
-        );
-      }
-      lines.push('');
-      lines.push(truncateStyleTemplate(style.content));
-    }
-  }
-
-  lines.push('</session-style-library>');
-  return lines.length > 3 ? lines.join('\n') : null;
-}
-
 export async function buildSessionStyleContextForTest(
   selection: { designStyleSkill?: string | null; writingStyleSkill?: string | null },
   configHome: string
@@ -2167,17 +2081,23 @@ async function buildSessionStyleContext(
   userId: string,
   cliProvider: CLIProvider
 ): Promise<string | null> {
-  const selection = (await pgGet(
+  const row = (await pgGet(
     `SELECT design_style_skill as designStyleSkill,
-              writing_style_skill as writingStyleSkill
+              writing_style_skill as writingStyleSkill,
+              surface
        FROM sessions
        WHERE id = ? AND user_id = ?`,
     sessionId,
     userId
   )) as unknown as
-    | { designStyleSkill: string | null; writingStyleSkill: string | null }
+    | { designStyleSkill: string | null; writingStyleSkill: string | null; surface: string | null }
     | undefined;
 
+  // Writing styles are a Chat/Task preset; Code sessions only carry a design preset.
+  const selection = row && {
+    designStyleSkill: row.designStyleSkill,
+    writingStyleSkill: row.surface === 'code' ? null : row.writingStyleSkill,
+  };
   if (!selection?.designStyleSkill && !selection?.writingStyleSkill) {
     return null;
   }

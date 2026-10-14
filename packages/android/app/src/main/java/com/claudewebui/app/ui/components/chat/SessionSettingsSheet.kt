@@ -36,8 +36,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.claudewebui.app.data.model.ConfigSkill
-import com.claudewebui.app.data.model.StyleKind
 import com.claudewebui.app.data.model.Session
 import com.claudewebui.app.data.model.SessionPeerLink
 import com.claudewebui.app.ui.components.common.PlumAccent
@@ -61,9 +59,6 @@ fun SessionSettingsSheet(
     directoriesLoading: Boolean,
     onAddAllowedDirectory: (String) -> Unit,
     onRemoveAllowedDirectory: (String) -> Unit,
-    designStyles: List<ConfigSkill> = emptyList(),
-    writingStyles: List<ConfigSkill> = emptyList(),
-    onStyleChange: (StyleKind, String?) -> Unit = { _, _ -> },
     meshPeers: List<SessionPeerLink> = emptyList(),
     /** Freeze this setup as a reusable template. */
     onSaveTemplate: (String) -> Unit = {},
@@ -91,18 +86,8 @@ fun SessionSettingsSheet(
         ) {
             Text(stringResource(R.string.component_session_settings), color = PlumText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
 
-            // Mode, provider, model and thinking depth are chat-bar chips now.
-
-            if (designStyles.isNotEmpty() || writingStyles.isNotEmpty()) {
-                SettingsGroup(stringResource(R.string.component_presentation_presets), stringResource(R.string.component_applied_to_this_session_s_turns)) {
-                    StylePicker(stringResource(R.string.component_design), designStyles, session.designStyleSkill, isApplying) {
-                        onStyleChange(StyleKind.DESIGN, it)
-                    }
-                    StylePicker(stringResource(R.string.component_writing), writingStyles, session.writingStyleSkill, isApplying) {
-                        onStyleChange(StyleKind.WRITING, it)
-                    }
-                }
-            }
+            // Mode, provider, model and thinking depth are chat-bar chips; the design
+            // preset sits in ⋯ → Darstellung, the Task writing style in the composer `+`.
 
             if (meshPeers.isNotEmpty()) {
                 SettingsGroup(stringResource(R.string.component_session_mesh), stringResource(R.string.component_sessions_this_one_can_delegate_to)) {
@@ -274,60 +259,6 @@ private fun OptionRow(
                 overflow = TextOverflow.Ellipsis,
             )
             subtitle?.let { Text(it, color = PlumMuted, fontSize = 10.sp, maxLines = 1) }
-        }
-    }
-}
-
-/**
- * One preset slot: stringResource(R.string.component_none) plus the catalogue entries. Collapsed to a scrollable
- * list because the design library alone ships several dozen presets.
- */
-@Composable
-private fun StylePicker(
-    label: String,
-    styles: List<ConfigSkill>,
-    selected: String?,
-    isApplying: Boolean,
-    onSelect: (String?) -> Unit,
-) {
-    if (styles.isEmpty()) return
-    var expanded by remember { mutableStateOf(false) }
-    val active = styles.firstOrNull { it.id == selected || it.name == selected }
-
-    OptionRow(
-        title = label,
-        subtitle = active?.name ?: stringResource(R.string.component_none),
-        selected = active != null,
-        enabled = !isApplying,
-    ) { expanded = !expanded }
-
-    if (expanded) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(max = 240.dp)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            OptionRow(
-                title = stringResource(R.string.component_none),
-                subtitle = null,
-                selected = active == null,
-                enabled = !isApplying,
-            ) {
-                onSelect(null)
-                expanded = false
-            }
-            styles.forEach { style ->
-                OptionRow(
-                    title = style.name,
-                    subtitle = style.description.takeIf { it.isNotBlank() },
-                    selected = style.id == selected || style.name == selected,
-                    enabled = !isApplying,
-                ) {
-                    onSelect(style.id)
-                    expanded = false
-                }
-            }
         }
     }
 }

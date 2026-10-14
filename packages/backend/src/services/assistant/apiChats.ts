@@ -33,6 +33,18 @@ import {
   type ApiMessage,
 } from './apiTransport.js';
 import { apiImagePayloads } from './apiFiles.js';
+import { resolveConfigHome } from '../../utils/configPaths.js';
+import { readSkillLibraryItem } from '../../utils/skillLibrary.js';
+import { buildSessionStyleContextFromSelection } from '../../utils/styleContext.js';
+
+/** Validates a writing-style preset name; explicit unknown names are rejected. */
+async function writingStyleName(name: string | null | undefined, explicit: boolean) {
+  if (!name) return null;
+  const style = await readSkillLibraryItem(resolveConfigHome('codex'), name);
+  if (style?.libraryKind === 'writing') return style.baseName;
+  if (explicit) throw new AppError('Schreibstil nicht gefunden', 400, 'INVALID_STYLE');
+  return null;
+}
 
 function editPassage(body: Record<string, unknown>, edit: z.infer<typeof ARTIFACT_EDIT_INPUT>) {
   const content = String(body.content ?? '');
@@ -71,6 +83,8 @@ export const API_CHAT_INPUT = z
     artifactEdit: ARTIFACT_EDIT_INPUT.optional(),
     workflow: z.literal('research').optional(),
     temporary: z.boolean().optional(),
+    /** Writing-style preset; omitted = account default (create) or unchanged (update). */
+    writingStyleSkill: z.string().min(1).max(100).nullable().optional(),
   })
   .strict();
 export const API_TURN_INPUT = z
@@ -143,6 +157,13 @@ export async function systemContext(userId: string, chat: AssistantResource, que
     );
   const personalPrompt = personalizationPrompt(personal, 'chat', !!chat.body.temporary, true);
   if (personalPrompt) parts.push(personalPrompt);
+  if (typeof chat.body.writingStyleSkill === 'string') {
+    const style = await buildSessionStyleContextFromSelection(
+      { writingStyleSkill: chat.body.writingStyleSkill },
+      resolveConfigHome('codex')
+    ).catch(() => null);
+    if (style) parts.push(style);
+  }
   const priorVoice = memoryPermission(personal, profile?.memory, !!chat.body.temporary)
     ? await voiceHistoryContext(userId, personal, !!chat.body.temporary)
     : '';
@@ -209,6 +230,10 @@ export async function createApiChat(userId: string, input: z.infer<typeof API_CH
     return ownedChat(userId, prior.resource_id);
   }
   await apiChatEndpoint(userId, input.providerId, input.model);
+  const writingStyleSkill =
+    input.writingStyleSkill === undefined
+      ? await writingStyleName((await readPersonalization(userId)).defaultWritingStyle, false)
+      : await writingStyleName(input.writingStyleSkill, true);
   return transaction(async (tx) => {
     await tx.get('SELECT id FROM users WHERE id=? FOR UPDATE', userId);
     const duplicate = await tx.get(
@@ -261,6 +286,7 @@ export async function createApiChat(userId: string, input: z.infer<typeof API_CH
       temporary: input.temporary ?? false,
       ...(input.temporary ? { expiresAt: new Date(Date.now() + 86400000).toISOString() } : {}),
       ...(profile ? { profileId: profile.id, profileRevision: profile.revision } : {}),
+      ...(writingStyleSkill ? { writingStyleSkill } : {}),
     });
     await checkReferences(userId, body, tx);
     const chat = await createResource(userId, 'api-chat', input.title, body, tx),
@@ -292,6 +318,10 @@ export async function updateApiChat(
   const profile = input.profileId ? await findResource(userId, input.profileId) : null;
   if (profile && profile.kind !== 'profile')
     throw new AppError('Ungültiges Profil', 400, 'INVALID_PROFILE');
+  const writingStyleSkill =
+    input.writingStyleSkill === undefined
+      ? undefined
+      : await writingStyleName(input.writingStyleSkill, true);
   return transaction(async (tx) => {
     const row = await tx.get(
       'SELECT id FROM assistant_resources WHERE id=? AND user_id=? FOR UPDATE',
@@ -324,6 +354,7 @@ export async function updateApiChat(
       model: input.model,
       sourceIds: input.sourceIds,
       ...(profile ? { profileId: profile.id, profileRevision: profile.revision } : {}),
+      ...(writingStyleSkill !== undefined ? { writingStyleSkill } : {}),
     };
     await checkReferences(userId, body, tx);
     return reviseResource(userId, id, input.expectedRevision, input.title, body, tx);

@@ -22,6 +22,10 @@ import com.claudewebui.app.ui.theme.PlumGlassCard
 import com.claudewebui.app.ui.theme.GlassRole
 import kotlinx.coroutines.*
 import org.koin.compose.koinInject
+import androidx.compose.foundation.clickable
+import com.claudewebui.app.ui.components.chat.DesignPresetSheet
+import com.claudewebui.app.ui.components.chat.WritingStyleSheet
+import com.claudewebui.app.ui.components.chat.presetName
 
 @Composable
 fun AssistantPersonalizationScreen(onClose: () -> Unit, onOpenFeature: (String) -> Unit, api: ApiClient = koinInject()) {
@@ -43,6 +47,9 @@ private fun PersonalizationAccount(owner: String, api: ApiClient, onClose: () ->
     var photoSlot by remember { mutableStateOf("portrait") }
     var destination by remember { mutableStateOf<String?>(null) }
     var confirmClose by remember { mutableStateOf(false) }
+    var styleLibrary by remember { mutableStateOf(com.claudewebui.app.data.model.StyleLibrary()) }
+    var showWritingDefault by remember { mutableStateOf(false) }
+    var showDesignDefault by remember { mutableStateOf(false) }
     val dirty = baseline != null && draft != baseline
     fun checkOwner() { if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed") }
     fun close(target: String? = null) { destination = target; if (dirty) confirmClose = true else if (target != null) onOpenFeature(target) else onClose() }
@@ -53,6 +60,7 @@ private fun PersonalizationAccount(owner: String, api: ApiClient, onClose: () ->
             val response = api.getAssistantPersonalization(); checkOwner()
             check(response.success) { response.error?.message ?: context.getString(R.string.assistant_load_failed) }
             draft = requireNotNull(response.data); baseline = draft
+            runCatching { api.getStyleLibrary() }.getOrNull()?.data?.let { checkOwner(); styleLibrary = it }
             val models = api.getAssistantApiProviders(); checkOwner()
             if (models.success) {
                 val rank = mapOf("anthropic" to 0, "mistral" to 1, "deepseek" to 2, "z-ai" to 3, "zai" to 3)
@@ -114,6 +122,19 @@ private fun PersonalizationAccount(owner: String, api: ApiClient, onClose: () ->
                         PreferenceToggle(R.string.assistant_writing_enabled, draft.writingStyleEnabled, !busy) { draft = draft.copy(writingStyleEnabled = it) }
                         PreferenceToggle(R.string.assistant_writing_learning, draft.writingStyleLearning, !busy) { draft = draft.copy(writingStyleLearning = it) }
                         PreferenceText(R.string.assistant_writing_sample, draft.writingSample, !busy, 10000, true) { draft = draft.copy(writingSample = it) }
+                    } }
+                    item { PersonalizationGroup(R.string.preset_defaults_title) {
+                        PresetDefaultRow(
+                            stringResource(R.string.preset_default_writing),
+                            styleLibrary.writingStyles.presetName(draft.defaultWritingStyle) ?: stringResource(R.string.preset_style_none),
+                            !busy,
+                        ) { showWritingDefault = true }
+                        PresetDefaultRow(
+                            stringResource(R.string.preset_default_design),
+                            styleLibrary.designStyles.presetName(draft.defaultDesignStyle, design = true) ?: stringResource(R.string.preset_design_none),
+                            !busy,
+                        ) { showDesignDefault = true }
+                        Text(stringResource(R.string.preset_default_design_caption), style = MaterialTheme.typography.bodySmall)
                     } }
                     item { PersonalizationGroup(R.string.assistant_about_you) {
                         PreferenceText(R.string.assistant_nickname, draft.nickname, !busy, 100) { draft = draft.copy(nickname = it) }
@@ -180,6 +201,20 @@ private fun PersonalizationAccount(owner: String, api: ApiClient, onClose: () ->
         }
     }
     if (confirmClose) AlertDialog(onDismissRequest = { confirmClose = false }, title = { Text(stringResource(R.string.assistant_unsaved)) }, text = { Text(stringResource(R.string.assistant_unsaved_detail)) }, confirmButton = { TextButton(onClick = { destination?.let(onOpenFeature) ?: onClose() }) { Text(stringResource(R.string.assistant_discard)) } }, dismissButton = { TextButton(onClick = { confirmClose = false }) { Text(stringResource(R.string.assistant_continue_editing)) } })
+    if (showWritingDefault) WritingStyleSheet(
+        styles = styleLibrary.writingStyles,
+        selected = draft.defaultWritingStyle.ifBlank { null },
+        onSelect = { draft = draft.copy(defaultWritingStyle = it.orEmpty()); showWritingDefault = false },
+        onDismiss = { showWritingDefault = false },
+    )
+    if (showDesignDefault) DesignPresetSheet(
+        styles = styleLibrary.designStyles,
+        selected = draft.defaultDesignStyle.ifBlank { null },
+        title = stringResource(R.string.preset_default_design_title),
+        caption = stringResource(R.string.preset_default_design_caption),
+        onSelect = { draft = draft.copy(defaultDesignStyle = it.orEmpty()); showDesignDefault = false },
+        onDismiss = { showDesignDefault = false },
+    )
     if (showVoicePicker) VoicePickerSheet(owner, api, draft.voiceName, { draft = draft.copy(voiceName = it) }, { showVoicePicker = false })
 }
 
@@ -188,6 +223,15 @@ private fun PersonalizationAccount(owner: String, api: ApiClient, onClose: () ->
 }
 @Composable private fun PreferenceText(label: Int, value: String, enabled: Boolean, limit: Int, multiline: Boolean = false, onChange: (String) -> Unit) {
     OutlinedTextField(value, { onChange(it.take(limit)) }, label = { Text(stringResource(label)) }, enabled = enabled, modifier = Modifier.fillMaxWidth(), minLines = if (multiline) 3 else 1, singleLine = !multiline)
+}
+@Composable private fun PresetDefaultRow(label: String, value: String, enabled: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = enabled, onClick = onClick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(label)
+            Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+        }
+        Text("›", style = MaterialTheme.typography.titleMedium)
+    }
 }
 @Composable private fun PreferenceToggle(label: Int, value: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) { Text(stringResource(label), Modifier.weight(1f)); Switch(value, onChange, enabled = enabled) }

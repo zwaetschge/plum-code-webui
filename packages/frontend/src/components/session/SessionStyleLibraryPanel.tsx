@@ -1934,6 +1934,28 @@ function getDesignDemoProfile(slug: string, item: SkillLibraryItem): DesignDemoP
   };
 }
 
+/** Card preview of one design preset: its HTML demo or its DESIGN.md tokens. */
+export function DesignStylePreview({
+  item,
+  className,
+}: {
+  item: SkillLibraryItem;
+  className?: string;
+}) {
+  const presentation = getDesignPreviewPresentation(item);
+  if (presentation.kind === 'tokens') {
+    return <DesignTokenPreview item={item} theme={getDesignCardTheme(item)} compact />;
+  }
+  return (
+    <DesignPreviewFrame
+      item={item}
+      src={presentation.src}
+      className={cn('mt-3 border', className)}
+      style={DESIGN_PREVIEW_WINDOW_STYLE}
+    />
+  );
+}
+
 export function SessionStyleLibraryPanel({
   sessionId,
   provider,

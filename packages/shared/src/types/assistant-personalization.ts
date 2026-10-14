@@ -32,6 +32,10 @@ export interface AssistantPersonalization {
   voiceName: string;
   projectSearch: boolean;
   connectorSearch: boolean;
+  /** Writing-style preset (style-library baseName) for new Chat and Task conversations; empty = none. */
+  defaultWritingStyle: string;
+  /** Design preset (style-library baseName) for new Code and Task sessions; empty = none. */
+  defaultDesignStyle: string;
   referencePhotos: Record<
     ReferencePhotoSlot,
     null | {
@@ -73,5 +77,7 @@ export const DEFAULT_PERSONALIZATION: AssistantPersonalization = {
   voiceName: '',
   projectSearch: false,
   connectorSearch: false,
+  defaultWritingStyle: '',
+  defaultDesignStyle: '',
   referencePhotos: { portrait: null, fullBody: null },
 };

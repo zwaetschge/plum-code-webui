@@ -9,6 +9,7 @@ import { Router, raw, type NextFunction, type Request, type Response } from 'exp
 import { createAssistantWorkspace } from '../services/assistant/workspaces.js';
 import { bindProfile } from '../services/assistant/context.js';
 import { findResource } from '../services/assistant/resources.js';
+import { readPersonalization } from '../services/assistant/personalization.js';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import path from 'path';
@@ -106,7 +107,59 @@ export const createSessionSchema = z.object({
   temporary: z.preprocess(value => value === 'true' ? true : value === 'false' ? false : value,z.boolean().default(false)),
   profileId: z.string().min(1).max(200).optional(),
   initialMessage: z.string().trim().min(1).max(40000).optional(),
+  // Presets chosen while creating; omitted = account default, null/'' = none.
+  designStyleSkill: z.preprocess(
+    (value) => (value === '' ? null : value),
+    z.string().min(1).max(100).nullable().optional()
+  ),
+  writingStyleSkill: z.preprocess(
+    (value) => (value === '' ? null : value),
+    z.string().min(1).max(100).nullable().optional()
+  ),
 });
+
+/**
+ * Presets for a new session: an explicit choice wins, otherwise the account
+ * default from the personalisation. Design applies to Code and Task, writing
+ * style only to Task. Explicit unknown presets are rejected, stale defaults
+ * are skipped.
+ */
+async function resolveCreationStyles(
+  userId: string,
+  surface: 'chat' | 'code' | 'task',
+  explicit: { designStyleSkill?: string | null; writingStyleSkill?: string | null }
+): Promise<{ designStyleSkill: string | null; writingStyleSkill: string | null }> {
+  const configHome = resolveConfigHome('codex');
+  const needsDefaults =
+    explicit.designStyleSkill === undefined ||
+    (surface === 'task' && explicit.writingStyleSkill === undefined);
+  const pref = needsDefaults ? await readPersonalization(userId) : null;
+  const pick = async (
+    kind: 'design' | 'writing',
+    chosen: string | null | undefined,
+    fallback: string | undefined
+  ): Promise<string | null> => {
+    const name = chosen === undefined ? fallback || null : chosen;
+    if (!name) return null;
+    const style = await readSkillLibraryItem(configHome, name);
+    if (style?.libraryKind === kind) return style.baseName;
+    if (chosen !== undefined) {
+      throw new AppError(
+        kind === 'design' ? 'UI style template not found' : 'Writing style template not found',
+        400,
+        'INVALID_STYLE'
+      );
+    }
+    return null;
+  };
+  return {
+    designStyleSkill: await pick('design', explicit.designStyleSkill, pref?.defaultDesignStyle),
+    writingStyleSkill:
+      surface === 'task'
+        ? await pick('writing', explicit.writingStyleSkill, pref?.defaultWritingStyle)
+        : null,
+  };
+}
 
 const updateSessionSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -1099,10 +1152,16 @@ router.post(
       profileId,
       temporary,
       initialMessage,
+      designStyleSkill: requestedDesignStyle,
+      writingStyleSkill: requestedWritingStyle,
     } = parsed.data;
     if (surface === 'chat') throw new AppError('Plum Chat verwendet API-Verbindungen. Agentensessions gehören zu Task oder Code.',400,'CHAT_REQUIRES_API');
     if (temporary) throw new AppError('Temporäre Gespräche werden über Plum Chat mit einer API-Verbindung erstellt.',400,'TEMPORARY_UNSUPPORTED');
     await assertProviderEnabled(userId, cliProvider);
+    const styles = await resolveCreationStyles(userId, surface, {
+      designStyleSkill: requestedDesignStyle,
+      writingStyleSkill: requestedWritingStyle,
+    });
     const profile = profileId ? await findResource(userId, profileId) : null;
     if (profile && profile.kind !== 'profile') throw new AppError('Ungültiges Profil', 400, 'INVALID_PROFILE');
     const selectedModel = cliModel?.trim() || (profile?.body.provider === cliProvider && typeof profile.body.model === 'string' ? profile.body.model.trim() : '') || null;
@@ -1188,9 +1247,11 @@ router.post(
        surface,
        cli_model,
        cli_reasoning,
-       cli_service_tier
+       cli_service_tier,
+       design_style_skill,
+       writing_style_skill
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       sessionId,
       userId,
       name,
@@ -1200,7 +1261,9 @@ router.post(
       surface,
       selectedModel,
       storedReasoning,
-      storedServiceTier
+      storedServiceTier,
+      styles.designStyleSkill,
+      styles.writingStyleSkill
     );
 
     if (profileId) await bindProfile(userId, sessionId, profileId);

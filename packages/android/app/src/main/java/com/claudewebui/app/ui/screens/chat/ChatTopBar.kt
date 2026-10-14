@@ -112,6 +112,8 @@ internal class ChatTopBarActions(
     val onDeleteChat: (String) -> Unit,
     val onRestart: () -> Unit = {},
     val onArchive: () -> Unit = {},
+    /** ⋯ → Darstellung: design preset cards (Code/Task). */
+    val onOpenAppearance: () -> Unit = {},
 )
 
 // ── Top Bar ───────────────────────────────────────────────────────────────────
@@ -272,7 +274,7 @@ internal fun ChatTopBar(
                     item(stringResource(R.string.chat_panel_notes), Icons.Outlined.StickyNote2, actions.onNavigateToNotes)
                     item(stringResource(R.string.session_menu_tool_log), Icons.Outlined.Terminal, actions.onOpenToolLog)
                     item(stringResource(R.string.session_menu_mesh), Icons.Outlined.Hub, actions.onOpenSessionSettings)
-                    item(stringResource(R.string.session_menu_appearance), Icons.Outlined.Palette, actions.onOpenSessionSettings)
+                    item(stringResource(R.string.session_menu_appearance), Icons.Outlined.Palette, actions.onOpenAppearance)
                     item(stringResource(R.string.chat_memory), Icons.Outlined.Psychology, actions.onNavigateToMemory)
                 }
                 item(stringResource(R.string.chat_settings), Icons.Outlined.Tune, actions.onOpenSessionSettings)

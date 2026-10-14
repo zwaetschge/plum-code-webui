@@ -111,6 +111,8 @@ fun ChatScreen(
     // Checkpoints still open it on demand.
     var showSidePanel by remember(sessionId) { mutableStateOf(maxWidth >= 1100.dp) }
     var showSessionSettings by remember { mutableStateOf(false) }
+    var showWritingStyle by remember { mutableStateOf(false) }
+    var showDesignPresets by remember { mutableStateOf(false) }
     var showModelEffort by remember { mutableStateOf(false) }
     var showProgress by remember { mutableStateOf(false) }
     var showVersions by remember(sessionId) { mutableStateOf(false) }
@@ -350,6 +352,7 @@ fun ChatScreen(
                     viewModel.loadAvailableModels()
                     showSessionSettings = true
                 },
+                onOpenAppearance = { showDesignPresets = true },
                 onNavigateToNotes = {
                     if (isWideLayout) { sidePanel = ChatSidePanel.NOTES; showSidePanel = true }
                     else onNavigateToNotes(sessionId)
@@ -406,6 +409,12 @@ fun ChatScreen(
                 onModelEffort = if (displaySession != null) ({ viewModel.loadAvailableModels(); showModelEffort = true }) else null,
                 mode = uiState.sessionMode.takeIf { displaySession?.surface?.let { it != "chat" } == true },
                 onModeChange = viewModel::setMode,
+                // Task: writing style as `+` preset; Code has none (design only via ⋯ → Darstellung).
+                presetLabel = uiState.writingStyles.presetName(displaySession?.writingStyleSkill),
+                onOpenPreset = if (displaySession?.surface == "task") ({ showWritingStyle = true }) else null,
+                designHint = uiState.designStyles.presetName(displaySession?.designStyleSkill, design = true)
+                    .takeIf { displaySession?.surface?.let { it != "chat" } == true },
+                onDesignHint = { showDesignPresets = true },
             )
             }
         },
@@ -639,9 +648,6 @@ fun ChatScreen(
                 directoriesLoading = uiState.directoriesLoading,
                 onAddAllowedDirectory = viewModel::addAllowedDirectory,
                 onRemoveAllowedDirectory = viewModel::removeAllowedDirectory,
-                designStyles = uiState.designStyles,
-                writingStyles = uiState.writingStyles,
-                onStyleChange = viewModel::setStyleSkill,
                 meshPeers = uiState.meshPeers,
                 onSaveTemplate = { name ->
                     showSessionSettings = false
@@ -652,6 +658,32 @@ fun ChatScreen(
                 onDismiss = { showSessionSettings = false },
             )
         }
+    }
+
+    if (showWritingStyle) {
+        WritingStyleSheet(
+            styles = uiState.writingStyles,
+            selected = displaySession?.writingStyleSkill,
+            enabled = !uiState.isApplyingSettings,
+            onSelect = { skill ->
+                viewModel.setStyleSkill(StyleKind.WRITING, skill)
+                showWritingStyle = false
+            },
+            onDismiss = { showWritingStyle = false },
+        )
+    }
+
+    if (showDesignPresets) {
+        DesignPresetSheet(
+            styles = uiState.designStyles,
+            selected = displaySession?.designStyleSkill,
+            enabled = !uiState.isApplyingSettings,
+            onSelect = { skill ->
+                viewModel.setStyleSkill(StyleKind.DESIGN, skill)
+                showDesignPresets = false
+            },
+            onDismiss = { showDesignPresets = false },
+        )
     }
 
     selectedAttachment?.let { attachment ->

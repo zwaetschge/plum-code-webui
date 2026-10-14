@@ -42,6 +42,8 @@ import {
   X,
   WifiOff,
   AlertCircle,
+  Palette,
+  PenLine,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,6 +54,13 @@ import { DiscoveredProjects } from '@/components/projects';
 import { ProviderLogo } from '@/components/branding/ProviderLogo';
 import { RenameSessionDialog } from '@/components/session/RenameSessionDialog';
 import { SessionIcon } from '@/components/session/SessionIcon';
+import { DesignPresetDialog } from '@/components/presets/DesignPresetDialog';
+import {
+  WRITING_STYLE_GROUPS,
+  designLabel,
+  useStyleLibrary,
+} from '@/components/presets/useStyleLibrary';
+import { usePersonalization } from '@/components/assistant/usePersonalization';
 import { useShallow } from 'zustand/react/shallow';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useCategoryStore } from '@/stores/categoryStore';
@@ -337,6 +346,16 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
   const [selectedReasoning, setSelectedReasoning] = useState('');
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [newSessionFiles, setNewSessionFiles] = useState<File[]>([]);
+  // Presets for the new session; undefined = account default from the personalisation.
+  const [newDesignStyle, setNewDesignStyle] = useState<string | null | undefined>(undefined);
+  const [newWritingStyle, setNewWritingStyle] = useState<string | null | undefined>(undefined);
+  const [showDesignPresets, setShowDesignPresets] = useState(false);
+  const { preferences: personalization } = usePersonalization();
+  const styleLibrary = useStyleLibrary();
+  const effectiveDesignStyle =
+    newDesignStyle === undefined ? personalization.defaultDesignStyle || null : newDesignStyle;
+  const effectiveWritingStyle =
+    newWritingStyle === undefined ? personalization.defaultWritingStyle || null : newWritingStyle;
   const [showFolderBrowser, setShowFolderBrowser] = useState(false);
   const [collapsedDashboardGroupIds, setCollapsedDashboardGroupIds] = useState<
     Record<string, boolean>
@@ -493,6 +512,8 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
       surface?: SessionSurface;
       initialMessage?: string;
       files?: File[];
+      designStyleSkill?: string | null;
+      writingStyleSkill?: string | null;
     }) => {
       if (data.files && data.files.length > 0) {
         const formData = new FormData();
@@ -504,6 +525,10 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
         if (data.mode) formData.append('mode', data.mode);
         if (data.surface) formData.append('surface', data.surface);
         if (data.initialMessage) formData.append('initialMessage', data.initialMessage);
+        if (data.designStyleSkill !== undefined)
+          formData.append('designStyleSkill', data.designStyleSkill ?? '');
+        if (data.writingStyleSkill !== undefined)
+          formData.append('writingStyleSkill', data.writingStyleSkill ?? '');
         data.files.forEach((file) => formData.append('files', file));
 
         const response = await api.post<ApiResponse<Session>>('/api/sessions', formData);
@@ -528,6 +553,8 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
         setSelectedReasoning('');
         setSelectedFolder(null);
         setNewSessionFiles([]);
+        setNewDesignStyle(undefined);
+        setNewWritingStyle(undefined);
         if (newSessionFileInputRef.current) newSessionFileInputRef.current.value = '';
         setSelectedCliProvider(dashboardDefaultProvider);
         navigate(`/session/${data.data.id}`);
@@ -1137,6 +1164,8 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
       surface?: SessionSurface;
       initialMessage?: string;
       files?: File[];
+      designStyleSkill?: string | null;
+      writingStyleSkill?: string | null;
     } = {
       name: (newSessionName.trim() || deriveSessionName(prompt)).slice(0, 100),
       cliProvider: selectedCliProvider,
@@ -1146,6 +1175,8 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
       surface,
       initialMessage: prompt,
       files: newSessionFiles,
+      ...(newDesignStyle !== undefined ? { designStyleSkill: newDesignStyle } : {}),
+      ...(isTask && newWritingStyle !== undefined ? { writingStyleSkill: newWritingStyle } : {}),
     };
     if (sessionMode === 'existing' && selectedFolder) {
       payload.workingDirectory = selectedFolder;
@@ -1495,6 +1526,47 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
 
               <button
                 type="button"
+                className="dashboard-control dashboard-chatbar-chip"
+                onClick={() => setShowDesignPresets(true)}
+                title="Design-Vorgabe für die neue Session"
+              >
+                <Palette className="h-4 w-4" />
+                <span>Design</span>
+                <strong>
+                  {designLabel(styleLibrary.data?.designStyles, effectiveDesignStyle) ?? 'Keine'}
+                </strong>
+              </button>
+
+              {isTask && (
+                <label className="dashboard-control dashboard-chatbar-chip">
+                  <PenLine className="h-4 w-4" />
+                  <span>Stil</span>
+                  <select
+                    value={effectiveWritingStyle ?? ''}
+                    onChange={(event) => setNewWritingStyle(event.target.value || null)}
+                    aria-label="Schreibstil"
+                  >
+                    <option value="">Kein Stil</option>
+                    {WRITING_STYLE_GROUPS.map((group) => {
+                      const items = (styleLibrary.data?.writingStyles ?? []).filter(
+                        (item) => (item.writingStyleType ?? 'persona') === group.type
+                      );
+                      return items.length ? (
+                        <optgroup key={group.type} label={group.label}>
+                          {items.map((item) => (
+                            <option key={item.id} value={item.baseName}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ) : null;
+                    })}
+                  </select>
+                </label>
+              )}
+
+              <button
+                type="button"
                 className={cn(
                   'dashboard-workspace-toggle dashboard-chatbar-chip dashboard-chatbar-workspace',
                   showNewSession && 'is-open'
@@ -1649,6 +1721,16 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
 
         <div className="flex flex-wrap items-center gap-3">
           <SessionAssignmentDialog surface={surface} />
+          <DesignPresetDialog
+            open={showDesignPresets}
+            onOpenChange={setShowDesignPresets}
+            value={effectiveDesignStyle}
+            description="Gilt für die neue Session. Den Standard legst du in der Personalisierung fest."
+            onSelect={(value) => {
+              setNewDesignStyle(value);
+              setShowDesignPresets(false);
+            }}
+          />
           {isTask && (
             <Link
               className="text-sm text-primary underline underline-offset-4"

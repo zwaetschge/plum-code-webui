@@ -19,6 +19,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { orderChatApiProviders } from '@/lib/chatApiProviders';
+import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
+import { WritingStyleMenu } from '@/components/presets/WritingStyleMenu';
 
 export function ChatPage() {
   const owner = useAuthStore((s) => s.user?.id);
@@ -47,6 +49,10 @@ function ChatAccountPage({ owner }: { owner?: string }) {
     [research, setResearch] = useState(false);
   const [created, setCreated] = useState<AssistantResource | null>(null);
   const [effort, setEffort] = useEffortChoice();
+  // undefined = account default from the personalisation, null = no style.
+  const [writingStyle, setWritingStyle] = useState<string | null | undefined>(undefined);
+  const activeWritingStyle =
+    writingStyle === undefined ? preferences.defaultWritingStyle || null : writingStyle;
   const providers = useQuery({
     queryKey: ['assistant', 'api-chat-providers', owner],
     select: orderChatApiProviders,
@@ -91,6 +97,7 @@ function ChatAccountPage({ owner }: { owner?: string }) {
                 temporary,
                 sourceIds: sources,
                 ...(research ? { workflow: 'research' } : {}),
+                ...(writingStyle !== undefined ? { writingStyleSkill: writingStyle } : {}),
               },
               'Gespräch erstellen'
             )) as { data: { data: AssistantResource } }
@@ -191,16 +198,13 @@ function ChatAccountPage({ owner }: { owner?: string }) {
           />
           <div className="plum-composer-toolbar">
             <div className="flex min-w-0 items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="Dateien anhängen"
-                disabled={busy || !!created || research}
-                onClick={() => fileInput.current?.click()}
+              <ComposerPlusMenu
+                disabled={busy || !!created}
+                attachDisabled={research}
+                onAttach={() => fileInput.current?.click()}
               >
-                <Paperclip size={19} />
-              </Button>
+                <WritingStyleMenu value={activeWritingStyle} onChange={setWritingStyle} />
+              </ComposerPlusMenu>
               <input
                 ref={fileInput}
                 type="file"

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -134,6 +135,12 @@ internal fun ChatComposerBar(
     /** Execution mode chip (Task/Code only); null hides it. */
     mode: com.claudewebui.app.data.model.SessionMode? = null,
     onModeChange: ((com.claudewebui.app.data.model.SessionMode) -> Unit)? = null,
+    /** Task: writing style shown in the `+` menu; null onOpenPreset keeps the plain attach button. */
+    presetLabel: String? = null,
+    onOpenPreset: (() -> Unit)? = null,
+    /** Small hint for the session's design preset (Code/Task); chosen via ⋯ → Darstellung. */
+    designHint: String? = null,
+    onDesignHint: (() -> Unit)? = null,
 ) {
     val t = PlumTheme.tokens
     val palette = LocalPlumPalette.current
@@ -195,6 +202,7 @@ internal fun ChatComposerBar(
                     model = modelLabel.orEmpty(), effortLabel = effortLabel, enabled = true, onClick = onModelEffort,
                 )
                 if (mode != null && onModeChange != null) SessionModeChip(mode, onModeChange)
+                if (designHint != null && onDesignHint != null) DesignHintChip(designHint, onDesignHint)
             }
 
             // Thinking/tool indicator sits just above input
@@ -225,6 +233,8 @@ internal fun ChatComposerBar(
                 isTranscribing = composer.isTranscribing,
                 isRecording = isRecording,
                 onToggleRecording = actions.onToggleRecording,
+                presetLabel = presetLabel,
+                onOpenPreset = onOpenPreset,
             )
         }
     }
@@ -375,6 +385,29 @@ private val CHAT_BAR_MODES = listOf(
     com.claudewebui.app.data.model.SessionMode.AUTO_ACCEPT,
     com.claudewebui.app.data.model.SessionMode.DANGER,
 )
+
+@Composable
+private fun DesignHintChip(label: String, onClick: () -> Unit) {
+    val palette = LocalPlumPalette.current
+    Surface(
+        onClick = onClick,
+        shape = androidx.compose.foundation.shape.CircleShape,
+        color = androidx.compose.ui.graphics.Color.Transparent,
+        border = androidx.compose.foundation.BorderStroke(1.dp, palette.border.copy(alpha = .6f)),
+        modifier = Modifier.heightIn(min = 36.dp).widthIn(max = 160.dp),
+    ) {
+        Row(Modifier.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Outlined.Palette,
+                contentDescription = stringResource(R.string.preset_design_title),
+                tint = palette.muted,
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge, color = palette.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        }
+    }
+}
 
 @Composable
 private fun SessionModeChip(

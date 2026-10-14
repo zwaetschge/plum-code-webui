@@ -45,6 +45,10 @@ data class AssistantPersonalization(
     val voiceName: String = "",
     val projectSearch: Boolean = false,
     val connectorSearch: Boolean = false,
+    /** Writing-style preset (style-library baseName) for new Chat/Task conversations; empty = none. */
+    val defaultWritingStyle: String = "",
+    /** Design preset for new Code/Task sessions; empty = none. */
+    val defaultDesignStyle: String = "",
     val referencePhotos: Map<String, AssistantReferencePhoto?> = mapOf("portrait" to null, "fullBody" to null),
 ) {
     fun updatePayload(): JsonObject {

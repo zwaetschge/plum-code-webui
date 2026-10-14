@@ -19,7 +19,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Mic
@@ -79,6 +81,9 @@ fun ChatInput(
     isTranscribing: Boolean = false,
     isRecording: Boolean = false,
     onToggleRecording: (() -> Unit)? = null,
+    /** Task: the attach button becomes `+` with „Stil: …" beside the attachments. */
+    presetLabel: String? = null,
+    onOpenPreset: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val componentTokens = PlumTheme.tokens
@@ -280,20 +285,33 @@ fun ChatInput(
                 // Attachment button — glass circle flanking the field, base-
                 // aligned with it so the row reads as one composed unit.
                 if (onAttachFile != null) {
+                    var plusOpen by remember { mutableStateOf(false) }
                     Box(
                         modifier = Modifier
                             .padding(bottom = componentTokens.spacing.xxs)
                             .size(componentTokens.sizing.touchTarget)
                             .glassSurface(CircleShape)
-                            .clickable(onClick = onAttachFile),
+                            .clickable(onClick = { if (onOpenPreset != null) plusOpen = true else onAttachFile() }),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.AttachFile,
-                            contentDescription = stringResource(R.string.component_attach_file),
+                            imageVector = if (onOpenPreset != null) Icons.Outlined.Add else Icons.Outlined.AttachFile,
+                            contentDescription = if (onOpenPreset != null) stringResource(R.string.assistant_add) else stringResource(R.string.component_attach_file),
                             tint = PlumMuted,
                             modifier = Modifier.size(componentTokens.sizing.iconMd),
                         )
+                        if (onOpenPreset != null) DropdownMenu(expanded = plusOpen, onDismissRequest = { plusOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.preset_attach_file)) },
+                                leadingIcon = { Icon(Icons.Outlined.AttachFile, contentDescription = null) },
+                                onClick = { plusOpen = false; onAttachFile() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.preset_style_label, presetLabel ?: stringResource(R.string.preset_style_none)), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                leadingIcon = { Icon(Icons.Outlined.EditNote, contentDescription = null) },
+                                onClick = { plusOpen = false; onOpenPreset() },
+                            )
+                        }
                     }
                 }
 

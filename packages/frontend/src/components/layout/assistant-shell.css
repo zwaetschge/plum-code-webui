@@ -985,3 +985,13 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
     animation: none !important;
   }
 }
+
+/* Design preset hint in the Code/Task chat bar (chosen via ⋯ → Darstellung). */
+.plum-preset-hint {
+  max-width: 170px;
+  border-style: dashed;
+  color: hsl(var(--muted-foreground));
+}
+.plum-preset-hint:hover {
+  color: hsl(var(--foreground));
+}

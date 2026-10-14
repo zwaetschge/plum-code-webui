@@ -40,6 +40,8 @@ interface AssistantApi {
     suspend fun speakAssistantText(owner: String, text: String, voice: String, language: String): ByteArray
     suspend fun getAssistantVoices(): ApiResponse<List<AssistantVoiceOption>>
     suspend fun deliverAssistantApiCommand(owner: String, path: String, payload: JsonObject): ApiResponse<JsonObject>
+    /** PATCH /api/assistant/api-chats/:id — model, profile, sources and writing style of a model chat. */
+    suspend fun updateAssistantApiChat(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource>
     suspend fun createAssistantResource(collection: String, input: AssistantResourceInput): ApiResponse<AssistantResource>
     suspend fun updateAssistantResource(collection: String, id: String, input: AssistantResourceInput): ApiResponse<AssistantResource>
     suspend fun sendAssistantTaskCommand(id: String, input: AssistantTaskCommand): ApiResponse<JsonObject>
@@ -165,6 +167,7 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
         return http.client.post("$server$path") { attributes.put(AssistantAccountKey, owner); header(HttpHeaders.Authorization, "Bearer $token"); setBody(payload) }.body()
     }
     override suspend fun createAssistantResource(collection: String, input: AssistantResourceInput): ApiResponse<AssistantResource> = http.post("/api/assistant/${checked(collection)}") { setBody(input) }
+    override suspend fun updateAssistantApiChat(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource> = http.patch("/api/assistant/api-chats/${checked(id)}") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun updateAssistantResource(collection: String, id: String, input: AssistantResourceInput): ApiResponse<AssistantResource> = http.patch("/api/assistant/${checked(collection)}/${checked(id)}") { setBody(input) }
     override suspend fun sendAssistantTaskCommand(id: String, input: AssistantTaskCommand): ApiResponse<JsonObject> = http.post("/api/assistant/tasks/${checked(id)}/commands") { setBody(input) }
     override suspend fun getAssistantTaskResults(id: String): ApiResponse<List<AssistantTaskResultCandidate>> = http.get("/api/assistant/tasks/${checked(id)}/results")

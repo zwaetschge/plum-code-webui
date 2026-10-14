@@ -36,6 +36,8 @@ import com.claudewebui.app.data.model.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import org.koin.compose.koinInject
+import com.claudewebui.app.ui.components.chat.WritingStyleSheet
+import com.claudewebui.app.ui.components.chat.presetName
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -83,6 +85,11 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var cameraBusy by remember { mutableStateOf(false) }
     var readText by remember { mutableStateOf<String?>(null) }
     var personalization by remember { mutableStateOf<AssistantPersonalization?>(null) }
+    var writingStyles by remember { mutableStateOf<List<ConfigSkill>>(emptyList()) }
+    // New chat: false keeps the account default, true sends newChatStyle (null = none).
+    var newChatStyleSet by remember { mutableStateOf(false) }
+    var newChatStyle by remember { mutableStateOf<String?>(null) }
+    var showStyleSheet by remember { mutableStateOf(false) }
     LaunchedEffect(owner) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
@@ -131,6 +138,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             providerId = providers.firstOrNull()?.id.orEmpty(); model = providers.firstOrNull()?.models?.firstOrNull().orEmpty()
             val profileResult = api.getAssistantResources("profiles"); checkOwner(); profiles = profileResult.data.orEmpty()
             val sourceResult = api.getAssistantResources("sources"); checkOwner(); sources = sourceResult.data.orEmpty()
+            runCatching { api.getStyleLibrary() }.getOrNull()?.data?.let { checkOwner(); writingStyles = it.writingStyles }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { checkOwner(); error = failure.message }
     }
@@ -228,6 +236,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                 val created = outbox.send("/api/assistant/api-chats", buildJsonObject {
                     put("title", text.take(48)); put("providerId", providerId); put("model", model)
                     profileId?.let { put("profileId", it) }; put("sourceIds", JsonArray(emptyList()))
+                    if (newChatStyleSet) put("writingStyleSkill", newChatStyle?.let(::JsonPrimitive) ?: JsonNull)
                 }, context.getString(R.string.assistant_new), null)
                 checkOwner(); accept("/api/assistant/api-chats", created)
                 val target = chat ?: return@launch
@@ -239,6 +248,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         }
     }
     val researchChat = chat?.body?.get("workflow")?.jsonPrimitive?.contentOrNull == "research"
+    val activeWritingStyle = chat?.let { it.body["writingStyleSkill"]?.jsonPrimitive?.contentOrNull }
+        ?: if (chat != null) null else if (newChatStyleSet) newChatStyle else personalization?.defaultWritingStyle?.ifBlank { null }
     Column(Modifier.fillMaxSize().padding(top = topInset).navigationBarsPadding().imePadding().padding(horizontal = 16.dp)) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (chat == null) {
@@ -334,7 +345,22 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                     ),
                 )
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    IconButton(onClick = { showAttach = !showAttach }) { Icon(androidx.compose.material.icons.Icons.Outlined.Add, stringResource(R.string.assistant_add), tint = palette.text) }
+                    var plusOpen by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { plusOpen = true }) { Icon(androidx.compose.material.icons.Icons.Outlined.Add, stringResource(R.string.assistant_add), tint = palette.text) }
+                        DropdownMenu(plusOpen, { plusOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.assistant_attach_image)) },
+                                enabled = chat != null && !researchChat,
+                                onClick = { plusOpen = false; showAttach = !showAttach },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.preset_style_label, writingStyles.presetName(activeWritingStyle) ?: stringResource(R.string.preset_style_none)), maxLines = 1) },
+                                enabled = !busy && !running,
+                                onClick = { plusOpen = false; showStyleSheet = true },
+                            )
+                        }
+                    }
                     Spacer(Modifier.weight(1f))
                     ModelEffortChip(
                         model = if (chat == null) model else chat!!.body["model"]?.jsonPrimitive?.content.orEmpty(),
@@ -353,6 +379,37 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             }
         }
     }
+    if (showStyleSheet) WritingStyleSheet(
+        styles = writingStyles,
+        selected = activeWritingStyle,
+        enabled = !busy && !running,
+        onSelect = { skill ->
+            showStyleSheet = false
+            val current = chat
+            if (current == null) { newChatStyleSet = true; newChatStyle = skill }
+            else scope.launch {
+                busy = true; error = null
+                try {
+                    val body = current.body
+                    val response = api.updateAssistantApiChat(owner, current.id, buildJsonObject {
+                        put("title", current.title)
+                        put("providerId", body["providerId"]?.jsonPrimitive?.contentOrNull.orEmpty())
+                        put("model", body["model"]?.jsonPrimitive?.contentOrNull.orEmpty())
+                        put("profileId", body["profileId"]?.jsonPrimitive?.contentOrNull?.let(::JsonPrimitive) ?: JsonNull)
+                        put("sourceIds", body["sourceIds"] as? JsonArray ?: JsonArray(emptyList()))
+                        put("writingStyleSkill", skill?.let(::JsonPrimitive) ?: JsonNull)
+                        put("expectedRevision", current.revision)
+                    })
+                    checkOwner()
+                    if (!response.success) kotlin.error(response.error?.message ?: "Style update failed")
+                    response.data?.let { updated -> if (chat?.id == updated.id) chat = updated }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { checkOwner(); error = failure.message }
+                finally { if (TokenStore.assistantOwnerKey() == owner) busy = false }
+            }
+        },
+        onDismiss = { showStyleSheet = false },
+    )
     if (showModelSheet) ModelEffortSheet(
         models = providers.flatMap { p -> p.models.map { m -> ModelOption(p.id, p.name, m) } },
         selectedGroup = providerId, selectedModel = model,

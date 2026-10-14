@@ -24,6 +24,24 @@ data class ConfigSkill(
     val libraryKind: String = "skill",
     val entryType: String? = null,
     val aliases: List<String> = emptyList(),
+    /** Writing presets: persona, author or prose. */
+    val writingStyleType: String? = null,
+    /** Design presets: DESIGN.md tokens used for the card preview. */
+    val designMd: ConfigDesignMd? = null,
+) {
+    /** Name the session/chat APIs expect (directory name of the preset). */
+    val presetKey: String get() = baseName ?: name
+}
+
+@Serializable
+data class ConfigDesignMd(
+    val name: String? = null,
+    val tokens: ConfigDesignTokens = ConfigDesignTokens(),
+)
+
+@Serializable
+data class ConfigDesignTokens(
+    val colors: Map<String, String> = emptyMap(),
 )
 
 @Serializable

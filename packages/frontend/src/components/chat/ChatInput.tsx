@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CommandMenu } from '@/components/chat/CommandMenu';
+import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
 import { cn } from '@/lib/utils';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import type { Command } from '@plum-code-webui/shared';
@@ -170,6 +171,8 @@ interface ChatInputProps {
   onOpenRun?: () => void;
   /** Chips under the input (model, thinking depth, execution mode); memoise it in the caller. */
   toolbar?: ReactNode;
+  /** Presets for the `+` menu (e.g. the Task writing style); memoise it in the caller. */
+  plusMenu?: ReactNode;
 }
 
 export const ChatInput = memo(function ChatInput({
@@ -201,6 +204,7 @@ export const ChatInput = memo(function ChatInput({
   queueDepth = 0,
   onOpenRun,
   toolbar,
+  plusMenu,
 }: ChatInputProps) {
   const { preferences } = usePersonalization();
   const [input, setInput] = useChatDraft(sessionId, chatId);
@@ -953,18 +957,28 @@ export const ChatInput = memo(function ChatInput({
         )}
 
         <div className="composer-input-shell">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            disabled={disabled || deliveryPending}
-            className="composer-control-button composer-attach-button"
-            title="Attach files (10 max, 25 MB each, 32 MB total)"
-            aria-label={conversation ? 'Dateien anhängen' : 'Attach files'}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Paperclip className="h-4 w-4" />
-          </Button>
+          {plusMenu ? (
+            <ComposerPlusMenu
+              disabled={disabled || deliveryPending}
+              className="composer-control-button composer-attach-button"
+              onAttach={() => fileInputRef.current?.click()}
+            >
+              {plusMenu}
+            </ComposerPlusMenu>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={disabled || deliveryPending}
+              className="composer-control-button composer-attach-button"
+              title="Attach files (10 max, 25 MB each, 32 MB total)"
+              aria-label={conversation ? 'Dateien anhängen' : 'Attach files'}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
+          )}
 
           {/* Text input */}
           <div className="composer-field relative">

@@ -66,6 +66,8 @@ export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
     workflow: z.literal('research').optional(),
     temporary: z.boolean().default(false),
     expiresAt: date,
+    /** Writing-style preset (style-library baseName); null = explicitly none. */
+    writingStyleSkill: z.string().min(1).max(100).nullable().optional(),
   }),
   profile: z.object({
     instructions: z.string().max(30000).default(''),

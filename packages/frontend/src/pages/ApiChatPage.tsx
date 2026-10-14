@@ -1,6 +1,8 @@
 import { orderChatApiProviders } from '@/lib/chatApiProviders';
+import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
+import { WritingStyleMenu } from '@/components/presets/WritingStyleMenu';
 import { usePersonalization } from '@/components/assistant/usePersonalization';
-import { ArrowUp, Copy, Paperclip, Mic, SlidersHorizontal } from 'lucide-react';
+import { ArrowUp, Copy, Mic, SlidersHorizontal } from 'lucide-react';
 import { LiveImageCapture } from '@/components/assistant/LiveImageCapture';
 import { ScreenHistoryDisclosure } from '@/components/assistant/ScreenHistory';
 import { useEffect, useRef, useState } from 'react';
@@ -665,16 +667,35 @@ export function ApiChatPage() {
           )}
           <div className="plum-composer-toolbar">
             <div className="flex gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="Anhänge und Kamera"
-                aria-expanded={tools}
-                onClick={() => setTools(!tools)}
+              <ComposerPlusMenu
+                attachLabel={tools ? 'Anhänge ausblenden' : 'Anhänge und Kamera'}
+                attachDisabled={chat.body.workflow === 'research' || !!chat.body.artifactEdit}
+                onAttach={() => setTools(!tools)}
               >
-                <Paperclip size={18} />
-              </Button>
+                <WritingStyleMenu
+                  value={
+                    typeof chat.body.writingStyleSkill === 'string'
+                      ? chat.body.writingStyleSkill
+                      : null
+                  }
+                  disabled={!!running || busy}
+                  onChange={(writingStyleSkill) =>
+                    void invoke(async () => {
+                      // Built from the stored chat so profile and sources stay as they are.
+                      await api.patch(`/api/assistant/api-chats/${id}`, {
+                        title: chat.title,
+                        providerId: String(chat.body.providerId),
+                        model: String(chat.body.model),
+                        profileId: chat.body.profileId ? String(chat.body.profileId) : null,
+                        sourceIds: (chat.body.sourceIds ?? []) as string[],
+                        writingStyleSkill,
+                        expectedRevision: chat.revision,
+                      });
+                      void cache.invalidateQueries({ queryKey: ['assistant', 'api-chats'] });
+                    })
+                  }
+                />
+              </ComposerPlusMenu>
             </div>
             <div className="plum-composer-model-tools">
               <ModelEffortPicker

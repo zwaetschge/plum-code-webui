@@ -7162,6 +7162,16 @@ html.dark .chat-composer-form.glass-chrome {
   padding: 0 2px 0 0;
 }
 
+.dashboard-chatbar-chip > strong {
+  min-width: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: hsl(var(--foreground) / 0.9);
+  font: 650 12px/1 var(--font-ui);
+}
+
 .dashboard-chatbar-provider select {
   max-width: 128px;
 }
