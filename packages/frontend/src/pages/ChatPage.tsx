@@ -17,6 +17,7 @@ import {
   useEffortChoice,
 } from '@/components/assistant/ModelEffortPicker';
 import { Button } from '@/components/ui/button';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { orderChatApiProviders } from '@/lib/chatApiProviders';
 import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
@@ -204,6 +205,10 @@ function ChatAccountPage({ owner }: { owner?: string }) {
                 onAttach={() => fileInput.current?.click()}
               >
                 <WritingStyleMenu value={activeWritingStyle} onChange={setWritingStyle} />
+                <DropdownMenuItem onSelect={() => setOptions(true)}>
+                  <SlidersHorizontal className="mr-2 h-4 w-4" />
+                  {chosenProfile?.title ?? 'Gesprächsoptionen'}
+                </DropdownMenuItem>
               </ComposerPlusMenu>
               <input
                 ref={fileInput}
@@ -260,19 +265,23 @@ function ChatAccountPage({ owner }: { owner?: string }) {
             </div>
           </div>
         </form>
-        <div className="plum-chat-context">
-          <button
-            type="button"
-            onClick={() => setOptions(!options)}
-            aria-expanded={options}
-            className="plum-context-button"
-          >
-            <SlidersHorizontal size={13} />
-            {chosenProfile?.title ?? 'Gesprächsoptionen'}
-          </button>
-          {temporary && <span>Temporär · 24 Stunden</span>}
-          {research && <span>Dokumentrecherche</span>}
-        </div>
+        {/* Options live in the `+` menu; only active choices are hinted here. */}
+        {(chosenProfile || temporary || research) && (
+          <div className="plum-chat-context">
+            {chosenProfile && (
+              <button
+                type="button"
+                onClick={() => setOptions(true)}
+                className="plum-context-button"
+              >
+                <SlidersHorizontal size={13} />
+                {chosenProfile.title}
+              </button>
+            )}
+            {temporary && <span>Temporär · 24 Stunden</span>}
+            {research && <span>Dokumentrecherche</span>}
+          </div>
+        )}
         {providers.isError && (
           <p role="alert" className="text-sm text-destructive">
             API-Verbindungen konnten nicht geladen werden.{' '}

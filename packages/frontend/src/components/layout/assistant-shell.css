@@ -513,7 +513,7 @@
 .plum-composer-model-tools .plum-reasoning-select select {
   max-width: 106px;
 }
-.plum-composer-toolbar button {
+.plum-composer-toolbar button:not(.plum-model-trigger) {
   width: 34px;
   height: 34px;
   padding: 0;
@@ -582,7 +582,7 @@
   .plum-composer-model-tools .plum-reasoning-select select {
     max-width: 80px;
   }
-  .plum-composer-toolbar button {
+  .plum-composer-toolbar button:not(.plum-model-trigger) {
     width: 36px;
     height: 40px;
   }

@@ -13454,8 +13454,7 @@ html.eink ::selection {
 }
 /* Zone ①: mode pill (Chat · Task · Code · Schwarm). */
 .sidebar-mode-pill {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
   gap: 2px;
   padding: 3px;
   margin: 2px 0 4px;
@@ -13463,10 +13462,12 @@ html.eink ::selection {
   background: hsl(var(--foreground) / 0.06);
 }
 .sidebar-mode-pill.is-collapsed {
-  grid-template-columns: 1fr;
+  flex-direction: column;
   border-radius: 12px;
 }
+/* Only the active mode carries its label; the others are icon buttons. */
 .sidebar-mode-pill-item {
+  flex: 0 0 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -13491,6 +13492,7 @@ html.eink ::selection {
   color: hsl(var(--foreground));
 }
 .sidebar-mode-pill-item.is-active {
+  flex: 1 1 auto;
   background: hsl(var(--primary) / 0.18);
   color: hsl(var(--foreground));
 }

@@ -15,7 +15,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import {
   LayoutDashboard,
-  LayoutGrid,
+  MonitorPlay,
   PanelLeftClose,
   PanelLeftOpen,
   Wrench,
@@ -83,7 +83,7 @@ const MODE_ITEMS: { mode: SidebarMode; label: string; icon: typeof Code2 }[] = [
 const GLOBAL_ITEMS: { label: string; path: string | null; icon: typeof Code2 }[] = [
   { label: 'Übersicht', path: '/', icon: LayoutDashboard },
   { label: 'Agenten', path: '/assistant/agents', icon: Bot },
-  { label: 'Monitor', path: '/monitor', icon: LayoutGrid },
+  { label: 'Monitor', path: '/monitor', icon: MonitorPlay },
   { label: 'Analytics', path: '/analytics', icon: BarChart3 },
   { label: 'Outbox', path: null, icon: Inbox },
   { label: 'Operations', path: '/operations', icon: ServerCog },
@@ -1282,7 +1282,7 @@ export function Sidebar({
                 className={cn('sidebar-mode-pill-item', selected && 'is-active')}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                {!isCollapsed && <span>{item.label}</span>}
+                {!isCollapsed && selected && <span>{item.label}</span>}
               </Link>
             );
           })}
