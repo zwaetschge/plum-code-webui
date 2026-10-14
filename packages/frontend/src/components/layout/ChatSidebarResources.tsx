@@ -1,43 +1,12 @@
-import type { ComponentType, ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { Link, NavLink, useLocation } from 'react-router-dom';
+import { LIBRARY_PARAM, LIBRARY_SECTIONS, libraryHref } from './libraryNav';
 import { useQuery } from '@tanstack/react-query';
-import {
-  BellRing,
-  BookOpen,
-  Bot,
-  Brain,
-  CalendarClock,
-  ChevronDown,
-  FileStack,
-  FolderKanban,
-  GraduationCap,
-  Layers,
-  Library,
-  MessageCircle,
-  Repeat,
-  SlidersHorizontal,
-  UserRound,
-  Users,
-} from 'lucide-react';
+import { ChevronDown, Library, MessageCircle, SlidersHorizontal, Users } from 'lucide-react';
 import type { AssistantResource, Session } from '@plum-code-webui/shared';
 import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/lib/utils';
-
-const libraries: [path: string, label: string, icon: ComponentType<{ className?: string }>][] = [
-  ['/assistant/projects', 'Projekte', FolderKanban],
-  ['/assistant/sources', 'Quellen', BookOpen],
-  ['/assistant/artifacts', 'Ergebnisse', FileStack],
-  ['/assistant/memory', 'Gedächtnis', Brain],
-  ['/assistant/profiles', 'Profile', UserRound],
-  ['/assistant/agents', 'Agenten', Bot],
-  ['/assistant/routines', 'Routinen', Repeat],
-  ['/assistant/collections', 'Sammlungen', Layers],
-  ['/assistant/meetings', 'Besprechungen', CalendarClock],
-  ['/assistant/courses', 'Kurse', GraduationCap],
-  ['/assistant/event-subscriptions', 'Ereignisse', BellRing],
-  ['/collaborate', 'Dokumente', Users],
-];
 
 const DAY_MS = 86_400_000;
 const HISTORY_GROUPS = ['Heute', 'Gestern', 'Älter'] as const;
@@ -73,6 +42,8 @@ export function ChatSidebarResources({
   renderSession: (session: Session) => ReactNode;
 }) {
   const owner = useAuthStore((state) => state.user?.id);
+  const location = useLocation();
+  const openLibrary = new URLSearchParams(location.search).get(LIBRARY_PARAM);
   const chats = useQuery({
     queryKey: ['assistant', 'api-chats', owner],
     queryFn: async () =>
@@ -167,19 +138,30 @@ export function ChatSidebarResources({
           aria-label="Bibliothekseinträge"
           className={cn('sidebar-library-grid', collapsed && 'is-collapsed')}
         >
-          {libraries.map(([to, label, Icon]) => (
-            <NavLink
-              key={to}
-              to={to}
+          {LIBRARY_SECTIONS.map(({ slug, label, icon: Icon }) => (
+            // Opens the library panel over the current chat instead of a page.
+            <Link
+              key={slug}
+              to={libraryHref(location.pathname, location.search, slug)}
               onClick={onNavigate}
               title={label}
               aria-label={label}
-              className={({ isActive }) => cn('sidebar-library-tile', isActive && 'is-active')}
+              className={cn('sidebar-library-tile', openLibrary === slug && 'is-active')}
             >
               <Icon className="h-4 w-4 shrink-0" />
               {!collapsed && <span>{label}</span>}
-            </NavLink>
+            </Link>
           ))}
+          <NavLink
+            to="/collaborate"
+            onClick={onNavigate}
+            title="Gemeinsame Dokumente"
+            aria-label="Gemeinsame Dokumente"
+            className={({ isActive }) => cn('sidebar-library-tile', isActive && 'is-active')}
+          >
+            <Users className="h-4 w-4 shrink-0" />
+            {!collapsed && <span>Dokumente</span>}
+          </NavLink>
         </nav>
       </details>
       <NavLink

@@ -16,6 +16,7 @@ import { ProviderLogo } from '@/components/branding/ProviderLogo';
 import { UI_PROVIDER_META, toUiProvider } from '@/lib/providers';
 import { AppBackground } from '@/components/effects/AppBackground';
 import { OutboxPanel } from '@/components/chat/OutboxPanel';
+import { LibraryPanel } from './LibraryPanel';
 import { CommandPalette } from '@/components/CommandPalette';
 import { getSessionRunState } from '@/lib/sessionRunState';
 import { cn } from '@/lib/utils';
@@ -295,6 +296,8 @@ export function Layout() {
             />
           </div>
         )}
+
+        <LibraryPanel />
 
         {/* Mobile Sheet */}
         <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>

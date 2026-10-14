@@ -309,18 +309,30 @@ function resourcePath(item: Pick<AssistantResource, 'id' | 'kind'>) {
   return `${item.kind === 'task' ? '/assistant/tasks' : `/assistant/${item.kind === 'memory' ? 'memory' : item.kind + 's'}`}?resource=${item.id}`;
 }
 
-export function AssistantPage() {
+/**
+ * `embeddedSection` renders one library section inside the chat's side panel
+ * (`?library=<section>`) instead of as its own page.
+ */
+export function AssistantPage({ embeddedSection }: { embeddedSection?: string } = {}) {
   const owner = useAuthStore((state) => state.user?.id);
-  return <AssistantAccountPage key={owner ?? 'signed-out'} />;
+  return <AssistantAccountPage key={owner ?? 'signed-out'} embeddedSection={embeddedSection} />;
 }
 
-function AssistantAccountPage() {
+function AssistantAccountPage({ embeddedSection }: { embeddedSection?: string }) {
   const account = useAuthStore((state) => state.user?.id);
   const location = useLocation();
   const navigate = useNavigate();
   const cache = useQueryClient();
-  const section =
-    location.pathname === '/'
+  /** Library links stay inside the side panel when embedded. */
+  const toLibrary = (slug: string, query = '') => {
+    if (!embeddedSection) return `/assistant/${slug}${query ? `?${query}` : ''}`;
+    const params = new URLSearchParams(query);
+    params.set('library', slug);
+    return `${location.pathname}?${params}`;
+  };
+  const section = embeddedSection
+    ? embeddedSection
+    : location.pathname === '/'
       ? 'overview'
       : location.pathname === '/chat'
         ? 'chat'
@@ -814,7 +826,11 @@ function AssistantAccountPage() {
   return (
     <main
       className={
-        section === 'tasks' ? 'plum-task-page' : 'mx-auto w-full max-w-6xl space-y-6 p-4 md:p-8'
+        section === 'tasks'
+          ? 'plum-task-page'
+          : embeddedSection
+            ? 'w-full space-y-5 px-4 pb-6 pt-2 md:px-6'
+            : 'mx-auto w-full max-w-6xl space-y-6 p-4 md:p-8'
       }
     >
       <AssistantOutbox />
@@ -935,10 +951,10 @@ function AssistantAccountPage() {
       {section === 'artifacts' && (
         <>
           <ComparisonStarter
-            onCreated={(artifact) => navigate(`/assistant/artifacts?resource=${artifact.id}`)}
+            onCreated={(artifact) => navigate(toLibrary('artifacts', `resource=${artifact.id}`))}
           />
           <DatasetImport
-            onCreated={(artifact) => navigate(`/assistant/artifacts?resource=${artifact.id}`)}
+            onCreated={(artifact) => navigate(toLibrary('artifacts', `resource=${artifact.id}`))}
           />
         </>
       )}
@@ -946,7 +962,7 @@ function AssistantAccountPage() {
         <WebSourceImport
           onCreated={(source) => {
             refresh();
-            navigate(`/assistant/sources?resource=${source.id}`);
+            navigate(toLibrary('sources', `resource=${source.id}`));
           }}
         />
       )}
@@ -1184,7 +1200,7 @@ function AssistantAccountPage() {
                     />
                   </label>
                   {section === 'projects' && (
-                    <Button variant="outline" onClick={() => navigate('/assistant/sources')}>
+                    <Button variant="outline" onClick={() => navigate(toLibrary('sources'))}>
                       <BookOpen className="mr-2 h-4 w-4" />
                       Quellen
                     </Button>
@@ -1487,7 +1503,7 @@ function AssistantAccountPage() {
                 source={selected}
                 onCreated={(artifact) => {
                   refresh();
-                  navigate(`/assistant/artifacts?resource=${artifact.id}`);
+                  navigate(toLibrary('artifacts', `resource=${artifact.id}`));
                 }}
               />
             )}
@@ -1608,7 +1624,10 @@ function AssistantAccountPage() {
             {selected.kind === 'task' && analysisOrigin && (
               <Link
                 className="text-sm text-primary underline"
-                to={`/assistant/artifacts?resource=${analysisOrigin.notebookId}&revision=${analysisOrigin.notebookRevision}`}
+                to={toLibrary(
+                  'artifacts',
+                  `resource=${analysisOrigin.notebookId}&revision=${analysisOrigin.notebookRevision}`
+                )}
               >
                 Ursprüngliches Analyse-Notebook öffnen
               </Link>
