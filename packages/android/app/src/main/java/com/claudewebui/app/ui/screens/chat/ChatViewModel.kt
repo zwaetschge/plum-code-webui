@@ -746,7 +746,7 @@ class ChatViewModel(
                     } else {
                         offered + current
                     }
-                    _uiState.update { it.copy(availableModels = models) }
+                    _uiState.update { it.copy(availableModels = models, providerConfigs = configs) }
                 }
                 .onFailure { failure ->
                     _uiState.update {
@@ -764,13 +764,27 @@ class ChatViewModel(
         applySessionChange(appContext.getString(R.string.chat_reasoning_updated)) { sessionRepository.setReasoning(sessionId, level) }
     }
 
-    fun switchProvider(provider: CLIProvider) {
+    /** Codex Fast on or off; the reasoning level stays as it is. */
+    fun setFast(enabled: Boolean) {
+        applySessionChange(appContext.getString(R.string.chat_reasoning_updated)) {
+            sessionRepository.setServiceTier(sessionId, if (enabled) ServiceTier.FAST.id else null)
+        }
+    }
+
+    /**
+     * Switch the harness. The server resets model and reasoning with it, so a
+     * [model] picked from the new provider's group is applied afterwards.
+     */
+    fun switchProvider(provider: CLIProvider, model: String? = null) {
         // The old list would offer models the new provider can't run; it
         // refills once the PATCH has come back.
         _uiState.update { it.copy(availableModels = emptyList()) }
         applySessionChange(
             appContext.getString(R.string.chat_provider_switched, provider.displayName),
-            onApplied = { updated -> loadAvailableModels(updated.cliProvider) },
+            onApplied = { updated ->
+                loadAvailableModels(updated.cliProvider)
+                if (!model.isNullOrBlank()) setModel(model)
+            },
         ) {
             sessionRepository.switchProvider(sessionId, provider)
         }

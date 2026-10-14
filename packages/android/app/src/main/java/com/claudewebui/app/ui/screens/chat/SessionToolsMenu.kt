@@ -14,7 +14,6 @@ import com.claudewebui.app.ui.theme.PlumTheme
 /** Tools stay first; configuration opens only when explicitly selected. */
 @Composable
 internal fun SessionToolsMenu(
-    modelSummary: String,
     appearanceSummary: String,
     activeAgents: Int,
     waitingAgents: Int,
@@ -27,7 +26,6 @@ internal fun SessionToolsMenu(
     onChecks: () -> Unit,
     onMemory: () -> Unit,
     onDevTools: () -> Unit,
-    onRuntime: () -> Unit,
     onAppearance: () -> Unit,
 ) {
     val t = PlumTheme.tokens
@@ -55,12 +53,7 @@ internal fun SessionToolsMenu(
             TextButton(onClick = onDevTools) { Text(stringResource(R.string.chat_dev_tools)) }
         }
         HorizontalDivider()
-        TextButton(onClick = onRuntime, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-            Column(Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.session_menu_runtime), style = MaterialTheme.typography.titleSmall)
-                Text(modelSummary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+        // Model, thinking depth and mode are set from the chat bar chips.
         TextButton(onClick = onAppearance, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
             Column(Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.session_menu_appearance), style = MaterialTheme.typography.titleSmall)

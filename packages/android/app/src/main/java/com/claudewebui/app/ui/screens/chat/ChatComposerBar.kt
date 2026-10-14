@@ -17,6 +17,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -37,6 +39,8 @@ import com.claudewebui.app.ui.components.chat.ThinkingIndicator
 import com.claudewebui.app.ui.components.common.PlumAmber
 import com.claudewebui.app.ui.components.common.PlumMuted
 import com.claudewebui.app.ui.components.common.isShortWindow
+import com.claudewebui.app.ui.components.common.localizedDescription
+import com.claudewebui.app.ui.components.common.localizedLabel
 import com.claudewebui.app.ui.theme.LocalPlumPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -127,6 +131,9 @@ internal fun ChatComposerBar(
     modelLabel: String? = null,
     effortLabel: String? = null,
     onModelEffort: (() -> Unit)? = null,
+    /** Execution mode chip (Task/Code only); null hides it. */
+    mode: com.claudewebui.app.data.model.SessionMode? = null,
+    onModeChange: ((com.claudewebui.app.data.model.SessionMode) -> Unit)? = null,
 ) {
     val t = PlumTheme.tokens
     val palette = LocalPlumPalette.current
@@ -178,11 +185,16 @@ internal fun ChatComposerBar(
                 }
             }
 
-            // Model and thinking depth are one tap away, as in the Chat area.
-            if (onModelEffort != null) Row(Modifier.fillMaxWidth().padding(start = t.spacing.md, end = t.spacing.md, top = 4.dp)) {
-                com.claudewebui.app.ui.screens.dashboard.ModelEffortChip(
+            // Model, thinking depth and execution mode live in the chat bar, as in the WebUI.
+            if (onModelEffort != null || (mode != null && onModeChange != null)) Row(
+                Modifier.fillMaxWidth().padding(start = t.spacing.md, end = t.spacing.md, top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(t.spacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (onModelEffort != null) com.claudewebui.app.ui.screens.dashboard.ModelEffortChip(
                     model = modelLabel.orEmpty(), effortLabel = effortLabel, enabled = true, onClick = onModelEffort,
                 )
+                if (mode != null && onModeChange != null) SessionModeChip(mode, onModeChange)
             }
 
             // Thinking/tool indicator sits just above input
@@ -353,3 +365,64 @@ internal fun inspectAttachmentUri(
         sizeBytes = byteSize,
     )
 }.getOrNull()
+
+// ── Execution mode chip ───────────────────────────────────────────────────────
+
+/** Order of the chat bar's mode menu: Planen · Manuell · Auto-Accept · YOLO. */
+private val CHAT_BAR_MODES = listOf(
+    com.claudewebui.app.data.model.SessionMode.PLANNING,
+    com.claudewebui.app.data.model.SessionMode.MANUAL,
+    com.claudewebui.app.data.model.SessionMode.AUTO_ACCEPT,
+    com.claudewebui.app.data.model.SessionMode.DANGER,
+)
+
+@Composable
+private fun SessionModeChip(
+    mode: com.claudewebui.app.data.model.SessionMode,
+    onModeChange: (com.claudewebui.app.data.model.SessionMode) -> Unit,
+) {
+    val palette = LocalPlumPalette.current
+    var open by remember { mutableStateOf(false) }
+    val danger = mode == com.claudewebui.app.data.model.SessionMode.DANGER
+    Box {
+        Surface(
+            onClick = { open = true },
+            shape = androidx.compose.foundation.shape.CircleShape,
+            color = palette.segmentTrack,
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (danger) MaterialTheme.colorScheme.error.copy(alpha = .6f) else palette.border.copy(alpha = .6f),
+            ),
+            modifier = Modifier.heightIn(min = 36.dp),
+        ) {
+            Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    mode.localizedLabel(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (danger) MaterialTheme.colorScheme.error else palette.text,
+                    maxLines = 1,
+                )
+            }
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Text(
+                stringResource(R.string.chat_mode_chip_title),
+                style = MaterialTheme.typography.labelSmall,
+                color = palette.muted,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            )
+            CHAT_BAR_MODES.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(option.localizedLabel(), style = MaterialTheme.typography.bodyLarge)
+                            Text(option.localizedDescription(), style = MaterialTheme.typography.bodySmall, color = palette.muted)
+                        }
+                    },
+                    trailingIcon = { if (option == mode) Icon(Icons.Outlined.Check, null, tint = palette.accent) },
+                    onClick = { open = false; if (option != mode) onModeChange(option) },
+                )
+            }
+        }
+    }
+}

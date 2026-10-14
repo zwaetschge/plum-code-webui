@@ -1,7 +1,5 @@
 package com.claudewebui.app.ui.components.chat
 
-import com.claudewebui.app.ui.components.common.localizedLabel
-import com.claudewebui.app.ui.components.common.localizedDescription
 import com.claudewebui.app.ui.theme.PlumTheme
 import androidx.compose.ui.res.stringResource
 import com.claudewebui.app.R
@@ -38,43 +36,29 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.claudewebui.app.data.model.CLIProvider
 import com.claudewebui.app.data.model.ConfigSkill
 import com.claudewebui.app.data.model.StyleKind
-import com.claudewebui.app.data.model.ReasoningLevel
-import com.claudewebui.app.data.model.ServiceTier
 import com.claudewebui.app.data.model.Session
 import com.claudewebui.app.data.model.SessionPeerLink
-import com.claudewebui.app.data.model.SessionMode
 import com.claudewebui.app.ui.components.common.PlumAccent
 import com.claudewebui.app.ui.components.common.PlumBorder
 import com.claudewebui.app.ui.components.common.PlumMuted
 import com.claudewebui.app.ui.components.common.PlumSubtleFill
 import com.claudewebui.app.ui.components.common.PlumSurfaceStrong
 import com.claudewebui.app.ui.components.common.PlumText
-import com.claudewebui.app.ui.components.common.providerColor
 
 /**
- * Per-session controls: which harness runs it, on which model, at which
- * reasoning level, and how freely it may use tools.
- *
- * Provider, model and reasoning are persisted settings. The backend reloads a
- * running harness immediately while preserving its conversation context. Mode
- * remains a live socket setting.
+ * Per-session settings beyond the chat bar: presentation presets, mesh peers,
+ * templates and allowed directories. Provider, model, thinking depth and mode
+ * are chips in the composer.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun SessionSettingsSheet(
     session: Session,
-    mode: SessionMode,
-    availableModels: List<String>,
     isApplying: Boolean,
     allowedDirectories: List<String>,
     directoriesLoading: Boolean,
-    onProviderChange: (CLIProvider) -> Unit,
-    onModelChange: (String?) -> Unit,
-    onReasoningChange: (String?) -> Unit,
-    onModeChange: (SessionMode) -> Unit,
     onAddAllowedDirectory: (String) -> Unit,
     onRemoveAllowedDirectory: (String) -> Unit,
     designStyles: List<ConfigSkill> = emptyList(),
@@ -107,96 +91,7 @@ fun SessionSettingsSheet(
         ) {
             Text(stringResource(R.string.component_session_settings), color = PlumText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
 
-            SettingsGroup(stringResource(R.string.component_mode), stringResource(R.string.component_applies_immediately)) {
-                SessionMode.entries.forEach { option ->
-                    OptionRow(
-                        title = option.localizedLabel(),
-                        subtitle = option.localizedDescription(),
-                        selected = option == mode,
-                        enabled = true,
-                    ) { onModeChange(option) }
-                }
-            }
-
-            SettingsGroup(stringResource(R.string.component_provider), stringResource(R.string.component_applies_immediately)) {
-                CLIProvider.active.forEach { provider ->
-                    OptionRow(
-                        title = provider.displayName,
-                        subtitle = null,
-                        selected = provider == session.cliProvider,
-                        enabled = !isApplying,
-                        accent = providerColor(provider),
-                    ) { onProviderChange(provider) }
-                }
-            }
-
-            SettingsGroup(stringResource(R.string.component_model), stringResource(R.string.component_applies_immediately)) {
-                OptionRow(
-                    title = stringResource(R.string.component_provider_default),
-                    subtitle = null,
-                    selected = session.cliModel.isNullOrBlank(),
-                    enabled = !isApplying,
-                ) { onModelChange(null) }
-                availableModels.forEach { model ->
-                    OptionRow(
-                        title = model,
-                        subtitle = null,
-                        selected = model == session.cliModel,
-                        enabled = !isApplying,
-                    ) { onModelChange(model) }
-                }
-                if (availableModels.isEmpty()) {
-                    Text(
-                        stringResource(R.string.component_this_provider_reports_no_model_list),
-                        color = PlumMuted,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(vertical = componentTokens.spacing.inline),
-                    )
-                }
-            }
-
-            SettingsGroup(stringResource(R.string.component_reasoning), stringResource(R.string.component_applies_immediately)) {
-                val levels = ReasoningLevel.forProvider(session.cliProvider)
-                val fastActive = session.cliServiceTier.equals(ServiceTier.FAST.id, ignoreCase = true)
-                // Default plus the provider's levels on one animated rail; the
-                // deepest ones (ultra, ultracode, …) get the nebula look.
-                val stops = listOf(com.claudewebui.app.ui.screens.dashboard.EffortStop(null, stringResource(R.string.component_provider_default))) +
-                    levels.map { level ->
-                        com.claudewebui.app.ui.screens.dashboard.EffortStop(level.id, level.localizedLabel(), com.claudewebui.app.ui.screens.dashboard.isSpecialLevel(level.id))
-                    }
-                val railSelection = when {
-                    fastActive -> "\u0000none"
-                    session.cliReasoning.isNullOrBlank() -> null
-                    else -> levels.firstOrNull { it.id.equals(session.cliReasoning, ignoreCase = true) }?.id ?: "\u0000none"
-                }
-                com.claudewebui.app.ui.screens.dashboard.EffortRail(
-                    stops = stops,
-                    selectedId = railSelection,
-                    onSelect = { onReasoningChange(it) },
-                    enabled = !isApplying,
-                )
-                // A level the server set but this provider no longer lists
-                // (e.g. after a provider switch) would otherwise vanish from the
-                // sheet and read as stringResource(R.string.component_provider_default).
-                ReasoningLevel.fromId(session.cliReasoning)
-                    ?.takeIf { it !in levels }
-                    ?.let { orphan ->
-                        OptionRow(
-                            title = orphan.localizedLabel(),
-                            subtitle = stringResource(R.string.component_set_on_the_server_for_another_provider),
-                            selected = !fastActive,
-                            enabled = !isApplying,
-                        ) { onReasoningChange(orphan.id) }
-                    }
-                if (session.cliProvider == CLIProvider.CODEX) {
-                    OptionRow(
-                        title = ServiceTier.FAST.localizedLabel(),
-                        subtitle = stringResource(R.string.component_codex_service_tier_lowest_latency),
-                        selected = fastActive,
-                        enabled = !isApplying,
-                    ) { onReasoningChange(ServiceTier.FAST.id) }
-                }
-            }
+            // Mode, provider, model and thinking depth are chat-bar chips now.
 
             if (designStyles.isNotEmpty() || writingStyles.isNotEmpty()) {
                 SettingsGroup(stringResource(R.string.component_presentation_presets), stringResource(R.string.component_applied_to_this_session_s_turns)) {

@@ -167,6 +167,7 @@
     <string name="chat_models_unavailable">Modellliste nicht verfügbar: %1$s</string>
     <string name="chat_provider_switched">Anbieter zu %1$s gewechselt</string>
     <string name="chat_mode_set">Modus auf %1$s gesetzt</string>
+    <string name="chat_mode_chip_title">Ausführungsmodus</string>
     <string name="chat_session_reloaded">%1$s — aktive Sitzung neu geladen</string>
     <string name="chat_attachment_limit">Bis zu %1$d Dateien mit insgesamt %2$s können angehängt werden</string>
     <string name="chat_attach_many_failed">%1$d Dateien konnten nicht angehängt werden (zu gross oder nicht unterstützt)</string>

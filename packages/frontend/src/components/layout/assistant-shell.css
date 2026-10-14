@@ -758,6 +758,36 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
 .plum-model-row.is-active {
   background: hsl(var(--primary) / 0.14);
 }
+/* Chat-bar chips of CLI sessions (model · effort, execution mode). */
+.composer-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 2px 4px 2px;
+}
+.plum-chip {
+  min-height: 30px;
+  padding: 0 9px;
+}
+.plum-session-model-menu {
+  max-height: min(560px, var(--radix-dropdown-menu-content-available-height, 80vh));
+  overflow-y: auto;
+}
+.plum-model-trigger-effort.is-fast {
+  background: hsl(38 92% 50% / 0.18);
+  color: hsl(32 95% 44%);
+}
+.plum-mode-chip.is-planning svg:first-child {
+  color: hsl(var(--primary));
+}
+.plum-mode-chip.is-danger {
+  border-color: hsl(var(--destructive) / 0.55);
+}
+.plum-mode-chip.is-danger svg:first-child {
+  color: hsl(var(--destructive));
+}
 .plum-model-empty {
   padding: 12px;
   font-size: 13px;

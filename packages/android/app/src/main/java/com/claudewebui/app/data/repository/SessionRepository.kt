@@ -295,6 +295,16 @@ class SessionRepository(
         response.data
     }
 
+    /** Toggle Codex's Fast service tier; independent of the reasoning level. */
+    suspend fun setServiceTier(id: String, serviceTier: String?): Result<Session> = apiCall {
+        val response = api.setSessionServiceTier(id, serviceTier)
+        if (!response.success || response.data == null) {
+            error(response.error?.message ?: "Failed to set service tier")
+        }
+        dao.insert(response.data.toEntity())
+        response.data
+    }
+
     /** Apply or clear one presentation preset for this session. */
     suspend fun setStyleSkill(
         id: String,

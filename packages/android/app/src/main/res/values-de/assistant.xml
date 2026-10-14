@@ -173,6 +173,7 @@
     <string name="model_picker_title">Modell</string>
     <string name="model_picker_none">Keine Modellverbindung</string>
     <string name="model_picker_default">Standard</string>
+    <string name="model_picker_not_configured">nicht eingerichtet</string>
     <string name="effort_ultra">Ultra</string>
     <string name="assistant_reading">Liest vor …</string>
     <string name="assistant_voice_pick">Stimme</string>

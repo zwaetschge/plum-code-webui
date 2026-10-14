@@ -53,7 +53,7 @@ import com.claudewebui.app.R
 import com.claudewebui.app.ui.theme.PlumTheme
 
 /** One selectable model, grouped under the connection or provider it belongs to. */
-internal data class ModelOption(val groupId: String, val group: String, val model: String, val label: String = model)
+internal data class ModelOption(val groupId: String, val group: String, val model: String, val label: String = model, val enabled: Boolean = true)
 
 /** One stop of the thinking-depth rail; `id == null` means "leave it to the model". */
 internal data class EffortStop(val id: String?, val label: String, val special: Boolean = false)
@@ -193,6 +193,8 @@ internal fun ModelEffortSheet(
     onEffort: (String?) -> Unit,
     onDismiss: () -> Unit,
     showModels: Boolean = true,
+    /** Extra rows under the rail, e.g. Codex Fast or the subagent model. */
+    extra: @Composable ColumnScope.() -> Unit = {},
 ) {
     val palette = PlumTheme.palette
     // Short (landscape) windows would otherwise park the rail below the fold.
@@ -212,10 +214,10 @@ internal fun ModelEffortSheet(
                             Row(
                                 Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp)).background(tint)
                                     .semantics { selected = active; role = Role.RadioButton }
-                                    .clickable { onSelectModel(option) }.padding(horizontal = 12.dp),
+                                    .clickable(enabled = option.enabled) { onSelectModel(option) }.padding(horizontal = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(option.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, color = palette.text)
+                                Text(option.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (option.enabled) palette.text else palette.muted)
                                 if (active) Icon(Icons.Outlined.Check, null, tint = palette.accent)
                             }
                         }
@@ -224,6 +226,7 @@ internal fun ModelEffortSheet(
                 HorizontalDivider()
             }
             EffortRail(stops, effort, onEffort)
+            extra()
         }
     }
 }

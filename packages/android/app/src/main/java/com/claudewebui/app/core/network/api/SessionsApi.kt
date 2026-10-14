@@ -55,6 +55,9 @@ interface SessionsApi {
     /** PATCH /api/sessions/:id/reasoning */
     suspend fun setSessionReasoning(id: String, reasoning: String?): ApiResponse<Session>
 
+    /** PATCH /api/sessions/:id/service-tier — Codex Fast on (`fast`) or off (null). */
+    suspend fun setSessionServiceTier(id: String, serviceTier: String?): ApiResponse<Session>
+
     /** PATCH /api/sessions/:id/category — returns only the assignment, not a Session. */
     suspend fun updateSessionSurface(id: String, surface: String): ApiResponse<kotlinx.serialization.json.JsonObject>
 
@@ -152,6 +155,9 @@ class SessionsApiImpl(private val http: ApiHttp) : SessionsApi {
 
     override suspend fun setSessionReasoning(id: String, reasoning: String?): ApiResponse<Session> =
         http.patch("/api/sessions/$id/reasoning") { setBody(mapOf("reasoning" to reasoning)) }
+
+    override suspend fun setSessionServiceTier(id: String, serviceTier: String?): ApiResponse<Session> =
+        http.patch("/api/sessions/$id/service-tier") { setBody(mapOf("serviceTier" to serviceTier)) }
 
     override suspend fun updateSessionSurface(id: String, surface: String): ApiResponse<kotlinx.serialization.json.JsonObject> =
         http.patch("/api/sessions/$id/surface") { setBody(mapOf("surface" to surface)) }

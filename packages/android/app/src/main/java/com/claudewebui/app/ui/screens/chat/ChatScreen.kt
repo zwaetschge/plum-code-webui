@@ -386,10 +386,14 @@ fun ChatScreen(
                 modelLabel = displaySession?.cliModel?.takeIf { it.isNotBlank() && it != "unknown" }
                     ?: stringResource(R.string.model_picker_default),
                 effortLabel = displaySession?.let { current ->
-                    ReasoningLevel.forProvider(current.cliProvider)
+                    val level = ReasoningLevel.forProvider(current.cliProvider)
                         .firstOrNull { it.id.equals(current.cliReasoning, ignoreCase = true) }?.localizedLabel()
+                    val fast = if (current.cliServiceTier.equals(ServiceTier.FAST.id, ignoreCase = true)) ServiceTier.FAST.localizedLabel() else null
+                    listOfNotNull(level, fast).joinToString(" · ").ifBlank { null }
                 },
                 onModelEffort = if (displaySession != null) ({ viewModel.loadAvailableModels(); showModelEffort = true }) else null,
+                mode = uiState.sessionMode.takeIf { displaySession?.surface?.let { it != "chat" } == true },
+                onModeChange = viewModel::setMode,
             )
             }
         },
@@ -497,7 +501,6 @@ fun ChatScreen(
             val agents = displayUiState.agentRuns.filter { it.chatId == displayUiState.activeChatId }
             val openRuntime = { showToolsMenu = false; viewModel.loadAvailableModels(); showSessionSettings = true }
             SessionToolsMenu(
-                modelSummary = listOfNotNull(displaySession?.cliModel, displaySession?.cliReasoning, displaySession?.mode?.localizedLabel()).joinToString(" · "),
                 appearanceSummary = listOfNotNull(displaySession?.designStyleSkill, displaySession?.writingStyleSkill).joinToString(" · ").ifBlank { stringResource(R.string.session_menu_default_appearance) },
                 activeAgents = agents.count { it.isActive }, waitingAgents = agents.count { it.isActive && it.activity == "waiting" },
                 onTasks = { showToolsMenu = false; showChatDetails = true },
@@ -509,7 +512,7 @@ fun ChatScreen(
                 onChecks = { showToolsMenu = false; onNavigateToCheckpoints(sessionId) },
                 onMemory = { showToolsMenu = false; onNavigateToMemory(displaySession?.workingDirectory ?: "") },
                 onDevTools = { showToolsMenu = false; onNavigateToDevTools(displaySession?.workingDirectory ?: "") },
-                onRuntime = openRuntime, onAppearance = openRuntime,
+                onAppearance = openRuntime,
             )
         }
     }
@@ -522,20 +525,58 @@ fun ChatScreen(
 
     if (showModelEffort) displaySession?.let { session ->
         val provider = session.cliProvider
+        val fastActive = session.cliServiceTier.equals(ServiceTier.FAST.id, ignoreCase = true)
         val stops = listOf(com.claudewebui.app.ui.screens.dashboard.EffortStop(null, stringResource(R.string.component_provider_default))) +
             ReasoningLevel.forProvider(provider).map { level ->
                 com.claudewebui.app.ui.screens.dashboard.EffortStop(level.id, level.localizedLabel(), com.claudewebui.app.ui.screens.dashboard.isSpecialLevel(level.id))
             }
+        val defaultLabel = stringResource(R.string.model_picker_default)
+        val notConfigured = stringResource(R.string.model_picker_not_configured)
+        // Models grouped by provider: picking one of another provider switches it.
+        // The current provider comes first and keeps the session's own model list.
+        val otherProviders = uiState.providerConfigs.mapNotNull { config ->
+            val cli = CLIProvider.fromId(config.id) ?: return@mapNotNull null
+            if (cli == provider || cli !in CLIProvider.active || !config.enabled) null else cli to config
+        }
+        val models = buildList {
+            add(com.claudewebui.app.ui.screens.dashboard.ModelOption(provider.name, provider.displayName, "", defaultLabel))
+            uiState.availableModels.forEach { add(com.claudewebui.app.ui.screens.dashboard.ModelOption(provider.name, provider.displayName, it)) }
+            otherProviders.forEach { (cli, config) ->
+                val group = if (config.available) cli.displayName else "${cli.displayName} · $notConfigured"
+                add(com.claudewebui.app.ui.screens.dashboard.ModelOption(cli.name, group, "", defaultLabel, enabled = config.available))
+                config.models.forEach { model ->
+                    add(com.claudewebui.app.ui.screens.dashboard.ModelOption(cli.name, group, model, enabled = config.available))
+                }
+            }
+        }
         com.claudewebui.app.ui.screens.dashboard.ModelEffortSheet(
-            models = listOf(com.claudewebui.app.ui.screens.dashboard.ModelOption(provider.name, provider.displayName, "", stringResource(R.string.model_picker_default))) +
-                uiState.availableModels.map { com.claudewebui.app.ui.screens.dashboard.ModelOption(provider.name, provider.displayName, it) },
+            models = models,
             selectedGroup = provider.name,
             selectedModel = session.cliModel?.takeIf { it.isNotBlank() && it != "unknown" } ?: "",
-            onSelectModel = { viewModel.setModel(it.model.ifBlank { null }) },
+            onSelectModel = { option ->
+                val target = CLIProvider.fromId(option.groupId) ?: provider
+                if (target == provider) viewModel.setModel(option.model.ifBlank { null })
+                else viewModel.switchProvider(target, option.model.ifBlank { null })
+            },
             stops = stops,
             effort = session.cliReasoning?.takeIf { it.isNotBlank() },
             onEffort = { viewModel.setReasoning(it) },
             onDismiss = { showModelEffort = false },
+            extra = {
+                if (provider == CLIProvider.CODEX) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(enabled = !uiState.isApplyingSettings) { viewModel.setFast(!fastActive) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(ServiceTier.FAST.localizedLabel(), style = MaterialTheme.typography.bodyLarge)
+                            Text(stringResource(R.string.component_codex_service_tier_lowest_latency), style = MaterialTheme.typography.bodySmall, color = PlumMuted)
+                        }
+                        Switch(checked = fastActive, onCheckedChange = { viewModel.setFast(it) }, enabled = !uiState.isApplyingSettings)
+                    }
+                }
+            },
         )
     }
 
@@ -543,15 +584,9 @@ fun ChatScreen(
         displaySession?.let { session ->
             SessionSettingsSheet(
                 session = session,
-                mode = uiState.sessionMode,
-                availableModels = uiState.availableModels,
                 isApplying = uiState.isApplyingSettings,
                 allowedDirectories = uiState.allowedDirectories,
                 directoriesLoading = uiState.directoriesLoading,
-                onProviderChange = viewModel::switchProvider,
-                onModelChange = viewModel::setModel,
-                onReasoningChange = viewModel::setReasoning,
-                onModeChange = viewModel::setMode,
                 onAddAllowedDirectory = viewModel::addAllowedDirectory,
                 onRemoveAllowedDirectory = viewModel::removeAllowedDirectory,
                 designStyles = uiState.designStyles,

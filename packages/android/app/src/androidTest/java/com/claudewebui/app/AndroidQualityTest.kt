@@ -58,17 +58,18 @@ class AndroidQualityTest {
         var destination = ""
         compose.setContent { ClaudeWebUITheme(darkTheme = true) {
             com.claudewebui.app.ui.screens.chat.SessionToolsMenu(
-                "Codex · GPT · High", "Default", 3, 1,
+                "Default", 3, 1,
                 { destination = "tasks" }, { destination = "agents" }, {}, {}, {}, {}, {}, {}, {},
-                { destination = "runtime" }, { destination = "appearance" },
+                { destination = "appearance" },
             )
         } }
         compose.onNodeWithText(context.getString(R.string.session_menu_agent_activity, 3, 1)).assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals("agents", destination) }
         compose.onNodeWithText(context.getString(R.string.session_menu_tasks)).performClick()
         compose.runOnIdle { assertEquals("tasks", destination) }
-        compose.onNodeWithText(context.getString(R.string.session_menu_runtime)).performScrollTo().performClick()
-        compose.runOnIdle { assertEquals("runtime", destination) }
+        // Model, effort and mode moved to the chat bar; the menu keeps appearance.
+        compose.onNodeWithText(context.getString(R.string.session_menu_appearance)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals("appearance", destination) }
     }
 
     @Test fun readButPendingApprovalCanStillBeAnswered() {

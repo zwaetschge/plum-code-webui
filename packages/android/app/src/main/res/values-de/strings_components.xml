@@ -132,9 +132,9 @@
     <string name="component_minutes">%1$d Min.</string>
     <string name="component_minutes_ago">vor %1$d Min.</string>
     <string name="component_mode">Modus</string>
-    <string name="component_mode_auto">Automatisch</string>
+    <string name="component_mode_auto">Auto-Accept</string>
     <string name="component_mode_auto_description">Werkzeuge ohne Rückfrage ausführen</string>
-    <string name="component_mode_danger">Ohne Freigaben</string>
+    <string name="component_mode_danger">YOLO</string>
     <string name="component_mode_danger_description">Alle Freigabeprüfungen überspringen</string>
     <string name="component_mode_manual">Manuell</string>
     <string name="component_mode_manual_description">Vor jedem Werkzeug nachfragen</string>

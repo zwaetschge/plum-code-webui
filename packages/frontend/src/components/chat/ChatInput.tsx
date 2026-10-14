@@ -1,6 +1,6 @@
 import { usePersonalization } from '@/components/assistant/usePersonalization';
 import { useChatDraft } from '@/hooks/useChatDraft';
-import { useState, useRef, useCallback, useMemo, memo, useEffect } from 'react';
+import { useState, useRef, useCallback, useMemo, memo, useEffect, type ReactNode } from 'react';
 import {
   MessageCircle,
   Send,
@@ -168,6 +168,8 @@ interface ChatInputProps {
   onFastModeToggle?: () => void;
   queueDepth?: number;
   onOpenRun?: () => void;
+  /** Chips under the input (model, thinking depth, execution mode); memoise it in the caller. */
+  toolbar?: ReactNode;
 }
 
 export const ChatInput = memo(function ChatInput({
@@ -198,6 +200,7 @@ export const ChatInput = memo(function ChatInput({
   onFastModeToggle,
   queueDepth = 0,
   onOpenRun,
+  toolbar,
 }: ChatInputProps) {
   const { preferences } = usePersonalization();
   const [input, setInput] = useChatDraft(sessionId, chatId);
@@ -1056,6 +1059,7 @@ export const ChatInput = memo(function ChatInput({
             </Button>
           </div>
         </div>
+        {toolbar && <div className="composer-chip-row">{toolbar}</div>}
       </form>
       <p
         id="chat-attachment-limits"

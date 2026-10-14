@@ -132,9 +132,9 @@
     <string name="component_minutes">%1$d min</string>
     <string name="component_minutes_ago">%1$d min ago</string>
     <string name="component_mode">Mode</string>
-    <string name="component_mode_auto">Auto</string>
+    <string name="component_mode_auto">Auto-accept</string>
     <string name="component_mode_auto_description">Run tools without asking</string>
-    <string name="component_mode_danger">Danger</string>
+    <string name="component_mode_danger">YOLO</string>
     <string name="component_mode_danger_description">Skip all permission checks</string>
     <string name="component_mode_manual">Manual</string>
     <string name="component_mode_manual_description">Ask before each tool</string>

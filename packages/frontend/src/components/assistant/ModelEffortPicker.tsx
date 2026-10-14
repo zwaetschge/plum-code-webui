@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, Brain } from 'lucide-react';
+import { Check, ChevronDown, Brain, Zap } from 'lucide-react';
 import type { AssistantApiProvider } from '@plum-code-webui/shared';
 import {
   DropdownMenu,
@@ -278,6 +278,237 @@ export function ModelEffortPicker({
           value={effort}
           onChange={(next) => onEffort(next as EffortChoice)}
         />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** One provider heading in the session model picker; switching provider is part of choosing a model. */
+export interface SessionModelGroup {
+  providerId: string;
+  name: string;
+  /** False when the provider is enabled but not configured; its rows stay visible but inert. */
+  available: boolean;
+  /** Label of the "provider default" row; omitted when the provider has no usable default. */
+  defaultLabel?: string;
+  models: Array<{ value: string; label: string }>;
+}
+
+/** Subagent model override (Claude transport only), shown under "Erweitert". */
+export interface SessionSubagentChoice {
+  value: string | null;
+  groups: Array<{ label: string; models: Array<{ value: string; label: string }> }>;
+  onChange: (value: string | null) => void;
+  pending?: boolean;
+}
+
+/**
+ * Chat-bar chip for CLI sessions: models grouped by provider (picking a model
+ * of another provider switches the provider), the animated thinking-depth rail
+ * below, Codex's Fast tier as a toggle and the subagent model under "Erweitert".
+ */
+export function SessionModelPicker({
+  groups,
+  providerId,
+  model,
+  modelLabel,
+  onSelect,
+  reasoning,
+  fast,
+  subagent,
+  disabled,
+}: {
+  groups: SessionModelGroup[];
+  providerId: string;
+  /** Selected model; '' means the provider default. */
+  model: string;
+  modelLabel: string;
+  onSelect: (providerId: string, model: string) => void;
+  reasoning?: {
+    title: string;
+    options: ReadonlyArray<{ value: string; label: string }>;
+    value: string;
+    defaultLabel: string;
+    onChange: (value: string) => void;
+  };
+  fast?: { active: boolean; pending?: boolean; onToggle: () => void };
+  subagent?: SessionSubagentChoice;
+  disabled?: boolean;
+}) {
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const stops = reasoning ? reasoningStops(reasoning.options, reasoning.defaultLabel) : [];
+  const effortStop = reasoning
+    ? stops.find((stop) => stop.id === (reasoning.value || '__default__'))
+    : undefined;
+  const showEffort = !!effortStop && effortStop.id !== '__default__';
+  const subagentLabel = (() => {
+    if (!subagent?.value) return 'Standard';
+    for (const group of subagent.groups) {
+      const hit = group.models.find((entry) => entry.value === subagent.value);
+      if (hit) return hit.label;
+    }
+    return subagent.value;
+  })();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild disabled={disabled}>
+        <button
+          type="button"
+          className="plum-model-trigger plum-chip"
+          aria-label="Modell und Denkaufwand"
+          title={`${modelLabel}${showEffort ? ` · ${effortStop.label}` : ''}`}
+        >
+          <span className="plum-model-trigger-name">{modelLabel}</span>
+          {showEffort && (
+            <span
+              className="plum-model-trigger-effort"
+              data-special={effortStop.special ? 'true' : 'false'}
+            >
+              <Brain size={12} aria-hidden />
+              {effortStop.label}
+            </span>
+          )}
+          {fast?.active && (
+            <span className="plum-model-trigger-effort is-fast">
+              <Zap size={12} aria-hidden />
+              Schnell
+            </span>
+          )}
+          <ChevronDown size={14} aria-hidden />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        side="top"
+        className="plum-model-menu plum-session-model-menu"
+      >
+        <div className="plum-model-list" role="listbox" aria-label="Modell">
+          {groups.map((group, index) => {
+            const rows = [
+              ...(group.defaultLabel !== undefined
+                ? [{ value: '', label: group.defaultLabel }]
+                : []),
+              ...group.models,
+            ];
+            return (
+              <div key={group.providerId}>
+                {index > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuLabel className="plum-model-group">
+                  {group.name}
+                  {!group.available && ' · nicht eingerichtet'}
+                </DropdownMenuLabel>
+                {rows.map((row) => {
+                  const active = group.providerId === providerId && row.value === model;
+                  return (
+                    <DropdownMenuItem
+                      key={`${group.providerId}/${row.value || '__default__'}`}
+                      role="option"
+                      aria-selected={active}
+                      disabled={!group.available && group.providerId !== providerId}
+                      className={cn('plum-model-row', active && 'is-active')}
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        if (!active) onSelect(group.providerId, row.value);
+                      }}
+                    >
+                      <span className="truncate">{row.label}</span>
+                      {active && <Check size={15} aria-hidden />}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </div>
+            );
+          })}
+          {!groups.length && <p className="plum-model-empty">Keine Anbieter verfügbar.</p>}
+        </div>
+        {reasoning && (
+          <>
+            <DropdownMenuSeparator />
+            <EffortRail
+              stops={stops}
+              value={reasoning.value || '__default__'}
+              onChange={reasoning.onChange}
+              title={reasoning.title}
+            />
+          </>
+        )}
+        {fast && (
+          <DropdownMenuItem
+            className={cn('plum-model-row', fast.active && 'is-active')}
+            disabled={fast.pending}
+            onSelect={(event) => {
+              event.preventDefault();
+              fast.onToggle();
+            }}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <Zap size={14} aria-hidden />
+              <span className="truncate">Schnellmodus (Codex-Serviceklasse)</span>
+            </span>
+            {fast.active && <Check size={15} aria-hidden />}
+          </DropdownMenuItem>
+        )}
+        {subagent && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="plum-model-row plum-model-advanced"
+              aria-expanded={advancedOpen}
+              onSelect={(event) => {
+                event.preventDefault();
+                setAdvancedOpen((open) => !open);
+              }}
+            >
+              <span className="truncate">Erweitert</span>
+              <ChevronDown
+                size={14}
+                aria-hidden
+                className={cn('transition-transform', advancedOpen && 'rotate-180')}
+              />
+            </DropdownMenuItem>
+            {advancedOpen && (
+              <div className="plum-model-list" role="listbox" aria-label="Subagent-Modell">
+                <DropdownMenuLabel className="plum-model-group">
+                  Subagent-Modell · {subagentLabel}
+                </DropdownMenuLabel>
+                {[
+                  {
+                    label: '',
+                    models: [{ value: '', label: 'Standard (Agent-Definition)' }],
+                  },
+                  ...subagent.groups,
+                ].map((group) => (
+                  <div key={group.label || '__default__'}>
+                    {group.label && (
+                      <DropdownMenuLabel className="plum-model-group">
+                        {group.label}
+                      </DropdownMenuLabel>
+                    )}
+                    {group.models.map((entry) => {
+                      const active = (subagent.value ?? '') === entry.value;
+                      return (
+                        <DropdownMenuItem
+                          key={`${group.label}/${entry.value || '__default__'}`}
+                          role="option"
+                          aria-selected={active}
+                          disabled={subagent.pending}
+                          className={cn('plum-model-row', active && 'is-active')}
+                          onSelect={(event) => {
+                            event.preventDefault();
+                            if (!active) subagent.onChange(entry.value || null);
+                          }}
+                        >
+                          <span className="truncate">{entry.label}</span>
+                          {active && <Check size={15} aria-hidden />}
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

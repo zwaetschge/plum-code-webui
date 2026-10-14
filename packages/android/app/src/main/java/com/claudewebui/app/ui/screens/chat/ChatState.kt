@@ -115,6 +115,8 @@ data class ChatUiState(
     // Session settings (provider / model / reasoning / mode)
     val sessionMode: SessionMode = SessionMode.AUTO_ACCEPT,
     val availableModels: List<String> = emptyList(),
+    /** Every CLI provider with its models; the chat-bar model sheet groups by them. */
+    val providerConfigs: List<com.claudewebui.app.data.model.CLIProviderConfig> = emptyList(),
     /** Slash commands offered by the composer's `/` picker. */
     val slashCommands: List<SlashCommand> = emptyList(),
     /** Working-tree changes per finished turn, newest first. */

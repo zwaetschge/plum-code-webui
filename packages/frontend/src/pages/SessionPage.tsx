@@ -1,4 +1,8 @@
-import { ReasoningPicker } from '@/components/assistant/ModelEffortPicker';
+import {
+  SessionModelPicker,
+  type SessionModelGroup,
+} from '@/components/assistant/ModelEffortPicker';
+import { SessionModeChip } from '@/components/session/SessionModeChip';
 import { RuntimeSelect } from '@/components/session/RuntimeSelect';
 import { ConversationControls } from '@/components/assistant/ConversationControls';
 import { createPortal } from 'react-dom';
@@ -47,9 +51,6 @@ import {
   ChevronRight,
   PenLine,
   Smartphone,
-  Hand,
-  Zap,
-  Sparkles,
   Network,
   Link2,
   SendHorizontal,
@@ -267,38 +268,6 @@ interface SessionChatListPayload {
   chats: Array<{ id: string; title: string }>;
   activeChatId: string | null;
 }
-
-const SESSION_MODE_OPTIONS: Array<{
-  value: SessionMode;
-  label: string;
-  description: string;
-  icon: typeof Brain;
-}> = [
-  {
-    value: 'planning',
-    label: 'Plan mode',
-    description: 'Plans but asks before executing',
-    icon: Brain,
-  },
-  {
-    value: 'auto-accept',
-    label: 'Auto mode',
-    description: 'Automatically approve safe operations',
-    icon: CheckCircle,
-  },
-  {
-    value: 'manual',
-    label: 'Manual mode',
-    description: 'Approve each operation manually',
-    icon: Hand,
-  },
-  {
-    value: 'danger',
-    label: 'YOLO mode',
-    description: 'Skip all confirmations',
-    icon: Zap,
-  },
-];
 
 function isActiveFollowupMode(value: string | null): value is ActiveFollowupMode {
   return value === 'queue' || value === 'steer';
@@ -1490,10 +1459,6 @@ export function SessionPage() {
     }
     return Array.from(options);
   }, [currentProviderInfo, sessionProvider, selectedModel, settings?.cliProviderModelLists]);
-  const showDefaultModelOption =
-    sessionProvider === 'pi' ||
-    sessionProvider !== 'opencode' ||
-    configuredModelsForProvider.length > 0;
   const isClaudeOpus55 =
     sessionProvider === 'claude' && selectedModel.replace(/\[1m\]$/i, '') === 'claude-opus-5-5';
   const selectedReasoning = session?.cliReasoning || '';
@@ -3008,6 +2973,210 @@ export function SessionPage() {
     }
   }, [id, session?.name]);
 
+  // Chat-bar chips (model · thinking depth, execution mode). The handlers read the
+  // latest render through a ref so the memoised toolbar does not re-render the
+  // composer on every streamed token.
+  const composerRuntimeRef = useRef({
+    applyModelSelection,
+    applyReasoningSelection,
+    switchProvider: providerMutation.mutateAsync,
+    setModel: sessionModelMutation.mutate,
+    setSubagentModel: sessionSubagentModelMutation.mutate,
+  });
+  composerRuntimeRef.current = {
+    applyModelSelection,
+    applyReasoningSelection,
+    switchProvider: providerMutation.mutateAsync,
+    setModel: sessionModelMutation.mutate,
+    setSubagentModel: sessionSubagentModelMutation.mutate,
+  };
+  const handleComposerModelSelect = useCallback(
+    (providerId: string, model: string) => {
+      const runtime = composerRuntimeRef.current;
+      if (providerId === sessionProvider) {
+        runtime.applyModelSelection(model || '__default__');
+        return;
+      }
+      // Switching provider resets model and reasoning on the server; the chosen
+      // model is applied once the provider PATCH has come back.
+      void runtime
+        .switchProvider(providerId as CLIProvider)
+        .then((result) => {
+          if (result.success && model) composerRuntimeRef.current.setModel(model);
+        })
+        .catch((error: unknown) => {
+          toast({
+            title: 'Anbieterwechsel fehlgeschlagen',
+            description: error instanceof Error ? error.message : undefined,
+            variant: 'destructive',
+          });
+        });
+    },
+    [sessionProvider]
+  );
+  const handleComposerReasoning = useCallback(
+    (value: string) => composerRuntimeRef.current.applyReasoningSelection(value),
+    []
+  );
+  const handleComposerSubagentModel = useCallback(
+    (value: string | null) => composerRuntimeRef.current.setSubagentModel(value),
+    []
+  );
+  const composerSurface = session?.surface;
+  const sessionSubagentModel = session?.subagentModel ?? null;
+  const subagentModelPending = sessionSubagentModelMutation.isPending;
+  const serviceTierPending = sessionServiceTierMutation.isPending;
+  const runtimeChangePending =
+    providerMutation.isPending ||
+    sessionModelMutation.isPending ||
+    sessionReasoningMutation.isPending;
+  const composerToolbar = useMemo(() => {
+    if (!composerSurface || composerSurface === 'chat') return null;
+    const configuredLists = settings?.cliProviderModelLists ?? {};
+    const groups: SessionModelGroup[] = (cliProviders ?? [])
+      .filter((provider) => provider.enabled !== false || provider.id === sessionProvider)
+      .map((provider) => {
+        const current = provider.id === sessionProvider;
+        const labels = provider.modelLabels ?? {};
+        const configured = configuredLists[provider.id] ?? [];
+        const shared = provider.id === 'opencode' || provider.id === 'pi';
+        const values = current
+          ? modelOptions
+          : shared
+            ? Array.from(new Set(configured.length > 0 ? configured : (provider.models ?? [])))
+            : Array.from(new Set([...(provider.models ?? []), ...configured]));
+        const fallbackDefault = current
+          ? resolvedDefaultModel
+          : (shared ? configured[0] : '') ||
+            provider.defaultModel ||
+            CLI_PROVIDER_DEFAULT_MODEL[provider.id as CLIProvider];
+        const hasDefault = provider.id !== 'opencode' || configured.length > 0;
+        return {
+          providerId: provider.id,
+          name: provider.name,
+          available: provider.available !== false,
+          defaultLabel: hasDefault
+            ? `Standard${fallbackDefault ? ` · ${labels[fallbackDefault] || fallbackDefault}` : ''}`
+            : undefined,
+          models: values.map((value) => ({ value, label: labels[value] || value })),
+        };
+      })
+      .sort(
+        (a, b) =>
+          Number(b.providerId === sessionProvider) - Number(a.providerId === sessionProvider)
+      );
+    const chipModel = selectedModel || resolvedDefaultModel;
+    const chipModelLabel = chipModel ? modelLabels[chipModel] || chipModel : 'Standard';
+    const showReasoning = ['claude', 'zai', 'codex', 'opencode', 'pi', 'vibe'].includes(
+      sessionProvider
+    );
+    const sessionModelLabels = modelOptions.map((value) => ({
+      value,
+      label: modelLabels[value] || value,
+    }));
+    const routableGroups = (
+      sessionProvider === 'zai'
+        ? subagentModelGroups.filter((group) => group.group.startsWith('Z.AI'))
+        : subagentModelGroups
+    ).map((group) => ({
+      label: group.group,
+      models: group.models.map((value) => ({ value, label: value })),
+    }));
+    const subagentGroups = [
+      ...(sessionModelLabels.length
+        ? [
+            {
+              label: sessionProvider === 'zai' ? 'Z.AI-Sessionmodelle' : 'Anthropic',
+              models: sessionModelLabels,
+            },
+          ]
+        : []),
+      ...routableGroups,
+    ];
+    if (
+      sessionSubagentModel &&
+      !subagentGroups.some((group) =>
+        group.models.some((entry) => entry.value === sessionSubagentModel)
+      )
+    ) {
+      subagentGroups.push({
+        label: 'Aktuell',
+        models: [{ value: sessionSubagentModel, label: sessionSubagentModel }],
+      });
+    }
+    return (
+      <>
+        <SessionModelPicker
+          groups={groups}
+          providerId={sessionProvider}
+          model={selectedModel}
+          modelLabel={chipModelLabel}
+          onSelect={handleComposerModelSelect}
+          disabled={runtimeChangePending}
+          reasoning={
+            showReasoning
+              ? {
+                  title:
+                    sessionProvider === 'claude' || sessionProvider === 'zai'
+                      ? 'Aufwand'
+                      : 'Denkaufwand',
+                  options: reasoningOptions,
+                  value: reasoningSelectValue,
+                  defaultLabel: isClaudeOpus55 ? 'Standard · Mittel' : 'Standard',
+                  onChange: handleComposerReasoning,
+                }
+              : undefined
+          }
+          fast={
+            sessionProvider === 'codex'
+              ? {
+                  active: fastModeActive,
+                  pending: serviceTierPending,
+                  onToggle: handleFastModeToggle,
+                }
+              : undefined
+          }
+          subagent={
+            isClaudeTransportSession
+              ? {
+                  value: sessionSubagentModel,
+                  groups: subagentGroups,
+                  onChange: handleComposerSubagentModel,
+                  pending: subagentModelPending,
+                }
+              : undefined
+          }
+        />
+        <SessionModeChip value={sessionMode} onChange={handleModeChange} />
+      </>
+    );
+  }, [
+    composerSurface,
+    settings?.cliProviderModelLists,
+    cliProviders,
+    sessionProvider,
+    modelOptions,
+    resolvedDefaultModel,
+    selectedModel,
+    modelLabels,
+    subagentModelGroups,
+    sessionSubagentModel,
+    handleComposerModelSelect,
+    runtimeChangePending,
+    reasoningOptions,
+    reasoningSelectValue,
+    isClaudeOpus55,
+    handleComposerReasoning,
+    fastModeActive,
+    serviceTierPending,
+    handleFastModeToggle,
+    isClaudeTransportSession,
+    handleComposerSubagentModel,
+    subagentModelPending,
+    sessionMode,
+    handleModeChange,
+  ]);
+
   /** Freeze this session's provider/model/directory setup as a reusable start. */
   const handleSaveTemplate = useCallback(
     async (name: string) => {
@@ -3851,196 +4020,19 @@ export function SessionPage() {
     });
   };
 
+  // Model, provider, thinking depth and mode live in the chat bar now (chips in
+  // the composer); the session menu only keeps the CLI tool and status light.
+  const hasSessionRuntimeExtras = Boolean(
+    (cliTools && cliTools.length > 0) || homeAssistantSettings?.configured
+  );
   const renderSessionRuntimeControls = (variant: 'sidebar' | 'mobile' = 'sidebar') => {
     const fieldId = (name: string) => `session-runtime-${variant}-${name}`;
-    const activeMode =
-      SESSION_MODE_OPTIONS.find((option) => option.value === sessionMode) ??
-      SESSION_MODE_OPTIONS[1]!;
-    const ActiveModeIcon = activeMode.icon;
-    const providerOptions =
-      cliProviders
-        ?.filter((provider) => provider.enabled !== false || provider.id === sessionProvider)
-        .map((provider) => ({
-          id: provider.id,
-          name: provider.name,
-          enabled: provider.enabled !== false,
-          available: provider.available,
-        })) ?? [];
-    const currentProvider = providerOptions.find((option) => option.id === sessionProvider);
-    const modelLabel =
-      modelSelectValue === '__default__'
-        ? `Default${resolvedDefaultModel ? ` · ${modelLabels[resolvedDefaultModel] || resolvedDefaultModel}` : ''}`
-        : modelLabels[modelSelectValue] || modelSelectValue;
-    const showReasoningControls = ['claude', 'zai', 'codex', 'opencode', 'pi', 'vibe'].includes(
-      sessionProvider
-    );
-    const reasoningValueLabel =
-      reasoningSelectValue === '__default__'
-        ? isClaudeOpus55
-          ? 'Default · Medium'
-          : 'Default'
-        : reasoningOptions.find((option) => option.value === reasoningSelectValue)?.label ||
-          reasoningSelectValue;
     const activeTool = selectedCliTool
       ? cliTools?.find((tool) => tool.id === selectedCliTool)
       : null;
-    // Z.AI sessions talk to the Z.AI endpoint directly (no model router), so
-    // only GLM targets are reachable there; claude sessions can use them all.
-    const routableSubagentGroups =
-      sessionProvider === 'zai'
-        ? subagentModelGroups.filter((group) => group.group.startsWith('Z.AI'))
-        : subagentModelGroups;
 
     return (
       <div className={cn('session-runtime-controls', variant === 'mobile' && 'is-mobile')}>
-        {renderRuntimeField({
-          id: fieldId('mode'),
-          label: 'Mode',
-          value: activeMode.label,
-          icon: <ActiveModeIcon className="h-3.5 w-3.5" />,
-          children: (
-            <RuntimeSelect
-              id={fieldId('mode')}
-              className="session-runtime-select"
-              value={sessionMode}
-              onValueChange={(value) => handleModeChange(value as SessionMode)}
-              aria-label="Session mode"
-            >
-              {SESSION_MODE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </RuntimeSelect>
-          ),
-        })}
-
-        {providerOptions.length > 0 &&
-          renderRuntimeField({
-            id: fieldId('provider'),
-            label: 'Provider',
-            value: currentProvider?.name ?? CLI_PROVIDER_LABEL[sessionProvider],
-            icon: <ProviderLogo provider={toUiProvider(sessionProvider)} className="h-3.5 w-3.5" />,
-            children: (
-              <RuntimeSelect
-                id={fieldId('provider')}
-                className="session-runtime-select"
-                value={sessionProvider}
-                onValueChange={(value) => providerMutation.mutate(value as CLIProvider)}
-                aria-label="Session provider"
-              >
-                {providerOptions.map((provider) => (
-                  <option key={provider.id} value={provider.id} disabled={!provider.available}>
-                    {provider.name}
-                    {!provider.enabled
-                      ? ' (disabled)'
-                      : !provider.available
-                        ? ' (not configured)'
-                        : ''}
-                  </option>
-                ))}
-              </RuntimeSelect>
-            ),
-          })}
-
-        {renderRuntimeField({
-          id: fieldId('model'),
-          label: 'Model',
-          value: modelLabel,
-          icon: <Sparkles className="h-3.5 w-3.5" />,
-          children: (
-            <RuntimeSelect
-              id={fieldId('model')}
-              className="session-runtime-select"
-              value={modelSelectValue}
-              onValueChange={(value) => applyModelSelection(value)}
-              aria-label="Session model"
-            >
-              {showDefaultModelOption && (
-                <option value="__default__">
-                  Default
-                  {resolvedDefaultModel
-                    ? ` (${modelLabels[resolvedDefaultModel] || resolvedDefaultModel})`
-                    : ''}
-                </option>
-              )}
-              {modelOptions.map((model) => (
-                <option key={model} value={model}>
-                  {modelLabels[model] || model}
-                </option>
-              ))}
-            </RuntimeSelect>
-          ),
-        })}
-
-        {isClaudeTransportSession &&
-          renderRuntimeField({
-            id: fieldId('subagent-model'),
-            label: 'Task agent model',
-            value: session.subagentModel || 'Default',
-            icon: <Network className="h-3.5 w-3.5" />,
-            children: (
-              <RuntimeSelect
-                id={fieldId('subagent-model')}
-                className="session-runtime-select"
-                value={session.subagentModel ?? '__default__'}
-                onValueChange={(value) =>
-                  sessionSubagentModelMutation.mutate(value === '__default__' ? null : value)
-                }
-                aria-label="Task agent model"
-                disabled={sessionSubagentModelMutation.isPending}
-              >
-                <option value="__default__">Default (Agent-Definition)</option>
-                {modelOptions.length > 0 && (
-                  <optgroup label={sessionProvider === 'zai' ? 'Z.AI session models' : 'Anthropic'}>
-                    {modelOptions.map((model) => (
-                      <option key={`sub-${model}`} value={model}>
-                        {modelLabels[model] || model}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {routableSubagentGroups.map((group) => (
-                  <optgroup key={group.group} label={group.group}>
-                    {group.models.map((model) => (
-                      <option key={`sub-${group.group}-${model}`} value={model}>
-                        {model}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-                {session.subagentModel &&
-                  !modelOptions.includes(session.subagentModel) &&
-                  !routableSubagentGroups.some((group) =>
-                    group.models.includes(session.subagentModel as string)
-                  ) && <option value={session.subagentModel}>{session.subagentModel}</option>}
-              </RuntimeSelect>
-            ),
-          })}
-
-        {showReasoningControls &&
-          renderRuntimeField({
-            id: fieldId('reasoning'),
-            label:
-              sessionProvider === 'claude' || sessionProvider === 'zai'
-                ? 'Effort'
-                : sessionProvider === 'vibe'
-                  ? 'Thinking'
-                  : 'Reasoning',
-            value: reasoningValueLabel,
-            icon: <Brain className="h-3.5 w-3.5" />,
-            children: (
-              <ReasoningPicker
-                className="session-runtime-select"
-                label="Session reasoning"
-                options={reasoningOptions}
-                value={reasoningSelectValue}
-                onChange={(value) => applyReasoningSelection(value)}
-                defaultLabel={isClaudeOpus55 ? 'Default · Medium on Opus 5.5' : 'Default'}
-              />
-            ),
-          })}
-
         {cliTools &&
           cliTools.length > 0 &&
           renderRuntimeField({
@@ -4439,13 +4431,20 @@ export function SessionPage() {
             </>
           ),
         })}
-        {renderSideMenuGroup({
-          id: 'runtime',
-          label: 'Model & execution',
-          icon: <Sparkles className="h-4 w-4" />,
-          summary: `${providerLabel} · ${asstModelLabel} · ${session.cliReasoning || 'Default'} · ${SESSION_MODE_OPTIONS.find((o) => o.value === sessionMode)?.label || sessionMode}`,
-          children: renderSessionRuntimeControls(mobile ? 'mobile' : 'sidebar'),
-        })}
+        {hasSessionRuntimeExtras &&
+          renderSideMenuGroup({
+            id: 'runtime',
+            label: 'CLI-Werkzeug & Statuslicht',
+            icon: <Wrench className="h-4 w-4" />,
+            summary:
+              [
+                selectedToolName || (cliTools?.length ? 'Kein Werkzeug' : ''),
+                session.homeAssistantEntityId ? 'Licht aktiv' : '',
+              ]
+                .filter(Boolean)
+                .join(' · ') || 'Nicht gesetzt',
+            children: renderSessionRuntimeControls(mobile ? 'mobile' : 'sidebar'),
+          })}
         {renderSideMenuGroup({
           id: 'styles',
           label: 'Appearance',
@@ -4910,6 +4909,7 @@ export function SessionPage() {
                 }
                 queueDepth={queuedDepth}
                 onOpenRun={handleOpenRunOverview}
+                toolbar={composerToolbar}
               />
             </div>
           </div>
