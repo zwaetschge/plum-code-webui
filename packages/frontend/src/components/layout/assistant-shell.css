@@ -1102,3 +1102,33 @@ html.plum-engine-gecko body :is(.plum-message-composer, .library-popup) {
 .composer-brief-row.is-idle .composer-brief-indicator {
   color: hsl(152 60% 52%);
 }
+
+/* Primary buttons as tinted frosted glass instead of a solid turquoise slab. */
+.plum-assistant-shell :is(button, a).bg-primary:not(.plum-send-button) {
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--primary) / 0.5);
+  background:
+    linear-gradient(145deg, hsl(0 0% 100% / 0.14), hsl(0 0% 100% / 0.03) 60%),
+    hsl(var(--primary) / 0.22);
+  box-shadow:
+    inset 0 1px 0 hsl(0 0% 100% / 0.18),
+    0 8px 24px -16px hsl(var(--primary) / 0.7);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+.plum-assistant-shell :is(button, a).bg-primary:not(.plum-send-button):hover {
+  border-color: hsl(var(--primary) / 0.75);
+  background:
+    linear-gradient(145deg, hsl(0 0% 100% / 0.18), hsl(0 0% 100% / 0.05) 60%),
+    hsl(var(--primary) / 0.32);
+}
+html:not(.dark) .plum-assistant-shell :is(button, a).bg-primary:not(.plum-send-button) {
+  color: hsl(var(--primary-foreground));
+  background:
+    linear-gradient(145deg, hsl(0 0% 100% / 0.3), hsl(0 0% 100% / 0.08) 60%),
+    hsl(var(--primary) / 0.75);
+}
