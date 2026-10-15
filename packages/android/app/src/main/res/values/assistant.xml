@@ -179,4 +179,24 @@
     <string name="assistant_voice_pick">Voice</string>
     <string name="assistant_voice_try">Play sample</string>
     <string name="assistant_voice_sample">Hello! This is how I sound when I read to you.</string>
+    <string name="assistant_start_sub">Plum can answer calculations, comparisons and numbers with an interactive view.</string>
+    <string name="assistant_start_interactive">Interactive</string>
+    <string name="assistant_start_growth_title">Run a savings plan</string>
+    <string name="assistant_start_growth_hint">Calculator with sliders and growth</string>
+    <string name="assistant_start_growth_prompt" formatted="false">How much capital will I have after 15 years if I invest 300 CHF a month at 4 %? Show me a calculator where I can change the values.</string>
+    <string name="assistant_start_dashboard_title">Budget as a dashboard</string>
+    <string name="assistant_start_dashboard_hint">Key figures and chart</string>
+    <string name="assistant_start_dashboard_prompt">Help me split my monthly budget of 5200 CHF across rent, food, transport, leisure and savings. Show it as an interactive dashboard.</string>
+    <string name="assistant_start_compare_title">Compare options</string>
+    <string name="assistant_start_compare_hint">Side by side with a pick</string>
+    <string name="assistant_start_compare_prompt">Compare three e-bikes for a daily 12 km commute in a comparison view and recommend one.</string>
+    <string name="assistant_start_write_title">Write a text</string>
+    <string name="assistant_start_write_hint">Email, letter or post</string>
+    <string name="assistant_start_write_prompt">Help me write a text: </string>
+    <string name="assistant_start_plan_title">Plan my day</string>
+    <string name="assistant_start_plan_hint">Appointments, breaks, focus time</string>
+    <string name="assistant_start_plan_prompt">Plan my day with me. Today I have: </string>
+    <string name="assistant_start_explain_title">Understand a topic</string>
+    <string name="assistant_start_explain_hint">Explained step by step</string>
+    <string name="assistant_start_explain_prompt">Explain clearly and with an example: </string>
 </resources>

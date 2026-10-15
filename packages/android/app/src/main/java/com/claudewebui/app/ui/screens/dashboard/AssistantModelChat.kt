@@ -45,6 +45,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.Check
@@ -329,9 +330,23 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             label = "chat_switch",
         ) { shown ->
             if (shown == null) {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                    Text(stringResource(R.string.assistant_greeting), style = MaterialTheme.typography.headlineMedium, color = palette.text, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
-                    if (providers.isEmpty()) Text(stringResource(R.string.assistant_api_missing), color = palette.muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(24.dp))
+                // Same frame as the WebUI start page: greeting and suggestions on top,
+                // the composer stays at the bottom where a started chat keeps it.
+                val suggestions = personalization?.suggestedPrompts != false
+                androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val columns = startColumns(maxWidth.value)
+                    Column(
+                        Modifier.fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 4.dp, vertical = 20.dp).heightIn(min = maxHeight - 40.dp),
+                        verticalArrangement = if (suggestions) Arrangement.spacedBy(14.dp) else Arrangement.Center,
+                        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                    ) {
+                        Text(stringResource(R.string.assistant_greeting), style = MaterialTheme.typography.headlineMedium, color = palette.text, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
+                        if (providers.isEmpty()) Text(stringResource(R.string.assistant_api_missing), color = palette.muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
+                        if (suggestions) {
+                            Text(stringResource(R.string.assistant_start_sub), color = palette.muted, style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
+                            AssistantStartSuggestions(enabled = !busy, columns = columns, onPick = { prompt = it }, modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth())
+                        }
+                    }
                 }
             } else {
                 val shownId = shown.id

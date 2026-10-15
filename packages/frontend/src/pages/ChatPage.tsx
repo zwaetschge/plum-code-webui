@@ -26,6 +26,7 @@ import { useAmbientSeed } from '@/components/motion/AmbientBackdrop';
 import { rememberComposer } from '@/lib/motion/flood';
 import { prefersReducedMotion } from '@/lib/motion/reducedMotion';
 import { cn } from '@/lib/utils';
+import { StartSuggestions } from '@/components/assistant/StartSuggestions';
 
 export function ChatPage() {
   const owner = useAuthStore((s) => s.user?.id);
@@ -144,13 +145,72 @@ function ChatAccountPage({ owner }: { owner?: string }) {
     }
   };
   return (
-    <div className="plum-chat-page">
+    <div className="plum-chat-page plum-chat-start">
       <div className={cn('plum-chat-welcome', leaving && 'is-leaving')}>
         <h1>
           {firstName
             ? `Hallo ${firstName}, was beschäftigt dich heute?`
             : 'Was beschäftigt dich heute?'}
         </h1>
+        {providers.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            API-Verbindungen konnten nicht geladen werden.{' '}
+            <button type="button" className="underline" onClick={() => void providers.refetch()}>
+              Erneut versuchen
+            </button>
+          </p>
+        )}
+        {!providers.isPending && !providers.data?.length && (
+          <Link className="text-sm underline" to="/settings">
+            Anbieter in den Einstellungen verbinden
+          </Link>
+        )}
+        {preferences.suggestedPrompts && (
+          <>
+            <p>
+              Rechnungen, Vergleiche und Zahlen beantwortet Plum auf Wunsch mit einer interaktiven
+              Ansicht.
+            </p>
+            <StartSuggestions
+              disabled={busy}
+              onPick={(suggestion) => {
+                setDraft(suggestion.prompt);
+                const element = input.current;
+                if (!element) return;
+                element.focus();
+                // Open prompts end with ": " and wait for the user's own words.
+                requestAnimationFrame(() =>
+                  element.setSelectionRange(suggestion.prompt.length, suggestion.prompt.length)
+                );
+                composer.current?.classList.remove('is-primed');
+                void composer.current?.offsetWidth;
+                composer.current?.classList.add('is-primed');
+              }}
+            />
+          </>
+        )}
+        <AssistantOutbox />
+      </div>
+      <div className={cn('plum-api-footer plum-start-footer', leaving && 'is-leaving')}>
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        {voice && preferences.voiceChat && (
+          <div className="plum-chat-options">
+            <VoiceComposer
+              scopeKey={`${owner}:new-chat`}
+              text=""
+              voice={preferences.voiceName || String(chosenProfile?.body.voice ?? 'Rufus Beck')}
+              language={String(chosenProfile?.body.language ?? 'German')}
+              onTranscription={(text) => {
+                setDraft((old) => [old, text].filter(Boolean).join('\n'));
+                input.current?.focus();
+              }}
+            />
+          </div>
+        )}
         <form
           ref={composer}
           className="plum-message-composer"
@@ -283,191 +343,131 @@ function ChatAccountPage({ owner }: { owner?: string }) {
             {research && <span>Dokumentrecherche</span>}
           </div>
         )}
-        {providers.isError && (
-          <p role="alert" className="text-sm text-destructive">
-            API-Verbindungen konnten nicht geladen werden.{' '}
-            <button type="button" className="underline" onClick={() => void providers.refetch()}>
-              Erneut versuchen
-            </button>
-          </p>
-        )}
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        )}
-        <Dialog open={options} onOpenChange={setOptions}>
-          <DialogContent className="plum-assistant-shell plum-chat-dialog">
-            <DialogTitle>Gespräch personalisieren</DialogTitle>
-            <DialogDescription>
-              Profil, persönliche Anweisungen und Gesprächskontext.
-            </DialogDescription>
-            <section className="plum-chat-options" aria-label="Gespräch personalisieren">
-              <div className="grid gap-3">
-                <label>
-                  Profil
-                  <select
-                    value={profile}
-                    disabled={busy || !!created}
-                    onChange={(e) => setProfile(e.target.value)}
-                  >
-                    <option value="">Standard</option>
-                    {profiles.data?.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.title}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <Link to="/assistant/profiles" className="text-sm underline">
-                  Profile und Systemanweisungen bearbeiten
-                </Link>
+      </div>
+      <Dialog open={options} onOpenChange={setOptions}>
+        <DialogContent className="plum-assistant-shell plum-chat-dialog">
+          <DialogTitle>Gespräch personalisieren</DialogTitle>
+          <DialogDescription>
+            Profil, persönliche Anweisungen und Gesprächskontext.
+          </DialogDescription>
+          <section className="plum-chat-options" aria-label="Gespräch personalisieren">
+            <div className="grid gap-3">
+              <label>
+                Profil
+                <select
+                  value={profile}
+                  disabled={busy || !!created}
+                  onChange={(e) => setProfile(e.target.value)}
+                >
+                  <option value="">Standard</option>
+                  {profiles.data?.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <Link to="/assistant/profiles" className="text-sm underline">
+                Profile und Systemanweisungen bearbeiten
+              </Link>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  disabled={busy || !!created}
+                  checked={temporary}
+                  onChange={(e) => {
+                    setTemporary(e.target.checked);
+                    if (e.target.checked) setResearch(false);
+                  }}
+                />
+                Temporäres Gespräch
+              </label>
+            </div>
+            {temporary && (
+              <p className="text-xs text-muted-foreground">
+                Ohne persönliches Gedächtnis. Plum löscht den lokalen Verlauf nach 24 Stunden; beim
+                Anbieter gelten eigene Aufbewahrungsregeln.
+              </p>
+            )}
+            {
+              <>
+                <ResourcePicker
+                  label="Dokumentquellen"
+                  kind="source"
+                  value={sources}
+                  maximum={20}
+                  onChange={setSources}
+                />
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
+                    checked={research}
                     disabled={busy || !!created}
-                    checked={temporary}
                     onChange={(e) => {
-                      setTemporary(e.target.checked);
-                      if (e.target.checked) setResearch(false);
+                      setResearch(e.target.checked);
+                      if (e.target.checked) {
+                        setTemporary(false);
+                        setFiles([]);
+                      }
                     }}
                   />
-                  Temporäres Gespräch
+                  Quellengebundene Dokumentrecherche
                 </label>
-              </div>
-              {temporary && (
-                <p className="text-xs text-muted-foreground">
-                  Ohne persönliches Gedächtnis. Plum löscht den lokalen Verlauf nach 24 Stunden;
-                  beim Anbieter gelten eigene Aufbewahrungsregeln.
-                </p>
+              </>
+            }
+            {!temporary &&
+              !research &&
+              Object.values(preferences.referencePhotos).some(Boolean) && (
+                <div className="flex flex-wrap gap-2" aria-label="Gespeicherte Referenzfotos">
+                  {(['portrait', 'fullBody'] as const)
+                    .filter((slot) => preferences.referencePhotos[slot])
+                    .map((slot) => (
+                      <Button
+                        key={slot}
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || !!created}
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              const response = await api.download(
+                                `/api/assistant/personalization/photos/${slot}`
+                              );
+                              const bytes = await response.blob();
+                              if (useAuthStore.getState().user?.id !== owner) return;
+                              const selected = preferences.referencePhotos[slot]!;
+                              setFiles((old) =>
+                                [
+                                  ...old,
+                                  new File([bytes], selected.filename, {
+                                    type: selected.mimeType,
+                                  }),
+                                ].slice(0, 4)
+                              );
+                            } catch {
+                              setError('Referenzfoto konnte nicht geladen werden.');
+                            }
+                          })();
+                        }}
+                      >
+                        {slot === 'portrait' ? 'Referenzfoto anhängen' : 'Ganzkörperfoto anhängen'}
+                      </Button>
+                    ))}
+                </div>
               )}
-              {
-                <>
-                  <ResourcePicker
-                    label="Dokumentquellen"
-                    kind="source"
-                    value={sources}
-                    maximum={20}
-                    onChange={setSources}
-                  />
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={research}
-                      disabled={busy || !!created}
-                      onChange={(e) => {
-                        setResearch(e.target.checked);
-                        if (e.target.checked) {
-                          setTemporary(false);
-                          setFiles([]);
-                        }
-                      }}
-                    />
-                    Quellengebundene Dokumentrecherche
-                  </label>
-                </>
-              }
-              {!temporary &&
-                !research &&
-                Object.values(preferences.referencePhotos).some(Boolean) && (
-                  <div className="flex flex-wrap gap-2" aria-label="Gespeicherte Referenzfotos">
-                    {(['portrait', 'fullBody'] as const)
-                      .filter((slot) => preferences.referencePhotos[slot])
-                      .map((slot) => (
-                        <Button
-                          key={slot}
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          disabled={busy || !!created}
-                          onClick={() => {
-                            void (async () => {
-                              try {
-                                const response = await api.download(
-                                  `/api/assistant/personalization/photos/${slot}`
-                                );
-                                const bytes = await response.blob();
-                                if (useAuthStore.getState().user?.id !== owner) return;
-                                const selected = preferences.referencePhotos[slot]!;
-                                setFiles((old) =>
-                                  [
-                                    ...old,
-                                    new File([bytes], selected.filename, {
-                                      type: selected.mimeType,
-                                    }),
-                                  ].slice(0, 4)
-                                );
-                              } catch {
-                                setError('Referenzfoto konnte nicht geladen werden.');
-                              }
-                            })();
-                          }}
-                        >
-                          {slot === 'portrait'
-                            ? 'Referenzfoto anhängen'
-                            : 'Ganzkörperfoto anhängen'}
-                        </Button>
-                      ))}
-                  </div>
-                )}
-              {
-                <p className="text-xs text-muted-foreground">
-                  Dieses Gespräch nutzt deine API-Verbindung und wird vom Anbieter abgerechnet.
-                  Bildanhänge: bis zu vier Bilder.
-                </p>
-              }
-            </section>
-            <Button onClick={() => setOptions(false)}>Fertig</Button>
-          </DialogContent>
-        </Dialog>
-        {voice && preferences.voiceChat && (
-          <div className="plum-chat-options">
-            <VoiceComposer
-              scopeKey={`${owner}:new-chat`}
-              text=""
-              voice={preferences.voiceName || String(chosenProfile?.body.voice ?? 'Rufus Beck')}
-              language={String(chosenProfile?.body.language ?? 'German')}
-              onTranscription={(text) => {
-                setDraft((old) => [old, text].filter(Boolean).join('\n'));
-                input.current?.focus();
-              }}
-            />
-          </div>
-        )}
-        {!providers.isPending && !providers.data?.length && (
-          <Link className="text-sm underline" to="/settings">
-            Anbieter in den Einstellungen verbinden
-          </Link>
-        )}
-        {preferences.suggestedPrompts && (
-          <div
-            className="flex flex-wrap justify-center gap-x-5 gap-y-2 text-xs text-muted-foreground"
-            aria-label="Vorgeschlagene Prompts"
-          >
-            {[
-              'Hilf mir, einen Text zu schreiben',
-              'Plane mit mir meinen Tag',
-              'Erkläre mir ein Thema verständlich',
-            ].map((text) => (
-              <button
-                key={text}
-                type="button"
-                disabled={busy}
-                className="rounded-sm hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-                onClick={() => {
-                  setDraft(text);
-                  input.current?.focus();
-                }}
-              >
-                {text}
-              </button>
-            ))}
-          </div>
-        )}
-        <AssistantOutbox />
-      </div>
+            {
+              <p className="text-xs text-muted-foreground">
+                Dieses Gespräch nutzt deine API-Verbindung und wird vom Anbieter abgerechnet.
+                Bildanhänge: bis zu vier Bilder.
+              </p>
+            }
+          </section>
+          <Button onClick={() => setOptions(false)}>Fertig</Button>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -179,4 +179,24 @@
     <string name="assistant_voice_pick">Stimme</string>
     <string name="assistant_voice_try">Probe anhören</string>
     <string name="assistant_voice_sample">Hallo! So klinge ich, wenn ich dir etwas vorlese.</string>
+    <string name="assistant_start_sub">Rechnungen, Vergleiche und Zahlen beantwortet Plum auf Wunsch mit einer interaktiven Ansicht.</string>
+    <string name="assistant_start_interactive">Interaktiv</string>
+    <string name="assistant_start_growth_title">Sparplan durchrechnen</string>
+    <string name="assistant_start_growth_hint">Rechner mit Reglern und Verlauf</string>
+    <string name="assistant_start_growth_prompt" formatted="false">Wie viel Kapital habe ich nach 15 Jahren, wenn ich monatlich 300 CHF zu 4 % anlege? Zeig mir einen Rechner, mit dem ich die Werte ändern kann.</string>
+    <string name="assistant_start_dashboard_title">Budget als Dashboard</string>
+    <string name="assistant_start_dashboard_hint">Kennzahlen und Diagramm</string>
+    <string name="assistant_start_dashboard_prompt">Hilf mir, mein Monatsbudget von 5200 CHF auf Miete, Essen, Mobilität, Freizeit und Sparen aufzuteilen. Zeig es als interaktives Dashboard.</string>
+    <string name="assistant_start_compare_title">Optionen vergleichen</string>
+    <string name="assistant_start_compare_hint">Nebeneinander mit Auswahl</string>
+    <string name="assistant_start_compare_prompt">Vergleiche drei E-Bikes für einen täglichen Arbeitsweg von 12 km in einer Vergleichsansicht und empfiehl mir eines.</string>
+    <string name="assistant_start_write_title">Text schreiben</string>
+    <string name="assistant_start_write_hint">Mail, Brief oder Beitrag</string>
+    <string name="assistant_start_write_prompt">Hilf mir, einen Text zu schreiben: </string>
+    <string name="assistant_start_plan_title">Tag planen</string>
+    <string name="assistant_start_plan_hint">Termine, Pausen, Fokuszeit</string>
+    <string name="assistant_start_plan_prompt">Plane mit mir meinen Tag. Das steht heute an: </string>
+    <string name="assistant_start_explain_title">Thema verstehen</string>
+    <string name="assistant_start_explain_hint">Schritt für Schritt erklärt</string>
+    <string name="assistant_start_explain_prompt">Erkläre mir verständlich und mit einem Beispiel: </string>
 </resources>
