@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Plum Browser",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Lässt Plum-Code-Agents Chrome steuern – jede Session in ihrem eigenen Fenster mit Tab-Gruppe.",
   "author": "Plum Code",
   "minimum_chrome_version": "116",
@@ -21,7 +21,8 @@
     "alarms",
     "debugger",
     "system.display",
-    "contextMenus"
+    "contextMenus",
+    "notifications"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {
@@ -55,6 +56,12 @@
         "default": "Alt+Shift+P"
       },
       "description": "Plum-Chat öffnen"
+    },
+    "toggle-pause": {
+      "suggested_key": {
+        "default": "Alt+Shift+X"
+      },
+      "description": "Not-Aus: alle Agents pausieren / fortsetzen"
     }
   },
   "storage": {

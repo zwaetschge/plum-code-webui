@@ -24,7 +24,24 @@
         </div>
       </header>
 
+      <div id="updateBanner" class="update-banner" hidden>
+        <span id="updateText"></span>
+        <button id="updateOpen" type="button" class="primary">Aktualisieren</button>
+      </div>
+
+      <section class="glass card onboarding" id="onboarding" hidden>
+        <h2>Einrichten</h2>
+        <ol>
+          <li>In Plum: <strong>Settings → Browser control → Pair browser</strong>.</li>
+          <li>Kopplungstext kopieren.</li>
+          <li>Hier in den Einstellungen einfügen und verbinden.</li>
+        </ol>
+        <button id="setup" type="button" class="primary">Jetzt einrichten</button>
+      </section>
+
       <section id="picker"></section>
+
+      <section id="siteCard"></section>
 
       <section class="glass card" id="sessionsCard">
         <h2>Session-Fenster</h2>
@@ -32,13 +49,17 @@
         <p class="muted" id="noSessions">Noch keine Session hat Firefox benutzt.</p>
       </section>
 
-      <section class="glass card">
-        <h2>Letzte Aktionen</h2>
+      <section class="glass card" id="actionsCard">
+        <div class="log-head">
+          <h2>Letzte Aktionen</h2>
+          <button id="clearActions" type="button">Leeren</button>
+        </div>
         <ul class="list" id="actions"></ul>
         <p class="muted" id="noActions">Noch keine Aktionen.</p>
       </section>
     </main>
     <script src="shared.js"></script>
+    <script src="widgets.js"></script>
     <script src="picker.js"></script>
     <script src="popup.js"></script>
   </body>

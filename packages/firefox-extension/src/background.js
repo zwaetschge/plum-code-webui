@@ -34,6 +34,9 @@ const state = {
   /** sessionId → { groupId|null, tabIds:Set (fallback), currentTabId, name, windowId, lastUsed } */
   sessions: new Map(),
   recentActions: [],
+  /** Diagnostics for the options page. */
+  connectedAt: null,
+  reconnects: 0,
 };
 
 // ---------------------------------------------------------------- utilities
@@ -80,8 +83,9 @@ function isScriptableUrl(url) {
   return /^(https?|file|data):/i.test(url);
 }
 
-function logAction(sessionName, tool, detail) {
-  state.recentActions.unshift({ at: Date.now(), session: sessionName, tool, detail });
+/** One line of the activity log; result is 'ok', 'error' or 'waiting'. */
+function logAction(sessionName, tool, detail, result = 'ok', ms = null) {
+  state.recentActions.unshift({ at: Date.now(), session: sessionName, tool, detail, result, ms });
   state.recentActions.length = Math.min(state.recentActions.length, 30);
   broadcastState();
 }
@@ -109,7 +113,11 @@ function publicState() {
       chatUrl: chatUrl(id),
       lastUsed: entry.lastUsed,
     })),
-    recentActions: state.recentActions.slice(0, 12),
+    recentActions: state.recentActions.slice(0, 20),
+    browser: `${BROWSER_NAME} ${BROWSER_VERSION}`.trim(),
+    endpoint: state.status === 'connected' ? state.settings.wsPath || '' : '',
+    connectedAt: state.status === 'connected' ? state.connectedAt : null,
+    reconnects: state.reconnects,
     guides: [...state.sessions.entries()]
       .filter(([, entry]) => entry.guideWindowId != null)
       .map(([id, entry]) => ({ sessionId: id, windowId: entry.guideWindowId })),
@@ -166,8 +174,10 @@ function setStatus(status, detail = '') {
 function scheduleReconnect() {
   clearTimeout(state.retryTimer);
   if (!state.settings.serverUrl || !state.settings.token) return;
-  const delay = state.retryMs;
+  // Jitter keeps several paired browsers from reconnecting in lockstep.
+  const delay = Math.round(state.retryMs * (0.8 + Math.random() * 0.4));
   state.retryMs = Math.min(state.retryMs * 2, 30_000);
+  state.reconnects += 1;
   state.retryTimer = setTimeout(() => connect(), delay);
 }
 
@@ -227,7 +237,7 @@ function tryEndpoint(candidate, generation) {
             version: BROWSER_VERSION,
             extensionVersion: EXTENSION_VERSION,
             platform: navigator.platform,
-            label: state.settings.label || 'Firefox',
+            label: state.settings.label || BROWSER_NAME,
           },
         })
       );
@@ -253,6 +263,7 @@ function tryEndpoint(candidate, generation) {
           state.latestVersion =
             typeof frame.latestVersion === 'string' ? frame.latestVersion : null;
           state.retryMs = 1_000;
+          state.connectedAt = Date.now();
           plumSaveSettings({ wsPath: candidate.path }).catch(() => {});
           state.settings.wsPath = candidate.path;
           setStatus('connected');
@@ -946,7 +957,7 @@ async function syncConsoleHookRegistration() {
 async function contentCall(tab, op, args = {}, timeoutMs = 20_000) {
   if (!isScriptableUrl(tab.url)) {
     throw new Error(
-      `Firefox erlaubt Erweiterungen keinen Zugriff auf ${tab.url || 'diese Seite'} (interne oder geschützte Seite).`
+      `${BROWSER_NAME} erlaubt Erweiterungen keinen Zugriff auf ${tab.url || 'diese Seite'} (interne oder geschützte Seite).`
     );
   }
   // Session restore brings background tabs back unloaded; they have no
@@ -1167,7 +1178,15 @@ const TOOLS = {
 
   async tabs_list(_session, entry) {
     const tabs = entry.guideWindowId != null ? [await guidedTab(entry)] : await sessionTabs(entry);
-    return [textContent({ tabs: tabs.map((tab) => describeTab(tab, entry.currentTabId)) })];
+    return [
+      textContent({
+        tabs: tabs.map((tab) =>
+          plumIsProtected(hostOf(tab.url), state.settings.blockedSites)
+            ? { id: tab.id, title: '(gesperrte Seite)', url: '', active: tab.active }
+            : describeTab(tab, entry.currentTabId)
+        ),
+      }),
+    ];
   },
 
   async tab_open(session, entry, args) {
@@ -1336,8 +1355,43 @@ const VISIBLE_TOOLS = new Set([
   'draw',
 ]);
 
+// Tools that work without a page, so a blocked tab does not matter to them.
+const TAB_FREE_TOOLS = new Set([
+  'status',
+  'macros',
+  'tabs_list',
+  'tab_open',
+  'download_file',
+  'peek',
+  'resize_window',
+]);
+
+function hostOf(url) {
+  try {
+    return new URL(String(url)).hostname;
+  } catch {
+    return '';
+  }
+}
+
+/** Blocked sites are off limits entirely: no reading, no input, no navigation. */
+function assertAllowed(url) {
+  const host = hostOf(url);
+  if (host && plumIsProtected(host, state.settings.blockedSites)) {
+    throw new Error(
+      `${host} ist in der Plum-Browser-Erweiterung gesperrt. Agents dürfen diese Seite weder lesen noch bedienen; bitte den Nutzer, es selbst zu tun.`
+    );
+  }
+}
+
 async function runTool(tool, session, args) {
   const entry = sessionEntry(session);
+  if ((tool === 'navigate' || tool === 'tab_open' || tool === 'download_file') && args.url)
+    assertAllowed(args.url);
+  if (!TAB_FREE_TOOLS.has(tool)) {
+    const tab = await resolveTab(entry, args.tabId).catch(() => null);
+    if (tab) assertAllowed(tab.url);
+  }
   const guiding = entry.guideWindowId != null;
   if (guiding && GUIDE_BLOCKED.has(tool)) {
     throw new Error(
@@ -1411,13 +1465,15 @@ async function guardProtected(session, entry, tab, tool, args) {
   if (!tab.active) await browser.tabs.update(tab.id, { active: true }).catch(() => {});
   // Flash the window in the taskbar without stealing focus.
   browser.windows.update(tab.windowId, { drawAttention: true }).catch(() => {});
-  logAction(session.name, 'wartet auf Freigabe', host);
+  logAction(session.name, 'Freigabe', host, 'waiting');
+  const notice = notifyApproval(tab, session, what, host);
   const answer = await contentCall(
     tab,
     'confirm',
     { host, text: `Session „${session.name}“ – ${what}` },
     45_000
   ).catch(() => 'timeout');
+  void notice.then((id) => id && browser.notifications.clear(id).catch(() => {}));
   if (answer === 'session') entry.allowedHosts.add(host);
   if (answer !== 'once' && answer !== 'session') {
     throw new Error(
@@ -1926,15 +1982,28 @@ async function handleCall(socket, frame) {
     }
   };
   if (state.settings.paused && frame.tool !== 'status') {
-    reply({ ok: false, error: 'Browser-Steuerung ist in Firefox pausiert.' });
+    reply({ ok: false, error: `Browser-Steuerung ist in ${BROWSER_NAME} pausiert.` });
     return;
   }
+  const started = Date.now();
   try {
     const content = await runTool(frame.tool, session, args);
-    logAction(session.name, frame.tool, args.url || args.ref || args.query || '');
+    logAction(
+      session.name,
+      frame.tool,
+      args.url || args.ref || args.query || '',
+      'ok',
+      Date.now() - started
+    );
     reply({ ok: true, content });
   } catch (error) {
-    logAction(session.name, frame.tool, `Fehler: ${error.message || error}`);
+    logAction(
+      session.name,
+      frame.tool,
+      String(error.message || error),
+      'error',
+      Date.now() - started
+    );
     reply({ ok: false, error: String(error.message || error) });
   }
 }
@@ -1950,6 +2019,19 @@ function routeMessage(message, sender) {
       state.settings = settings;
       return connect().then(() => publicState());
     });
+  }
+  if (message.plumClearActions) {
+    state.recentActions = [];
+    broadcastState();
+    return Promise.resolve(publicState());
+  }
+  if (message.plumPing) {
+    // Round trip through Plum: a cheap RPC the bridge answers itself.
+    const started = Date.now();
+    return rpc('settings.defaults').then(
+      () => ({ ok: true, ms: Date.now() - started }),
+      (error) => ({ ok: false, error: String(error.message || error) })
+    );
   }
   if (message.plumDisconnect) {
     disconnect();
@@ -2113,7 +2195,8 @@ async function isManagedTab(tab) {
 // here only the live toggles need to reach the running state.
 browser.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  if (!('paused' in changes) && !('allowJs' in changes)) return;
+  const live = ['paused', 'allowJs', 'protectedSites', 'blockedSites'];
+  if (!live.some((key) => key in changes)) return;
   plumLoadSettings().then((settings) => {
     state.settings = settings;
     if ('paused' in changes) sendFrame({ type: 'state', paused: settings.paused });
@@ -2344,4 +2427,72 @@ void startup.then(() => {
 
 browser.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === 'install') browser.runtime.openOptionsPage().catch(() => {});
+});
+
+// ---------------------------------------------------------------- notifications
+//
+// A protected site waiting for approval shows a desktop notification, since
+// the session window usually sits in the background. Clicking it brings the
+// tab to the front; it disappears once answered.
+
+const approvalTabs = new Map();
+
+async function notifyApproval(tab, session, what, host) {
+  if (!browser.notifications) return null;
+  const id = `plum-approve-${tab.id}-${Date.now()}`;
+  approvalTabs.set(id, { tabId: tab.id, windowId: tab.windowId });
+  try {
+    await browser.notifications.create(id, {
+      type: 'basic',
+      iconUrl: browser.runtime.getURL('icons/icon-128.png'),
+      title: `Plum wartet auf deine Freigabe · ${host}`,
+      message: `${session.name}: ${what}`,
+    });
+    return id;
+  } catch {
+    approvalTabs.delete(id);
+    return null;
+  }
+}
+
+browser.notifications?.onClicked.addListener((id) => {
+  const target = approvalTabs.get(id);
+  approvalTabs.delete(id);
+  browser.notifications.clear(id).catch(() => {});
+  if (!target) return;
+  void browser.windows.update(target.windowId, { focused: true }).catch(() => {});
+  void browser.tabs.update(target.tabId, { active: true }).catch(() => {});
+});
+browser.notifications?.onClosed.addListener((id) => approvalTabs.delete(id));
+
+// ---------------------------------------------------------------- emergency stop
+//
+// Alt+Shift+X pauses every agent at once (and resumes on the next press),
+// wherever the focus is. Plum hears about it through the storage listener.
+
+browser.commands?.onCommand.addListener(async (command) => {
+  if (command !== 'toggle-pause') return;
+  const paused = !(await plumLoadSettings()).paused;
+  await plumSaveSettings({ paused });
+  browser.notifications
+    ?.create(`plum-pause-${Date.now()}`, {
+      type: 'basic',
+      iconUrl: browser.runtime.getURL('icons/icon-128.png'),
+      title: paused ? 'Plum pausiert' : 'Plum fortgesetzt',
+      message: paused
+        ? 'Agents können diesen Browser nicht mehr steuern, bis du fortsetzt (Alt+Shift+X).'
+        : 'Agents dürfen diesen Browser wieder steuern.',
+    })
+    .catch(() => {});
+});
+
+// ---------------------------------------------------------------- network changes
+//
+// Back online after Wi-Fi switch or sleep: reconnect now instead of waiting
+// out the backoff.
+
+globalThis.addEventListener?.('online', () => {
+  if (state.status === 'connected' || !state.settings.serverUrl || !state.settings.token) return;
+  state.retryMs = 1_000;
+  void connect();
 });

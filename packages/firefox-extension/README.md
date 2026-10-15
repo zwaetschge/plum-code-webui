@@ -52,6 +52,19 @@ scripted.
 - **Virtual cursor:** A Plum pointer glides to every click, hover, type and scroll target, shows a ripple on clicks and stays in place across page loads. It and the violet frame are hidden while a screenshot is taken.
 - **Chat sidebar:** The window's sidebar shows the session's Plum chat (`<plum>/session/<id>`, mobile layout at sidebar width). Firefox only opens sidebars on a user action; in a session window the Plum toolbar icon toggles it with one click, and `Alt+Shift+P` works too. Firefox restores it with the window, and new session windows usually inherit an open sidebar. Put it on the right with `sidebar.position_start = false`.
 
+## Settings, safety and diagnostics (0.8)
+
+- **One-paste pairing:** paste Plum's whole pairing text (or `{"serverUrl","token"}` JSON) into the address or token field; both are filled. The token can be shown with _Anzeigen_.
+- **Blocked sites:** next to the protected sites (agent asks first) there is a list of sites agents may not read, click or open at all. Blocked tabs appear in `tabs_list` only as „gesperrte Seite“. Both lists apply immediately, also when changed from the popup or panel card _Diese Seite_ (Frei / Geschützt / Gesperrt for the active tab).
+- **Emergency stop:** `Alt+Shift+X` pauses every agent at once, wherever the focus is, and resumes on the next press. The options page lists all shortcuts and links to the browser's shortcut settings.
+- **Approval notifications:** when a protected site waits for approval, a desktop notification names the session and action; clicking it brings the tab to the front.
+- **Activity log:** each entry shows its result (done, error, waiting for approval) and duration; _Leeren_ clears it.
+- **Diagnostics:** the options page shows version, browser, endpoint (direct or `/mobile`), connected since, reconnect count, a round-trip test and _Diagnose kopieren_ (never includes the token).
+- **First run and offline:** popup and panel show setup steps until the browser is paired, and a reconnect card while Plum is unreachable, instead of empty forms.
+- **Dark mode:** all extension pages follow the system colour scheme.
+- **Network changes:** the extension reconnects as soon as the network comes back; retries use jitter so several browsers do not reconnect in lockstep.
+- **Update hint:** popup, panel and options page show when Plum serves a newer extension version.
+
 ## Locked screen
 
 Control keeps working while the desktop is locked or the Plum window is covered.

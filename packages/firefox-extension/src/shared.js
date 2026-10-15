@@ -43,6 +43,16 @@ const PLUM_DEFAULTS = Object.freeze({
     'outlook.office.com',
     'accounts.google.com',
   ].join('\n'),
+  // Sites the agent may not read or touch at all; it is told to ask the user.
+  blockedSites: '',
+});
+
+const PLUM_STATUS_TEXT = Object.freeze({
+  connected: 'Verbunden',
+  connecting: 'Verbinde …',
+  error: 'Nicht verbunden',
+  idle: 'Getrennt',
+  unconfigured: 'Nicht eingerichtet',
 });
 
 /** Whether a hostname matches one of the protected-site patterns (glob, or domain + subdomains). */
@@ -129,4 +139,73 @@ function plumSocketCandidates(serverUrl, rememberedPath) {
     paths.unshift(rememberedPath);
   }
   return paths.map((path) => ({ path, url: `${wsBase}${path}` }));
+}
+
+/** Whether a dotted version string is newer than another ("0.10.0" > "0.9.1"). */
+function plumNewerVersion(latest, current) {
+  const a = String(latest || '')
+    .split('.')
+    .map(Number);
+  const b = String(current || '')
+    .split('.')
+    .map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  }
+  return false;
+}
+
+/** 'blocked', 'protected' or 'free' for a hostname under the current settings. */
+function plumSiteState(hostname, settings) {
+  if (plumIsProtected(hostname, settings.blockedSites)) return 'blocked';
+  if (plumIsProtected(hostname, settings.protectedSites)) return 'protected';
+  return 'free';
+}
+
+/**
+ * Puts a host on the protected or blocked list (or takes it off both with
+ * list = 'free'). Exact host entries only; patterns the user typed stay.
+ */
+async function plumSetSiteRule(hostname, list) {
+  const host = String(hostname || '').toLowerCase();
+  if (!host) return;
+  const settings = await plumLoadSettings();
+  const lines = (value) =>
+    String(value || '')
+      .split(/[\n,]+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  const patch = {};
+  for (const key of ['protectedSites', 'blockedSites']) {
+    const wanted = (key === 'protectedSites' ? 'protected' : 'blocked') === list;
+    const entries = lines(settings[key]).filter((line) => line.toLowerCase() !== host);
+    if (wanted) entries.push(host);
+    patch[key] = entries.join('\n');
+  }
+  await plumSaveSettings(patch);
+}
+
+/**
+ * Pulls a Plum address and/or pairing token out of pasted text: a JSON
+ * object, a "https://… plum_ff_…" line or either part on its own.
+ */
+function plumParsePairing(text) {
+  const raw = String(text || '').trim();
+  const found = {};
+  try {
+    const json = JSON.parse(raw);
+    if (json && typeof json === 'object') {
+      if (typeof json.serverUrl === 'string') found.serverUrl = json.serverUrl;
+      if (typeof json.token === 'string') found.token = json.token;
+      if (typeof json.label === 'string') found.label = json.label;
+      return found;
+    }
+  } catch {
+    /* not JSON */
+  }
+  const token = raw.match(/plum_ff_[A-Za-z0-9_-]+/);
+  if (token) found.token = token[0];
+  const url = raw.match(/https?:\/\/[^\s"'<>]+/i);
+  if (url) found.serverUrl = url[0].replace(/[),.;]+$/, '');
+  return found;
 }

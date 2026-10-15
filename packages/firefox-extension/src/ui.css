@@ -11,6 +11,15 @@
   --border: rgba(255, 255, 255, 0.65);
   --shadow: 0 10px 36px rgba(58, 52, 78, 0.18);
   --radius: 8px;
+  --page: #eef0f7;
+  --field: rgba(255, 255, 255, 0.9);
+  --control: rgba(255, 255, 255, 0.85);
+  --control-hover: #fff;
+  --surface-soft: rgba(255, 255, 255, 0.6);
+  --line: rgba(58, 52, 78, 0.18);
+  --line-soft: rgba(58, 52, 78, 0.1);
+  --ok-text: #045c31;
+  --error-text: #9b0c24;
   color-scheme: light;
   font-family:
     'Plus Jakarta Sans',
@@ -22,6 +31,29 @@
   color: var(--text);
 }
 
+/* Dark pages follow the system setting; the same glass, on a deep violet ground. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary: #4d7dff;
+    --text: #eceaf5;
+    --muted: #a7a2bb;
+    --glass: rgba(30, 27, 43, 0.72);
+    --glass-strong: rgba(30, 27, 43, 0.94);
+    --border: rgba(255, 255, 255, 0.09);
+    --shadow: 0 10px 36px rgba(0, 0, 0, 0.45);
+    --page: #12101b;
+    --field: rgba(255, 255, 255, 0.06);
+    --control: rgba(255, 255, 255, 0.08);
+    --control-hover: rgba(255, 255, 255, 0.14);
+    --surface-soft: rgba(255, 255, 255, 0.05);
+    --line: rgba(255, 255, 255, 0.14);
+    --line-soft: rgba(255, 255, 255, 0.08);
+    --ok-text: #6ee7a8;
+    --error-text: #ff8a9b;
+    color-scheme: dark;
+  }
+}
+
 * {
   box-sizing: border-box;
 }
@@ -31,7 +63,7 @@ body {
   background:
     radial-gradient(circle at 12% 8%, rgba(24, 86, 255, 0.28), transparent 42%),
     radial-gradient(circle at 92% 18%, rgba(122, 76, 255, 0.3), transparent 45%),
-    radial-gradient(circle at 50% 110%, rgba(7, 202, 107, 0.18), transparent 50%), #eef0f7;
+    radial-gradient(circle at 50% 110%, rgba(7, 202, 107, 0.18), transparent 50%), var(--page);
   min-height: 100vh;
 }
 
@@ -115,8 +147,8 @@ button,
   font: inherit;
   font-weight: 600;
   border-radius: var(--radius);
-  border: 1px solid rgba(58, 52, 78, 0.16);
-  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--line);
+  background: var(--control);
   color: var(--text);
   padding: 8px 12px;
   cursor: pointer;
@@ -129,7 +161,7 @@ button,
 
 button:hover,
 .button:hover {
-  background: #fff;
+  background: var(--control-hover);
 }
 
 button.primary {
@@ -172,8 +204,8 @@ input[type='password'] {
   font: inherit;
   padding: 9px 11px;
   border-radius: var(--radius);
-  border: 1px solid rgba(58, 52, 78, 0.2);
-  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--line);
+  background: var(--field);
   color: var(--text);
 }
 
@@ -222,7 +254,7 @@ input[type='password'] {
   font-size: 0.85rem;
   padding: 7px 9px;
   border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--surface-soft);
 }
 
 .mono {
@@ -239,12 +271,12 @@ input[type='password'] {
 
 .message.ok {
   background: rgba(7, 202, 107, 0.14);
-  color: #045c31;
+  color: var(--ok-text);
 }
 
 .message.error {
   background: rgba(234, 33, 67, 0.12);
-  color: #9b0c24;
+  color: var(--error-text);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -282,8 +314,8 @@ input[type='password'] {
   font: inherit;
   padding: 8px 10px;
   border-radius: var(--radius);
-  border: 1px solid rgba(58, 52, 78, 0.2);
-  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--line);
+  background: var(--field);
   color: var(--text);
 }
 
@@ -308,14 +340,14 @@ input[type='password'] {
   padding: 7px 9px;
   border-radius: var(--radius);
   border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--surface-soft);
   color: var(--text);
   font: inherit;
   cursor: pointer;
 }
 
 .picker-option:hover {
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--field);
 }
 
 .picker-option[aria-selected='true'] {
@@ -380,7 +412,7 @@ input[type='password'] {
   display: grid;
   gap: 8px;
   padding-top: 4px;
-  border-top: 1px solid rgba(58, 52, 78, 0.12);
+  border-top: 1px solid var(--line-soft);
 }
 
 .picker-field {
@@ -400,4 +432,184 @@ input[type='password'] {
 
 .picker .hint {
   margin: 0;
+}
+
+/* ── Shared pieces for options, popup and panel ─────────────────────────── */
+.update-banner:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  background: rgba(24, 86, 255, 0.12);
+  border: 1px solid rgba(24, 86, 255, 0.4);
+}
+
+.update-banner span {
+  flex: 1;
+}
+
+.update-banner button {
+  padding: 5px 10px;
+  font-size: 0.78rem;
+}
+
+.small {
+  font-size: 0.78rem;
+}
+
+.with-action {
+  display: flex;
+  gap: 6px;
+}
+
+.with-action input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Activity log: a dot per result, duration on the right. */
+.log li {
+  align-items: center;
+}
+
+.log .what {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log .result {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.log .result.error {
+  background: var(--danger);
+}
+
+.log .result.waiting {
+  background: var(--warning);
+}
+
+.log li.error .what {
+  color: var(--error-text);
+}
+
+.log .when {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.log-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.log-head button {
+  padding: 3px 8px;
+  font-size: 0.75rem;
+}
+
+/* The site in the active tab and its rule. */
+.site-card .site {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.site-card .host {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-state {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: rgba(7, 202, 107, 0.15);
+  color: var(--ok-text);
+}
+
+.site-state.protected {
+  background: rgba(232, 149, 88, 0.18);
+  color: var(--warning);
+}
+
+.site-state.blocked {
+  background: rgba(234, 33, 67, 0.14);
+  color: var(--error-text);
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.segmented button {
+  padding: 6px 4px;
+  font-size: 0.78rem;
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+/* First run: what to do before anything else makes sense. */
+.onboarding ol {
+  margin: 6px 0 12px;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.shortcuts kbd {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.78rem;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--field);
+}
+
+[hidden] {
+  display: none !important;
 }

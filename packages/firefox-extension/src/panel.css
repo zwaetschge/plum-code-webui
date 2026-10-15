@@ -90,8 +90,8 @@ body {
   font: inherit;
   padding: 8px 10px;
   border-radius: var(--radius);
-  border: 1px solid rgba(58, 52, 78, 0.2);
-  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--line);
+  background: var(--field);
   color: var(--text);
 }
 
@@ -161,7 +161,7 @@ body {
 }
 
 .chat-switch:hover {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface-soft);
 }
 
 .chat-switch-text {
@@ -277,7 +277,7 @@ body {
 .bubble-body code {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.8rem;
-  background: rgba(58, 52, 78, 0.08);
+  background: var(--line-soft);
   border-radius: 4px;
   padding: 1px 4px;
 }
@@ -311,7 +311,7 @@ body {
   color: var(--muted);
   padding: 3px 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.55);
+  background: var(--surface-soft);
 }
 
 .tool-icon {
@@ -384,7 +384,7 @@ body {
   font: inherit;
   padding: 7px 9px;
   border-radius: var(--radius);
-  border: 1px solid rgba(58, 52, 78, 0.2);
+  border: 1px solid var(--line);
 }
 
 .card-inline .badge {
@@ -547,7 +547,7 @@ body {
   font: inherit;
   padding: 7px 9px;
   border-radius: var(--radius);
-  border: 1px solid rgba(58, 52, 78, 0.2);
+  border: 1px solid var(--line);
   resize: vertical;
 }
 
@@ -559,24 +559,7 @@ body {
 /* ---------------------------------------------------------------- update + macros */
 
 .update-banner:not([hidden]) {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   margin: 8px 8px 0;
-  padding: 7px 10px;
-  border-radius: 12px;
-  font-size: 0.78rem;
-  background: rgba(24, 86, 255, 0.12);
-  border: 1px solid rgba(24, 86, 255, 0.4);
-}
-
-.update-banner span {
-  flex: 1;
-}
-
-.update-banner button {
-  padding: 5px 10px;
-  font-size: 0.78rem;
 }
 
 .list li.macro {

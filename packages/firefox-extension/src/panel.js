@@ -6,13 +6,7 @@
  */
 
 const $ = (id) => document.getElementById(id);
-const STATUS_TEXT = {
-  connected: 'Verbunden',
-  connecting: 'Verbinde …',
-  error: 'Nicht verbunden',
-  idle: 'Getrennt',
-  unconfigured: 'Nicht eingerichtet',
-};
+const STATUS_TEXT = PLUM_STATUS_TEXT;
 
 // Opened as a tab only to grant the microphone (Chrome's side panel cannot prompt).
 if (new URLSearchParams(location.search).has('grantMic')) {
@@ -36,19 +30,7 @@ let windowSessionId = new URLSearchParams(location.search).get('session');
 let serverUrl = '';
 let lastStatus = null;
 
-function relative(ms) {
-  const seconds = Math.round((Date.now() - ms) / 1000);
-  if (seconds < 60) return 'gerade eben';
-  if (seconds < 3600) return `vor ${Math.round(seconds / 60)} min`;
-  return `vor ${Math.round(seconds / 3600)} h`;
-}
-
-function span(className, text) {
-  const node = document.createElement('span');
-  node.className = className;
-  node.textContent = text;
-  return node;
-}
+const span = plumSpan;
 
 function show(view) {
   $('chatView').hidden = view !== 'chat';
@@ -277,32 +259,12 @@ async function renderMacros() {
 
 // ---------------------------------------------------------------- update hint
 
-function newer(latest, current) {
-  const a = String(latest || '')
-    .split('.')
-    .map(Number);
-  const b = String(current || '')
-    .split('.')
-    .map(Number);
-  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
-    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
-  }
-  return false;
-}
-
 function renderUpdate(state) {
-  const available = state.latestVersion && newer(state.latestVersion, state.version);
-  $('updateBanner').hidden = !available;
-  if (available) {
-    $('updateText').textContent =
-      `Version ${state.latestVersion} verfügbar (du hast ${state.version}).`;
-  }
+  plumRenderUpdate($('updateBanner'), $('updateText'), state);
 }
 
-$('updateOpen').addEventListener('click', () => {
-  const base = plumNormalizeServerUrl(serverUrl);
-  if (base) void browser.tabs.create({ url: `${base}/settings?section=firefox-browser` });
-});
+$('updateOpen').addEventListener('click', () => plumOpenUpdate(serverUrl));
+plumMountSiteCard($('siteCard'), async () => windowId);
 
 // ---------------------------------------------------------------- new session
 
@@ -404,19 +366,14 @@ function render(state) {
     })
   );
   $('noSessions').hidden = sessions.length > 0;
-  $('actions').replaceChildren(
-    ...state.recentActions.map((action) => {
-      const li = document.createElement('li');
-      li.append(
-        span('what', `${action.tool}${action.detail ? ` · ${action.detail}` : ''}`),
-        span('when', relative(action.at))
-      );
-      return li;
-    })
-  );
-  $('noActions').hidden = state.recentActions.length > 0;
+  plumRenderLog($('actions'), $('noActions'), state.recentActions);
 
   const connected = state.status === 'connected';
+  // Only what works right now: setup first, then reconnect, then sessions.
+  $('onboarding').hidden = state.configured;
+  $('offline').hidden = !state.configured || connected || state.status === 'connecting';
+  $('offlineDetail').textContent = state.statusDetail || 'Plum ist gerade nicht erreichbar.';
+  for (const id of ['picker', 'newSessionCard', 'macrosCard']) $(id).hidden = !connected;
   if (connected && lastStatus !== 'connected') void onConnected();
   lastStatus = state.status;
 }
@@ -463,6 +420,13 @@ $('reconnect').addEventListener('click', async () => {
   render(await browser.runtime.sendMessage({ plumReconnect: true }));
 });
 $('options').addEventListener('click', () => browser.runtime.openOptionsPage());
+$('setup').addEventListener('click', () => browser.runtime.openOptionsPage());
+$('retry').addEventListener('click', async () => {
+  render(await browser.runtime.sendMessage({ plumReconnect: true }));
+});
+$('clearActions').addEventListener('click', async () => {
+  render(await browser.runtime.sendMessage({ plumClearActions: true }));
+});
 
 browser.runtime.onMessage.addListener((message) => {
   if (message && message.plumState) render(message.plumState);

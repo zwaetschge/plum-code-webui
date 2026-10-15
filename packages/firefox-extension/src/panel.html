@@ -28,7 +28,22 @@
 
     <main id="sessionsView" class="view overview" hidden>
       <p class="muted" id="detail"></p>
+      <section class="glass card onboarding" id="onboarding" hidden>
+        <h2>Einrichten</h2>
+        <ol>
+          <li>In Plum: <strong>Settings → Browser control → Pair browser</strong>.</li>
+          <li>Kopplungstext kopieren.</li>
+          <li>In den Einstellungen einfügen und verbinden.</li>
+        </ol>
+        <button id="setup" type="button" class="primary">Jetzt einrichten</button>
+      </section>
+      <section class="glass card onboarding" id="offline" hidden>
+        <h2>Nicht verbunden</h2>
+        <p class="muted small" id="offlineDetail"></p>
+        <button id="retry" type="button" class="primary">Erneut verbinden</button>
+      </section>
       <section id="picker"></section>
+      <section id="siteCard"></section>
 
       <section class="glass card" id="newSessionCard">
         <h2>Neue Session</h2>
@@ -81,7 +96,10 @@
         <h2>Session-Fenster</h2>
         <ul class="list" id="sessions"></ul>
         <p class="muted" id="noSessions">Noch keine Session hat den Browser benutzt.</p>
-        <h2>Letzte Aktionen</h2>
+        <div class="log-head">
+          <h2>Letzte Aktionen</h2>
+          <button id="clearActions" type="button">Leeren</button>
+        </div>
         <ul class="list" id="actions"></ul>
         <p class="muted" id="noActions">Noch keine Aktionen.</p>
         <button id="reconnect" type="button">Neu verbinden</button>
@@ -89,6 +107,7 @@
     </main>
 
     <script src="shared.js"></script>
+    <script src="widgets.js"></script>
     <script src="picker.js"></script>
     <script src="chat.js"></script>
     <script src="panel.js"></script>

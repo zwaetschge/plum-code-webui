@@ -2,13 +2,9 @@
 
 const $ = (id) => document.getElementById(id);
 
-const STATUS_TEXT = {
-  connected: 'Verbunden',
-  connecting: 'Verbinde …',
-  error: 'Nicht verbunden',
-  idle: 'Getrennt',
-  unconfigured: 'Nicht eingerichtet',
-};
+const STATUS_TEXT = PLUM_STATUS_TEXT;
+let serverUrl = '';
+plumMountSiteCard($('siteCard'), () => null);
 
 let lastStatus = null;
 const picker = plumMountPicker($('picker'), {
@@ -26,16 +22,16 @@ const picker = plumMountPicker($('picker'), {
   },
 });
 
-function relative(ms) {
-  const seconds = Math.round((Date.now() - ms) / 1000);
-  if (seconds < 60) return 'gerade eben';
-  if (seconds < 3600) return `vor ${Math.round(seconds / 60)} min`;
-  return `vor ${Math.round(seconds / 3600)} h`;
-}
+const relative = plumRelative;
 
 function render(state) {
   if (state.status === 'connected' && lastStatus !== 'connected') void picker.refresh();
   lastStatus = state.status;
+  serverUrl = state.serverUrl || '';
+  plumRenderUpdate($('updateBanner'), $('updateText'), state);
+  // Before pairing only the setup steps make sense.
+  $('onboarding').hidden = state.configured;
+  for (const id of ['picker', 'sessionsCard', 'actionsCard']) $(id).hidden = !state.configured;
   const paused = state.paused && state.status === 'connected';
   $('dot').className = `dot ${paused ? 'paused' : state.status}`;
   $('status').textContent = paused ? 'Pausiert' : STATUS_TEXT[state.status] || state.status;
@@ -75,21 +71,7 @@ function render(state) {
   );
   $('noSessions').hidden = sessions.length > 0;
 
-  $('actions').replaceChildren(
-    ...state.recentActions.map((action) => {
-      const li = document.createElement('li');
-      const what = document.createElement('span');
-      what.className = 'what';
-      what.textContent = `${action.tool}${action.detail ? ` · ${action.detail}` : ''}`;
-      what.title = `${action.session}: ${what.textContent}`;
-      const when = document.createElement('span');
-      when.className = 'when';
-      when.textContent = relative(action.at);
-      li.append(what, when);
-      return li;
-    })
-  );
-  $('noActions').hidden = state.recentActions.length > 0;
+  plumRenderLog($('actions'), $('noActions'), state.recentActions);
 }
 
 $('pause').addEventListener('click', async () => {
@@ -98,6 +80,14 @@ $('pause').addEventListener('click', async () => {
 });
 $('reconnect').addEventListener('click', async () => {
   render(await browser.runtime.sendMessage({ plumReconnect: true }));
+});
+$('clearActions').addEventListener('click', async () => {
+  render(await browser.runtime.sendMessage({ plumClearActions: true }));
+});
+$('updateOpen').addEventListener('click', () => plumOpenUpdate(serverUrl));
+$('setup').addEventListener('click', () => {
+  browser.runtime.openOptionsPage();
+  window.close();
 });
 $('options').addEventListener('click', () => {
   browser.runtime.openOptionsPage();
