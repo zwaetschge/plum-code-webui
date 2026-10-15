@@ -119,6 +119,20 @@
       </section>
 
       <section class="glass card">
+        <h2>Sichern &amp; Wiederherstellen</h2>
+        <p class="hint">
+          Exportiert geschützte und gesperrte Seiten, die JavaScript-Einstellung und alle Makros als
+          JSON-Datei – ohne Token. So nimmst du alles auf einen anderen Browser mit.
+        </p>
+        <div class="row">
+          <button id="exportSettings" type="button">Exportieren</button>
+          <button id="importSettings" type="button">Importieren …</button>
+          <input id="importFile" type="file" accept="application/json,.json" hidden />
+        </div>
+        <div id="backupMessage" class="message" hidden></div>
+      </section>
+
+      <section class="glass card">
         <h2>Tastenkürzel</h2>
         <ul class="list shortcuts" id="shortcuts"></ul>
         <div class="row">

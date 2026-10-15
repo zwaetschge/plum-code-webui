@@ -112,6 +112,7 @@ function publicState() {
       chatWindowId: entry.chatWindowId ?? null,
       chatUrl: chatUrl(id),
       lastUsed: entry.lastUsed,
+      stopped: !!entry.stopped,
     })),
     recentActions: state.recentActions.slice(0, 20),
     browser: `${BROWSER_NAME} ${BROWSER_VERSION}`.trim(),
@@ -491,6 +492,7 @@ function writeSessions() {
       currentTabId: entry.currentTabId,
       name: entry.name,
       lastUsed: entry.lastUsed,
+      stopped: !!entry.stopped,
     };
   }
   return browser.storage.local.set({ sessions: serialisable });
@@ -507,6 +509,7 @@ async function restoreSessions() {
       currentTabId: entry.currentTabId ?? null,
       name: entry.name || id,
       lastUsed: entry.lastUsed || 0,
+      stopped: !!entry.stopped,
     });
   }
 }
@@ -1072,7 +1075,28 @@ async function chromeCapture(tab, format) {
   }
 }
 
-async function screenshot(tab, format) {
+/** Cuts one element (plus a margin) out of a viewport capture, at device resolution. */
+async function cropScreenshot(dataUrl, format, viewport, rect) {
+  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const ratio = viewport && viewport.width ? bitmap.width / viewport.width : 1;
+  const pad = 12;
+  const sx = Math.max(0, Math.floor((rect.left - pad) * ratio));
+  const sy = Math.max(0, Math.floor((rect.top - pad) * ratio));
+  const sw = Math.max(1, Math.min(bitmap.width - sx, Math.ceil((rect.width + pad * 2) * ratio)));
+  const sh = Math.max(1, Math.min(bitmap.height - sy, Math.ceil((rect.height + pad * 2) * ratio)));
+  const fit = Math.min(1, SCREENSHOT_MAX_EDGE / Math.max(sw, sh));
+  const width = Math.round(sw * fit);
+  const height = Math.round(sh * fit);
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, width, height);
+  bitmap.close();
+  const blob = await canvas.convertToBlob({ type: `image/${format}`, quality: 0.9 });
+  return { base64: bytesToBase64(new Uint8Array(await blob.arrayBuffer())), width, height };
+}
+
+async function screenshot(tab, format, ref) {
   if (!tab.active) {
     await browser.tabs.update(tab.id, { active: true });
     await sleep(250);
@@ -1086,6 +1110,12 @@ async function screenshot(tab, format) {
   // shrunk to what a model actually sees; x/y given to click/hover/scroll are
   // screenshot pixels and get converted back with the remembered factor.
   const scriptable = isScriptableUrl(tab.url);
+  // An element shot scrolls it into view first, then re-reads the viewport.
+  let rect = null;
+  if (ref && scriptable) {
+    rect = await contentCall(tab, 'element_rect', { ref });
+    viewport = await contentCall(tab, 'viewport').catch(() => viewport);
+  }
   if (scriptable) await contentCall(tab, 'overlay', { visible: false }).catch(() => {});
   let dataUrl;
   try {
@@ -1096,6 +1126,15 @@ async function screenshot(tab, format) {
         : await chromeCapture(tab, imageFormat);
   } finally {
     if (scriptable) await contentCall(tab, 'overlay', { visible: true }).catch(() => {});
+  }
+  if (rect) {
+    const crop = await cropScreenshot(dataUrl, imageFormat, viewport, rect);
+    return [
+      { type: 'image', data: crop.base64, mimeType: `image/${imageFormat}` },
+      textContent(
+        `Ausschnitt ${ref} (${crop.width}×${crop.height}). Positionen in diesem Bild gelten nicht für click/hover; verwende ${ref}.`
+      ),
+    ];
   }
   const { base64, width, height, factor } = await fitScreenshot(dataUrl, imageFormat, viewport);
   screenshotScale.set(tab.id, factor);
@@ -1128,6 +1167,17 @@ async function toolStatus(session, entry) {
           }
         : {}),
       browser: `${BROWSER_NAME} ${BROWSER_VERSION}`,
+      // So the agent can plan around sites it must ask about or may not touch.
+      siteRules: {
+        protected: plumRuleList(state.settings.protectedSites),
+        blocked: plumRuleList(state.settings.blockedSites),
+      },
+      ...(entry.stopped
+        ? {
+            stopped:
+              'The user stopped this session in the browser; ask them to resume it in the Plum panel.',
+          }
+        : {}),
       tabGroups: HAS_TAB_GROUPS
         ? `native ${BROWSER_NAME} tab groups`
         : 'fallback (tab list, no visible group)',
@@ -1257,7 +1307,7 @@ const TOOLS = {
 
   async screenshot(_session, entry, args) {
     const tab = await resolveTab(entry, args.tabId);
-    return screenshot(await browser.tabs.get(tab.id), args.format);
+    return screenshot(await browser.tabs.get(tab.id), args.format, args.ref);
   },
 
   async resize_window(_session, entry, args) {
@@ -1272,24 +1322,40 @@ const TOOLS = {
   async wait_for(_session, entry, args) {
     const tab = await resolveTab(entry, args.tabId);
     const seconds = Math.max(0.1, Math.min(Number(args.seconds) || 10, 60));
-    if (!args.text && !args.selector) {
+    if (!args.text && !args.selector && !args.url) {
       await sleep(seconds * 1000);
       return [textContent(`${seconds}s gewartet.`)];
     }
+    // gone: wait until the text/selector disappears (spinners, "Wird geladen …").
+    const gone = args.gone === true;
+    const what = args.url ? `URL mit „${args.url}“` : args.text || args.selector;
     const deadline = Date.now() + seconds * 1000;
     while (Date.now() < deadline) {
       const fresh = await browser.tabs.get(tab.id);
-      const found = await contentCall(
-        fresh,
-        'check',
-        { text: args.text, selector: args.selector },
-        5_000
-      ).catch(() => false);
-      if (found) return [textContent(`Gefunden: ${args.text || args.selector}`)];
+      let found;
+      if (args.url)
+        found = String(fresh.url || '').includes(String(args.url)) && fresh.status === 'complete';
+      else
+        found = await contentCall(
+          fresh,
+          'check',
+          { text: args.text, selector: args.selector },
+          5_000
+        ).catch(() => (gone ? true : false));
+      if (gone ? !found : found)
+        return [
+          textContent(
+            gone ? `Verschwunden: ${what}` : `Gefunden: ${what}${args.url ? ` – ${fresh.url}` : ''}`
+          ),
+        ];
       await sleep(300);
     }
     return [
-      textContent(`Nicht erschienen innerhalb von ${seconds}s: ${args.text || args.selector}`),
+      textContent(
+        gone
+          ? `Nach ${seconds}s immer noch da: ${what}`
+          : `Nicht erschienen innerhalb von ${seconds}s: ${what}`
+      ),
     ];
   },
 
@@ -1323,6 +1389,7 @@ const WRITE_TOOLS = new Set([
 ]);
 
 const CONTENT_TOOLS = new Set([
+  'extract_table',
   'guide_step',
   'upload_file',
   'read_page',
@@ -1970,6 +2037,42 @@ browser.tabs.onActivated.addListener(({ tabId, windowId }) => {
   });
 });
 
+// Runaway guard: a session looping on clicks or typing is stopped after this
+// many page-changing actions within one minute.
+const RUNAWAY_LIMIT = 60;
+
+function tripsRunawayGuard(entry, session) {
+  const now = Date.now();
+  entry.writes = (entry.writes || []).filter((at) => now - at < 60_000);
+  entry.writes.push(now);
+  if (entry.writes.length <= RUNAWAY_LIMIT) return false;
+  entry.writes = [];
+  setSessionStopped(session.id, true, 'Notbremse');
+  return true;
+}
+
+/** Stops or resumes one session's control without pausing the others. */
+function setSessionStopped(sessionId, stopped, reason = '') {
+  const entry = state.sessions.get(sessionId);
+  if (!entry) return false;
+  entry.stopped = stopped;
+  logAction(entry.name, stopped ? 'angehalten' : 'fortgesetzt', reason, stopped ? 'error' : 'ok');
+  if (stopped && browser.notifications) {
+    browser.notifications
+      .create(`plum-stop-${sessionId}`, {
+        type: 'basic',
+        iconUrl: browser.runtime.getURL('icons/icon-128.png'),
+        title: `Plum: ${entry.name} angehalten`,
+        message: reason
+          ? `${reason}: zu viele Eingaben in kurzer Zeit. Fortsetzen im Plum-Panel.`
+          : 'Fortsetzen im Plum-Panel.',
+      })
+      .catch(() => {});
+  }
+  void persistSessions();
+  return true;
+}
+
 async function handleCall(socket, frame) {
   const session = {
     id: String(frame.session?.id || 'unknown'),
@@ -1981,6 +2084,21 @@ async function handleCall(socket, frame) {
       socket.send(JSON.stringify({ type: 'result', id: frame.id, ...payload }));
     }
   };
+  const entry = state.sessions.get(session.id);
+  if (entry?.stopped && frame.tool !== 'status') {
+    reply({
+      ok: false,
+      error: `Der Nutzer hat diese Session in ${BROWSER_NAME} angehalten. Bitte ihn, sie im Plum-Panel fortzusetzen.`,
+    });
+    return;
+  }
+  if (WRITE_TOOLS.has(frame.tool) && entry && tripsRunawayGuard(entry, session)) {
+    reply({
+      ok: false,
+      error: `Notbremse: mehr als ${RUNAWAY_LIMIT} Eingaben in einer Minute. Die Session ist angehalten, bis der Nutzer sie im Plum-Panel fortsetzt.`,
+    });
+    return;
+  }
   if (state.settings.paused && frame.tool !== 'status') {
     reply({ ok: false, error: `Browser-Steuerung ist in ${BROWSER_NAME} pausiert.` });
     return;
@@ -2019,6 +2137,27 @@ function routeMessage(message, sender) {
       state.settings = settings;
       return connect().then(() => publicState());
     });
+  }
+  if (message.plumStopSession) {
+    const { id, stopped } = message.plumStopSession;
+    setSessionStopped(id, !!stopped);
+    return Promise.resolve(publicState());
+  }
+  if (message.plumCloseSession) {
+    const entry = state.sessions.get(message.plumCloseSession);
+    const windows = [entry?.windowId, entry?.chatWindowId].filter((id) => id != null);
+    return Promise.all(windows.map((id) => browser.windows.remove(id).catch(() => {}))).then(() =>
+      publicState()
+    );
+  }
+  if (message.plumStopFromPage && sender.tab) {
+    // The in-page "Stopp" button stops the session owning that tab, or all control.
+    const owner = [...state.sessions.entries()].find(
+      ([, entry]) => entry.windowId === sender.tab.windowId || entry.tabIds.has(sender.tab.id)
+    );
+    if (owner) setSessionStopped(owner[0], true, 'Stopp auf der Seite');
+    else void plumSaveSettings({ paused: true });
+    return Promise.resolve(true);
   }
   if (message.plumClearActions) {
     state.recentActions = [];
@@ -2267,6 +2406,28 @@ if (PLUM_IS_CHROME) {
 // panel showed last. Without one, the share waits until a session is picked.
 
 const menus = browser.menus || browser.contextMenus;
+// Page rules from the context menu; same effect as the "Diese Seite" card.
+const RULE_ITEMS = [
+  {
+    id: 'plum-rule-protected',
+    title: 'Plum: Seite schützen (Agent fragt vorher)',
+    contexts: ['page'],
+    rule: 'protected',
+  },
+  {
+    id: 'plum-rule-blocked',
+    title: 'Plum: Seite für Agents sperren',
+    contexts: ['page'],
+    rule: 'blocked',
+  },
+  {
+    id: 'plum-rule-free',
+    title: 'Plum: Regel für diese Seite entfernen',
+    contexts: ['page'],
+    rule: 'free',
+  },
+];
+
 const SHARE_ITEMS = [
   { id: 'plum-selection', title: 'Auswahl an Plum senden', contexts: ['selection'] },
   { id: 'plum-link', title: 'Link an Plum senden', contexts: ['link'] },
@@ -2282,6 +2443,12 @@ const SHARE_ITEMS = [
 function setupShareMenu() {
   if (!menus) return;
   menus.removeAll(() => {
+    menus.create(
+      { id: 'plum-rule-separator', type: 'separator', contexts: ['page'] },
+      () => void browser.runtime.lastError
+    );
+    for (const { rule: _rule, ...item } of RULE_ITEMS)
+      menus.create(item, () => void browser.runtime.lastError);
     for (const item of SHARE_ITEMS) {
       try {
         menus.create(item, () => void browser.runtime.lastError);
@@ -2366,6 +2533,27 @@ async function deliverShare(share) {
 
 if (menus) {
   menus.onClicked.addListener((info, tab) => {
+    const ruleItem = RULE_ITEMS.find((item) => item.id === info.menuItemId);
+    if (ruleItem && tab) {
+      const host = hostOf(tab.url);
+      if (!host) return;
+      void plumSetSiteRule(host, ruleItem.rule).then(() =>
+        browser.notifications
+          ?.create(`plum-rule-${Date.now()}`, {
+            type: 'basic',
+            iconUrl: browser.runtime.getURL('icons/icon-128.png'),
+            title: `Plum: ${host}`,
+            message:
+              ruleItem.rule === 'blocked'
+                ? 'Gesperrt – Agents dürfen diese Seite weder lesen noch bedienen.'
+                : ruleItem.rule === 'protected'
+                  ? 'Geschützt – der Agent fragt vor jeder Eingabe.'
+                  : 'Keine Regel mehr – Agents dürfen hier normal arbeiten.',
+          })
+          .catch(() => {})
+      );
+      return;
+    }
     if (!SHARE_ITEMS.some((item) => item.id === info.menuItemId) || !tab) return;
     // Opening the panel needs the click's user gesture, so it happens first.
     try {

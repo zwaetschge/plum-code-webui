@@ -55,6 +55,14 @@ const PLUM_STATUS_TEXT = Object.freeze({
   unconfigured: 'Nicht eingerichtet',
 });
 
+/** The non-empty entries of a site list. */
+function plumRuleList(patterns) {
+  return String(patterns || '')
+    .split(/[\n,]+/)
+    .map((pattern) => pattern.trim())
+    .filter(Boolean);
+}
+
 /** Whether a hostname matches one of the protected-site patterns (glob, or domain + subdomains). */
 function plumIsProtected(hostname, patterns) {
   const host = String(hostname || '').toLowerCase();

@@ -348,24 +348,10 @@ function render(state) {
   if (!state.configured) details.push('Öffne die Einstellungen (⚙), um Plum zu verbinden.');
   $('detail').textContent = details.join(' · ');
 
-  const sessions = [...state.sessions].sort((a, b) => b.lastUsed - a.lastUsed);
-  $('sessions').replaceChildren(
-    ...sessions.map((session) => {
-      const li = document.createElement('li');
-      li.append(span('name', session.name));
-      if (session.windowId != null) {
-        const focus = document.createElement('button');
-        focus.type = 'button';
-        focus.textContent = 'Fenster';
-        focus.addEventListener('click', () =>
-          browser.runtime.sendMessage({ plumFocusSession: session.id })
-        );
-        li.append(focus);
-      }
-      return li;
-    })
-  );
-  $('noSessions').hidden = sessions.length > 0;
+  plumRenderSessions($('sessions'), $('noSessions'), state.sessions, { limit: 50 });
+  // A stopped session should not hide in the collapsed section.
+  if (state.sessions.some((session) => session.stopped))
+    document.querySelector('details.more').open = true;
   plumRenderLog($('actions'), $('noActions'), state.recentActions);
 
   const connected = state.status === 'connected';

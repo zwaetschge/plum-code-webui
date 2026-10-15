@@ -249,3 +249,69 @@ browser.runtime.onMessage.addListener((message) => {
 
 $('label').placeholder = `z. B. ${PLUM_IS_CHROME ? 'Chrome' : 'Firefox'} Laptop`;
 void load();
+
+// ---------------------------------------------------------------- backup
+
+function backupMessage(text, kind) {
+  const box = $('backupMessage');
+  box.textContent = text;
+  box.className = `message ${kind}`;
+  box.hidden = !text;
+}
+
+$('exportSettings').addEventListener('click', async () => {
+  const settings = await plumLoadSettings();
+  const { macros } = await browser.storage.local.get('macros');
+  const backup = {
+    kind: 'plum-browser-settings',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    protectedSites: settings.protectedSites,
+    blockedSites: settings.blockedSites,
+    allowJs: settings.allowJs,
+    macros: Array.isArray(macros) ? macros : [],
+  };
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+  );
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `plum-browser-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  backupMessage(`Exportiert: ${backup.macros.length} Makros und beide Seitenlisten.`, 'ok');
+});
+
+$('importSettings').addEventListener('click', () => $('importFile').click());
+
+$('importFile').addEventListener('change', async () => {
+  const file = $('importFile').files && $('importFile').files[0];
+  $('importFile').value = '';
+  if (!file) return;
+  try {
+    const backup = JSON.parse(await file.text());
+    if (!backup || backup.kind !== 'plum-browser-settings')
+      throw new Error('Keine Plum-Browser-Sicherung');
+    const patch = {};
+    if (typeof backup.protectedSites === 'string') patch.protectedSites = backup.protectedSites;
+    if (typeof backup.blockedSites === 'string') patch.blockedSites = backup.blockedSites;
+    if (typeof backup.allowJs === 'boolean') patch.allowJs = backup.allowJs;
+    // Macros merge by id; an imported macro replaces one with the same id.
+    let added = 0;
+    if (Array.isArray(backup.macros)) {
+      const { macros } = await browser.storage.local.get('macros');
+      const byId = new Map((Array.isArray(macros) ? macros : []).map((macro) => [macro.id, macro]));
+      for (const macro of backup.macros) {
+        if (!macro || typeof macro.id !== 'string' || !Array.isArray(macro.steps)) continue;
+        if (!byId.has(macro.id)) added += 1;
+        byId.set(macro.id, macro);
+      }
+      patch.macros = [...byId.values()];
+    }
+    await plumSaveSettings(patch);
+    await load();
+    backupMessage(`Importiert. ${added} neue Makros, Seitenlisten übernommen.`, 'ok');
+  } catch (error) {
+    backupMessage(`Import fehlgeschlagen: ${error.message}`, 'error');
+  }
+});

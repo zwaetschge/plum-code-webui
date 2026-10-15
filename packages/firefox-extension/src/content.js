@@ -489,8 +489,9 @@
 
   // ------------------------------------------------------------ page text
 
-  function pageText({ maxChars = 40000 } = {}) {
+  function pageText({ maxChars = 40000, ref } = {}) {
     const root =
+      (ref && elementForRef(ref)) ||
       document.querySelector('article') ||
       document.querySelector('main, [role="main"]') ||
       document.body ||
@@ -1261,6 +1262,15 @@
           .confirm-card .row { display: flex; gap: 6px; flex-wrap: wrap; }
           .confirm-card .secondary { background: #eef0f7; color: #141414; }
           .confirm-card .deny { background: #ea2143; }
+          .confirm-card .countdown { height: 3px; margin-top: 10px; border-radius: 2px; background: #e89558;
+            transform-origin: left; transition: transform .25s linear; }
+          .confirm-card .left { display: block; margin-top: 5px; font-size: 11px; color: #5d5870; }
+          .pill { pointer-events: auto; display: flex; align-items: center; gap: 10px; }
+          /* Invisible pill must not catch clicks meant for the page. */
+          .frame:not(.on) .pill { pointer-events: none; }
+          .pill button { font: 700 11px system-ui, sans-serif; border: 0; border-radius: 999px;
+            padding: 4px 10px; cursor: pointer; background: #ea2143; color: #fff; }
+          .pill button:focus-visible { outline: 3px solid #f5c400; }
           .rec .dot { width: 9px; height: 9px; border-radius: 50%; background: #ea2143;
             animation: blink 1.2s ease-in-out infinite; }
           @keyframes blink { 50% { opacity: .25; } }
@@ -1270,7 +1280,7 @@
           }
         </style>
         <div class="chrome">
-        <div class="frame"><div class="pill"></div></div>
+        <div class="frame"><div class="pill"><span class="pill-text"></span><button type="button" class="stop" title="Alle Agents in diesem Browser anhalten">Stopp</button></div></div>
         <div class="cursor">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
@@ -1286,7 +1296,13 @@
         <div class="rec" hidden><span class="dot"></span><span class="rec-text"></span></div>`;
       overlayHost._shadow = shadow;
       overlayHost._frame = shadow.querySelector('.frame');
-      overlayHost._pill = shadow.querySelector('.pill');
+      overlayHost._pill = shadow.querySelector('.pill-text');
+      // The stop button only reacts to a real click, never to a synthetic one.
+      shadow.querySelector('.stop').addEventListener('click', (event) => {
+        if (!event.isTrusted) return;
+        browser.runtime.sendMessage({ plumStopFromPage: true }).catch(() => {});
+        overlayHost._pill.textContent = 'Angehalten – Fortsetzen im Plum-Panel';
+      });
       overlayHost._cursor = shadow.querySelector('.cursor');
       overlayHost._tag = shadow.querySelector('.tag');
       overlayHost._chrome = shadow.querySelector('.chrome');
@@ -1772,7 +1788,7 @@
       const row = document.createElement('div');
       row.className = 'row';
       let timer = null;
-      const done = (answer) => {
+      let done = (answer) => {
         clearTimeout(timer);
         card.remove();
         resolve(answer);
@@ -1792,9 +1808,31 @@
         make('Für diese Session', 'secondary', 'session'),
         make('Ablehnen', 'deny', 'deny')
       );
-      card.append(heading, detail, row);
+      const bar = document.createElement('div');
+      bar.className = 'countdown';
+      const left = document.createElement('small');
+      left.className = 'left';
+      card.append(heading, detail, row, bar, left);
+      // Escape denies; Tab/Enter work on the focused button like any dialog.
+      card.addEventListener('keydown', (event) => {
+        if (event.isTrusted && event.key === 'Escape') done('deny');
+      });
       ui._shadow.appendChild(card);
+      row.firstChild.focus({ preventScroll: true });
+      const until = Date.now() + 40_000;
+      const tick = () => {
+        const seconds = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+        left.textContent = `Noch ${seconds} s · Esc lehnt ab`;
+        bar.style.transform = `scaleX(${Math.max(0, (until - Date.now()) / 40_000)})`;
+      };
+      tick();
+      const ticker = setInterval(tick, 250);
       timer = setTimeout(() => done('timeout'), 40_000);
+      const finish = done;
+      done = (answer) => {
+        clearInterval(ticker);
+        finish(answer);
+      };
     });
   }
 
@@ -1961,6 +1999,91 @@
     return (document.body?.innerText || '').toLowerCase().includes(String(text).toLowerCase());
   }
 
+  // ------------------------------------------------------------ tables
+
+  const cellText = (cell) => (cell.innerText || cell.textContent || '').replace(/\s+/g, ' ').trim();
+
+  function tablesOnPage() {
+    return [...deepElements()].filter(
+      (el) => (el.tagName === 'TABLE' || el.getAttribute('role') === 'grid') && isVisible(el)
+    );
+  }
+
+  /** Rows of one HTML table or ARIA grid: headers plus cell texts. */
+  function tableData(table, maxRows) {
+    const rowEls = [...table.querySelectorAll('tr, [role="row"]')].filter(
+      (row) => row.closest('table, [role="grid"]') === table
+    );
+    const cellsOf = (row) =>
+      [
+        ...row.querySelectorAll('th, td, [role="cell"], [role="gridcell"], [role="columnheader"]'),
+      ].filter((cell) => cell.closest('tr, [role="row"]') === row);
+    let headers = [];
+    let body = rowEls;
+    const first = rowEls[0];
+    if (
+      first &&
+      cellsOf(first).every(
+        (cell) => cell.tagName === 'TH' || cell.getAttribute('role') === 'columnheader'
+      )
+    ) {
+      headers = cellsOf(first).map(cellText);
+      body = rowEls.slice(1);
+    }
+    const rows = body
+      .map((row) => cellsOf(row).map(cellText))
+      .filter((cells) => cells.some(Boolean));
+    return {
+      caption:
+        cellText(table.querySelector('caption') || document.createElement('i')) ||
+        accessibleName(table) ||
+        '',
+      headers,
+      rows: rows.slice(0, maxRows),
+      totalRows: rows.length,
+      truncated: rows.length > maxRows,
+    };
+  }
+
+  /** extract_table: one table as data, or an overview when the page has several. */
+  function extractTable({ ref, index, maxRows = 200 } = {}) {
+    const limit = Math.max(1, Math.min(Number(maxRows) || 200, 1000));
+    if (ref) {
+      const el = elementForRef(ref);
+      const table = el.closest('table, [role="grid"]') || el.querySelector('table, [role="grid"]');
+      if (!table) throw new Error(`${ref} ist keine Tabelle und enthält keine`);
+      return tableData(table, limit);
+    }
+    const tables = tablesOnPage();
+    if (!tables.length) return 'Keine sichtbare Tabelle auf der Seite.';
+    if (index == null && tables.length > 1) {
+      return {
+        tables: tables.map((table, i) => {
+          const data = tableData(table, 1);
+          return {
+            index: i,
+            ref: refFor(table),
+            caption: data.caption,
+            headers: data.headers,
+            rows: data.totalRows,
+          };
+        }),
+        hint: 'Mehrere Tabellen: extract_table mit index oder ref aufrufen.',
+      };
+    }
+    const table = tables[Number(index) || 0];
+    if (!table) throw new Error(`Keine Tabelle mit index ${index} (es gibt ${tables.length})`);
+    return tableData(table, limit);
+  }
+
+  /** Viewport rectangle of an element, scrolled into view, for cropped screenshots. */
+  function elementRect({ ref }) {
+    const el = elementForRef(ref);
+    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    const rect = topRect(el);
+    return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+  }
+
   const OPS = {
     viewport: () => ({
       width: innerWidth,
@@ -1998,6 +2121,8 @@
     link_url: linkUrl,
     upload,
     confirm: confirmAction,
+    extract_table: extractTable,
+    element_rect: elementRect,
   };
 
   const QUIET_OPS = new Set([
@@ -2009,6 +2134,7 @@
     'locate',
     'link_url',
     'confirm',
+    'element_rect',
   ]);
   const LABELS = {
     read_page: 'liest',
@@ -2028,6 +2154,7 @@
     clear_annotations: 'räumt auf',
     guide_step: 'leitet an',
     upload: 'lädt Datei hoch',
+    extract_table: 'liest Tabelle',
   };
 
   // Reply through sendResponse: Chrome ignores a promise returned by the listener.

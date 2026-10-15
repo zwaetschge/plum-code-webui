@@ -47,29 +47,10 @@ function render(state) {
   $('pause').disabled = !state.configured;
   $('reconnect').disabled = !state.configured;
 
-  const sessions = [...state.sessions].sort((a, b) => b.lastUsed - a.lastUsed);
-  $('sessions').replaceChildren(
-    ...sessions.slice(0, 8).map((session) => {
-      const li = document.createElement('li');
-      const name = document.createElement('span');
-      name.className = 'what';
-      name.textContent = session.name;
-      const when = document.createElement('span');
-      when.className = 'when';
-      when.textContent = session.lastUsed ? relative(session.lastUsed) : '';
-      li.append(name, when);
-      if (session.windowId != null) {
-        li.classList.add('clickable');
-        li.title = 'Fenster dieser Session anzeigen';
-        li.addEventListener('click', () => {
-          browser.runtime.sendMessage({ plumFocusSession: session.id });
-          window.close();
-        });
-      }
-      return li;
-    })
-  );
-  $('noSessions').hidden = sessions.length > 0;
+  plumRenderSessions($('sessions'), $('noSessions'), state.sessions, {
+    limit: 8,
+    onFocused: () => window.close(),
+  });
 
   plumRenderLog($('actions'), $('noActions'), state.recentActions);
 }

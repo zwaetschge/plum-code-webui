@@ -128,3 +128,75 @@ function plumMountSiteCard(container, getWindowId) {
   void render();
   return { render };
 }
+
+function plumButton(label, title, onClick, className = '') {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = label;
+  button.title = title;
+  if (className) button.className = className;
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    onClick();
+  });
+  return button;
+}
+
+/**
+ * Session windows with per-session controls: show the window, stop/resume
+ * just this session, close its window. `onFocused` runs after "Fenster".
+ */
+function plumRenderSessions(list, empty, sessions, { limit = 50, onFocused } = {}) {
+  const sorted = [...sessions].sort((a, b) => b.lastUsed - a.lastUsed).slice(0, limit);
+  list.classList.add('sessions');
+  list.replaceChildren(
+    ...sorted.map((session) => {
+      const li = document.createElement('li');
+      li.classList.toggle('stopped', !!session.stopped);
+      const info = document.createElement('span');
+      info.className = 'info';
+      info.append(plumSpan('name', session.name));
+      info.append(
+        plumSpan(
+          'when',
+          session.stopped ? 'angehalten' : session.lastUsed ? plumRelative(session.lastUsed) : ''
+        )
+      );
+      const actions = document.createElement('span');
+      actions.className = 'actions';
+      if (session.windowId != null) {
+        actions.append(
+          plumButton('Fenster', 'Fenster dieser Session anzeigen', () => {
+            void browser.runtime.sendMessage({ plumFocusSession: session.id });
+            if (onFocused) onFocused();
+          })
+        );
+      }
+      actions.append(
+        plumButton(
+          session.stopped ? 'Fortsetzen' : 'Anhalten',
+          session.stopped
+            ? 'Diese Session darf den Browser wieder steuern'
+            : 'Nur diese Session anhalten, die anderen laufen weiter',
+          () =>
+            void browser.runtime.sendMessage({
+              plumStopSession: { id: session.id, stopped: !session.stopped },
+            }),
+          session.stopped ? 'primary' : ''
+        )
+      );
+      if (session.windowId != null) {
+        actions.append(
+          plumButton(
+            '✕',
+            'Session-Fenster schließen',
+            () => void browser.runtime.sendMessage({ plumCloseSession: session.id })
+          )
+        );
+      }
+      li.append(info, actions);
+      return li;
+    })
+  );
+  empty.hidden = sorted.length > 0;
+}

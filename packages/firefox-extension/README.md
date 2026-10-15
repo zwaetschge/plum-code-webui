@@ -65,6 +65,18 @@ scripted.
 - **Network changes:** the extension reconnects as soon as the network comes back; retries use jitter so several browsers do not reconnect in lockstep.
 - **Update hint:** popup, panel and options page show when Plum serves a newer extension version.
 
+## Control and agent tools (0.9)
+
+- **Stop one session:** the session list in panel and popup has _Anhalten/Fortsetzen_ per session (the others keep running) and ✕ to close its window. A stopped session gets a clear error until the user resumes it; the state survives a browser restart.
+- **Stop button on the page:** the pill „Plum steuert diesen Tab“ has a _Stopp_ button. Only a real click counts; it stops the session owning the tab.
+- **Runaway guard:** more than 60 page-changing actions (click, type, keys, form input, navigation, upload, JS) within a minute stop the session and show a notification.
+- **Approval card by keyboard:** the first button is focused, Escape denies, and a bar counts down the 40 s.
+- **Context menu:** _Plum: Seite schützen / sperren / Regel entfernen_ on any page.
+- **Backup:** the options page exports and imports both site lists, the JavaScript setting and all macros as JSON (never the token). Imported macros merge by id.
+- **New for agents:** `extract_table` (headers and rows of a table or ARIA grid, or an overview when there are several), `screenshot` with `ref` (one element at full resolution), `wait_for` with `gone` (until text or selector disappears) and `url` (until the tab reached a URL), `get_page_text` with `ref`, and `status.siteRules` listing protected and blocked sites.
+
+`node scripts/test-chrome.mjs` (after `build.mjs`) checks the Chrome build headless against a fake bridge: blocked sites, the new tools, session stop, approval by Escape, the in-page stop button and the runaway guard.
+
 ## Locked screen
 
 Control keeps working while the desktop is locked or the Plum window is covered.

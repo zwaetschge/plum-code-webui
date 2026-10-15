@@ -613,3 +613,42 @@ input[type='password'] {
 [hidden] {
   display: none !important;
 }
+
+/* Session windows with their own controls. */
+.sessions li {
+  align-items: center;
+}
+
+.sessions .info {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+
+.sessions .name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessions .when {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.sessions li.stopped .when {
+  color: var(--error-text);
+  font-weight: 600;
+}
+
+.sessions .actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.sessions .actions button {
+  padding: 4px 8px;
+  font-size: 0.75rem;
+}
