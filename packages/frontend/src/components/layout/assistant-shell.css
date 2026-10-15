@@ -622,11 +622,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.plum-composer-toolbar .plum-stop-answer {
-  width: auto;
-  height: auto;
-  padding: 8px 12px;
-}
 @media (max-width: 767px) {
   .plum-composer-model-tools .plum-current-model {
     max-width: 145px;
@@ -718,8 +713,8 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
   font-size: 12px;
   cursor: pointer;
   transition:
-    background-color 0.18s ease,
-    transform 0.12s ease;
+    background-color var(--plum-dur-fast) ease,
+    transform var(--plum-dur-press) ease;
 }
 .plum-model-trigger:hover {
   background: hsl(var(--foreground) / 0.1);
@@ -816,7 +811,7 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
 }
 .plum-effort-label {
   color: hsl(var(--primary));
-  animation: plum-effort-pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  animation: plum-effort-pop var(--plum-dur-base) var(--plum-ease-pop);
 }
 @keyframes plum-effort-pop {
   from {
@@ -842,10 +837,10 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
 .plum-effort-fill {
   position: absolute;
   inset: 0 auto 0 0;
-  width: calc(var(--pad) + (100% - 2 * var(--pad)) * (var(--index) + 1) / var(--stops));
+  width: calc(var(--pad) + (100% - 2 * var(--pad)) * (var(--pos, var(--index)) + 1) / var(--stops));
   border-radius: 999px;
   background: linear-gradient(90deg, hsl(var(--primary) / 0.55), hsl(var(--primary)));
-  transition: width 0.34s cubic-bezier(0.3, 1.1, 0.4, 1);
+  transition: width 0.34s var(--plum-ease-spring);
 }
 .plum-effort-thumb {
   position: absolute;
@@ -853,8 +848,8 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
   left: var(--pad);
   width: calc((100% - 2 * var(--pad)) / var(--stops));
   height: 30px;
-  transform: translateX(calc(var(--index) * 100%));
-  transition: transform 0.34s cubic-bezier(0.3, 1.1, 0.4, 1);
+  transform: translateX(calc(var(--pos, var(--index)) * 100%));
+  transition: transform 0.34s var(--plum-ease-spring);
   pointer-events: none;
 }
 .plum-effort-thumb::after {
@@ -904,7 +899,7 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
   overflow: hidden;
   background-size: 100% 100%;
   transition:
-    width 0.34s cubic-bezier(0.3, 1.1, 0.4, 1),
+    width 0.34s var(--plum-ease-spring),
     background 0.4s ease;
 }
 .plum-effort-fill::before {
@@ -968,7 +963,7 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
   background-clip: text;
   color: transparent;
   animation:
-    plum-effort-pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    plum-effort-pop var(--plum-dur-base) var(--plum-ease-pop),
     plum-effort-nebula 3s ease-in-out infinite alternate;
 }
 .plum-effort[data-special='true'] .plum-effort-thumb::after {
@@ -995,6 +990,15 @@ html.eink .plum-chat-dialog.plum-assistant-shell {
   .plum-model-trigger {
     transition: none;
   }
+}
+/* The sprung rail moves --pos itself; only the colour keeps a transition. */
+.plum-effort-rail.is-sprung .plum-effort-thumb {
+  transition: none;
+}
+.plum-effort-rail.is-sprung .plum-effort-fill {
+  transition: background 0.4s ease;
+}
+@media (prefers-reduced-motion: reduce) {
   .plum-effort-label,
   .plum-effort-fill,
   .plum-effort-fill::before,

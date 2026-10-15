@@ -8867,7 +8867,7 @@ html.dark .chat-composer-form.glass-chrome {
   box-shadow:
     0 24px 60px -24px rgb(0 0 0 / 0.65),
     inset 0 1px 0 hsl(var(--foreground) / 0.08);
-  animation: library-popup-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: library-popup-in var(--plum-dur-base) var(--plum-ease-enter);
 }
 /* Transform only: paused animations (hidden tab) must not leave it invisible. */
 @keyframes library-popup-in {

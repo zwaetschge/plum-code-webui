@@ -2,12 +2,49 @@ package com.claudewebui.app.ui.screens.dashboard
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import com.claudewebui.app.ui.motion.PlumMotionTokens
+import com.claudewebui.app.ui.motion.StreamingCaret
+import com.claudewebui.app.ui.motion.ThinkingDots
+import com.claudewebui.app.ui.motion.orSnap
+import com.claudewebui.app.ui.motion.plumSwitchTransform
+import com.claudewebui.app.ui.motion.pressScale
+import com.claudewebui.app.ui.motion.reducedMotion
+import com.claudewebui.app.ui.motion.riseIn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.History
@@ -90,6 +127,9 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var newChatStyleSet by remember { mutableStateOf(false) }
     var newChatStyle by remember { mutableStateOf<String?>(null) }
     var showStyleSheet by remember { mutableStateOf(false) }
+    // Which chat's history defined the "already there" turns, and their highest seq.
+    var baselineChat by remember { mutableStateOf<String?>(null) }
+    var baselineSeq by remember { mutableLongStateOf(Long.MAX_VALUE) }
     LaunchedEffect(owner) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
@@ -102,7 +142,6 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     }
     val voiceEnabled = personalization?.voiceChat == true
     LaunchedEffect(voiceEnabled) { if (!voiceEnabled) readText = null }
-    val isTemporary = chat?.body?.get("temporary")?.jsonPrimitive?.booleanOrNull == true
     val chatId = chat?.id
     val running = turns.any { it.status == "running" }
     LaunchedEffect(owner, chatId) { readText = null }
@@ -158,7 +197,11 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                         val history = requireNotNull(response.data)
                         // Latest snapshots replace their suffix, retaining older loaded pages.
                         val first = history.turns.firstOrNull()?.seq ?: Long.MAX_VALUE
-                        turns = if (turns.isNotEmpty() && turns.last().seq < first - 1) history.turns else (turns.filter { it.seq < first } + history.turns).distinctBy { it.id }.sortedBy { it.seq }
+                        val merged = if (turns.isNotEmpty() && turns.last().seq < first - 1) history.turns else (turns.filter { it.seq < first } + history.turns).distinctBy { it.id }.sortedBy { it.seq }
+                        // The first snapshot of a chat is its history: it is drawn in
+                        // place. Only turns with a higher seq rise in afterwards.
+                        if (baselineChat != chatId) { baselineChat = chatId; baselineSeq = merged.maxOfOrNull { it.seq } ?: 0L }
+                        turns = merged
                         chat = history.chat
                     }
                     pending = outbox.pending()
@@ -206,11 +249,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var effort by rememberSaveable { mutableStateOf<String?>(null) }
     val effortStops = apiEffortStops()
     val effortLabel = effortStops.firstOrNull { it.id == effort && it.id != null }?.label
-    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-    val lastLength = turns.lastOrNull()?.response?.length ?: 0
-    LaunchedEffect(chatId, turns.size) { if (turns.isNotEmpty()) listState.animateScrollToItem(turns.lastIndex) }
-    LaunchedEffect(lastLength) { if (running && turns.isNotEmpty()) listState.scrollBy(100000f) }
+    val reduce = reducedMotion()
     // The conversation list only polls while no chat is open, so the history
     // sheet loads its own page.
     LaunchedEffect(showHistory, search, offset) {
@@ -240,6 +280,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                 }, context.getString(R.string.assistant_new), null)
                 checkOwner(); accept("/api/assistant/api-chats", created)
                 val target = chat ?: return@launch
+                // A brand-new chat has no history: its first turn rises in.
+                baselineChat = target.id; baselineSeq = 0L
                 val sent = outbox.send("/api/assistant/api-chats/${target.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", target.revision); put("imageAssetIds", JsonArray(emptyList())); effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send), null)
                 checkOwner(); accept("/api/assistant/api-chats/${target.id}/turns", sent)
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -251,23 +293,53 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val activeWritingStyle = chat?.let { it.body["writingStyleSkill"]?.jsonPrimitive?.contentOrNull }
         ?: if (chat != null) null else if (newChatStyleSet) newChatStyle else personalization?.defaultWritingStyle?.ifBlank { null }
     Column(Modifier.fillMaxSize().padding(top = topInset).navigationBarsPadding().imePadding().padding(horizontal = 16.dp)) {
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (chat == null) {
+        // Switching chats: the old conversation leaves quickly, the new one
+        // settles in. Each slot renders its own snapshot, so the leaving chat
+        // never shows the arriving chat's title or turns.
+        val switchDensity = LocalDensity.current
+        val switchRise = with(switchDensity) { 16.dp.roundToPx() }
+        val switchExit = with(switchDensity) { 8.dp.roundToPx() }
+        AnimatedContent(
+            targetState = chat,
+            contentKey = { it?.id },
+            transitionSpec = { plumSwitchTransform(reduce, switchRise, switchExit) },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            label = "chat_switch",
+        ) { shown ->
+            if (shown == null) {
                 Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
                     Text(stringResource(R.string.assistant_greeting), style = MaterialTheme.typography.headlineMedium, color = palette.text, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
                     if (providers.isEmpty()) Text(stringResource(R.string.assistant_api_missing), color = palette.muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(24.dp))
                 }
             } else {
+                val shownId = shown.id
+                val live = shownId == chatId
+                val frozenTurns = remember { arrayOf(turns) }
+                if (live) frozenTurns[0] = turns
+                val shownTurns = if (live) turns else frozenTurns[0]
+                val shownTemporary = shown.body["temporary"]?.jsonPrimitive?.booleanOrNull == true
+                val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+                // Turns that already rose once; scrolling back must not replay it.
+                val risen = remember { HashSet<String>() }
+                var positioned by remember { mutableStateOf(false) }
+                val lastLength = shownTurns.lastOrNull()?.response?.length ?: 0
+                LaunchedEffect(shownTurns.size) {
+                    if (!live || shownTurns.isEmpty()) return@LaunchedEffect
+                    // Opening a chat lands at the end without scrolling through the history.
+                    val lastItem = shownTurns.lastIndex + if ((shownTurns.first().seq) > 1) 1 else 0
+                    if (positioned) listState.animateScrollToItem(lastItem) else { listState.scrollToItem(lastItem); positioned = true }
+                }
+                LaunchedEffect(lastLength) { if (live && running && shownTurns.isNotEmpty()) listState.scrollBy(100000f) }
                 Column(Modifier.fillMaxSize()) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text(chat!!.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = palette.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        Text(shown.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = palette.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         IconButton(enabled = !busy, onClick = { chat = null; turns = emptyList(); prompt = ""; imageIds = emptyList(); offset = 0 }) {
                             Icon(androidx.compose.material.icons.Icons.Outlined.Edit, stringResource(R.string.assistant_new_chat), tint = palette.text)
                         }
                     }
-                    if (isTemporary) Text(stringResource(R.string.assistant_temporary_detail, chat!!.body["expiresAt"]?.jsonPrimitive?.content.orEmpty()), color = palette.muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 4.dp))
+                    if (shownTemporary) Text(stringResource(R.string.assistant_temporary_detail, shown.body["expiresAt"]?.jsonPrimitive?.content.orEmpty()), color = palette.muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 4.dp))
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-                        if ((turns.firstOrNull()?.seq ?: 0) > 1) item(key = "older") { TextButton(enabled = !busy, onClick = { scope.launch {
+                        if ((shownTurns.firstOrNull()?.seq ?: 0) > 1) item(key = "older") { TextButton(enabled = !busy && live, onClick = { scope.launch {
                             busy = true
                             try {
                                 val target = chatId ?: return@launch
@@ -278,32 +350,64 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                             catch (failure: Exception) { checkOwner(); error = failure.message }
                             finally { if (TokenStore.assistantOwnerKey() == owner) busy = false }
                         } }) { Text(stringResource(R.string.assistant_older)) } }
-                        items(turns, key = { it.id }) { turn ->
+                        items(shownTurns, key = { it.id }) { turn ->
                             var menu by remember { mutableStateOf(false) }
-                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Only turns newer than the loaded history rise, and only once.
+                            val rise = remember { live && baselineChat == shownId && turn.seq > baselineSeq && risen.add(turn.id) }
+                            Column(Modifier.riseIn(rise), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Column(Modifier.fillMaxWidth(), horizontalAlignment = androidx.compose.ui.Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp), color = palette.controlSurface, modifier = Modifier.widthIn(max = 320.dp)) {
                                         Text(turn.prompt, Modifier.padding(horizontal = 16.dp, vertical = 11.dp), style = MaterialTheme.typography.bodyLarge, color = palette.text)
                                     }
-                                    turn.imageAssetIds.forEach { id -> ModelImage(owner, api, chatId!!, id) }
+                                    turn.imageAssetIds.forEach { id -> ModelImage(owner, api, shownId, id) }
                                 }
-                                Text(
-                                    if (turn.response.isEmpty() && turn.status == "running") "…" else turn.response,
-                                    style = MaterialTheme.typography.bodyLarge, color = palette.text,
-                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    AnswerHeader(turn.status, palette.muted, palette.accent)
+                                    val thinking = turn.status == "running" && turn.response.isEmpty()
+                                    val streaming = turn.status == "running" && turn.response.isNotEmpty()
+                                    if (thinking) {
+                                        val thinkingLabel = stringResource(R.string.component_thinking)
+                                        ThinkingDots(palette.accent, Modifier.padding(vertical = 8.dp).semantics { contentDescription = thinkingLabel })
+                                    } else if (streaming) {
+                                        Text(
+                                            buildAnnotatedString { append(turn.response); append(' '); appendInlineContent(CARET_ID, "▍") },
+                                            inlineContent = mapOf(CARET_ID to InlineTextContent(Placeholder(4.sp, 16.sp, PlaceholderVerticalAlign.TextCenter)) { StreamingCaret(palette.accent) }),
+                                            style = MaterialTheme.typography.bodyLarge, color = palette.text,
+                                        )
+                                    } else Text(turn.response, style = MaterialTheme.typography.bodyLarge, color = palette.text)
+                                }
                                 turn.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
                                 if (turn.status != "running" && turn.response.isNotBlank()) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                    IconButton(onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(turn.response)) }) { Icon(androidx.compose.material.icons.Icons.Outlined.ContentCopy, stringResource(R.string.assistant_copy), tint = palette.muted, modifier = Modifier.size(20.dp)) }
-                                    if (voiceEnabled) IconButton(onClick = { readText = turn.response }) { Icon(androidx.compose.material.icons.Icons.Outlined.VolumeUp, stringResource(R.string.assistant_read_aloud), tint = palette.muted, modifier = Modifier.size(20.dp)) }
-                                    if (!isTemporary) Box {
-                                        IconButton(onClick = { menu = true }) { Icon(androidx.compose.material.icons.Icons.Outlined.MoreHoriz, stringResource(R.string.assistant_more_actions), tint = palette.muted, modifier = Modifier.size(20.dp)) }
+                                    var copied by remember { mutableStateOf(false) }
+                                    LaunchedEffect(copied) { if (copied) { delay(PlumMotionTokens.COPY_CONFIRM_MS); copied = false } }
+                                    val copySource = remember { MutableInteractionSource() }
+                                    IconButton(onClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(turn.response)); copied = true }, interactionSource = copySource, modifier = Modifier.pressScale(copySource)) {
+                                        AnimatedContent(
+                                            targetState = copied,
+                                            transitionSpec = {
+                                                if (reduce) EnterTransition.None togetherWith ExitTransition.None
+                                                else (scaleIn(spring(0.5f, 700f), initialScale = .5f) + fadeIn(tween(110))) togetherWith (scaleOut(tween(110), targetScale = .5f) + fadeOut(tween(110)))
+                                            },
+                                            label = "copy_confirm",
+                                        ) { done ->
+                                            Icon(
+                                                if (done) androidx.compose.material.icons.Icons.Outlined.Check else androidx.compose.material.icons.Icons.Outlined.ContentCopy,
+                                                stringResource(if (done) R.string.component_copied else R.string.assistant_copy),
+                                                tint = if (done) palette.accent else palette.muted, modifier = Modifier.size(20.dp),
+                                            )
+                                        }
+                                    }
+                                    if (voiceEnabled) { val readSource = remember { MutableInteractionSource() }; IconButton(onClick = { readText = turn.response }, interactionSource = readSource, modifier = Modifier.pressScale(readSource)) { Icon(androidx.compose.material.icons.Icons.Outlined.VolumeUp, stringResource(R.string.assistant_read_aloud), tint = palette.muted, modifier = Modifier.size(20.dp)) } }
+                                    if (!shownTemporary) Box {
+                                        val moreSource = remember { MutableInteractionSource() }
+                                        IconButton(onClick = { menu = true }, interactionSource = moreSource, modifier = Modifier.pressScale(moreSource)) { Icon(androidx.compose.material.icons.Icons.Outlined.MoreHoriz, stringResource(R.string.assistant_more_actions), tint = palette.muted, modifier = Modifier.size(20.dp)) }
                                         DropdownMenu(menu, { menu = false }) {
-                                            DropdownMenuItem(text = { Text(stringResource(R.string.assistant_edit_branch)) }, enabled = !busy && !running, onClick = { menu = false; command("/api/assistant/api-chats/$chatId/branches", buildJsonObject { put("turnId", turn.id); put("includeAnswer", false) }, context.getString(R.string.assistant_edit_branch)) })
-                                            DropdownMenuItem(text = { Text(stringResource(R.string.assistant_branch)) }, enabled = !busy && !running, onClick = { menu = false; command("/api/assistant/api-chats/$chatId/branches", buildJsonObject { put("turnId", turn.id); put("includeAnswer", true) }, context.getString(R.string.assistant_branch)) })
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.assistant_edit_branch)) }, enabled = !busy && !running, onClick = { menu = false; command("/api/assistant/api-chats/$shownId/branches", buildJsonObject { put("turnId", turn.id); put("includeAnswer", false) }, context.getString(R.string.assistant_edit_branch)) })
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.assistant_branch)) }, enabled = !busy && !running, onClick = { menu = false; command("/api/assistant/api-chats/$shownId/branches", buildJsonObject { put("turnId", turn.id); put("includeAnswer", true) }, context.getString(R.string.assistant_branch)) })
                                             if (turn.status == "completed") {
                                                 val kinds = listOf("document" to R.string.assistant_artifacts, "task" to R.string.assistant_task, "memory" to R.string.assistant_memory) + if (researchChat) listOf("research" to R.string.assistant_research) else emptyList()
                                                 kinds.forEach { (kind, label) ->
-                                                    DropdownMenuItem(text = { Text("${stringResource(R.string.assistant_save_as)}: ${stringResource(label)}") }, enabled = !busy, onClick = { menu = false; command("/api/assistant/api-chats/$chatId/results", buildJsonObject { put("turnId", turn.id); put("kind", kind) }, context.getString(R.string.assistant_save_as)) })
+                                                    DropdownMenuItem(text = { Text("${stringResource(R.string.assistant_save_as)}: ${stringResource(label)}") }, enabled = !busy, onClick = { menu = false; command("/api/assistant/api-chats/$shownId/results", buildJsonObject { put("turnId", turn.id); put("kind", kind) }, context.getString(R.string.assistant_save_as)) })
                                                 }
                                             }
                                         }
@@ -311,7 +415,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                 }
                             }
                         }
-                        item(key = "read-aloud") { key(owner, chatId, readText) { AssistantReadAloud(owner, api, if (voiceEnabled) readText else null, personalization?.voiceName.orEmpty()) { readText = null } } }
+                        item(key = "read-aloud") { key(owner, shownId, readText) { AssistantReadAloud(owner, api, if (voiceEnabled && live) readText else null, personalization?.voiceName.orEmpty()) { readText = null } } }
                     }
                 }
             }
@@ -319,10 +423,10 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         error?.let { message -> Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
         notice?.let { message -> Text(message, color = palette.muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) }
         if (pending.isNotEmpty()) Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState())) {
-            pending.forEach { entry -> AssistChip(onClick = { pendingReview = entry }, enabled = !busy, label = { Text(entry.label, maxLines = 1) }) }
+            pending.forEach { entry -> val chipSource = remember { MutableInteractionSource() }; AssistChip(onClick = { pendingReview = entry }, enabled = !busy, label = { Text(entry.label, maxLines = 1) }, interactionSource = chipSource, modifier = Modifier.pressScale(chipSource)) }
         }
         if (imageIds.isNotEmpty()) Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            imageIds.forEach { id -> InputChip(selected = true, onClick = { imageIds = imageIds - id }, label = { Text(stringResource(R.string.assistant_remove_image)) }) }
+            imageIds.forEach { id -> val chipSource = remember { MutableInteractionSource() }; InputChip(selected = true, onClick = { imageIds = imageIds - id }, label = { Text(stringResource(R.string.assistant_remove_image)) }, interactionSource = chipSource, modifier = Modifier.pressScale(chipSource)) }
         }
         androidx.compose.animation.AnimatedVisibility(showAttach && chat != null && !researchChat) {
             Column(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -347,7 +451,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     var plusOpen by remember { mutableStateOf(false) }
                     Box {
-                        IconButton(onClick = { plusOpen = true }) { Icon(androidx.compose.material.icons.Icons.Outlined.Add, stringResource(R.string.assistant_add), tint = palette.text) }
+                        val plusSource = remember { MutableInteractionSource() }
+                        IconButton(onClick = { plusOpen = true }, interactionSource = plusSource, modifier = Modifier.pressScale(plusSource)) { Icon(androidx.compose.material.icons.Icons.Outlined.Add, stringResource(R.string.assistant_add), tint = palette.text) }
                         DropdownMenu(plusOpen, { plusOpen = false }) {
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.assistant_attach_image)) },
@@ -369,11 +474,35 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                     Spacer(Modifier.width(8.dp))
                     val runningTurn = turns.lastOrNull { it.status == "running" }
                     val canSend = prompt.isNotBlank() && !busy && !voiceBusy && !cameraBusy && !running
+                    // One button that morphs: the arrow cross-fades into the stop square
+                    // and the container takes on a stop tint while a reply runs.
+                    val stopping = runningTurn != null
+                    val sendSource = remember { MutableInteractionSource() }
+                    val sendContainer by animateColorAsState(
+                        if (stopping) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
+                        PlumMotionTokens.menuSpring<androidx.compose.ui.graphics.Color>().orSnap(reduce), label = "send_container",
+                    )
+                    val sendContent by animateColorAsState(
+                        if (stopping) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary,
+                        PlumMotionTokens.menuSpring<androidx.compose.ui.graphics.Color>().orSnap(reduce), label = "send_content",
+                    )
                     FilledIconButton(
-                        enabled = runningTurn != null || canSend,
+                        enabled = stopping || canSend,
                         onClick = { if (runningTurn != null) command("/api/assistant/api-chats/$chatId/turns/${runningTurn.id}/stop", buildJsonObject {}, context.getString(R.string.assistant_stop)) else send() },
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = sendContainer, contentColor = sendContent),
+                        interactionSource = sendSource,
+                        modifier = Modifier.pressScale(sendSource),
                     ) {
-                        Icon(if (runningTurn != null) androidx.compose.material.icons.Icons.Outlined.Stop else androidx.compose.material.icons.Icons.Outlined.ArrowUpward, stringResource(if (runningTurn != null) R.string.assistant_stop else R.string.assistant_send))
+                        AnimatedContent(
+                            targetState = stopping,
+                            transitionSpec = {
+                                if (reduce) EnterTransition.None togetherWith ExitTransition.None
+                                else (fadeIn(tween(160, 40)) + scaleIn(PlumMotionTokens.menuSpring(), initialScale = .6f)) togetherWith (fadeOut(tween(120)) + scaleOut(tween(120), targetScale = .6f))
+                            },
+                            label = "send_stop_icon",
+                        ) { stop ->
+                            Icon(if (stop) androidx.compose.material.icons.Icons.Outlined.Stop else androidx.compose.material.icons.Icons.Outlined.ArrowUpward, stringResource(if (stop) R.string.assistant_stop else R.string.assistant_send))
+                        }
                     }
                 }
             }
@@ -436,6 +565,47 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         catch (failure: Exception) { checkOwner(); error = failure.message }
         finally { if (TokenStore.assistantOwnerKey() == owner) { busy = false; updatePending() } }
     } }) { Text(stringResource(R.string.assistant_retry_delivery)) } }, dismissButton = { TextButton(enabled = !busy, onClick = { scope.launch { outbox.discard(entry.id); pending = outbox.pending(); pendingReview = null } }) { Text(stringResource(R.string.assistant_discard_delivery)) } }) }
+}
+
+private const val CARET_ID = "plum_caret"
+
+/**
+ * "Plum" above each answer. When a reply finishes while it is on screen, a
+ * single shine sweeps across the name — a quiet "done". Replies that were
+ * already complete when the history loaded never shine.
+ */
+@Composable
+private fun AnswerHeader(status: String, color: androidx.compose.ui.graphics.Color, shine: androidx.compose.ui.graphics.Color) {
+    val reduce = reducedMotion()
+    val sweep = remember { Animatable(-1f) }
+    var wasRunning by remember { mutableStateOf(status == "running") }
+    LaunchedEffect(status) {
+        val finished = wasRunning && status == "completed"
+        wasRunning = status == "running"
+        if (finished && !reduce) {
+            sweep.snapTo(0f)
+            sweep.animateTo(1f, tween(900, easing = PlumMotionTokens.EnterEasing))
+            sweep.snapTo(-1f)
+        }
+    }
+    Text(
+        "Plum",
+        style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = color,
+        modifier = Modifier
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                val p = sweep.value
+                if (p >= 0f) {
+                    val band = size.width * .7f
+                    val center = -band + p * (size.width + band * 2)
+                    drawRect(
+                        Brush.horizontalGradient(listOf(androidx.compose.ui.graphics.Color.Transparent, shine, androidx.compose.ui.graphics.Color.Transparent), startX = center - band / 2, endX = center + band / 2),
+                        blendMode = BlendMode.SrcAtop,
+                    )
+                }
+            },
+    )
 }
 
 @Composable

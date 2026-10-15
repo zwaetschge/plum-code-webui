@@ -12,6 +12,9 @@ import {
 } from '@/lib/sidebarMode';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useGlideMarker } from '@/lib/motion/glide';
+import { launchFlood } from '@/lib/motion/flood';
+import { isPlainClick } from '@/lib/motion/navigation';
 import { useShallow } from 'zustand/react/shallow';
 import {
   LayoutDashboard,
@@ -191,6 +194,13 @@ export function Sidebar({
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('all');
   const [toolsOpen, setToolsOpen] = useState(true);
   const toolsBlockRef = useRef<HTMLElement>(null);
+  // RailGlide: one selection surface each for the mode pill and the session list.
+  const modePillRef = useRef<HTMLDivElement>(null);
+  const modeMarkerRef = useRef<HTMLSpanElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const listMarkerRef = useRef<HTMLSpanElement>(null);
+  useGlideMarker(modePillRef, modeMarkerRef, '.sidebar-mode-pill-item.is-active');
+  useGlideMarker(listRef, listMarkerRef, ':is(.sidebar-nav-item, .sidebar-session-row).is-active');
   const [sortMode, setSortMode] = useState<SortMode>('updated');
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState<Record<string, boolean>>({});
   const [collapsedSessionFlyout, setCollapsedSessionFlyout] = useState<{
@@ -1258,10 +1268,15 @@ export function Sidebar({
         className="sidebar-main-navigation flex-1 flex flex-col min-h-0 px-2 pt-1 pb-0"
       >
         <div
-          className={cn('sidebar-mode-pill shrink-0', isCollapsed && 'is-collapsed')}
+          ref={modePillRef}
+          className={cn(
+            'sidebar-mode-pill plum-glide-host shrink-0',
+            isCollapsed && 'is-collapsed'
+          )}
           role="group"
           aria-label="Modus"
         >
+          <span ref={modeMarkerRef} className="plum-glide-marker" aria-hidden="true" />
           {MODE_ITEMS.map((item) => {
             const Icon = item.icon;
             const selected = mode === item.mode;
@@ -1270,9 +1285,19 @@ export function Sidebar({
                 key={item.mode}
                 to={SIDEBAR_MODE_HOME[item.mode]}
                 data-mode={item.mode}
-                onClick={() => {
+                onClick={(event) => {
                   setRememberedMode(item.mode);
                   rememberSidebarMode(item.mode);
+                  // Switching area: a LaunchFlood covers the screen, then the route changes.
+                  if (!selected && isPlainClick(event)) {
+                    event.preventDefault();
+                    const target = SIDEBAR_MODE_HOME[item.mode];
+                    launchFlood(event.currentTarget, () => {
+                      handleLinkClick();
+                      navigate(target);
+                    });
+                    return;
+                  }
                   handleLinkClick();
                 }}
                 onKeyDown={focusModeItem}
@@ -1423,7 +1448,8 @@ export function Sidebar({
               setCollapsedCategoryFlyout(null);
             }}
           >
-            <div className="sidebar-session-scroll-content mt-1">
+            <div ref={listRef} className="sidebar-session-scroll-content plum-glide-host mt-1">
+              <span ref={listMarkerRef} className="plum-glide-marker" aria-hidden="true" />
               {mode === 'chat' ? (
                 <ChatSidebarResources
                   search={searchQuery}

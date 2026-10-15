@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import './index.css';
+import './lib/motion/motion.css';
 import { applyProviderClass } from '@/lib/providers';
 import { toast } from '@/hooks/use-toast';
 import {

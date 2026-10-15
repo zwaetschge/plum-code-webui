@@ -1,9 +1,13 @@
-import { lazy, Suspense, useLayoutEffect, useState } from 'react';
+import { lazy, Suspense, useLayoutEffect, useRef, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LIBRARY_PARAM, LIBRARY_SECTIONS, libraryHref } from './libraryNav';
+import { floodElement } from '@/lib/motion/flood';
+import { takeLibraryOrigin } from '@/lib/motion/navigation';
+import { prefersReducedMotion } from '@/lib/motion/reducedMotion';
+import { boxOf } from '@/lib/motion/spring';
 
 const AssistantPage = lazy(() =>
   import('@/pages/AssistantPage').then((m) => ({ default: m.AssistantPage }))
@@ -50,8 +54,37 @@ export function LibraryPanel() {
   const slug = new URLSearchParams(location.search).get(LIBRARY_PARAM);
   const active = LIBRARY_SECTIONS.find((section) => section.slug === slug);
   const edge = useSidebarEdge(!!active);
+  // PageFlood: the popup grows out of the tile it was opened from and folds back into it.
+  const [panel, setPanel] = useState<HTMLDivElement | null>(null);
+  const closing = useRef(false);
+  // Layout effect: the first clip is in place before the popup is ever painted.
+  useLayoutEffect(() => {
+    if (!panel) return;
+    closing.current = false;
+    const origin = takeLibraryOrigin();
+    if (!origin) return;
+    panel.dataset.flood = 'opening';
+    void floodElement(panel, origin, boxOf(panel.getBoundingClientRect())).then(() => {
+      panel.style.clipPath = '';
+      if (panel.dataset.flood === 'opening') delete panel.dataset.flood;
+    });
+  }, [panel]);
 
   const close = () => {
+    const tile = document.querySelector('.sidebar-library-tile.is-active');
+    if (panel && tile && !closing.current && !prefersReducedMotion()) {
+      closing.current = true;
+      panel.dataset.flood = 'closing';
+      void floodElement(
+        panel,
+        boxOf(panel.getBoundingClientRect()),
+        boxOf(tile.getBoundingClientRect())
+      ).then(drop);
+      return;
+    }
+    if (!closing.current) drop();
+  };
+  const drop = () => {
     const params = new URLSearchParams(location.search);
     params.delete(LIBRARY_PARAM);
     params.delete('resource');
@@ -64,6 +97,7 @@ export function LibraryPanel() {
     <DialogPrimitive.Root open={!!active} modal={false} onOpenChange={(open) => !open && close()}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Content
+          ref={setPanel}
           aria-describedby={undefined}
           style={{ ['--library-left' as string]: `${edge}px` }}
           className="library-popup plum-assistant-shell"

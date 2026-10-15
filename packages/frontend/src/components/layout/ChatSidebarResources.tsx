@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { isPlainClick, rememberLibraryOrigin, transitionPane } from '@/lib/motion/navigation';
 import { LIBRARY_PARAM, LIBRARY_SECTIONS, libraryHref } from './libraryNav';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, Library, MessageCircle, SlidersHorizontal, Users } from 'lucide-react';
@@ -43,6 +44,7 @@ export function ChatSidebarResources({
 }) {
   const owner = useAuthStore((state) => state.user?.id);
   const location = useLocation();
+  const navigate = useNavigate();
   const openLibrary = new URLSearchParams(location.search).get(LIBRARY_PARAM);
   const chats = useQuery({
     queryKey: ['assistant', 'api-chats', owner],
@@ -93,7 +95,17 @@ export function ChatSidebarResources({
                 <NavLink
                   key={`model-${entry.id}`}
                   to={`/chat/model/${entry.id}`}
-                  onClick={onNavigate}
+                  onClick={(event) => {
+                    // Between model chats the pane swaps through a view transition.
+                    const to = `/chat/model/${entry.id}`;
+                    if (
+                      isPlainClick(event) &&
+                      location.pathname !== to &&
+                      transitionPane(() => navigate(to))
+                    )
+                      event.preventDefault();
+                    onNavigate();
+                  }}
                   title={entry.title}
                   className={({ isActive }) =>
                     cn(row, isActive && 'is-active', collapsed && 'justify-center')
@@ -143,7 +155,10 @@ export function ChatSidebarResources({
             <Link
               key={slug}
               to={libraryHref(location.pathname, location.search, slug)}
-              onClick={onNavigate}
+              onClick={(event) => {
+                rememberLibraryOrigin(event.currentTarget);
+                onNavigate();
+              }}
               title={label}
               aria-label={label}
               className={cn('sidebar-library-tile', openLibrary === slug && 'is-active')}

@@ -822,10 +822,13 @@ export const ChatInput = memo(function ChatInput({
                 )}
               </span>
               <span className="composer-brief-copy">
-                <span className="composer-brief-label">{composerBriefLabel}</span>
-                {composerBriefDetail && (
-                  <span className="composer-brief-detail">{composerBriefDetail}</span>
-                )}
+                {/* Keyed so a new status crossfades in instead of snapping. */}
+                <span key={composerBriefLabel} className="plum-swap">
+                  <span className="composer-brief-label">{composerBriefLabel}</span>
+                  {composerBriefDetail && (
+                    <span className="composer-brief-detail">{composerBriefDetail}</span>
+                  )}
+                </span>
               </span>
               {queueDepth > 0 && <span className="composer-brief-count">{queueDepth}</span>}
               {onOpenRun && isActive && (

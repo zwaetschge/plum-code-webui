@@ -30,7 +30,7 @@ export function WritingStyleMenu({ value, onChange, disabled }: WritingStyleMenu
         <PenLine className="h-4 w-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate">Stil: {current ?? 'Kein Stil'}</span>
       </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className="max-h-80 w-64 overflow-y-auto">
+      <DropdownMenuSubContent className="plum-stepout max-h-80 w-64 overflow-y-auto">
         <DropdownMenuItem onSelect={() => onChange(null)}>
           <span className="flex-1">Kein Stil</span>
           {!value && <Check className="h-4 w-4" />}

@@ -60,6 +60,9 @@ import com.claudewebui.app.ui.components.common.PlumText
 import com.claudewebui.app.ui.components.common.glassSurface
 import com.claudewebui.app.ui.theme.LocalPlumPalette
 import com.claudewebui.app.ui.theme.LocalReduceMotion
+import com.claudewebui.app.ui.motion.PlumMotionTokens
+import com.claudewebui.app.ui.motion.orSnap
+import com.claudewebui.app.ui.motion.pressScale
 
 @Composable
 fun ChatInput(
@@ -360,19 +363,26 @@ fun ChatInput(
                     label = "send_scale",
                 )
 
+                // Send and stop are one button: the fill tints between the states
+                // instead of jumping, and the icon cross-fades (below).
+                val sendFill by animateColorAsState(
+                    targetValue = when {
+                        canSend -> PlumAccent
+                        isWorking -> MaterialTheme.colorScheme.error
+                        else -> PlumSurfaceStrong
+                    },
+                    animationSpec = PlumMotionTokens.menuSpring<Color>().orSnap(reduceMotion),
+                    label = "send_fill",
+                )
+                val sendPress = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                 Box(
                     modifier = Modifier
                         .padding(bottom = componentTokens.spacing.xxs)
                         .size(componentTokens.sizing.touchTarget)
                         .graphicsLayer { scaleX = buttonScale; scaleY = buttonScale }
+                        .pressScale(sendPress)
                         .clip(CircleShape)
-                        .background(
-                            color = when {
-                                canSend -> PlumAccent
-                                isWorking -> MaterialTheme.colorScheme.error
-                                else -> PlumSurfaceStrong
-                            }
-                        ),
+                        .background(color = sendFill),
                     contentAlignment = Alignment.Center,
                 ) {
                     IconButton(
@@ -388,6 +398,7 @@ fun ChatInput(
                         },
                         modifier = Modifier.fillMaxSize().testTag("chat-send"),
                         enabled = canSend || isWorking,
+                        interactionSource = sendPress,
                     ) {
                         AnimatedContent(
                             targetState = isWorking && !canSend,
@@ -395,8 +406,8 @@ fun ChatInput(
                                 if (reduceMotion) {
                                     fadeIn(animationSpec = snap()) togetherWith fadeOut(animationSpec = snap())
                                 } else {
-                                    scaleIn(animationSpec = tween(componentTokens.motion.fast)) togetherWith
-                                        scaleOut(animationSpec = tween(componentTokens.motion.fast))
+                                    (fadeIn(tween(160, 40)) + scaleIn(PlumMotionTokens.menuSpring(), initialScale = 0.6f)) togetherWith
+                                        (fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.6f))
                                 }
                             },
                             label = "send_icon",

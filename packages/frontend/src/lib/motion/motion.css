@@ -1,0 +1,605 @@
+/* ── Motion tokens ─────────────────────────────────────────────────────────
+ * One timing language for CSS and JS (see tokens.ts). Only transform and
+ * opacity move; reduced motion and e-ink collapse everything to end states
+ * at the bottom of this file. */
+:root {
+  --plum-dur-press: 120ms;
+  --plum-dur-fast: 160ms;
+  --plum-dur-base: 220ms;
+  --plum-dur-exit: 170ms;
+  --plum-dur-enter: 300ms;
+  --plum-dur-rise: 420ms;
+  --plum-dur-crossfade: 650ms;
+  --plum-ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --plum-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --plum-ease-pop: cubic-bezier(0.3, 1.3, 0.5, 1);
+  /* Spring-like settle with a hint of overshoot for markers and fills. */
+  --plum-ease-spring: cubic-bezier(0.3, 1.1, 0.4, 1);
+}
+
+/* ── Rise: new turns, welcome blocks ───────────────────────────────────── */
+@keyframes plum-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes plum-rise-user {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.98);
+  }
+}
+.plum-rise .plum-api-user {
+  transform-origin: 100% 100%;
+  animation: plum-rise-user var(--plum-dur-enter) var(--plum-ease-enter) both;
+}
+.plum-rise .plum-api-answer {
+  animation: plum-rise var(--plum-dur-rise) var(--plum-ease-enter) 90ms both;
+}
+.plum-chat-welcome > * {
+  animation: plum-rise var(--plum-dur-rise) var(--plum-ease-enter) both;
+}
+.plum-chat-welcome > :nth-child(2) {
+  animation-delay: 60ms;
+}
+.plum-chat-welcome > :nth-child(3) {
+  animation-delay: 120ms;
+}
+.plum-chat-welcome > :nth-child(n + 4) {
+  animation-delay: 170ms;
+}
+/* Leaving the start page: greeting and hints lift away, the composer stays. */
+.plum-chat-welcome.is-leaving > :not(.plum-message-composer) {
+  opacity: 0;
+  transform: translateY(-12px);
+  transition:
+    opacity var(--plum-dur-exit) var(--plum-ease-exit),
+    transform var(--plum-dur-exit) var(--plum-ease-exit);
+}
+
+/* ── Answer lifecycle: thinking dots, live caret, completion shine ─────── */
+.plum-thinking {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 1.6em;
+}
+.plum-thinking > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: hsl(var(--primary));
+  animation: plum-thinking 1.2s ease-in-out infinite both;
+}
+.plum-thinking > span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.plum-thinking > span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes plum-thinking {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0) scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1);
+  }
+}
+.plum-api-answer.is-streaming .prose > :last-child:not(pre, ul, ol, table, blockquote, hr)::after {
+  content: '';
+  display: inline-block;
+  width: 0.5em;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  border-radius: 2px;
+  background: hsl(var(--primary) / 0.85);
+  animation: plum-caret 1.6s ease-in-out infinite;
+}
+@keyframes plum-caret {
+  50% {
+    opacity: 0.25;
+  }
+}
+.plum-answer-label {
+  display: inline-block;
+}
+.plum-answer-label.is-shine {
+  background: linear-gradient(
+    100deg,
+    hsl(var(--muted-foreground)) 35%,
+    hsl(var(--primary)) 50%,
+    hsl(var(--muted-foreground)) 65%
+  );
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: plum-text-shine 0.9s var(--plum-ease-enter) 1 both;
+}
+@keyframes plum-text-shine {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+/* ── Press feedback: one scale for every chat control ──────────────────── */
+:is(
+  .plum-composer-toolbar button,
+  .plum-message-actions button,
+  .plum-scroll-latest,
+  .plum-context-button,
+  .composer-chip-row button,
+  .composer-brief-row button,
+  .plum-chat-welcome [aria-label='Vorgeschlagene Prompts'] button,
+  .sidebar-mode-pill-item,
+  .sidebar-new-item,
+  .sidebar-library-tile,
+  .library-panel-tab
+) {
+  transition:
+    transform var(--plum-dur-press) var(--plum-ease-enter),
+    background-color var(--plum-dur-fast) ease,
+    color var(--plum-dur-fast) ease,
+    border-color var(--plum-dur-fast) ease;
+}
+:is(
+    .plum-composer-toolbar button,
+    .plum-message-actions button,
+    .plum-scroll-latest,
+    .plum-context-button,
+    .composer-chip-row button,
+    .composer-brief-row button,
+    .plum-chat-welcome [aria-label='Vorgeschlagene Prompts'] button,
+    .sidebar-mode-pill-item,
+    .sidebar-new-item,
+    .sidebar-library-tile,
+    .library-panel-tab
+  ):not(:disabled):active {
+  transform: scale(0.96);
+}
+:is(.sidebar-chat-history .sidebar-nav-item, .sidebar-session-row > a):active {
+  transform: scale(0.985);
+  transition: transform var(--plum-dur-press) var(--plum-ease-enter);
+}
+
+/* ── Send ↔ stop morph ─────────────────────────────────────────────────── */
+.plum-send-button {
+  position: relative;
+  overflow: hidden;
+}
+.plum-send-button .plum-send-icon {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transition:
+    opacity var(--plum-dur-base) var(--plum-ease-enter),
+    transform var(--plum-dur-base) var(--plum-ease-enter);
+}
+.plum-send-button[data-mode='send'] .plum-send-icon.is-stop,
+.plum-send-button[data-mode='stop'] .plum-send-icon.is-send {
+  opacity: 0;
+  transform: scale(0.5) rotate(-90deg);
+}
+.plum-composer-toolbar .plum-send-button[data-mode='stop'] {
+  border-color: hsl(var(--destructive) / 0.55);
+  background:
+    linear-gradient(145deg, hsl(0 0% 100% / 0.16), hsl(0 0% 100% / 0.03) 60%),
+    hsl(var(--destructive) / 0.24);
+  box-shadow:
+    inset 0 1px 0 hsl(0 0% 100% / 0.2),
+    0 6px 18px -10px hsl(var(--destructive) / 0.8);
+}
+.plum-send-button[data-mode='stop']::after {
+  /* A slow ring while the answer streams: the button is now the live control. */
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px hsl(var(--destructive) / 0.5);
+  animation: plum-caret 1.6s ease-in-out infinite;
+}
+
+/* ── Small pop for confirmations (copy → check) ────────────────────────── */
+.plum-pop {
+  display: inline-flex;
+  animation: plum-pop var(--plum-dur-base) var(--plum-ease-pop);
+}
+@keyframes plum-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+
+/* ── Agent status bubble above the code chat bar ───────────────────────── */
+.composer-wrap .composer-now-brief {
+  animation: plum-rise var(--plum-dur-enter) var(--plum-ease-enter) both;
+}
+.composer-brief-copy > .plum-swap {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: inherit;
+  animation: plum-swap var(--plum-dur-base) var(--plum-ease-enter);
+}
+@keyframes plum-swap {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* ── Jump to the latest answer ─────────────────────────────────────────── */
+.plum-api-footer {
+  position: relative;
+}
+.plum-scroll-latest {
+  position: absolute;
+  left: 50%;
+  top: -48px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px 0 11px;
+  margin-left: -60px;
+  border-radius: 999px;
+  border: 1px solid var(--assistant-glass-edge, hsl(var(--border)));
+  background: var(--assistant-glass, hsl(var(--card)));
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  box-shadow: var(--assistant-glass-shadow, 0 8px 24px -12px rgb(0 0 0 / 0.5));
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  animation: plum-rise var(--plum-dur-enter) var(--plum-ease-enter) both;
+}
+.plum-scroll-latest:hover {
+  border-color: hsl(var(--primary) / 0.5);
+}
+.plum-scroll-latest-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  animation: plum-pop var(--plum-dur-base) var(--plum-ease-pop);
+}
+
+/* ── StepOut menus ─────────────────────────────────────────────────────── */
+.plum-stepout:is([data-stepout='shaped'], [data-stepout='pending']) {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.plum-stepout[data-state='open'] {
+  animation: none;
+}
+.plum-stepout[data-state='open'] > * {
+  animation: plum-stepout-item var(--plum-dur-base) var(--plum-ease-enter) both;
+  animation-delay: calc(110ms + var(--stepout-i, 0) * 40ms);
+}
+.plum-stepout[data-state='closed'] {
+  animation: plum-stepout-out 110ms var(--plum-ease-exit) both;
+}
+@keyframes plum-stepout-item {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes plum-stepout-out {
+  to {
+    opacity: 0;
+  }
+}
+.plum-stepout-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 49;
+  pointer-events: none;
+}
+.plum-stepout-scrim {
+  position: absolute;
+  inset: 0;
+  background: hsl(var(--background) / 0.28);
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+.plum-stepout-layer.is-open .plum-stepout-scrim {
+  opacity: 1;
+}
+.plum-stepout-glass,
+.plum-stepout-edge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+}
+.plum-stepout-glass {
+  background: hsl(var(--popover));
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.16);
+}
+.plum-stepout-edge path {
+  fill: none;
+  stroke: hsl(var(--foreground) / 0.16);
+  stroke-width: 1;
+}
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html:not(.eink):not(.plum-engine-gecko) .plum-stepout-glass {
+    background:
+      linear-gradient(145deg, hsl(0 0% 100% / 0.12), transparent 55%), hsl(var(--popover) / 0.78);
+    -webkit-backdrop-filter: blur(32px) saturate(145%);
+    backdrop-filter: blur(32px) saturate(145%);
+  }
+  html.dark:not(.eink):not(.plum-engine-gecko) .plum-stepout-glass {
+    background:
+      radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.14), transparent 65%),
+      linear-gradient(145deg, hsl(0 0% 100% / 0.15), transparent 55%), hsl(var(--popover) / 0.5);
+  }
+}
+html.dark .plum-stepout-edge path {
+  stroke: hsl(0 0% 100% / 0.22);
+}
+/* The `+` turns into a close glyph while its menu is open. */
+.plum-plus-trigger svg {
+  transition: transform var(--plum-dur-base) var(--plum-ease-pop);
+}
+.plum-plus-trigger[data-state='open'] svg {
+  transform: rotate(45deg);
+}
+
+/* ── RailGlide markers in the sidebar ──────────────────────────────────── */
+.plum-glide-host {
+  position: relative;
+}
+.plum-glide-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 999px;
+  background: hsl(var(--primary) / 0.18);
+  opacity: 0;
+  transition: opacity var(--plum-dur-fast) ease;
+  will-change: transform;
+}
+.sidebar-session-scroll-content > .plum-glide-marker {
+  border-radius: 8px;
+  background: hsl(var(--primary) / 0.14);
+}
+.plum-glide-host > :not(.plum-glide-marker) {
+  position: relative;
+  z-index: 1;
+}
+.sidebar-mode-pill.plum-glide-host .sidebar-mode-pill-item.is-active,
+.sidebar-session-scroll-content.plum-glide-host
+  :is(.sidebar-nav-item, .sidebar-session-row).is-active {
+  background: transparent;
+}
+.sidebar-mode-pill-item {
+  transition:
+    flex-grow var(--plum-dur-enter) var(--plum-ease-spring),
+    transform var(--plum-dur-press) var(--plum-ease-enter),
+    color var(--plum-dur-base) ease;
+}
+.sidebar-mode-pill-item > span {
+  animation: plum-swap var(--plum-dur-base) var(--plum-ease-enter);
+}
+
+/* ── Chat switch (view transition) and pane entrance ───────────────────── */
+.plum-api-scroll {
+  view-transition-name: plum-chat-pane;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+::view-transition-old(plum-chat-pane) {
+  animation: plum-pane-out var(--plum-dur-exit) var(--plum-ease-exit) both;
+}
+::view-transition-new(plum-chat-pane) {
+  animation: plum-pane-in var(--plum-dur-enter) var(--plum-ease-enter) 60ms both;
+}
+@keyframes plum-pane-out {
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+@keyframes plum-pane-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+.plum-chat-enter {
+  animation: plum-pane-in var(--plum-dur-enter) var(--plum-ease-enter) 60ms both;
+}
+
+/* ── Library popup: PageFlood from the clicked tile ────────────────────── */
+.library-popup[data-flood] {
+  animation: none;
+}
+.library-popup[data-flood] > * {
+  animation: plum-rise var(--plum-dur-enter) var(--plum-ease-enter) 140ms both;
+}
+.library-popup[data-flood='closing'] > * {
+  animation: plum-stepout-out 120ms var(--plum-ease-exit) both;
+}
+
+/* ── LaunchFlood overlay for area switches ─────────────────────────────── */
+.plum-launch-flood {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 30% 20%, hsl(var(--primary) / 0.55), transparent 60%),
+    linear-gradient(160deg, hsl(var(--primary) / 0.35), hsl(var(--background)) 70%),
+    hsl(var(--background));
+}
+
+/* ── Ambient colour fields behind the chat glass ───────────────────────── */
+.plum-api-conversation,
+.plum-chat-page {
+  position: relative;
+  isolation: isolate;
+}
+.plum-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.plum-ambient-layer {
+  position: absolute;
+  inset: -10%;
+  background:
+    radial-gradient(
+      42% 38% at 18% 22%,
+      hsl(var(--ambient-hue) 80% 62% / var(--ambient-strength, 0.16)),
+      transparent 70%
+    ),
+    radial-gradient(
+      38% 44% at 84% 70%,
+      hsl(calc(var(--ambient-hue) + 40) 75% 58% / var(--ambient-strength, 0.16)),
+      transparent 70%
+    ),
+    radial-gradient(
+      30% 30% at 60% 8%,
+      hsl(calc(var(--ambient-hue) - 30) 70% 60% / calc(var(--ambient-strength, 0.16) * 0.6)),
+      transparent 70%
+    );
+}
+html:not(.dark) .plum-ambient-layer {
+  --ambient-strength: 0.1;
+}
+.plum-ambient-layer.is-in {
+  animation: plum-fade-in var(--plum-dur-crossfade) ease both;
+}
+.plum-ambient-layer.is-out {
+  animation: plum-fade-out var(--plum-dur-crossfade) ease both;
+}
+@keyframes plum-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes plum-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+html.eink .plum-ambient {
+  display: none;
+}
+
+/* ── FocusGlide frame ──────────────────────────────────────────────────── */
+.plum-focus-glide {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 60;
+  pointer-events: none;
+  overflow: visible;
+  opacity: 0;
+  transition: opacity var(--plum-dur-fast) ease;
+}
+.plum-focus-glide.is-visible {
+  opacity: 1;
+}
+.plum-focus-glide rect {
+  fill: none;
+  stroke: hsl(var(--ring));
+  stroke-width: 2;
+  filter: drop-shadow(0 0 6px hsl(var(--ring) / 0.45));
+}
+html.plum-focus-glide-on
+  .plum-assistant-shell
+  :focus-visible:not(textarea, select, input, [contenteditable='true']) {
+  outline-color: transparent !important;
+  box-shadow: none;
+}
+
+/* Turns reached with Alt+↑/↓ are focusable but draw no box of their own. */
+.plum-api-conversation article[tabindex='-1']:focus {
+  outline: none;
+}
+
+/* ── Reduced motion: end states only ───────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .plum-rise .plum-api-user,
+  .plum-rise .plum-api-answer,
+  .plum-chat-welcome > *,
+  .plum-thinking > span,
+  .plum-api-answer.is-streaming .prose > :last-child::after,
+  .plum-answer-label.is-shine,
+  .plum-send-button[data-mode='stop']::after,
+  .plum-pop,
+  .composer-wrap .composer-now-brief,
+  .composer-brief-copy > .plum-swap,
+  .plum-scroll-latest,
+  .plum-scroll-latest-badge,
+  .plum-stepout[data-state] > *,
+  .plum-stepout[data-state],
+  .sidebar-mode-pill-item > span,
+  .plum-chat-enter,
+  .library-popup[data-flood] > *,
+  .plum-ambient-layer {
+    animation: none !important;
+  }
+  .plum-chat-welcome.is-leaving > *,
+  .plum-send-button .plum-send-icon,
+  .plum-glide-marker,
+  .sidebar-mode-pill-item,
+  .plum-stepout-scrim,
+  .plum-focus-glide,
+  .plum-plus-trigger svg {
+    transition: none !important;
+  }
+  ::view-transition-old(plum-chat-pane),
+  ::view-transition-new(plum-chat-pane) {
+    animation: none;
+  }
+}
+html.eink :is(.plum-rise > *, .plum-chat-welcome > *, .plum-chat-enter, .plum-thinking > span) {
+  animation: none !important;
+}
+
+/* A hidden tab pauses every animation (index.css). Entrances start invisible,
+ * so a paused one would leave content blank: show their end state instead. */
+html.plum-page-hidden
+  :is(
+    .plum-chat-welcome > *,
+    .plum-rise .plum-api-user,
+    .plum-rise .plum-api-answer,
+    .plum-chat-enter,
+    .library-popup[data-flood] > *,
+    .plum-scroll-latest,
+    .composer-wrap .composer-now-brief,
+    .plum-stepout[data-state] > *,
+    .plum-ambient-layer.is-in
+  ) {
+  animation: none !important;
+}

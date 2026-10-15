@@ -22,6 +22,10 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/compone
 import { orderChatApiProviders } from '@/lib/chatApiProviders';
 import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
 import { WritingStyleMenu } from '@/components/presets/WritingStyleMenu';
+import { AmbientBackdrop } from '@/components/motion/AmbientBackdrop';
+import { rememberComposer } from '@/lib/motion/flood';
+import { prefersReducedMotion } from '@/lib/motion/reducedMotion';
+import { cn } from '@/lib/utils';
 
 export function ChatPage() {
   const owner = useAuthStore((s) => s.user?.id);
@@ -35,7 +39,9 @@ function ChatAccountPage({ owner }: { owner?: string }) {
   const navigate = useNavigate(),
     cache = useQueryClient(),
     input = useRef<HTMLTextAreaElement>(null),
-    fileInput = useRef<HTMLInputElement>(null);
+    fileInput = useRef<HTMLInputElement>(null),
+    composer = useRef<HTMLFormElement>(null);
+  const [leaving, setLeaving] = useState(false);
   const [draft, setDraft] = useState(''),
     [selection, setSelection] = useState(''),
     [model, setModel] = useState(''),
@@ -120,6 +126,11 @@ function ChatAccountPage({ owner }: { owner?: string }) {
         );
         if (useAuthStore.getState().user?.id !== owner) return;
         void cache.invalidateQueries({ queryKey: ['assistant', 'api-chats'] });
+        // Greeting and hints lift away first; the composer then glides into the new chat.
+        setLeaving(true);
+        if (!prefersReducedMotion()) await new Promise((resolve) => setTimeout(resolve, 170));
+        if (useAuthStore.getState().user?.id !== owner) return;
+        rememberComposer(composer.current);
         navigate(`/chat/model/${resource.id}`);
       }
     } catch (failure) {
@@ -133,13 +144,15 @@ function ChatAccountPage({ owner }: { owner?: string }) {
   };
   return (
     <div className="plum-chat-page">
-      <div className="plum-chat-welcome">
+      <AmbientBackdrop seed="plum-welcome" />
+      <div className={cn('plum-chat-welcome', leaving && 'is-leaving')}>
         <h1>
           {firstName
             ? `Hallo ${firstName}, was beschäftigt dich heute?`
             : 'Was beschäftigt dich heute?'}
         </h1>
         <form
+          ref={composer}
           className="plum-message-composer"
           onSubmit={(e) => {
             e.preventDefault();

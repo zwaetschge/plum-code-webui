@@ -17,6 +17,7 @@ import { UI_PROVIDER_META, toUiProvider } from '@/lib/providers';
 import { AppBackground } from '@/components/effects/AppBackground';
 import { OutboxPanel } from '@/components/chat/OutboxPanel';
 import { LibraryPanel } from './LibraryPanel';
+import { FocusGlide } from '@/components/motion/FocusGlide';
 import { CommandPalette } from '@/components/CommandPalette';
 import { getSessionRunState } from '@/lib/sessionRunState';
 import { cn } from '@/lib/utils';
@@ -298,6 +299,7 @@ export function Layout() {
         )}
 
         <LibraryPanel />
+        {assistantSurface && <FocusGlide />}
 
         {/* Mobile Sheet */}
         <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>

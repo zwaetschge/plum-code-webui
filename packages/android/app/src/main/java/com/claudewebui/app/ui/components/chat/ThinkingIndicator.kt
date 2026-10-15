@@ -4,7 +4,12 @@ import com.claudewebui.app.ui.theme.PlumTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import com.claudewebui.app.R
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.togetherWith
+import com.claudewebui.app.ui.motion.PlumMotionTokens
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -30,10 +35,17 @@ fun ThinkingIndicator(
     modifier: Modifier = Modifier,
 ) {
     val componentTokens = PlumTheme.tokens
+    val reduce = componentTokens.motion.reduceMotion
+    val live = isThinking || toolName != null
+    // Rises on a calm spring, leaves faster than it came; instant when the
+    // system removes animations. The dots only pulse while the agent is live,
+    // so they freeze during the exit instead of looping on.
     AnimatedVisibility(
-        visible = isThinking || toolName != null,
-        enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
-        exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 2 }),
+        visible = live,
+        enter = if (reduce) EnterTransition.None else
+            fadeIn(PlumMotionTokens.enterTween()) + slideInVertically(PlumMotionTokens.menuSpring()) { it / 2 },
+        exit = if (reduce) ExitTransition.None else
+            fadeOut(PlumMotionTokens.exitTween()) + slideOutVertically(PlumMotionTokens.exitTween()) { it / 3 },
         modifier = modifier,
     ) {
         Row(
@@ -72,22 +84,27 @@ fun ThinkingIndicator(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(componentTokens.spacing.sm),
                 ) {
-                    if (toolName != null) {
-                        // Tool executing state. A long-running tool call is
-                        // exactly where a missing timer reads as a hang, so it
-                        // gets the same elapsed counter as thinking.
-                        PulsingDots(color = MaterialTheme.colorScheme.tertiary)
-                        ElapsedTime(
-                            startTime = thinkingStartTime,
-                            prefix = formatToolLabel(toolName).removeSuffix("…"),
-                        )
-                    } else {
-                        // Thinking state
-                        PulsingDots(color = MaterialTheme.colorScheme.primary)
-                        ElapsedTime(
-                            startTime = thinkingStartTime,
-                            prefix = stringResource(R.string.component_thinking),
-                        )
+                    // Label changes (thinking -> tool -> other tool) cross-fade in place.
+                    // While leaving, the last live label and colour are held.
+                    val toolLabel = toolName?.let { formatToolLabel(it).removeSuffix("…") }
+                    val label = toolLabel ?: stringResource(R.string.component_thinking)
+                    val held = remember { arrayOf<Any>(label, toolName != null) }
+                    if (live) { held[0] = label; held[1] = toolName != null }
+                    PulsingDots(
+                        color = if (held[1] as Boolean) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                        active = live,
+                    )
+                    AnimatedContent(
+                        targetState = held[0] as String,
+                        transitionSpec = {
+                            if (reduce) EnterTransition.None togetherWith ExitTransition.None
+                            else fadeIn(tween(PlumMotionTokens.ENTER_MS / 2, PlumMotionTokens.EXIT_MS / 2)) togetherWith fadeOut(tween(PlumMotionTokens.EXIT_MS / 2))
+                        },
+                        label = "thinking_label",
+                    ) { prefix ->
+                        // A long-running tool call is exactly where a missing
+                        // timer reads as a hang, so it gets the elapsed counter too.
+                        ElapsedTime(startTime = thinkingStartTime, prefix = prefix)
                     }
                 }
             }
@@ -99,9 +116,10 @@ fun ThinkingIndicator(
 private fun PulsingDots(
     color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
+    active: Boolean = true,
 ) {
     val componentTokens = PlumTheme.tokens
-    val infiniteTransition = if (PlumTheme.tokens.motion.reduceMotion) null else rememberInfiniteTransition(label = "dots")
+    val infiniteTransition = if (PlumTheme.tokens.motion.reduceMotion || !active) null else rememberInfiniteTransition(label = "dots")
 
     Row(
         modifier = modifier,

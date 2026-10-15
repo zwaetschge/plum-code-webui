@@ -1,15 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, Brain, Zap } from 'lucide-react';
 import type { AssistantApiProvider } from '@plum-code-webui/shared';
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { StepOutContent } from '@/components/motion/StepOutContent';
+import { onFrame, SpringValue } from '@/lib/motion/spring';
+import { prefersReducedMotion } from '@/lib/motion/reducedMotion';
+import { SPRINGS } from '@/lib/motion/tokens';
 
 /** What the model chat API accepts per turn; `auto` sends nothing and keeps the model default. */
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'max' | 'ultra';
@@ -90,6 +93,31 @@ export function EffortRail({
     stops.findIndex((stop) => stop.id === value)
   );
   const current = stops[index] ?? stops[0]!;
+  // Thumb and fill ride one marker spring; rapid re-selection keeps its velocity.
+  const rail = useRef<HTMLDivElement>(null);
+  const position = useRef<SpringValue | null>(null);
+  const stopSpring = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    const element = rail.current;
+    if (!element) return;
+    if (!position.current || prefersReducedMotion()) {
+      position.current = position.current ?? new SpringValue(index);
+      position.current.jump(index);
+      element.style.setProperty('--pos', String(index));
+      return;
+    }
+    const spring = position.current;
+    spring.setTarget(index, SPRINGS.marker);
+    if (!stopSpring.current)
+      stopSpring.current = onFrame((dt) => {
+        element.style.setProperty('--pos', String(spring.step(dt)));
+        if (spring.settled) {
+          stopSpring.current = null;
+          return false;
+        }
+      });
+  }, [index]);
+  useEffect(() => () => stopSpring.current?.(), []);
   const [swap, setSwap] = useState(0);
   const first = useRef(true);
   useEffect(() => {
@@ -105,7 +133,8 @@ export function EffortRail({
         </strong>
       </div>
       <div
-        className="plum-effort-rail"
+        ref={rail}
+        className="plum-effort-rail is-sprung"
         role="radiogroup"
         aria-label={title}
         style={{ ['--stops' as string]: stops.length, ['--index' as string]: index }}
@@ -187,14 +216,14 @@ export function ReasoningPicker({
           <ChevronDown size={14} aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="plum-model-menu">
+      <StepOutContent align="end" className="plum-model-menu">
         <EffortRail
           stops={stops}
           value={value || '__default__'}
           onChange={onChange}
           title={label}
         />
-      </DropdownMenuContent>
+      </StepOutContent>
     </DropdownMenu>
   );
 }
@@ -242,7 +271,7 @@ export function ModelEffortPicker({
           <ChevronDown size={14} aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top" className="plum-model-menu">
+      <StepOutContent align="end" side="top" className="plum-model-menu">
         {!readOnlyModel && (
           <div className="plum-model-list" role="listbox" aria-label="Modell">
             {providers.map((provider, index) => (
@@ -278,7 +307,7 @@ export function ModelEffortPicker({
           value={effort}
           onChange={(next) => onEffort(next as EffortChoice)}
         />
-      </DropdownMenuContent>
+      </StepOutContent>
     </DropdownMenu>
   );
 }
@@ -377,11 +406,7 @@ export function SessionModelPicker({
           <ChevronDown size={14} aria-hidden />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        side="top"
-        className="plum-model-menu plum-session-model-menu"
-      >
+      <StepOutContent align="end" side="top" className="plum-model-menu plum-session-model-menu">
         <div className="plum-model-list" role="listbox" aria-label="Modell">
           {groups.map((group, index) => {
             const rows = [
@@ -509,7 +534,7 @@ export function SessionModelPicker({
             )}
           </>
         )}
-      </DropdownMenuContent>
+      </StepOutContent>
     </DropdownMenu>
   );
 }

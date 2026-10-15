@@ -1,12 +1,33 @@
 import { orderChatApiProviders } from '@/lib/chatApiProviders';
 import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
-import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { StepOutContent } from '@/components/motion/StepOutContent';
+import { AmbientBackdrop } from '@/components/motion/AmbientBackdrop';
+import { composerHandoffPending, launchFlood, playComposerHandoff } from '@/lib/motion/flood';
+import { onFrame, SpringValue } from '@/lib/motion/spring';
+import { prefersReducedMotion } from '@/lib/motion/reducedMotion';
+import { SPRINGS } from '@/lib/motion/tokens';
+import { cn } from '@/lib/utils';
 import { WritingStyleMenu } from '@/components/presets/WritingStyleMenu';
 import { usePersonalization } from '@/components/assistant/usePersonalization';
-import { ArrowUp, Copy, Mic, SlidersHorizontal } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  Copy,
+  Mic,
+  MoreHorizontal,
+  SlidersHorizontal,
+  Square,
+} from 'lucide-react';
 import { LiveImageCapture } from '@/components/assistant/LiveImageCapture';
 import { ScreenHistoryDisclosure } from '@/components/assistant/ScreenHistory';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
@@ -45,6 +66,25 @@ const statuses = {
   failed: 'Fehlgeschlagen',
   interrupted: 'Unterbrochen',
 };
+
+/** Where each conversation was left when the reader scrolled up; restored on return. */
+const scrollMemory = new Map<string, number>();
+
+function ThinkingDots() {
+  return (
+    <span className="plum-thinking" role="status">
+      <span />
+      <span />
+      <span />
+      <span className="sr-only">Plum denkt nach</span>
+    </span>
+  );
+}
+
+const isTextField = (target: EventTarget | null) =>
+  target instanceof HTMLElement &&
+  !!target.closest('textarea, input, select, [contenteditable="true"]');
+
 export function ApiChatPage() {
   const { id } = useParams(),
     owner = useAuthStore((state) => state.user?.id),
@@ -55,6 +95,10 @@ export function ApiChatPage() {
   const chatPrefix = chatHome === '/mini' ? '/mini/chat' : '/chat/model';
   const scroll = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
+  const [away, setAway] = useState(false);
+  const awaySeq = useRef(0);
+  const restored = useRef('');
+  const scrollStop = useRef<(() => void) | null>(null);
   const [tools, setTools] = useState(false),
     [voiceOpen, setVoiceOpen] = useState(false),
     [copied, setCopied] = useState('');
@@ -87,12 +131,24 @@ export function ApiChatPage() {
       query.state.data?.turns.some((turn) => turn.status === 'running') ? 500 : 5000,
     retry: false,
   });
+  useLayoutEffect(() => {
+    const element = scroll.current;
+    if (!element || !latest.data) return;
+    if (restored.current !== scope) {
+      // First paint of this conversation: back to where the reader left it, else the end.
+      restored.current = scope;
+      const saved = scrollMemory.get(scope);
+      followLatest.current = saved === undefined;
+      setAway(saved !== undefined);
+      awaySeq.current = latest.data.turns.at(-1)?.seq ?? 0;
+      if (saved !== undefined) {
+        element.scrollTop = saved;
+        return;
+      }
+    }
+    if (followLatest.current) element.scrollTop = element.scrollHeight;
+  }, [latest.data, scope]);
   useEffect(() => {
-    if (followLatest.current && scroll.current)
-      scroll.current.scrollTop = scroll.current.scrollHeight;
-  }, [latest.data]);
-  useEffect(() => {
-    followLatest.current = true;
     setTools(false);
     setVoiceOpen(false);
     setCopied('');
@@ -122,6 +178,109 @@ export function ApiChatPage() {
       ...new Map([...older, ...(latest.data?.turns ?? [])].map((turn) => [turn.id, turn])).values(),
     ].sort((a, b) => a.seq - b.seq),
     running = turns.find((turn) => turn.status === 'running');
+  // Turns already there when a conversation opens stay still; later ones rise in.
+  // After the start-page handoff the first turn rises too.
+  const baseline = useRef<{ scope: string; ids: Set<string> } | null>(null);
+  if (latest.data && baseline.current?.scope !== scope)
+    baseline.current = {
+      scope,
+      ids: new Set(composerHandoffPending() ? [] : latest.data.turns.map((turn) => turn.id)),
+    };
+  const fresh = (turnId: string) =>
+    baseline.current?.scope === scope && !baseline.current.ids.has(turnId);
+  // A cached conversation is swapped by the view transition; one that loads gets an entrance.
+  const entrance = useRef<{ scope: string; animate: boolean } | null>(null);
+  if (entrance.current?.scope !== scope) entrance.current = { scope, animate: !latest.data };
+  const statusSeen = useRef<{ scope: string; statuses: Map<string, string> }>({
+    scope,
+    statuses: new Map(),
+  });
+  const [shine, setShine] = useState('');
+  useEffect(() => {
+    const seen = statusSeen.current;
+    if (seen.scope !== scope) {
+      seen.scope = scope;
+      seen.statuses = new Map();
+    }
+    for (const turn of latest.data?.turns ?? []) {
+      if (seen.statuses.get(turn.id) === 'running' && turn.status === 'completed')
+        setShine(turn.id);
+      seen.statuses.set(turn.id, turn.status);
+    }
+  }, [latest.data, scope]);
+  useEffect(() => {
+    if (!shine) return;
+    const timer = window.setTimeout(() => setShine(''), 1000);
+    return () => window.clearTimeout(timer);
+  }, [shine]);
+  const unseen = away ? turns.filter((turn) => turn.seq > awaySeq.current).length : 0;
+  const stopScroll = () => {
+    scrollStop.current?.();
+    scrollStop.current = null;
+  };
+  const scrollToLatest = () => {
+    const element = scroll.current;
+    if (!element) return;
+    followLatest.current = true;
+    setAway(false);
+    scrollMemory.delete(scope);
+    stopScroll();
+    if (prefersReducedMotion()) {
+      element.scrollTop = element.scrollHeight;
+      return;
+    }
+    const position = new SpringValue(element.scrollTop);
+    const cancel = () => stopScroll();
+    element.addEventListener('wheel', cancel, { once: true, passive: true });
+    element.addEventListener('touchstart', cancel, { once: true, passive: true });
+    const unsubscribe = onFrame((dt) => {
+      // The answer may keep growing; aim at the current end every frame.
+      position.setTarget(element.scrollHeight - element.clientHeight, SPRINGS.scroll);
+      element.scrollTop = position.step(dt);
+      if (position.settled) {
+        scrollStop.current = null;
+        return false;
+      }
+    });
+    scrollStop.current = () => {
+      unsubscribe();
+      element.removeEventListener('wheel', cancel);
+      element.removeEventListener('touchstart', cancel);
+    };
+  };
+  useEffect(() => () => scrollStop.current?.(), []);
+  const composerRef = useCallback((node: HTMLFormElement | null) => playComposerHandoff(node), []);
+  // Alt+↑/↓ walks the turns; Enter reaches a turn's actions, Escape returns to the composer.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+      if (isTextField(event.target)) return;
+      const articles = Array.from(
+        scroll.current?.querySelectorAll<HTMLElement>('article[data-turn]') ?? []
+      );
+      if (!articles.length) return;
+      event.preventDefault();
+      const current = articles.findIndex((article) => article.contains(document.activeElement));
+      const next =
+        current < 0
+          ? event.key === 'ArrowUp'
+            ? articles.length - 1
+            : 0
+          : Math.max(
+              0,
+              Math.min(articles.length - 1, current + (event.key === 'ArrowUp' ? -1 : 1))
+            );
+      const target = articles[next]!;
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({
+        block: 'nearest',
+        behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const { preferences } = usePersonalization();
   const spoken = turns.filter((turn) => turn.status === 'completed' && turn.response).at(-1);
   const profile = useQuery({
@@ -213,7 +372,11 @@ export function ApiChatPage() {
       navigate(location.pathname, { replace: true, state: null });
     }
   }, [location.state, location.pathname, owner, navigate]);
-  const saveAnswer = (item: AssistantApiTurn, kind: 'document' | 'task' | 'memory' | 'research') =>
+  const saveAnswer = (
+    item: AssistantApiTurn,
+    kind: 'document' | 'task' | 'memory' | 'research',
+    origin?: DOMRect
+  ) =>
     void invoke(async () => {
       const goal = kind === 'task' ? draft.trim() || item.prompt : undefined;
       const result = (
@@ -225,10 +388,11 @@ export function ApiChatPage() {
             : 'Antwort übernehmen'
         )) as { data: { data: AssistantResource } }
       ).data.data;
-      if (scopeRef.current === scope)
-        navigate(
-          `${kind === 'task' ? '/assistant/tasks' : `/assistant/${kind === 'memory' ? 'memory' : 'artifacts'}`}?resource=${result.id}`
-        );
+      if (scopeRef.current !== scope) return;
+      const target = `${kind === 'task' ? '/assistant/tasks' : `/assistant/${kind === 'memory' ? 'memory' : 'artifacts'}`}?resource=${result.id}`;
+      // Leaving the chat for another area: cover from where the action was chosen.
+      if (origin) launchFlood(origin, () => navigate(target));
+      else navigate(target);
     });
   if (latest.isPending)
     return (
@@ -263,6 +427,7 @@ export function ApiChatPage() {
   };
   return (
     <main className="plum-api-conversation">
+      <AmbientBackdrop seed={String(chat.body.profileId ?? chat.id)} />
       {/* No top bar: the title shows in the sidebar, options sit in the `+` menu. */}
       <h1 className="sr-only">{chat.title}</h1>
       <div
@@ -270,10 +435,19 @@ export function ApiChatPage() {
         className="plum-api-scroll"
         onScroll={() => {
           const el = scroll.current;
-          if (el) followLatest.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+          if (!el) return;
+          const follow = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+          followLatest.current = follow;
+          if (follow) scrollMemory.delete(scope);
+          else scrollMemory.set(scope, el.scrollTop);
+          if (!follow && !away) awaySeq.current = turns.at(-1)?.seq ?? 0;
+          if (follow !== !away) setAway(!follow);
         }}
       >
-        <div className="plum-api-content">
+        <div
+          key={scope}
+          className={cn('plum-api-content', entrance.current?.animate && 'plum-chat-enter')}
+        >
           {!!chat.body.temporary && (
             <p className="rounded-md border p-3 text-sm">
               Temporäres Gespräch · lokale Löschung ab{' '}
@@ -386,6 +560,7 @@ export function ApiChatPage() {
                     )
                   ).data.data;
                   if (scopeRef.current === scope) {
+                    for (const turn of result.turns) baseline.current?.ids.add(turn.id);
                     setOlder((previous) => [...result.turns, ...previous]);
                   }
                 })
@@ -394,10 +569,34 @@ export function ApiChatPage() {
               Ältere Beiträge laden
             </Button>
           )}
-          <section className="space-y-6" aria-label="Gesprächsverlauf">
+          <section
+            className="space-y-6"
+            aria-label="Gesprächsverlauf"
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+          >
             {!turns.length && <p>Stelle deine erste Frage.</p>}
             {turns.map((item) => (
-              <article key={item.id} className="min-w-0 space-y-3">
+              <article
+                key={item.id}
+                data-turn={item.seq}
+                tabIndex={-1}
+                aria-label={`Beitrag ${item.seq}`}
+                className={cn('min-w-0 space-y-3', fresh(item.id) && 'plum-rise')}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    event.currentTarget
+                      .querySelector<HTMLElement>('.plum-message-actions button')
+                      ?.focus();
+                  } else if (event.key === 'Escape') {
+                    event.currentTarget
+                      .closest('.plum-api-conversation')
+                      ?.querySelector<HTMLTextAreaElement>('.plum-message-composer textarea')
+                      ?.focus();
+                  }
+                }}
+              >
                 <div className="plum-api-user">
                   <p className="mb-2 text-xs font-medium text-muted-foreground">Du</p>
                   <p className="whitespace-pre-wrap break-words">{item.prompt}</p>
@@ -405,9 +604,17 @@ export function ApiChatPage() {
                     <ChatImageStrip chatId={chat.id} ids={item.imageAssetIds} />
                   )}
                 </div>
-                <div className="plum-api-answer">
+                <div
+                  className={cn(
+                    'plum-api-answer',
+                    item.status === 'running' && !!item.response && 'is-streaming'
+                  )}
+                >
                   <p className="mb-2 text-xs font-medium text-muted-foreground">
-                    Plum{item.status !== 'completed' ? ` · ${statuses[item.status]}` : ''}
+                    <span className={cn('plum-answer-label', shine === item.id && 'is-shine')}>
+                      Plum
+                    </span>
+                    {item.status !== 'completed' ? ` · ${statuses[item.status]}` : ''}
                   </p>
                   {chat.body.workflow === 'research' && item.status === 'completed' ? (
                     <ResearchPreview
@@ -415,10 +622,12 @@ export function ApiChatPage() {
                       busy={busy}
                       onSave={() => saveAnswer(item, 'research')}
                     />
+                  ) : item.status === 'running' && !item.response ? (
+                    <ThinkingDots />
                   ) : (
                     <div className="prose prose-sm max-w-none break-words dark:prose-invert">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {item.response || (item.status === 'running' ? '…' : 'Keine Antwort')}
+                        {item.response || 'Keine Antwort'}
                       </ReactMarkdown>
                     </div>
                   )}
@@ -481,11 +690,23 @@ export function ApiChatPage() {
                         onClick={() =>
                           void navigator.clipboard
                             .writeText(item.response)
-                            .then(() => setCopied(item.id))
+                            .then(() => {
+                              setCopied(item.id);
+                              window.setTimeout(
+                                () => setCopied((current) => (current === item.id ? '' : current)),
+                                1600
+                              );
+                            })
                             .catch(() => setError('Kopieren fehlgeschlagen.'))
                         }
                       >
-                        <Copy size={13} />
+                        {copied === item.id ? (
+                          <span key="copied" className="plum-pop">
+                            <Check size={13} />
+                          </span>
+                        ) : (
+                          <Copy size={13} />
+                        )}
                         {copied === item.id ? 'Kopiert' : 'Kopieren'}
                       </Button>
                       {item.response && (
@@ -496,57 +717,63 @@ export function ApiChatPage() {
                           onError={setError}
                         />
                       )}
-                      <details>
-                        <summary className="cursor-pointer rounded-md px-3 py-2 text-xs">
-                          Weitere Aktionen
-                        </summary>
-                        <div className="flex flex-wrap gap-2 pt-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={busy}
-                            onClick={() => branch(item, false)}
-                          >
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" type="button">
+                            <MoreHorizontal size={13} />
+                            Mehr
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <StepOutContent align="start" side="bottom" className="w-72">
+                          <DropdownMenuItem disabled={busy} onSelect={() => branch(item, false)}>
                             Nachricht bearbeiten / neue Antwort
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={busy}
-                            onClick={() => branch(item, true)}
-                          >
+                          </DropdownMenuItem>
+                          <DropdownMenuItem disabled={busy} onSelect={() => branch(item, true)}>
                             Hier abzweigen
-                          </Button>
+                          </DropdownMenuItem>
                           {item.response && (
                             <>
-                              <Button
-                                variant="outline"
-                                size="sm"
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
                                 disabled={busy}
-                                onClick={() => saveAnswer(item, 'document')}
+                                onSelect={(event) =>
+                                  saveAnswer(
+                                    item,
+                                    'document',
+                                    (event.currentTarget as HTMLElement).getBoundingClientRect()
+                                  )
+                                }
                               >
                                 Als Ergebnis speichern
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
                                 disabled={busy}
-                                onClick={() => saveAnswer(item, 'task')}
+                                onSelect={(event) =>
+                                  saveAnswer(
+                                    item,
+                                    'task',
+                                    (event.currentTarget as HTMLElement).getBoundingClientRect()
+                                  )
+                                }
                               >
                                 Als Task-Entwurf übernehmen
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
                                 disabled={busy}
-                                onClick={() => saveAnswer(item, 'memory')}
+                                onSelect={(event) =>
+                                  saveAnswer(
+                                    item,
+                                    'memory',
+                                    (event.currentTarget as HTMLElement).getBoundingClientRect()
+                                  )
+                                }
                               >
                                 Als persönliche Erinnerung speichern
-                              </Button>
+                              </DropdownMenuItem>
                             </>
                           )}
-                        </div>
-                      </details>
+                        </StepOutContent>
+                      </DropdownMenu>
                     </div>
                   )}
                 </div>
@@ -556,7 +783,19 @@ export function ApiChatPage() {
         </div>
       </div>
       <div className="plum-api-footer">
+        {away && (
+          <button type="button" className="plum-scroll-latest" onClick={scrollToLatest}>
+            <ArrowDown size={14} aria-hidden />
+            Zum Ende
+            {unseen > 0 && (
+              <span key={unseen} className="plum-scroll-latest-badge" aria-label={`${unseen} neu`}>
+                {unseen}
+              </span>
+            )}
+          </button>
+        )}
         <form
+          ref={composerRef}
           className="plum-message-composer"
           onSubmit={(event) => {
             event.preventDefault();
@@ -728,30 +967,35 @@ export function ApiChatPage() {
                   {images.length} Bilder
                 </span>
               )}
+              {/* One button that morphs: send while idle, stop while an answer streams. */}
               <Button
                 className="plum-send-button"
                 size="icon"
-                aria-label="Senden"
-                disabled={busy || !!running || !draft.trim()}
-              >
-                <ArrowUp size={18} />
-              </Button>
-            </div>
-            {running && (
-              <Button
-                type="button"
-                variant="outline"
-                className="plum-stop-answer"
-                disabled={busy}
-                onClick={() =>
-                  void invoke(async () => {
-                    await api.post(`/api/assistant/api-chats/${id}/turns/${running.id}/stop`, {});
-                  })
+                type={running ? 'button' : 'submit'}
+                data-mode={running ? 'stop' : 'send'}
+                aria-label={running ? 'Antwort stoppen' : 'Senden'}
+                title={running ? 'Antwort stoppen' : undefined}
+                disabled={running ? busy : busy || !draft.trim()}
+                onClick={
+                  running
+                    ? () =>
+                        void invoke(async () => {
+                          await api.post(
+                            `/api/assistant/api-chats/${id}/turns/${running.id}/stop`,
+                            {}
+                          );
+                        })
+                    : undefined
                 }
               >
-                Antwort stoppen
+                <span className="plum-send-icon is-send" aria-hidden>
+                  <ArrowUp size={18} />
+                </span>
+                <span className="plum-send-icon is-stop" aria-hidden>
+                  <Square size={12} fill="currentColor" />
+                </span>
               </Button>
-            )}
+            </div>
           </div>
         </form>
         {error && (

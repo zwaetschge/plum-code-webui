@@ -1,6 +1,10 @@
 package com.claudewebui.app.ui.screens.dashboard
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.claudewebui.app.ui.motion.PlumMotionTokens
+import com.claudewebui.app.ui.motion.orSnap
+import com.claudewebui.app.ui.motion.pressScale
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -110,8 +114,10 @@ internal fun EffortRail(stops: List<EffortStop>, selectedId: String?, onSelect: 
             Modifier.fillMaxWidth().height(44.dp).clip(CircleShape).background(palette.segmentTrack),
         ) {
             val segment = maxWidth / stops.size
-            val x by animateDpAsState(segment * index, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow), label = "effort_thumb")
-            val fill by animateDpAsState(if (found >= 0) segment * (index + 1) else 0.dp, spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow), label = "effort_fill")
+            // animateDpAsState retargets the running spring, so a quick second
+            // pick continues from the thumb's current velocity instead of restarting.
+            val x by animateDpAsState(segment * index, PlumMotionTokens.markerSpring<androidx.compose.ui.unit.Dp>().orSnap(reduce), label = "effort_thumb")
+            val fill by animateDpAsState(if (found >= 0) segment * (index + 1) else 0.dp, spring<androidx.compose.ui.unit.Dp>(dampingRatio = 0.9f, stiffness = PlumMotionTokens.MARKER_STIFFNESS).orSnap(reduce), label = "effort_fill")
             Box(
                 Modifier.width(fill).fillMaxHeight().clip(CircleShape).drawBehind {
                     val w = size.width
@@ -136,7 +142,7 @@ internal fun EffortRail(stops: List<EffortStop>, selectedId: String?, onSelect: 
                 },
             )
             if (found >= 0) Box(
-                Modifier.offset(x = x).width(segment).fillMaxHeight().padding(4.dp)
+                Modifier.offset { androidx.compose.ui.unit.IntOffset(x.roundToPx(), 0) }.width(segment).fillMaxHeight().padding(4.dp)
                     .graphicsLayer { scaleX = pulse.value; scaleY = pulse.value }
                     .then(if (nebula > 0f) Modifier.border(2.dp, violet.copy(alpha = .85f * nebula), CircleShape) else Modifier)
                     .clip(CircleShape).background(palette.segmentSelected),
@@ -235,10 +241,12 @@ internal fun ModelEffortSheet(
 @Composable
 internal fun ModelEffortChip(model: String, effortLabel: String?, enabled: Boolean, onClick: () -> Unit) {
     val palette = PlumTheme.palette
+    val press = remember { MutableInteractionSource() }
     Surface(
         onClick = onClick, enabled = enabled, shape = CircleShape,
         color = palette.segmentTrack, border = BorderStroke(1.dp, palette.border.copy(alpha = .6f)),
-        modifier = Modifier.heightIn(min = 36.dp),
+        interactionSource = press,
+        modifier = Modifier.heightIn(min = 36.dp).pressScale(press),
     ) {
         Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(model.ifBlank { stringResource(R.string.assistant_model_pick) }, style = MaterialTheme.typography.labelLarge, color = palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
