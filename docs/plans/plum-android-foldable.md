@@ -42,18 +42,18 @@ Regeln:
 - **Aufklappen** aus einem Vollbild-Detail: derselbe Bereich mit diesem Element rechts ausgewählt.
 - Der Bereich bleibt über Faltwechsel hinweg erhalten.
 
-### Aufklapp-Animation „Milchglas wird scharf“
+### Aufklapp-Animation (nach dem Prinzip von github.com/chuspeeism/iphone-duo)
 
-Prinzip wie beim Referenz-GIF (Inhalt bleibt, neue Fläche schärft sich), mit Plum-eigener Glasnote:
-
-1. **Der Inhalt bleibt stehen.** Das offene Element landet ohne Gleiten direkt in der rechten Spalte – dort, wo der
-   Blick schon ist. Kein Neuaufbau, Scrollposition und Composer-Text bleiben.
-2. **Die neue Fläche ist Milchglas.** Die Listenspalte erscheint sofort an ihrem Platz, aber stark weichgezeichnet
-   (Blur 36 dp), leicht vergrößert (104 %) und von einem violett getönten Schleier überzogen.
-3. **Sie wird scharf.** In ~760 ms (abbremsend) klären sich Blur, Zoom und Tint gemeinsam zur fertigen Liste.
-
-Zuklappen: Die Liste verschwimmt in ~260 ms und verschwindet, das Element füllt danach den kleinen Screen. Keine
-Linie, keine Drehung. Bei „Animationen entfernen“ sofortiger Wechsel; unter Android 12 ohne Blur (nur Tint/Zoom).
+- **Ein Bild über beide Displays.** Was das Aussendisplay zeigte, ist der Teil rechts vom Scharnier: das offene
+  Element landet sofort in der rechten Spalte und bleibt scharf und an seinem Platz. Nichts gleitet, nichts dreht.
+- **Verlauf vom Scharnier nach aussen.** Links vom Scharnier ist der neu geöffnete Teil zuerst unscharf und dunkel.
+  Unschärfe wächst vom Scharnier (0) bis zum linken Rand (max. 34 dp) mit Exponent 1,35; die Abdunklung setzt nach
+  20 % der Strecke ein und erreicht doppelte Stärke (gekappt bei Schwarz). Rechts vom Scharnier: unverändert.
+- **An den Winkel gekoppelt.** Die Stärke folgt dem Scharnier-Sensor (`TYPE_HINGE_ANGLE`, flach = 0) und ist
+  zusätzlich durch einen 1,4-s-Zeitverlauf gedeckelt – wer halb geöffnet stehen bleibt (Flex-Modus), sieht nach
+  spätestens 1,4 s scharfen Inhalt.
+- Umsetzung: `ui/motion/HingeReveal.kt` (AGSL-Shader ab Android 13, darunter nur die Abdunklung). Bei
+  „Animationen entfernen“ kein Effekt.
 
 ### Später (nicht Teil dieses Schritts)
 
