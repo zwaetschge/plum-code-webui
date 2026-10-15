@@ -28,7 +28,8 @@ import {
 } from 'lucide-react';
 import { LiveImageCapture } from '@/components/assistant/LiveImageCapture';
 import { ScreenHistoryDisclosure } from '@/components/assistant/ScreenHistory';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import '@/components/assistant/dynamic-ui/dynamic-ui.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
@@ -59,6 +60,9 @@ import {
   ChatImageStrip,
   uploadChatImages,
 } from '@/components/assistant/ChatImages';
+
+// Interactive views pull in the chart library; only messages that have one load it.
+const DynamicUi = lazy(() => import('@/components/assistant/dynamic-ui/DynamicUi'));
 
 const statuses = {
   running: 'Antwortet …',
@@ -344,6 +348,14 @@ export function ApiChatPage() {
         setDraft((current) => (current.trim() === text ? '' : current));
     });
   };
+  /** A Dynamic UI button asking a follow-up: sent like a typed message. */
+  const sendText = (text: string) => {
+    if (!chat || running || busy || !text.trim()) return;
+    followLatest.current = true;
+    void invoke(async () => {
+      await transmit(text);
+    });
+  };
   const branch = (item: AssistantApiTurn, includeAnswer: boolean) =>
     void invoke(async () => {
       const result = (
@@ -618,14 +630,32 @@ export function ApiChatPage() {
                       busy={busy}
                       onSave={() => saveAnswer(item, 'research')}
                     />
-                  ) : item.status === 'running' && !item.response ? (
+                  ) : item.status === 'running' && !item.response && !item.uiPending ? (
                     <ThinkingDots />
-                  ) : (
+                  ) : item.response || (!item.ui && !item.uiPending) ? (
                     <div className="prose prose-sm max-w-none break-words dark:prose-invert">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {item.response || 'Keine Antwort'}
                       </ReactMarkdown>
                     </div>
+                  ) : null}
+                  {item.uiPending && (
+                    <div className="dui-pending" role="status">
+                      <span>Interaktive Ansicht wird erstellt …</span>
+                      <div className="dui-pending-bars" aria-hidden>
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                    </div>
+                  )}
+                  {item.ui && (
+                    <Suspense fallback={null}>
+                      <DynamicUi spec={item.ui} busy={busy || !!running} onSendMessage={sendText} />
+                    </Suspense>
+                  )}
+                  {item.uiError && item.status !== 'running' && (
+                    <p className="dui-note">{item.uiError}</p>
                   )}
                   {item.error && (
                     <p

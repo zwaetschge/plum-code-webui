@@ -13,7 +13,9 @@ import {
   replaceAssistantDocumentPassage,
   type AssistantApiTurn,
   type AssistantResource,
+  extractDynamicUi,
 } from '@plum-code-webui/shared';
+import { DYNAMIC_UI_INSTRUCTIONS } from './dynamicUiPrompt.js';
 import { z } from 'zod';
 import { all, get, run, transaction } from '../../db/pg.js';
 import { AppError } from '../../middleware/errorHandler.js';
@@ -100,11 +102,17 @@ export const API_TURN_INPUT = z
 const active = new Map<string, AbortController>();
 function turn(row: Record<string, unknown>): AssistantApiTurn {
   const context = JSON.parse(String(row.profile_json));
+  // The stored answer keeps the model's ```plum-ui block; clients get the text
+  // and the validated view separately (invalid views fall back to text).
+  const dynamic = extractDynamicUi(String(row.response));
   return {
     id: String(row.id),
     seq: Number(row.seq),
     prompt: String(row.prompt),
-    response: String(row.response),
+    response: dynamic.text,
+    ui: dynamic.ui,
+    uiError: dynamic.error,
+    uiPending: dynamic.pending && row.status === 'running',
     status: row.status as AssistantApiTurn['status'],
     error: row.error ? String(row.error) : null,
     createdAt: String(row.created_at),
@@ -184,6 +192,10 @@ export async function systemContext(userId: string, chat: AssistantResource, que
     parts.push(
       'Source-bound research: use only the supplied reference excerpts, distinguish supported findings from unknowns and conflicting evidence. Do not claim a web search. Return one JSON object only: {"title":"...","report":"Markdown report including limitations, claim references [1], [2], ... and source comparisons","claims":[{"claim":"supported statement","sourceId":"exact supplied ID","sourceRevision":1,"quote":"exact unmodified passage from that source revision","note":"limitations or relation to claim"}]}. Include at least one claim. Never invent IDs, revisions or quotes. Never set human review fields.'
     );
+  // Interactive views make no sense where the answer must be plain JSON or a
+  // bare replacement passage.
+  if (chat.body.workflow !== 'research' && !chat.body.artifactEdit)
+    parts.push(DYNAMIC_UI_INSTRUCTIONS);
   if (project) {
     parts.push(`Project instructions:\n${String(project.body.instructions ?? '').slice(0, 30000)}`);
   }
@@ -871,7 +883,7 @@ export async function materializeApiAnswer(
             BODY_SCHEMAS.artifact.parse({
               type: 'document',
               format: 'markdown',
-              content: row.response,
+              content: extractDynamicUi(String(row.response)).text,
               sourceIds,
               originResourceId: id,
               originTurnId: input.turnId,
@@ -897,7 +909,10 @@ export async function materializeApiAnswer(
               userId,
               'memory',
               chat.title,
-              BODY_SCHEMAS.memory.parse({ text: row.response, scope: 'personal' }),
+              BODY_SCHEMAS.memory.parse({
+                text: extractDynamicUi(String(row.response)).text,
+                scope: 'personal',
+              }),
               tx
             );
     await checkReferences(userId, resource.body, tx);

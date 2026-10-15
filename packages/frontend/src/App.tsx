@@ -53,6 +53,9 @@ const DashboardPage = lazy(() =>
   import('@/pages/DashboardPage').then((m) => ({ default: m.DashboardPage }))
 );
 const ChatPage = lazy(() => import('@/pages/ChatPage').then((m) => ({ default: m.ChatPage })));
+const DynamicUiDemoPage = lazy(() =>
+  import('@/pages/DynamicUiDemoPage').then((m) => ({ default: m.DynamicUiDemoPage }))
+);
 const PersonalizationPage = lazy(() =>
   import('@/pages/PersonalizationPage').then((m) => ({ default: m.PersonalizationPage }))
 );
@@ -232,6 +235,7 @@ export default function App() {
             >
               <Route index element={<AssistantPage />} />
               <Route path="chat" element={<ChatPage />} />
+              <Route path="chat/ui-demo" element={<DynamicUiDemoPage />} />
               <Route path="chat/personalization" element={<PersonalizationPage />} />
               <Route path="chat/session/:id" element={<SessionPage />} />
               <Route path="chat/model/:id" element={<ApiChatPage />} />

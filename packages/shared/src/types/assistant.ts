@@ -29,6 +29,12 @@ export interface AssistantApiTurn {
   profileRevision: number | null;
   sourceVersions: Array<{ id: string; revision: number }>;
   imageAssetIds?: string[];
+  /** Validated interactive view the model attached to this answer (Dynamic UI v1). */
+  ui?: import('../utils/dynamicUi.js').DynamicUiSpec | null;
+  /** Why an attached view was rejected; the text answer is shown instead. */
+  uiError?: string | null;
+  /** The answer is still streaming its interactive view. */
+  uiPending?: boolean;
   usage: {
     input: number;
     output: number;

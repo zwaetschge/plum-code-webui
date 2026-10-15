@@ -30,6 +30,7 @@
     "test:security-boundaries": "tsx scripts/security-boundaries-regression-tests.ts",
     "test:ssh-connections": "tsx scripts/ssh-connections-regression-tests.ts",
     "test:migrations": "tsx scripts/migration-dry-run.ts",
+    "test:dynamic-ui": "tsx --conditions=development scripts/dynamic-ui-regression-tests.ts",
     "test:assistant-api-chat": "tsx --conditions=development scripts/assistant-api-chat-regression-tests.ts",
     "test:assistant-voice": "tsx --conditions=development scripts/assistant-voice-regression-tests.ts",
     "test:assistant-sheet": "tsx --conditions=development scripts/assistant-sheet-regression-tests.ts",

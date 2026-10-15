@@ -21,6 +21,8 @@ export type * from './types/home-assistant.js';
 export * from './utils/contextWindow.js';
 
 export * from './utils/subagents.js';
+export * from './utils/dynamicUiExpr.js';
+export * from './utils/dynamicUi.js';
 export * from './types/assistant-csv.js';
 
 export * from './types/assistant-sheet.js';
