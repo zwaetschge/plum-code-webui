@@ -30,7 +30,7 @@
 #include "esp_heap_caps.h"
 #include "secrets.h"
 
-#define VERSION "0.3.0"
+#define VERSION "0.3.1"
 
 // ---- pins ----
 #define TFT_SCLK 21
@@ -392,8 +392,13 @@ static size_t readMic(int16_t *out) {
   int slot = e1 > e0 ? 1 : 0;
   slotEnergy[0] = e0 / 512; slotEnergy[1] = e1 / 512;
   int32_t peak = 0;
+  // DC blocker (one-pole high-pass at ~13 Hz): an offset would read as room noise.
+  static float lastIn = 0, lastOut = 0;
   for (int i = 0; i < 512; i++) {
-    int32_t v = raw[2 * i + slot] >> 14;      // 16 bit with 4x gain (8x clipped)
+    float in = (float)(raw[2 * i + slot] >> 14);   // 16 bit with 4x gain (8x clipped)
+    lastOut = in - lastIn + 0.995f * lastOut;
+    lastIn = in;
+    int32_t v = (int32_t)lastOut;
     v = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
     out[i] = v;
     peak = max(peak, abs(v));
@@ -438,8 +443,8 @@ struct Vad {
     float rms = sqrtf(sum / n);
     level = level > 0 ? level * 0.6f + rms * 0.4f : rms;
     if (noise <= 0) noise = level;
-    speech = level > max(noise * 4.0f, 450.0f);
-    quiet = level < max(noise * 2.2f, 250.0f);
+    speech = level > max(noise * 2.8f, 220.0f);
+    quiet = level < max(noise * 1.7f, 160.0f);
     if (level < noise) noise = noise * 0.7f + level * 0.3f;
     else if (!speech) noise = min(level, noise * 1.004f);
   }
@@ -477,6 +482,8 @@ static Heard record(size_t &bytes) {
     uint32_t now = millis();
     loud = vad.speech ? loud + 1 : 0;
     if (loud >= 4) heard = true;   // ~130 ms clearly above the room
+    static int tick = 0;
+    if (++tick % 16 == 0) Serial.printf("level %.0f room %.0f%s\n", vad.level, vad.noise, heard ? " speech" : "");
     if (!vad.quiet) lastVoice = now;
     append(pcm, samples, maxSamples, block, n, heard, RATE / 2);
     if (heard && now - lastVoice > SILENCE_END_MS) break;
