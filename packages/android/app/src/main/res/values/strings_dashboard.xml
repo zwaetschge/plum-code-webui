@@ -94,4 +94,12 @@
     <string name="dashboard_updated_1_s_66b44">updated %1$s</string>
     <string name="dashboard_waiting_for_you_e235e">Waiting for you</string>
     <string name="dashboard_you_re_offline_f4d9c">You\'re offline</string>
+    <string name="workspace_new_task">New task</string>
+    <string name="workspace_continue_task">Continue last task</string>
+    <string name="workspace_task_start_title">No task open</string>
+    <string name="workspace_task_start_hint">Start a new task or pick up where you left off.</string>
+    <string name="workspace_code_start_title">No session open</string>
+    <string name="workspace_code_start_hint">Start a new session or pick up where you left off.</string>
+    <string name="workspace_hide_list">Hide list</string>
+    <string name="workspace_show_list">Show list</string>
 </resources>

@@ -94,4 +94,12 @@
     <string name="dashboard_updated_1_s_66b44">aktualisiert %1$s</string>
     <string name="dashboard_waiting_for_you_e235e">Wartet auf dich</string>
     <string name="dashboard_you_re_offline_f4d9c">Du bist offline</string>
+    <string name="workspace_new_task">Neue Aufgabe</string>
+    <string name="workspace_continue_task">Letzte Aufgabe fortsetzen</string>
+    <string name="workspace_task_start_title">Keine Aufgabe offen</string>
+    <string name="workspace_task_start_hint">Starte eine neue Aufgabe oder mach dort weiter, wo du aufgehört hast.</string>
+    <string name="workspace_code_start_title">Keine Sitzung offen</string>
+    <string name="workspace_code_start_hint">Starte eine neue Sitzung oder mach dort weiter, wo du aufgehört hast.</string>
+    <string name="workspace_hide_list">Liste ausblenden</string>
+    <string name="workspace_show_list">Liste einblenden</string>
 </resources>

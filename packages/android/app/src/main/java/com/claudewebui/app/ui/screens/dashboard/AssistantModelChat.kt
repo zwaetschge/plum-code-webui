@@ -25,6 +25,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.buildAnnotatedString
@@ -79,16 +82,27 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 
 @Composable
-fun AssistantModelChat(topInset: androidx.compose.ui.unit.Dp, historyOpen: Boolean, onHistoryDismiss: () -> Unit, onAreaSelect: (String) -> Unit, onAgentChats: () -> Unit, api: ApiClient = koinInject()) {
+fun AssistantModelChat(
+    topInset: androidx.compose.ui.unit.Dp,
+    historyOpen: Boolean,
+    onHistoryDismiss: () -> Unit,
+    onAreaSelect: (String) -> Unit,
+    onAgentChats: () -> Unit,
+    // The open conversation is owned by the area workspace, so it survives
+    // fold changes and the expanded layout's history column can drive it.
+    selectedChatId: String? = null,
+    onChatSelected: (String?) -> Unit = {},
+    api: ApiClient = koinInject(),
+) {
     // Debug design previews run without an account; they still render the layout.
     val owner = TokenStore.assistantOwnerKey() ?: (if (com.claudewebui.app.BuildConfig.DEBUG) "preview" else return)
     // All state, thumbnails and effects are discarded when the account changes.
-    key(owner) { ModelChatAccount(owner, api, topInset, historyOpen, onHistoryDismiss, onAreaSelect, onAgentChats) }
+    key(owner) { ModelChatAccount(owner, api, topInset, historyOpen, onHistoryDismiss, onAreaSelect, onAgentChats, selectedChatId, onChatSelected) }
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.compose.ui.unit.Dp, historyOpen: Boolean, onHistoryDismiss: () -> Unit, onAreaSelect: (String) -> Unit, onAgentChats: () -> Unit) {
+private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.compose.ui.unit.Dp, historyOpen: Boolean, onHistoryDismiss: () -> Unit, onAreaSelect: (String) -> Unit, onAgentChats: () -> Unit, selectedChatId: String?, onChatSelected: (String?) -> Unit) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
@@ -97,7 +111,6 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var providers by remember { mutableStateOf<List<AssistantApiProvider>>(emptyList()) }
     var profiles by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
     var sources by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
-    var chats by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
     var chat by remember { mutableStateOf<AssistantResource?>(null) }
     var turns by remember { mutableStateOf<List<AssistantApiTurn>>(emptyList()) }
     var pending by remember { mutableStateOf<List<AssistantPendingCommand>>(emptyList()) }
@@ -108,15 +121,12 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var imageIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var prompt by remember { mutableStateOf("") }
     var title by remember { mutableStateOf("") }
-    var search by remember { mutableStateOf("") }
     var temporary by remember { mutableStateOf(false) }
     var research by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
     var refresh by remember { mutableIntStateOf(0) }
-    var offset by remember { mutableIntStateOf(0) }
-    var hasMore by remember { mutableStateOf(false) }
     var pendingReview by remember { mutableStateOf<AssistantPendingCommand?>(null) }
     var voiceBusy by remember { mutableStateOf(false) }
     var cameraBusy by remember { mutableStateOf(false) }
@@ -146,13 +156,31 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val running = turns.any { it.status == "running" }
     LaunchedEffect(owner, chatId) { readText = null }
     fun checkOwner() { if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed") }
+    val currentOnChatSelected by rememberUpdatedState(onChatSelected)
+    fun showChat(resource: AssistantResource?) { chat = resource; turns = emptyList(); prompt = ""; imageIds = emptyList() }
+    // The workspace picked another conversation (history column, restored
+    // selection, "new chat"): follow it. Internal switches report back through
+    // currentOnChatSelected, so both sides agree and this stays a no-op.
+    LaunchedEffect(owner, selectedChatId) {
+        if (selectedChatId == chat?.id) return@LaunchedEffect
+        if (selectedChatId == null) { showChat(null); return@LaunchedEffect }
+        RecentModelChats.get(selectedChatId)?.let { showChat(it); return@LaunchedEffect }
+        try {
+            val response = api.getAssistantApiTurns(selectedChatId); checkOwner()
+            val loaded = response.data?.chat
+            if (response.success && loaded != null) showChat(loaded) else currentOnChatSelected(chat?.id)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { checkOwner(); error = failure.message; currentOnChatSelected(chat?.id) }
+    }
     fun updatePending() { scope.launch { checkOwner(); pending = outbox.pending() } }
     fun accept(path: String, result: JsonObject) {
         checkOwner()
         if (path == "/api/assistant/api-chats") {
             chat = json.decodeFromJsonElement<AssistantResource>(result); turns = emptyList(); imageIds = emptyList()
+            currentOnChatSelected(chat?.id)
         } else if (path.endsWith("/branches")) {
             chat = json.decodeFromJsonElement<AssistantResource>(result.getValue("chat"))
+            currentOnChatSelected(chat?.id)
             turns = emptyList(); prompt = result["prompt"]?.jsonPrimitive?.content.orEmpty()
             imageIds = result["imageAssetIds"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
         } else if (path == "/api/assistant/api-chats/${chat?.id}/turns") { prompt = ""; imageIds = emptyList() }
@@ -181,17 +209,12 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { checkOwner(); error = failure.message }
     }
-    LaunchedEffect(owner, chatId, refresh, offset, search) {
+    LaunchedEffect(owner, chatId, refresh) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 try {
-                    if (chatId == null) {
-                        val response = api.getAssistantResources("api-chats", offset, search); checkOwner()
-                        if (!response.success) kotlin.error(response.error?.message ?: "Conversation list unavailable")
-                        val page = response.data.orEmpty()
-                        chats = if (offset == 0) page else (chats + page).distinctBy { it.id }
-                        hasMore = page.size == 100
-                    } else {
+                    // The conversation list lives in ModelChatHistoryList now.
+                    if (chatId != null) {
                         val response = api.getAssistantApiTurns(chatId); checkOwner()
                         if (!response.success) kotlin.error(response.error?.message ?: "Conversation unavailable")
                         val history = requireNotNull(response.data)
@@ -243,7 +266,6 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     }
     val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
     val showHistory = historyOpen
-    LaunchedEffect(historyOpen) { if (historyOpen) offset = 0 }
     var showAttach by remember { mutableStateOf(false) }
     var showModelSheet by remember { mutableStateOf(false) }
     var effort by rememberSaveable { mutableStateOf<String?>(null) }
@@ -251,19 +273,6 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val effortLabel = effortStops.firstOrNull { it.id == effort && it.id != null }?.label
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val reduce = reducedMotion()
-    // The conversation list only polls while no chat is open, so the history
-    // sheet loads its own page.
-    LaunchedEffect(showHistory, search, offset) {
-        if (showHistory && chatId != null) {
-            try {
-                val response = api.getAssistantResources("api-chats", offset, search); checkOwner()
-                val page = response.data.orEmpty()
-                chats = if (offset == 0) page else (chats + page).distinctBy { it.id }
-                hasMore = page.size == 100
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { }
-        }
-    }
     fun send() {
         val text = prompt.trim()
         if (text.isEmpty() || busy || running) return
@@ -333,7 +342,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                 Column(Modifier.fillMaxSize()) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Text(shown.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = palette.muted, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                        IconButton(enabled = !busy, onClick = { chat = null; turns = emptyList(); prompt = ""; imageIds = emptyList(); offset = 0 }) {
+                        IconButton(enabled = !busy, onClick = { showChat(null); currentOnChatSelected(null) }) {
                             Icon(androidx.compose.material.icons.Icons.Outlined.Edit, stringResource(R.string.assistant_new_chat), tint = palette.text)
                         }
                     }
@@ -547,16 +556,15 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         onDismiss = { showModelSheet = false }, showModels = chat == null,
     )
     if (showHistory) ModalBottomSheet(onDismissRequest = onHistoryDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(search, { search = it; offset = 0 }, placeholder = { Text(stringResource(R.string.assistant_search_chats)) }, singleLine = true, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth())
-            if (chats.isEmpty()) Text(stringResource(R.string.assistant_no_chats), color = palette.muted, modifier = Modifier.padding(vertical = 16.dp))
-            LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                items(chats, key = { it.id }) { resource ->
-                    Text(resource.title, Modifier.fillMaxWidth().clickable(enabled = !busy) { chat = resource; turns = emptyList(); prompt = ""; imageIds = emptyList(); onHistoryDismiss() }.padding(vertical = 14.dp, horizontal = 4.dp), style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                }
-                if (hasMore) item { TextButton(onClick = { offset += 100 }) { Text(stringResource(R.string.assistant_more)) } }
-            }
-        }
+        ModelChatHistoryList(
+            selectedChatId = chatId,
+            onSelect = { resource -> showChat(resource); currentOnChatSelected(resource.id); onHistoryDismiss() },
+            onNewChat = { showChat(null); currentOnChatSelected(null); onHistoryDismiss() },
+            enabled = !busy,
+            listModifier = Modifier.heightIn(max = 420.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            api = api,
+        )
     }
     pendingReview?.let { entry -> AlertDialog(onDismissRequest = { if (!busy) pendingReview = null }, title = { Text(stringResource(R.string.assistant_pending_delivery)) }, text = { Text(entry.payload["prompt"]?.jsonPrimitive?.content ?: entry.payload["title"]?.jsonPrimitive?.content ?: entry.label) }, confirmButton = { TextButton(enabled = !busy, onClick = { scope.launch {
         busy = true; error = null
@@ -568,6 +576,97 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
 }
 
 private const val CARET_ID = "plum_caret"
+
+/**
+ * Conversations the history list handed over, so a selection made there opens
+ * at once instead of waiting for a round trip. Process-local and tiny.
+ */
+internal object RecentModelChats {
+    private val cache = object : LinkedHashMap<String, AssistantResource>(32, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, AssistantResource>?) = size > 64
+    }
+    @Synchronized fun put(resource: AssistantResource) { cache[resource.id] = resource }
+    @Synchronized fun get(id: String): AssistantResource? = cache[id]
+}
+
+/**
+ * Model-chat history: search, "new chat" and the conversation list. Used in
+ * the phone's history sheet and as the expanded layout's list column, where
+ * it sits permanently beside the open conversation.
+ */
+@Composable
+fun ModelChatHistoryList(
+    selectedChatId: String?,
+    onSelect: (AssistantResource) -> Unit,
+    onNewChat: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    listModifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    api: ApiClient = koinInject(),
+) {
+    val owner = TokenStore.assistantOwnerKey() ?: (if (com.claudewebui.app.BuildConfig.DEBUG) "preview" else return)
+    val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    key(owner) {
+        var search by remember { mutableStateOf("") }
+        var offset by remember { mutableIntStateOf(0) }
+        var chats by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
+        var hasMore by remember { mutableStateOf(false) }
+        var loaded by remember { mutableStateOf(false) }
+        // Refreshes while visible, and right away when the open conversation
+        // changes, so a chat created in the composer shows up in the list.
+        LaunchedEffect(owner, search, offset, selectedChatId) {
+            if (search.isNotEmpty()) delay(250)
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) {
+                    try {
+                        val response = api.getAssistantResources("api-chats", offset, search)
+                        if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed")
+                        val page = response.data.orEmpty()
+                        chats = if (offset == 0) page else (chats + page).distinctBy { it.id }
+                        hasMore = page.size == 100
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { }
+                    loaded = true
+                    if (offset != 0) break
+                    delay(10_000)
+                }
+            }
+        }
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(search, { search = it; offset = 0 }, placeholder = { Text(stringResource(R.string.assistant_search_chats)) }, singleLine = true, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth())
+            if (onNewChat != null) {
+                val newSource = remember { MutableInteractionSource() }
+                FilledTonalButton(onClick = onNewChat, enabled = enabled, interactionSource = newSource, modifier = Modifier.fillMaxWidth().pressScale(newSource)) {
+                    Icon(androidx.compose.material.icons.Icons.Outlined.Edit, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.assistant_new_chat))
+                }
+            }
+            if (loaded && chats.isEmpty()) Text(stringResource(R.string.assistant_no_chats), color = palette.muted, modifier = Modifier.padding(vertical = 16.dp, horizontal = 4.dp))
+            LazyColumn(listModifier, contentPadding = contentPadding, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                items(chats, key = { it.id }) { resource ->
+                    val active = resource.id == selectedChatId
+                    Text(
+                        resource.title,
+                        Modifier.fillMaxWidth()
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                            .background(if (active) palette.controlSurface else androidx.compose.ui.graphics.Color.Transparent)
+                            .semantics { selected = active }
+                            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button) { RecentModelChats.put(resource); onSelect(resource) }
+                            .padding(vertical = 13.dp, horizontal = 12.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (active) palette.text else palette.text.copy(alpha = .86f),
+                        fontWeight = if (active) FontWeight.SemiBold else null,
+                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
+                if (hasMore) item { TextButton(onClick = { offset += 100 }) { Text(stringResource(R.string.assistant_more)) } }
+            }
+        }
+    }
+}
 
 /**
  * "Plum" above each answer. When a reply finishes while it is on screen, a

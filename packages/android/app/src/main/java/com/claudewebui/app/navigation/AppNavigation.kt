@@ -44,10 +44,11 @@ import com.claudewebui.app.ui.screens.chat.UsageScreen
 import com.claudewebui.app.ui.screens.chat.UsageViewModel
 import com.claudewebui.app.ui.components.common.WindowWidth
 import com.claudewebui.app.ui.components.common.rememberWindowWidth
-import com.claudewebui.app.ui.screens.dashboard.AdaptiveSessionWorkspace
+import com.claudewebui.app.ui.screens.dashboard.AreaWorkspace
+import com.claudewebui.app.ui.screens.dashboard.AreaWorkspaceHandoff
+import com.claudewebui.app.ui.components.common.isShortWindow
 import com.claudewebui.app.ui.screens.monitor.MonitorScreen
 import com.claudewebui.app.ui.theme.LayoutPrefs
-import com.claudewebui.app.ui.screens.dashboard.DashboardScreen
 import com.claudewebui.app.ui.screens.filemanager.FileManagerScreen
 import com.claudewebui.app.ui.screens.library.LibraryScreen
 import com.claudewebui.app.ui.components.common.MainDestination
@@ -128,6 +129,21 @@ private fun popExitSlide(): AnimatedContentTransitionScope<NavBackStackEntry>.()
             animationSpec = tween(EXIT_DURATION, easing = EmphasizedAccelerate)
         ) + fadeOut(animationSpec = tween(EXIT_DURATION))
     }
+}
+
+/**
+ * Whether the workspace uses two columns: from 600dp wide (unfolded Fold,
+ * tablets), unless the window is short — a landscape phone or the Fold's cover
+ * screen on its side has the width but not the height for two columns. The
+ * setting can force either layout.
+ */
+@Composable
+private fun rememberTwoPane(): Boolean {
+    val option by LayoutPrefs.twoPane.collectAsState()
+    return LayoutPrefs.shouldUseTwoPane(
+        option,
+        rememberWindowWidth() != WindowWidth.COMPACT && !isShortWindow(),
+    )
 }
 
 @Composable
@@ -248,53 +264,34 @@ fun AppNavigation(
         // ---- Dashboard ----
 
         composable(route = Routes.Dashboard.route) {
-            // On a tablet or unfolded device there is room for the session list
-            // and the chat at once; pushing a full-screen chat there wastes half
-            // the display and loses the list on every switch.
-            val twoPaneOption by LayoutPrefs.twoPane.collectAsState()
-            if (
-                LayoutPrefs.shouldUseTwoPane(
-                    twoPaneOption,
-                    rememberWindowWidth() == WindowWidth.EXPANDED,
-                )
-            ) {
-                AdaptiveSessionWorkspace(
-                    onNavigateToSettings = { navController.navigate(SETTINGS_GRAPH) },
-                    onNavigateMain = { navController.navigateMain(it) },
-                    onNavigateToFiles = { sessionId, dir ->
-                        navController.navigate(Routes.FileManager.createRoute(sessionId, dir))
-                    },
-                    onNavigateToGit = { sessionId ->
-                        navController.navigate(Routes.GitManager.createRoute(sessionId))
-                    },
-                    onNavigateToCheckpoints = { sessionId ->
-                        navController.navigate(Routes.CheckpointManager.createRoute(sessionId))
-                    },
-                    onNavigateToNotes = { sessionId ->
-                        navController.navigate(Routes.Notes.createRoute(sessionId))
-                    },
-                    onNavigateToMemory = { workingDirectory ->
-                        navController.navigate(Routes.Memory.createRoute(workingDirectory))
-                    },
-                    onNavigateToDevTools = { sessionId, workingDirectory ->
-                        navController.navigate(
-                            Routes.DevTools.createRoute(sessionId, workingDirectory)
-                        )
-                    },
-                )
-                return@composable
-            }
-            DashboardScreen(
-                onNavigateToChat = { sessionId ->
-                    navController.navigate(Routes.Chat.createRoute(sessionId))
-                },
-                onNavigateToMessage = { sessionId, messageId, chatId ->
-                    navController.navigate(Routes.Chat.createRoute(sessionId, messageId, chatId))
-                },
-                onNavigateToSettings = {
-                    navController.navigate(SETTINGS_GRAPH)
-                },
+            // One workspace for every width: compact windows keep the phone
+            // flow, wide ones (unfolded Fold, tablets) show the selected area's
+            // list beside one of its items. It decides the layout itself so the
+            // open item survives folding and unfolding.
+            AreaWorkspace(
+                expanded = rememberTwoPane(),
+                onNavigateToSettings = { navController.navigate(SETTINGS_GRAPH) },
                 onNavigateMain = { navController.navigateMain(it) },
+                onNavigateToFiles = { sessionId, dir ->
+                    navController.navigate(Routes.FileManager.createRoute(sessionId, dir))
+                },
+                onNavigateToGit = { sessionId ->
+                    navController.navigate(Routes.GitManager.createRoute(sessionId))
+                },
+                onNavigateToCheckpoints = { sessionId ->
+                    navController.navigate(Routes.CheckpointManager.createRoute(sessionId))
+                },
+                onNavigateToNotes = { sessionId ->
+                    navController.navigate(Routes.Notes.createRoute(sessionId))
+                },
+                onNavigateToMemory = { workingDirectory ->
+                    navController.navigate(Routes.Memory.createRoute(workingDirectory))
+                },
+                onNavigateToDevTools = { sessionId, workingDirectory ->
+                    navController.navigate(
+                        Routes.DevTools.createRoute(sessionId, workingDirectory)
+                    )
+                },
             )
         }
 
@@ -369,6 +366,21 @@ fun AppNavigation(
         ) { backStackEntry ->
             val sessionId = backStackEntry.arguments?.getString(Routes.Chat.ARG_SESSION_ID)
                 ?: return@composable
+            // Wide window (unfolded while this session was open full-screen, or
+            // a deep link on a tablet): open it inside the workspace instead,
+            // in its own area and selected in the right column.
+            if (rememberTwoPane()) {
+                val messageId = backStackEntry.arguments?.getString(Routes.Chat.ARG_MESSAGE_ID)
+                val chatId = backStackEntry.arguments?.getString(Routes.Chat.ARG_CHAT_ID)
+                LaunchedEffect(sessionId) {
+                    AreaWorkspaceHandoff.open(sessionId, messageId, chatId)
+                    navController.navigate(Routes.Dashboard.route) {
+                        popUpTo(Routes.Dashboard.route)
+                        launchSingleTop = true
+                    }
+                }
+                return@composable
+            }
             ChatScreen(
                 sessionId = sessionId,
                 initialMessageId = backStackEntry.arguments?.getString(Routes.Chat.ARG_MESSAGE_ID),

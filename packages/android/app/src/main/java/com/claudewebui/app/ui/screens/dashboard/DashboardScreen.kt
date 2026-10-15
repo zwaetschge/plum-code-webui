@@ -151,12 +151,20 @@ fun DashboardScreen(
     viewModel: DashboardViewModel = koinViewModel(),
     embedded: Boolean = false,
     selectedSessionId: String? = null,
+    // Area, open items and overlays live in a holder shared with the expanded
+    // layout, so folding or unfolding keeps the area and its selection.
+    workspace: AreaWorkspaceState = rememberAreaWorkspaceState(),
+    // The workspace passes its single model-chat instance in here, so the open
+    // conversation (scroll position, composer text) survives fold changes.
+    modelChat: (@Composable (androidx.compose.ui.unit.Dp, Boolean, () -> Unit) -> Unit)? = null,
 ) {
-    var assistantArea by rememberSaveable { mutableStateOf("chat") }
+    var assistantArea by workspace::area
     var modelChatMode by rememberSaveable { mutableStateOf(false) }
-    var showPersonalization by remember { mutableStateOf(false) }
-    var workspacePath by rememberSaveable { mutableStateOf<String?>(null) }
-    val selectArea: (String) -> Unit = { viewModel.clearSelection(); assistantArea = it; workspacePath = null; modelChatMode = false }
+    var showPersonalization by workspace::showPersonalization
+    var workspacePath by workspace::workspacePath
+    // The phone always lands on the area's list; only the two-column layout
+    // brings a remembered item back.
+    val selectArea: (String) -> Unit = { viewModel.clearSelection(); workspace.clearSelection(it); assistantArea = it; workspacePath = null; modelChatMode = false }
     val reduceMotion = com.claudewebui.app.ui.theme.LocalReduceMotion.current
 
     // Chat / Task / Code / Schwarm are sibling areas of one workspace. The
@@ -208,26 +216,7 @@ fun DashboardScreen(
             androidx.compose.animation.AnimatedContent(
                 targetState = screen,
                 transitionSpec = {
-                    val from = areaOrder(initialState)
-                    val to = areaOrder(targetState)
-                    if (reduceMotion) {
-                        androidx.compose.animation.EnterTransition.None togetherWith
-                            androidx.compose.animation.ExitTransition.None
-                    } else if (from < 0 || to < 0 || from == to) {
-                        androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(240)) togetherWith
-                            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(240))
-                    } else {
-                        val dir = if (to > from) 1 else -1
-                        (androidx.compose.animation.slideInHorizontally(
-                            androidx.compose.animation.core.tween(340, 40, PlumMotionTokens.EnterEasing)
-                        ) { dir * slideIn } + androidx.compose.animation.fadeIn(
-                            androidx.compose.animation.core.tween(300, 40)
-                        )) togetherWith (androidx.compose.animation.slideOutHorizontally(
-                            androidx.compose.animation.core.tween(PlumMotionTokens.EXIT_MS, easing = PlumMotionTokens.ExitEasing)
-                        ) { -dir * slideOut } + androidx.compose.animation.fadeOut(
-                            androidx.compose.animation.core.tween(PlumMotionTokens.EXIT_MS)
-                        ))
-                    }
+                    areaSwitchTransform(areaOrder(initialState), areaOrder(targetState), reduceMotion, slideIn, slideOut)
                 },
                 label = "assistant_area",
             ) { target ->
@@ -239,7 +228,12 @@ fun DashboardScreen(
                             onClose = { workspacePath = null; assistantArea = "code" },
                             onPersonalize = { showPersonalization = true }, onNavigateToChat = onNavigateToChat,
                             onNativeChat = { workspacePath = null; assistantArea = "chat"; modelChatMode = true })
-                    target == "model" -> AssistantModelChat(topInset = topInset, historyOpen = showHistory, onHistoryDismiss = { showHistory = false }, onAreaSelect = selectArea, onAgentChats = { modelChatMode = false })
+                    target == "model" -> if (modelChat != null) modelChat(topInset, showHistory) { showHistory = false }
+                        else AssistantModelChat(
+                            topInset = topInset, historyOpen = showHistory, onHistoryDismiss = { showHistory = false },
+                            onAreaSelect = selectArea, onAgentChats = { modelChatMode = false },
+                            selectedChatId = workspace.selection("chat"), onChatSelected = { workspace.select("chat", it) },
+                        )
                     target == "swarm" -> AssistantSwarmScreen(topInset = topInset, emergencyOpen = showEmergency, onEmergencyDismiss = { showEmergency = false }, onAreaSelect = selectArea)
                     else -> DashboardListScreen(
                         onNavigateToChat, onNavigateToMessage, onNavigateToSettings, onNavigateMain,
@@ -281,7 +275,7 @@ fun DashboardScreen(
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun DashboardListScreen(
+internal fun DashboardListScreen(
     onNavigateToChat: (sessionId: String) -> Unit,
     onNavigateToMessage: (sessionId: String, messageId: String, chatId: String?) -> Unit,
     onNavigateToSettings: () -> Unit,
@@ -1826,3 +1820,36 @@ private fun areaOrder(screen: String): Int = when (screen) {
     "swarm" -> 3
     else -> -1
 }
+
+/** Position of an area id ("chat", "task", "code", "swarm") in the selector; -1 otherwise. */
+internal fun areaIndex(area: String): Int = when (area) {
+    "chat" -> 0
+    "task" -> 1
+    "code" -> 2
+    "swarm" -> 3
+    else -> -1
+}
+
+/**
+ * Sibling areas slide along the selector's order: further right enters from
+ * the right, back enters from the left. Anything outside the selector
+ * (personalisation, web workspaces) cross-fades; reduced motion snaps.
+ */
+internal fun areaSwitchTransform(from: Int, to: Int, reduce: Boolean, slideIn: Int, slideOut: Int): androidx.compose.animation.ContentTransform =
+    if (reduce) {
+        androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+    } else if (from < 0 || to < 0 || from == to) {
+        androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(240)) togetherWith
+            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(240))
+    } else {
+        val dir = if (to > from) 1 else -1
+        (androidx.compose.animation.slideInHorizontally(
+            androidx.compose.animation.core.tween(340, 40, PlumMotionTokens.EnterEasing)
+        ) { dir * slideIn } + androidx.compose.animation.fadeIn(
+            androidx.compose.animation.core.tween(300, 40)
+        )) togetherWith (androidx.compose.animation.slideOutHorizontally(
+            androidx.compose.animation.core.tween(PlumMotionTokens.EXIT_MS, easing = PlumMotionTokens.ExitEasing)
+        ) { -dir * slideOut } + androidx.compose.animation.fadeOut(
+            androidx.compose.animation.core.tween(PlumMotionTokens.EXIT_MS)
+        ))
+    }
