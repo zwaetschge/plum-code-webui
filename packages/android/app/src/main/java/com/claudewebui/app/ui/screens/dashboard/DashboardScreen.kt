@@ -98,6 +98,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.animation.togetherWith
+import com.claudewebui.app.ui.motion.PlumMotionTokens
 import com.claudewebui.app.data.model.Category
 import com.claudewebui.app.data.model.CLIProvider
 import com.claudewebui.app.data.model.Session
@@ -198,9 +200,35 @@ fun DashboardScreen(
                     }
             },
         ) {
-            androidx.compose.animation.Crossfade(
+            // Sibling areas slide along the selector's order (Chat · Task · Code ·
+            // Schwarm): further right enters from the right, back enters from the
+            // left. Personalisation and web workspaces keep a plain cross-fade.
+            val slideIn = with(LocalDensity.current) { 48.dp.roundToPx() }
+            val slideOut = with(LocalDensity.current) { 36.dp.roundToPx() }
+            androidx.compose.animation.AnimatedContent(
                 targetState = screen,
-                animationSpec = androidx.compose.animation.core.tween(if (reduceMotion) 0 else 240),
+                transitionSpec = {
+                    val from = areaOrder(initialState)
+                    val to = areaOrder(targetState)
+                    if (reduceMotion) {
+                        androidx.compose.animation.EnterTransition.None togetherWith
+                            androidx.compose.animation.ExitTransition.None
+                    } else if (from < 0 || to < 0 || from == to) {
+                        androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(240)) togetherWith
+                            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(240))
+                    } else {
+                        val dir = if (to > from) 1 else -1
+                        (androidx.compose.animation.slideInHorizontally(
+                            androidx.compose.animation.core.tween(340, 40, PlumMotionTokens.EnterEasing)
+                        ) { dir * slideIn } + androidx.compose.animation.fadeIn(
+                            androidx.compose.animation.core.tween(300, 40)
+                        )) togetherWith (androidx.compose.animation.slideOutHorizontally(
+                            androidx.compose.animation.core.tween(PlumMotionTokens.EXIT_MS, easing = PlumMotionTokens.ExitEasing)
+                        ) { -dir * slideOut } + androidx.compose.animation.fadeOut(
+                            androidx.compose.animation.core.tween(PlumMotionTokens.EXIT_MS)
+                        ))
+                    }
+                },
                 label = "assistant_area",
             ) { target ->
                 when {
@@ -1789,3 +1817,12 @@ private fun dashboardFilterLabel(value: String, resources: android.content.res.R
         "Recent" -> R.string.dashboard_recent_76eec
         else -> R.string.dashboard_all_6a720
     })
+
+/** Position in the area selector; -1 for screens outside it. */
+private fun areaOrder(screen: String): Int = when (screen) {
+    "model" -> 0
+    "list:task" -> 1
+    "list:code" -> 2
+    "swarm" -> 3
+    else -> -1
+}
