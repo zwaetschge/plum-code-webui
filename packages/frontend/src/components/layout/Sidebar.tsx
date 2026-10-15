@@ -1,4 +1,5 @@
 import { ChatSidebarResources } from './ChatSidebarResources';
+import { SHOW_CHAT_HISTORY_EVENT } from '@/lib/chatHistory';
 import { SwarmSidebarSection } from './SwarmSidebarSection';
 import { Inbox, MessageSquare, ListTodo, Code2, Bot, Network } from 'lucide-react';
 import { SessionSurfaceMenuItem } from '@/components/session/SessionSurfaceMenuItem';
@@ -198,6 +199,20 @@ export function Sidebar({
     return () => window.removeEventListener('plum:expand-navigation', expand);
   }, []);
   const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    // "Alle anzeigen" on the chat start page: open the rail on the history.
+    const showHistory = () => {
+      setCollapsed(false);
+      setSearchQuery('');
+      window.requestAnimationFrame(() => {
+        listRef.current?.scrollIntoView({ block: 'start' });
+        searchInputRef.current?.focus({ preventScroll: true });
+      });
+    };
+    window.addEventListener(SHOW_CHAT_HISTORY_EVENT, showHistory);
+    return () => window.removeEventListener(SHOW_CHAT_HISTORY_EVENT, showHistory);
+  }, []);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('all');
   const [toolsOpen, setToolsOpen] = useState(true);
   const toolsBlockRef = useRef<HTMLElement>(null);
@@ -1393,6 +1408,7 @@ export function Sidebar({
               <div className="sidebar-session-search relative">
                 <Search className="absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
                 <Input
+                  ref={searchInputRef}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder={

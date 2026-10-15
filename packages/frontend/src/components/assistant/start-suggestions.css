@@ -205,3 +205,110 @@ html.plum-page-hidden .plum-start-card {
     animation: none;
   }
 }
+
+/* ── "Zuletzt": the latest model chats below the suggestions ─────────── */
+.plum-recent-chats {
+  width: 100%;
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plum-recent-chats-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-inline: 4px;
+}
+.plum-recent-chats-header h2 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+.plum-recent-chats-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  border-radius: 999px;
+  padding: 2px 6px;
+  transition: color 160ms ease;
+}
+.plum-recent-chats-all:is(:hover, :focus-visible) {
+  color: hsl(var(--primary));
+}
+.plum-recent-chats ul {
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  border: 1px solid var(--assistant-glass-edge, hsl(var(--border)));
+  background: var(--assistant-glass, hsl(var(--card)));
+  overflow: hidden;
+}
+.plum-recent-chats li {
+  animation: plum-recent-in var(--plum-dur-enter, 300ms) var(--plum-ease-enter, ease-out) both;
+  animation-delay: calc(260ms + var(--i, 0) * 50ms);
+}
+.plum-recent-chats li + li {
+  border-top: 1px solid hsl(var(--foreground) / 0.06);
+}
+.plum-recent-chat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 14px;
+  font-size: 13.5px;
+  color: hsl(var(--foreground));
+  transition: background-color 160ms ease;
+}
+.plum-recent-chat svg {
+  flex-shrink: 0;
+  color: hsl(var(--muted-foreground));
+}
+.plum-recent-chat:is(:hover, :focus-visible) {
+  background: hsl(var(--primary) / 0.08);
+}
+.plum-recent-chat:is(:hover, :focus-visible) svg {
+  color: hsl(var(--primary));
+}
+.plum-recent-chat-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.plum-recent-chat time {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--muted-foreground));
+}
+@keyframes plum-recent-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (max-width: 767px) {
+  .plum-recent-chat {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plum-recent-chats li {
+    animation: none;
+  }
+  .plum-recent-chat {
+    transition: none;
+  }
+}
+html.eink .plum-recent-chats li,
+html.plum-page-hidden .plum-recent-chats li {
+  animation: none !important;
+}

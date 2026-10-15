@@ -7853,6 +7853,11 @@ html.dark .chat-composer-form.glass-chrome {
   padding: 2px 0 0 2px;
 }
 
+/* `display: flex` above beats Tailwind's `hidden`; restore it. */
+.dashboard-category-create-slot.hidden {
+  display: none;
+}
+
 .dashboard-category-add-bubble {
   display: inline-flex;
   max-width: 100%;

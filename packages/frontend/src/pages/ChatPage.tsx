@@ -27,6 +27,7 @@ import { rememberComposer } from '@/lib/motion/flood';
 import { prefersReducedMotion } from '@/lib/motion/reducedMotion';
 import { cn } from '@/lib/utils';
 import { StartSuggestions } from '@/components/assistant/StartSuggestions';
+import { RecentChats } from '@/components/assistant/RecentChats';
 
 export function ChatPage() {
   const owner = useAuthStore((s) => s.user?.id);
@@ -189,6 +190,7 @@ function ChatAccountPage({ owner }: { owner?: string }) {
             />
           </>
         )}
+        <RecentChats />
         <AssistantOutbox />
       </div>
       <div className={cn('plum-api-footer plum-start-footer', leaving && 'is-leaving')}>

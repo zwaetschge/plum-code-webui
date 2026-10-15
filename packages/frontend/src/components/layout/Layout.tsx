@@ -22,6 +22,7 @@ import { AmbientBackdrop } from '@/components/motion/AmbientBackdrop';
 import { CommandPalette } from '@/components/CommandPalette';
 import { getSessionRunState } from '@/lib/sessionRunState';
 import { cn } from '@/lib/utils';
+import { SHOW_CHAT_HISTORY_EVENT } from '@/lib/chatHistory';
 import { normalizeUsageSnapshot } from '@plum-code-webui/shared';
 import { GlobalMessageSearchDialog } from '@/components/search/GlobalMessageSearchDialog';
 
@@ -95,6 +96,16 @@ export function Layout() {
     };
     window.addEventListener('session:open-mobile-right-menu', openTools);
     return () => window.removeEventListener('session:open-mobile-right-menu', openTools);
+  }, [isDesktopLayout]);
+  useEffect(() => {
+    // "Alle anzeigen" on the chat start page: the history lives in the sidebar.
+    const showHistory = () => {
+      if (isDesktopLayout) return;
+      setNavigationView('sessions');
+      setMobileMenuOpen(true);
+    };
+    window.addEventListener(SHOW_CHAT_HISTORY_EVENT, showHistory);
+    return () => window.removeEventListener(SHOW_CHAT_HISTORY_EVENT, showHistory);
   }, [isDesktopLayout]);
   const sessions = useSessionStore((state) => state.sessions);
   const setSessions = useSessionStore((state) => state.setSessions);
