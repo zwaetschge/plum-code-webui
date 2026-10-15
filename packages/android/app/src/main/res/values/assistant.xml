@@ -181,4 +181,24 @@
     <string name="assistant_voice_sample">Hello! This is how I sound when I read to you.</string>
     <string name="assistant_start_sub">Plum can answer calculations, comparisons and numbers with an interactive view.</string>
     <string name="assistant_start_interactive">Interactive</string>
+    <string name="voice_mode_title">Voice chat</string>
+    <string name="voice_mode_new_chat">New conversation</string>
+    <string name="voice_mode_ready">Go ahead, I\'m listening</string>
+    <string name="voice_mode_listening">Listening …</string>
+    <string name="voice_mode_transcribing">Understanding …</string>
+    <string name="voice_mode_thinking">Plum is thinking …</string>
+    <string name="voice_mode_speaking">Plum is speaking</string>
+    <string name="voice_mode_paused">Paused, microphone off</string>
+    <string name="voice_mode_hint_finish">Pause briefly or tap the orb when you\'re done.</string>
+    <string name="voice_mode_hint_interrupt">Tap the orb to interrupt.</string>
+    <string name="voice_mode_not_understood">Didn\'t catch that. Just say it again.</string>
+    <string name="voice_mode_no_answer">No answer arrived.</string>
+    <string name="voice_mode_send_failed">Couldn\'t send. Is a model connected?</string>
+    <string name="voice_mode_mic_failed">The microphone is not available.</string>
+    <string name="voice_mode_idle_end">Voice chat ended after two minutes of silence.</string>
+    <string name="voice_mode_permission">The voice chat needs microphone access.</string>
+    <string name="voice_mode_pause">Pause microphone</string>
+    <string name="voice_mode_resume">Resume listening</string>
+    <string name="voice_mode_end">End voice chat</string>
+    <string name="voice_mode_orb">Voice chat. Tap to finish speaking or to interrupt.</string>
 </resources>

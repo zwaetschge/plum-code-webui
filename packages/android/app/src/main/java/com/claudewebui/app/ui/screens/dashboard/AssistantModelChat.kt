@@ -51,6 +51,7 @@ import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Stop
@@ -142,6 +143,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var newChatStyle by remember { mutableStateOf<String?>(null) }
     var showStyleSheet by remember { mutableStateOf(false) }
     var showVoiceSheet by remember { mutableStateOf(false) }
+    var voiceMode by remember { mutableStateOf(false) }
     // Which chat's history defined the "already there" turns, and their highest seq.
     var baselineChat by remember { mutableStateOf<String?>(null) }
     var baselineSeq by remember { mutableLongStateOf(Long.MAX_VALUE) }
@@ -287,13 +289,21 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val reduce = reducedMotion()
     // A Dynamic UI button (override) sends like the composer, into the open chat,
     // but leaves the typed draft alone.
-    fun send(override: String? = null) {
+    val voicePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) voiceMode = true else error = context.getString(R.string.voice_mode_permission)
+    }
+    fun openVoiceMode() {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) voiceMode = true
+        else voicePermission.launch(android.Manifest.permission.RECORD_AUDIO)
+    }
+    // The voice mode (voice = true) also starts a new chat and leaves the draft alone.
+    fun send(override: String? = null, voice: Boolean = false) {
         val text = (override ?: prompt).trim()
         if (text.isEmpty() || busy || running) return
         val current = chat
         if (current != null) {
             command("/api/assistant/api-chats/${current.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", current.revision); put("imageAssetIds", JsonArray(imageIds.map(::JsonPrimitive))); effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send), keepDraft = override != null)
-        } else if (override == null && providerId.isNotBlank() && model.isNotBlank()) scope.launch {
+        } else if ((override == null || voice) && providerId.isNotBlank() && model.isNotBlank()) scope.launch {
             busy = true; error = null
             try {
                 val created = outbox.send("/api/assistant/api-chats", buildJsonObject {
@@ -306,7 +316,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                 // A brand-new chat has no history: its first turn rises in.
                 baselineChat = target.id; baselineSeq = 0L
                 val sent = outbox.send("/api/assistant/api-chats/${target.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", target.revision); put("imageAssetIds", JsonArray(emptyList())); effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send), null)
-                checkOwner(); accept("/api/assistant/api-chats/${target.id}/turns", sent)
+                checkOwner(); accept("/api/assistant/api-chats/${target.id}/turns", sent, keepDraft = voice)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { checkOwner(); error = failure.message }
             finally { if (TokenStore.assistantOwnerKey() == owner) { busy = false; updatePending() } }
@@ -505,6 +515,11 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                 enabled = !busy && !running,
                                 onClick = { plusOpen = false; showStyleSheet = true },
                             )
+                            if (voiceEnabled) DropdownMenuItem(
+                                text = { Text(stringResource(R.string.voice_mode_title)) },
+                                enabled = !busy && !running && !researchChat && (chat != null || providers.isNotEmpty()),
+                                onClick = { plusOpen = false; openVoiceMode() },
+                            )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.settings_hub_voice_menu, com.claudewebui.app.ui.screens.settings.assistantVoiceLabel(personalization?.voiceName.orEmpty())), maxLines = 1) },
                                 onClick = { plusOpen = false; showVoiceSheet = true },
@@ -519,6 +534,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                     Spacer(Modifier.width(8.dp))
                     val runningTurn = turns.lastOrNull { it.status == "running" }
                     val canSend = prompt.isNotBlank() && !busy && !voiceBusy && !cameraBusy && !running
+                    // An empty composer offers the voice conversation instead of sending.
+                    val canTalk = voiceEnabled && prompt.isBlank() && !busy && !voiceBusy && !cameraBusy && !running && !researchChat && (chat != null || providers.isNotEmpty())
                     // One button that morphs: the arrow cross-fades into the stop square
                     // and the container takes on a stop tint while a reply runs.
                     val stopping = runningTurn != null
@@ -532,21 +549,25 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                         PlumMotionTokens.menuSpring<androidx.compose.ui.graphics.Color>().orSnap(reduce), label = "send_content",
                     )
                     FilledIconButton(
-                        enabled = stopping || canSend,
-                        onClick = { if (runningTurn != null) command("/api/assistant/api-chats/$chatId/turns/${runningTurn.id}/stop", buildJsonObject {}, context.getString(R.string.assistant_stop)) else send() },
+                        enabled = stopping || canSend || canTalk,
+                        onClick = { if (runningTurn != null) command("/api/assistant/api-chats/$chatId/turns/${runningTurn.id}/stop", buildJsonObject {}, context.getString(R.string.assistant_stop)) else if (canSend) send() else openVoiceMode() },
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = sendContainer, contentColor = sendContent),
                         interactionSource = sendSource,
                         modifier = Modifier.pressScale(sendSource),
                     ) {
                         AnimatedContent(
-                            targetState = stopping,
+                            targetState = if (stopping) 2 else if (canTalk) 1 else 0,
                             transitionSpec = {
                                 if (reduce) EnterTransition.None togetherWith ExitTransition.None
                                 else (fadeIn(tween(160, 40)) + scaleIn(PlumMotionTokens.menuSpring(), initialScale = .6f)) togetherWith (fadeOut(tween(120)) + scaleOut(tween(120), targetScale = .6f))
                             },
                             label = "send_stop_icon",
-                        ) { stop ->
-                            Icon(if (stop) androidx.compose.material.icons.Icons.Outlined.Stop else androidx.compose.material.icons.Icons.Outlined.ArrowUpward, stringResource(if (stop) R.string.assistant_stop else R.string.assistant_send))
+                        ) { mode ->
+                            when (mode) {
+                                2 -> Icon(androidx.compose.material.icons.Icons.Outlined.Stop, stringResource(R.string.assistant_stop))
+                                1 -> Icon(androidx.compose.material.icons.Icons.Outlined.GraphicEq, stringResource(R.string.voice_mode_title))
+                                else -> Icon(androidx.compose.material.icons.Icons.Outlined.ArrowUpward, stringResource(R.string.assistant_send))
+                            }
                         }
                     }
                 }
@@ -554,6 +575,16 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         }
     }
     if (showVoiceSheet) VoicePickerSheet(api) { showVoiceSheet = false }
+    LaunchedEffect(voiceEnabled) { if (!voiceEnabled) voiceMode = false }
+    if (voiceMode) AssistantVoiceMode(
+        owner = owner, api = api,
+        voice = personalization?.voiceName?.ifBlank { null } ?: "Rufus Beck",
+        title = chat?.title,
+        turns = { turns }, running = { turns.any { it.status == "running" } }, lastError = { error },
+        send = { text -> if (busy || turns.any { it.status == "running" } || (chat == null && (providerId.isBlank() || model.isBlank()))) false else { send(text, voice = true); true } },
+        stopTurn = { turns.lastOrNull { it.status == "running" }?.let { turn -> command("/api/assistant/api-chats/$chatId/turns/${turn.id}/stop", buildJsonObject {}, context.getString(R.string.assistant_stop)) } },
+        onClose = { reason -> voiceMode = false; reason?.let { notice = it } },
+    )
     if (showStyleSheet) WritingStyleSheet(
         styles = writingStyles,
         selected = activeWritingStyle,

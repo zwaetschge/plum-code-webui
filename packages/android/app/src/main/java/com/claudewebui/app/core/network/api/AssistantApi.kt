@@ -36,7 +36,8 @@ interface AssistantApi {
     suspend fun getAssistantApiImages(id: String): ApiResponse<List<AssistantApiImage>>
     suspend fun getAssistantApiImage(id: String, assetId: String): ByteArray
     suspend fun uploadAssistantApiImage(owner: String, id: String, filename: String, mimeType: String, bytes: ByteArray): ApiResponse<AssistantApiImage>
-    suspend fun transcribeAssistantAudio(owner: String, bytes: ByteArray): ApiResponse<JsonObject>
+    /** Whisper through Vocarium; dictation sends AAC, the voice mode 16 kHz WAV. */
+    suspend fun transcribeAssistantAudio(owner: String, bytes: ByteArray, fileName: String = "dictation.m4a", mimeType: String = "audio/mp4"): ApiResponse<JsonObject>
     suspend fun speakAssistantText(owner: String, text: String, voice: String, language: String): ByteArray
     suspend fun getAssistantVoices(): ApiResponse<List<AssistantVoiceOption>>
     suspend fun deliverAssistantApiCommand(owner: String, path: String, payload: JsonObject): ApiResponse<JsonObject>
@@ -122,7 +123,7 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
             setBody(multipart)
         }.body()
     }
-    override suspend fun transcribeAssistantAudio(owner: String, bytes: ByteArray): ApiResponse<JsonObject> {
+    override suspend fun transcribeAssistantAudio(owner: String, bytes: ByteArray, fileName: String, mimeType: String): ApiResponse<JsonObject> {
         require(owner == TokenStore.assistantOwnerKey())
         require(bytes.isNotEmpty() && bytes.size <= 20 * 1024 * 1024)
         val server = requireNotNull(TokenStore.getServerUrl()).trimEnd('/')
@@ -130,8 +131,9 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
         val multipart = MultiPartFormDataContent(formData {
             append("language", "de")
             append("file", bytes, Headers.build {
-                append(HttpHeaders.ContentType, "audio/mp4")
-                append(HttpHeaders.ContentDisposition, "filename=\"dictation.m4a\"")
+                require(fileName.matches(Regex("[A-Za-z0-9_.-]+")))
+                append(HttpHeaders.ContentType, mimeType)
+                append(HttpHeaders.ContentDisposition, "filename=\"$fileName\"")
             })
         })
         return http.client.post("$server/api/assistant/voice/transcribe") {

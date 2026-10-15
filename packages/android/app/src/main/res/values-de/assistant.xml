@@ -181,4 +181,24 @@
     <string name="assistant_voice_sample">Hallo! So klinge ich, wenn ich dir etwas vorlese.</string>
     <string name="assistant_start_sub">Rechnungen, Vergleiche und Zahlen beantwortet Plum auf Wunsch mit einer interaktiven Ansicht.</string>
     <string name="assistant_start_interactive">Interaktiv</string>
+    <string name="voice_mode_title">Sprachgespräch</string>
+    <string name="voice_mode_new_chat">Neues Gespräch</string>
+    <string name="voice_mode_ready">Sprich einfach los</string>
+    <string name="voice_mode_listening">Ich höre zu …</string>
+    <string name="voice_mode_transcribing">Verstehe …</string>
+    <string name="voice_mode_thinking">Plum denkt nach …</string>
+    <string name="voice_mode_speaking">Plum spricht</string>
+    <string name="voice_mode_paused">Pausiert, Mikrofon aus</string>
+    <string name="voice_mode_hint_finish">Kurz Pause machen oder auf die Kugel tippen, wenn du fertig bist.</string>
+    <string name="voice_mode_hint_interrupt">Auf die Kugel tippen, um zu unterbrechen.</string>
+    <string name="voice_mode_not_understood">Nicht verstanden. Sag es einfach nochmal.</string>
+    <string name="voice_mode_no_answer">Keine Antwort erhalten.</string>
+    <string name="voice_mode_send_failed">Konnte nicht senden. Ist ein Modell verbunden?</string>
+    <string name="voice_mode_mic_failed">Das Mikrofon ist nicht verfügbar.</string>
+    <string name="voice_mode_idle_end">Sprachgespräch nach zwei Minuten Stille beendet.</string>
+    <string name="voice_mode_permission">Für das Sprachgespräch wird die Mikrofonfreigabe benötigt.</string>
+    <string name="voice_mode_pause">Mikrofon pausieren</string>
+    <string name="voice_mode_resume">Weiter zuhören</string>
+    <string name="voice_mode_end">Sprachgespräch beenden</string>
+    <string name="voice_mode_orb">Sprachgespräch. Tippen, um fertig zu sprechen oder zu unterbrechen.</string>
 </resources>
