@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated with the WebUI table in startSuggestionData.ts; keep both in sync. -->
+<resources>
+    <string name="start_savings_title">Sparplan durchrechnen</string>
+    <string name="start_savings_hint">Rechner mit Reglern und Verlauf</string>
+    <string name="start_savings_prompt" formatted="false">Wie viel Kapital habe ich nach 15 Jahren, wenn ich monatlich 300 CHF zu 4 % anlege? Zeig mir einen Rechner, mit dem ich die Werte ändern kann.</string>
+    <string name="start_mortgage_title">Eigenheim tragbar?</string>
+    <string name="start_mortgage_hint">Hypothek, Zins und Einkommen</string>
+    <string name="start_mortgage_prompt" formatted="false">Kann ich mir eine Wohnung für 850\'000 CHF leisten? Ich verdiene 140\'000 CHF im Jahr und habe 200\'000 CHF Eigenkapital. Zeig mir einen Tragbarkeitsrechner.</string>
+    <string name="start_pillar3a_title">Säule 3a planen</string>
+    <string name="start_pillar3a_hint">Steuern sparen und vorsorgen</string>
+    <string name="start_pillar3a_prompt" formatted="false">Wie viel bringt mir die Säule 3a bis zur Pension, wenn ich jedes Jahr den Maximalbetrag einzahle? Zeig einen Rechner mit Rendite, Laufzeit und Steuerersparnis.</string>
+    <string name="start_loan_title">Kredit oder Leasing</string>
+    <string name="start_loan_hint">Monatsrate und Gesamtkosten</string>
+    <string name="start_loan_prompt" formatted="false">Ich möchte ein Auto für 32\'000 CHF finanzieren. Vergleiche Kredit und Leasing über 4 Jahre mit einem Rechner für Rate, Zins und Gesamtkosten.</string>
+    <string name="start_power_title">Stromkosten prüfen</string>
+    <string name="start_power_hint">Was ein Gerät im Jahr kostet</string>
+    <string name="start_power_prompt" formatted="false">Was kostet mich mein Gaming-PC im Jahr an Strom, wenn er 4 Stunden täglich mit 450 Watt läuft? Zeig einen Rechner mit Strompreis und Nutzungsdauer.</string>
+    <string name="start_salary_title">Lohnerhöhung verhandeln</string>
+    <string name="start_salary_hint">Was die Prozente wirklich bringen</string>
+    <string name="start_salary_prompt" formatted="false">Ich verdiene 92\'000 CHF brutto. Zeig mir einen Rechner, was 3, 5 oder 8 % Lohnerhöhung netto pro Monat und über 10 Jahre ausmachen.</string>
+    <string name="start_budget_title">Budget als Dashboard</string>
+    <string name="start_budget_hint">Kennzahlen und Diagramm</string>
+    <string name="start_budget_prompt" formatted="false">Hilf mir, mein Monatsbudget von 5200 CHF auf Miete, Essen, Mobilität, Freizeit und Sparen aufzuteilen. Zeig es als interaktives Dashboard.</string>
+    <string name="start_running_title">Lauftraining auswerten</string>
+    <string name="start_running_hint">Kilometer, Tempo, Verlauf</string>
+    <string name="start_running_prompt" formatted="false">Erstelle ein Beispiel-Dashboard für 8 Wochen Lauftraining mit Kilometern, Tempo und Puls pro Woche, damit ich meine Fortschritte sehe.</string>
+    <string name="start_sleep_title">Schlaf im Blick</string>
+    <string name="start_sleep_hint">Muster über zwei Wochen</string>
+    <string name="start_sleep_prompt" formatted="false">Zeig mir ein Dashboard, wie ich meinen Schlaf über zwei Wochen auswerten kann: Dauer, Einschlafzeit und Wochentag im Vergleich.</string>
+    <string name="start_groceries_title">Haushaltskosten</string>
+    <string name="start_groceries_hint">Wohin das Geld fliesst</string>
+    <string name="start_groceries_prompt" formatted="false">Wir sind ein Haushalt mit zwei Personen. Erstelle ein Dashboard mit typischen Monatsausgaben nach Kategorie und zeig, wo man am meisten sparen kann.</string>
+    <string name="start_project_title">Projektstatus</string>
+    <string name="start_project_hint">Aufgaben, Fortschritt, Risiken</string>
+    <string name="start_project_prompt" formatted="false">Erstelle ein Projekt-Dashboard für eine Website-Neugestaltung mit Aufgaben pro Phase, Fortschritt in Prozent und offenen Risiken.</string>
+    <string name="start_energy_title">Energieverbrauch</string>
+    <string name="start_energy_hint">Monate und Jahresvergleich</string>
+    <string name="start_energy_prompt" formatted="false">Zeig mir ein Dashboard für den Stromverbrauch einer 4-Zimmer-Wohnung über ein Jahr, nach Monat, mit Vergleich zum Vorjahr.</string>
+    <string name="start_ebike_title">Optionen vergleichen</string>
+    <string name="start_ebike_hint">Nebeneinander mit Auswahl</string>
+    <string name="start_ebike_prompt" formatted="false">Vergleiche drei E-Bikes für einen täglichen Arbeitsweg von 12 km in einer Vergleichsansicht und empfiehl mir eines.</string>
+    <string name="start_phone_title">Neues Smartphone</string>
+    <string name="start_phone_hint">Drei Modelle im Vergleich</string>
+    <string name="start_phone_prompt" formatted="false">Ich brauche ein neues Smartphone bis 800 CHF mit guter Kamera und langem Akku. Vergleiche drei Modelle in einer Vergleichsansicht.</string>
+    <string name="start_health_title">Franchise wählen</string>
+    <string name="start_health_hint">Welche lohnt sich für mich?</string>
+    <string name="start_health_prompt" formatted="false">Vergleiche die Krankenkassen-Franchisen 300, 1500 und 2500 CHF für jemanden mit etwa 1200 CHF Gesundheitskosten pro Jahr. Mit Vergleichsansicht und Empfehlung.</string>
+    <string name="start_travel_title">Ferienziel finden</string>
+    <string name="start_travel_hint">Wetter, Kosten, Anreise</string>
+    <string name="start_travel_prompt" formatted="false">Vergleiche Lissabon, Kreta und Teneriffa für eine Woche Ferien im März: Wetter, Kosten und Anreise aus Zürich, in einer Vergleichsansicht.</string>
+    <string name="start_laptop_title">Laptop fürs Studium</string>
+    <string name="start_laptop_hint">Leicht, ausdauernd, bezahlbar</string>
+    <string name="start_laptop_prompt" formatted="false">Vergleiche drei Laptops fürs Studium bis 1300 CHF nach Gewicht, Akku und Leistung in einer Vergleichsansicht.</string>
+    <string name="start_streaming_title">Streamingdienste</string>
+    <string name="start_streaming_hint">Preis und Angebot</string>
+    <string name="start_streaming_prompt" formatted="false">Welche Streamingdienste lohnen sich in der Schweiz? Vergleiche Preis, Angebot und Bildqualität in einer Vergleichsansicht.</string>
+    <string name="start_text_title">Text schreiben</string>
+    <string name="start_text_hint">Mail, Brief oder Beitrag</string>
+    <string name="start_text_prompt" formatted="false">Hilf mir, einen Text zu schreiben: </string>
+    <string name="start_application_title">Bewerbung schreiben</string>
+    <string name="start_application_hint">Anschreiben, das auffällt</string>
+    <string name="start_application_prompt" formatted="false">Hilf mir, ein überzeugendes Bewerbungsschreiben zu verfassen. Die Stelle: </string>
+    <string name="start_decline_title">Freundlich absagen</string>
+    <string name="start_decline_hint">Klar, aber herzlich</string>
+    <string name="start_decline_prompt" formatted="false">Hilf mir, freundlich und klar abzusagen. Worum es geht: </string>
+    <string name="start_greeting_title">Persönlicher Glückwunsch</string>
+    <string name="start_greeting_hint">Geburtstag, Hochzeit, Jubiläum</string>
+    <string name="start_greeting_prompt" formatted="false">Schreib mir einen persönlichen Glückwunsch. Für wen und was ich mag an der Person: </string>
+    <string name="start_post_title">Beitrag für LinkedIn</string>
+    <string name="start_post_hint">Erfolg teilen, ohne zu prahlen</string>
+    <string name="start_post_prompt" formatted="false">Hilf mir, einen LinkedIn-Beitrag zu schreiben, der natürlich klingt. Das möchte ich teilen: </string>
+    <string name="start_complaint_title">Reklamation formulieren</string>
+    <string name="start_complaint_hint">Sachlich und wirksam</string>
+    <string name="start_complaint_prompt" formatted="false">Hilf mir, eine sachliche und wirksame Reklamation zu schreiben. Das ist passiert: </string>
+    <string name="start_day_title">Tag planen</string>
+    <string name="start_day_hint">Termine, Pausen, Fokuszeit</string>
+    <string name="start_day_prompt" formatted="false">Plane mit mir meinen Tag. Das steht heute an: </string>
+    <string name="start_menu_title">Wochenmenü</string>
+    <string name="start_menu_hint">Gesund, einfach, mit Einkaufsliste</string>
+    <string name="start_menu_prompt" formatted="false">Erstelle mir ein einfaches, gesundes Wochenmenü für zwei Personen mit Einkaufsliste. Besonderheiten: </string>
+    <string name="start_move_title">Umzug planen</string>
+    <string name="start_move_hint">Zeitplan und Checkliste</string>
+    <string name="start_move_prompt" formatted="false">Hilf mir, meinen Umzug zu planen, mit Zeitplan und Checkliste. Umzugsdatum und Situation: </string>
+    <string name="start_exam_title">Lernplan erstellen</string>
+    <string name="start_exam_hint">Bis zur Prüfung im Takt</string>
+    <string name="start_exam_prompt" formatted="false">Erstelle mir einen Lernplan bis zu meiner Prüfung. Fach, Datum und Stoff: </string>
+    <string name="start_workout_title">Trainingsplan</string>
+    <string name="start_workout_hint">Drei Einheiten pro Woche</string>
+    <string name="start_workout_prompt" formatted="false">Erstelle mir einen Trainingsplan mit drei Einheiten pro Woche. Mein Ziel und meine Ausgangslage: </string>
+    <string name="start_party_title">Fest organisieren</string>
+    <string name="start_party_hint">Ablauf, Essen, Aufgaben</string>
+    <string name="start_party_prompt" formatted="false">Hilf mir, ein Fest zu organisieren: Ablauf, Essen und Aufgabenverteilung. Anlass und Anzahl Gäste: </string>
+    <string name="start_topic_title">Thema verstehen</string>
+    <string name="start_topic_hint">Schritt für Schritt erklärt</string>
+    <string name="start_topic_prompt" formatted="false">Erkläre mir verständlich und mit einem Beispiel: </string>
+    <string name="start_ai_title">Wie denkt eine KI?</string>
+    <string name="start_ai_hint">Sprachmodelle einfach erklärt</string>
+    <string name="start_ai_prompt" formatted="false">Erkläre mir einfach, wie ein Sprachmodell wie du Antworten erzeugt, mit einem anschaulichen Beispiel.</string>
+    <string name="start_inflation_title">Inflation erklärt</string>
+    <string name="start_inflation_hint">Warum alles teurer wird</string>
+    <string name="start_inflation_prompt" formatted="false">Erkläre mir verständlich, was Inflation ist, warum sie entsteht und was sie für mein Erspartes bedeutet.</string>
+    <string name="start_quantum_title">Quantencomputer</string>
+    <string name="start_quantum_hint">Ohne Formeln erklärt</string>
+    <string name="start_quantum_prompt" formatted="false">Erkläre mir ohne Formeln, was ein Quantencomputer anders macht als ein normaler Computer und wofür er gut ist.</string>
+    <string name="start_nature_title">Wie Natur funktioniert</string>
+    <string name="start_nature_hint">Photosynthese und mehr</string>
+    <string name="start_nature_prompt" formatted="false">Erkläre mir anschaulich, wie Photosynthese funktioniert und warum sie für uns so wichtig ist.</string>
+    <string name="start_blockchain_title">Blockchain verstehen</string>
+    <string name="start_blockchain_hint">Was dahinter steckt</string>
+    <string name="start_blockchain_prompt" formatted="false">Erkläre mir einfach, was eine Blockchain ist, wie sie funktioniert und wo sie wirklich Sinn ergibt.</string>
+</resources>

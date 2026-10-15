@@ -1,86 +1,30 @@
-import type { CSSProperties, PointerEvent } from 'react';
-import {
-  BarChart3,
-  CalendarClock,
-  Lightbulb,
-  PenLine,
-  Scale,
-  TrendingUp,
-  type LucideIcon,
-} from 'lucide-react';
+import { useState, type CSSProperties, type PointerEvent } from 'react';
+import { START_SUGGESTIONS, type StartSketch, type StartSuggestion } from './startSuggestionData';
 import './start-suggestions.css';
 
-type Preview = 'growth' | 'dashboard' | 'compare' | 'write' | 'plan' | 'explain';
+export type { StartSuggestion };
 
-export interface StartSuggestion {
-  id: Preview;
-  title: string;
-  hint: string;
-  prompt: string;
-  icon: LucideIcon;
-  /** The answer usually comes with an interactive view (Dynamic UI). */
-  interactive?: boolean;
-}
+/** Answers to these usually come with an interactive view (Dynamic UI). */
+const INTERACTIVE = new Set<StartSketch>(['growth', 'dashboard', 'compare']);
+const SKETCHES: StartSketch[] = ['growth', 'dashboard', 'compare', 'write', 'plan', 'explain'];
 
-export const START_SUGGESTIONS: StartSuggestion[] = [
-  {
-    id: 'growth',
-    title: 'Sparplan durchrechnen',
-    hint: 'Rechner mit Reglern und Verlauf',
-    prompt:
-      'Wie viel Kapital habe ich nach 15 Jahren, wenn ich monatlich 300 CHF zu 4 % anlege? Zeig mir einen Rechner, mit dem ich die Werte ändern kann.',
-    icon: TrendingUp,
-    interactive: true,
-  },
-  {
-    id: 'dashboard',
-    title: 'Budget als Dashboard',
-    hint: 'Kennzahlen und Diagramm',
-    prompt:
-      'Hilf mir, mein Monatsbudget von 5200 CHF auf Miete, Essen, Mobilität, Freizeit und Sparen aufzuteilen. Zeig es als interaktives Dashboard.',
-    icon: BarChart3,
-    interactive: true,
-  },
-  {
-    id: 'compare',
-    title: 'Optionen vergleichen',
-    hint: 'Nebeneinander mit Auswahl',
-    prompt:
-      'Vergleiche drei E-Bikes für einen täglichen Arbeitsweg von 12 km in einer Vergleichsansicht und empfiehl mir eines.',
-    icon: Scale,
-    interactive: true,
-  },
-  {
-    id: 'write',
-    title: 'Text schreiben',
-    hint: 'Mail, Brief oder Beitrag',
-    prompt: 'Hilf mir, einen Text zu schreiben: ',
-    icon: PenLine,
-  },
-  {
-    id: 'plan',
-    title: 'Tag planen',
-    hint: 'Termine, Pausen, Fokuszeit',
-    prompt: 'Plane mit mir meinen Tag. Das steht heute an: ',
-    icon: CalendarClock,
-  },
-  {
-    id: 'explain',
-    title: 'Thema verstehen',
-    hint: 'Schritt für Schritt erklärt',
-    prompt: 'Erkläre mir verständlich und mit einem Beispiel: ',
-    icon: Lightbulb,
-  },
-];
+const random = <T,>(list: T[]) => list[Math.floor(Math.random() * list.length)]!;
 
-/** Morning favours planning, evening favours the open topics; numbers stay first otherwise. */
-function ordered(hour: number) {
-  const list = [...START_SUGGESTIONS];
-  if (hour >= 5 && hour < 11) {
-    const plan = list.findIndex((item) => item.id === 'plan');
-    list.unshift(...list.splice(plan, 1));
+/**
+ * Six of the 36 starters per page load: one per sketch, in shuffled order,
+ * so every visit shows a different mix. Mornings lead with planning.
+ */
+function deal(hour: number) {
+  const hand = SKETCHES.map((sketch) =>
+    random(START_SUGGESTIONS.filter((item) => item.sketch === sketch))
+  );
+  for (let i = hand.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [hand[i], hand[j]] = [hand[j]!, hand[i]!];
   }
-  return list;
+  if (hour >= 5 && hour < 11)
+    hand.sort((x, y) => Number(y.sketch === 'plan') - Number(x.sketch === 'plan'));
+  return hand;
 }
 
 function track(event: PointerEvent<HTMLButtonElement>) {
@@ -97,24 +41,24 @@ export function StartSuggestions({
   disabled?: boolean;
   onPick: (suggestion: StartSuggestion) => void;
 }) {
-  const items = ordered(new Date().getHours());
+  const [items] = useState(() => deal(new Date().getHours()));
   return (
     <section className="plum-start-deck" aria-label="Vorgeschlagene Prompts">
       {items.map((item, index) => {
         const Icon = item.icon;
         return (
           <button
-            key={item.id}
+            key={item.key}
             type="button"
             disabled={disabled}
             className="plum-start-card"
-            data-preview={item.id}
+            data-preview={item.sketch}
             style={{ '--i': index } as CSSProperties}
             onPointerMove={track}
             onClick={() => onPick(item)}
           >
             <span className="plum-start-preview" aria-hidden>
-              <PreviewArt kind={item.id} />
+              <PreviewArt kind={item.sketch} />
             </span>
             <span className="plum-start-copy">
               <span className="plum-start-title">
@@ -123,7 +67,7 @@ export function StartSuggestions({
               </span>
               <span className="plum-start-hint">{item.hint}</span>
             </span>
-            {item.interactive && <span className="plum-start-badge">Interaktiv</span>}
+            {INTERACTIVE.has(item.sketch) && <span className="plum-start-badge">Interaktiv</span>}
           </button>
         );
       })}
@@ -133,7 +77,7 @@ export function StartSuggestions({
 
 /* Small looping sketches of what the answer will look like. Transform and
  * opacity only; reduced motion shows the resting frame. */
-function PreviewArt({ kind }: { kind: Preview }) {
+function PreviewArt({ kind }: { kind: StartSketch }) {
   switch (kind) {
     case 'growth':
       return (

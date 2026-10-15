@@ -27,6 +27,36 @@ import androidx.compose.material.icons.outlined.Balance
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.EventNote
 import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Eco
+import androidx.compose.material.icons.outlined.Science
+import androidx.compose.material.icons.outlined.Payments
+import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Celebration
+import androidx.compose.material.icons.outlined.FitnessCenter
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.LocalShipping
+import androidx.compose.material.icons.outlined.Restaurant
+import androidx.compose.material.icons.outlined.ReportProblem
+import androidx.compose.material.icons.outlined.Campaign
+import androidx.compose.material.icons.outlined.Cake
+import androidx.compose.material.icons.outlined.Mail
+import androidx.compose.material.icons.outlined.Work
+import androidx.compose.material.icons.outlined.Tv
+import androidx.compose.material.icons.outlined.Laptop
+import androidx.compose.material.icons.outlined.Flight
+import androidx.compose.material.icons.outlined.HealthAndSafety
+import androidx.compose.material.icons.outlined.Smartphone
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.ShoppingCart
+import androidx.compose.material.icons.outlined.Bedtime
+import androidx.compose.material.icons.outlined.DirectionsRun
+import androidx.compose.material.icons.outlined.Percent
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Calculate
+import androidx.compose.material.icons.outlined.AccountBalance
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -68,17 +98,55 @@ private data class StartSuggestion(
     @StringRes val hint: Int,
     @StringRes val prompt: Int,
     val icon: ImageVector,
-    val interactive: Boolean = false,
+) {
+    val interactive get() = sketch == StartSketch.Growth || sketch == StartSketch.Dashboard || sketch == StartSketch.Compare
+}
+
+/** Same 36 starters as the WebUI (`startSuggestionData.ts`), six per sketch. */
+private val SUGGESTIONS = listOf(
+    StartSuggestion(StartSketch.Growth, R.string.start_savings_title, R.string.start_savings_hint, R.string.start_savings_prompt, Icons.AutoMirrored.Outlined.TrendingUp),
+    StartSuggestion(StartSketch.Growth, R.string.start_mortgage_title, R.string.start_mortgage_hint, R.string.start_mortgage_prompt, Icons.Outlined.Home),
+    StartSuggestion(StartSketch.Growth, R.string.start_pillar3a_title, R.string.start_pillar3a_hint, R.string.start_pillar3a_prompt, Icons.Outlined.AccountBalance),
+    StartSuggestion(StartSketch.Growth, R.string.start_loan_title, R.string.start_loan_hint, R.string.start_loan_prompt, Icons.Outlined.Calculate),
+    StartSuggestion(StartSketch.Growth, R.string.start_power_title, R.string.start_power_hint, R.string.start_power_prompt, Icons.Outlined.Bolt),
+    StartSuggestion(StartSketch.Growth, R.string.start_salary_title, R.string.start_salary_hint, R.string.start_salary_prompt, Icons.Outlined.Percent),
+    StartSuggestion(StartSketch.Dashboard, R.string.start_budget_title, R.string.start_budget_hint, R.string.start_budget_prompt, Icons.Outlined.BarChart),
+    StartSuggestion(StartSketch.Dashboard, R.string.start_running_title, R.string.start_running_hint, R.string.start_running_prompt, Icons.Outlined.DirectionsRun),
+    StartSuggestion(StartSketch.Dashboard, R.string.start_sleep_title, R.string.start_sleep_hint, R.string.start_sleep_prompt, Icons.Outlined.Bedtime),
+    StartSuggestion(StartSketch.Dashboard, R.string.start_groceries_title, R.string.start_groceries_hint, R.string.start_groceries_prompt, Icons.Outlined.ShoppingCart),
+    StartSuggestion(StartSketch.Dashboard, R.string.start_project_title, R.string.start_project_hint, R.string.start_project_prompt, Icons.Outlined.Checklist),
+    StartSuggestion(StartSketch.Dashboard, R.string.start_energy_title, R.string.start_energy_hint, R.string.start_energy_prompt, Icons.Outlined.Speed),
+    StartSuggestion(StartSketch.Compare, R.string.start_ebike_title, R.string.start_ebike_hint, R.string.start_ebike_prompt, Icons.Outlined.Balance),
+    StartSuggestion(StartSketch.Compare, R.string.start_phone_title, R.string.start_phone_hint, R.string.start_phone_prompt, Icons.Outlined.Smartphone),
+    StartSuggestion(StartSketch.Compare, R.string.start_health_title, R.string.start_health_hint, R.string.start_health_prompt, Icons.Outlined.HealthAndSafety),
+    StartSuggestion(StartSketch.Compare, R.string.start_travel_title, R.string.start_travel_hint, R.string.start_travel_prompt, Icons.Outlined.Flight),
+    StartSuggestion(StartSketch.Compare, R.string.start_laptop_title, R.string.start_laptop_hint, R.string.start_laptop_prompt, Icons.Outlined.Laptop),
+    StartSuggestion(StartSketch.Compare, R.string.start_streaming_title, R.string.start_streaming_hint, R.string.start_streaming_prompt, Icons.Outlined.Tv),
+    StartSuggestion(StartSketch.Write, R.string.start_text_title, R.string.start_text_hint, R.string.start_text_prompt, Icons.Outlined.EditNote),
+    StartSuggestion(StartSketch.Write, R.string.start_application_title, R.string.start_application_hint, R.string.start_application_prompt, Icons.Outlined.Work),
+    StartSuggestion(StartSketch.Write, R.string.start_decline_title, R.string.start_decline_hint, R.string.start_decline_prompt, Icons.Outlined.Mail),
+    StartSuggestion(StartSketch.Write, R.string.start_greeting_title, R.string.start_greeting_hint, R.string.start_greeting_prompt, Icons.Outlined.Cake),
+    StartSuggestion(StartSketch.Write, R.string.start_post_title, R.string.start_post_hint, R.string.start_post_prompt, Icons.Outlined.Campaign),
+    StartSuggestion(StartSketch.Write, R.string.start_complaint_title, R.string.start_complaint_hint, R.string.start_complaint_prompt, Icons.Outlined.ReportProblem),
+    StartSuggestion(StartSketch.Plan, R.string.start_day_title, R.string.start_day_hint, R.string.start_day_prompt, Icons.Outlined.EventNote),
+    StartSuggestion(StartSketch.Plan, R.string.start_menu_title, R.string.start_menu_hint, R.string.start_menu_prompt, Icons.Outlined.Restaurant),
+    StartSuggestion(StartSketch.Plan, R.string.start_move_title, R.string.start_move_hint, R.string.start_move_prompt, Icons.Outlined.LocalShipping),
+    StartSuggestion(StartSketch.Plan, R.string.start_exam_title, R.string.start_exam_hint, R.string.start_exam_prompt, Icons.Outlined.School),
+    StartSuggestion(StartSketch.Plan, R.string.start_workout_title, R.string.start_workout_hint, R.string.start_workout_prompt, Icons.Outlined.FitnessCenter),
+    StartSuggestion(StartSketch.Plan, R.string.start_party_title, R.string.start_party_hint, R.string.start_party_prompt, Icons.Outlined.Celebration),
+    StartSuggestion(StartSketch.Explain, R.string.start_topic_title, R.string.start_topic_hint, R.string.start_topic_prompt, Icons.Outlined.Lightbulb),
+    StartSuggestion(StartSketch.Explain, R.string.start_ai_title, R.string.start_ai_hint, R.string.start_ai_prompt, Icons.Outlined.Psychology),
+    StartSuggestion(StartSketch.Explain, R.string.start_inflation_title, R.string.start_inflation_hint, R.string.start_inflation_prompt, Icons.Outlined.Payments),
+    StartSuggestion(StartSketch.Explain, R.string.start_quantum_title, R.string.start_quantum_hint, R.string.start_quantum_prompt, Icons.Outlined.Science),
+    StartSuggestion(StartSketch.Explain, R.string.start_nature_title, R.string.start_nature_hint, R.string.start_nature_prompt, Icons.Outlined.Eco),
+    StartSuggestion(StartSketch.Explain, R.string.start_blockchain_title, R.string.start_blockchain_hint, R.string.start_blockchain_prompt, Icons.Outlined.Link),
 )
 
-private val SUGGESTIONS = listOf(
-    StartSuggestion(StartSketch.Growth, R.string.assistant_start_growth_title, R.string.assistant_start_growth_hint, R.string.assistant_start_growth_prompt, Icons.AutoMirrored.Outlined.TrendingUp, true),
-    StartSuggestion(StartSketch.Dashboard, R.string.assistant_start_dashboard_title, R.string.assistant_start_dashboard_hint, R.string.assistant_start_dashboard_prompt, Icons.Outlined.BarChart, true),
-    StartSuggestion(StartSketch.Compare, R.string.assistant_start_compare_title, R.string.assistant_start_compare_hint, R.string.assistant_start_compare_prompt, Icons.Outlined.Balance, true),
-    StartSuggestion(StartSketch.Write, R.string.assistant_start_write_title, R.string.assistant_start_write_hint, R.string.assistant_start_write_prompt, Icons.Outlined.EditNote),
-    StartSuggestion(StartSketch.Plan, R.string.assistant_start_plan_title, R.string.assistant_start_plan_hint, R.string.assistant_start_plan_prompt, Icons.Outlined.EventNote),
-    StartSuggestion(StartSketch.Explain, R.string.assistant_start_explain_title, R.string.assistant_start_explain_hint, R.string.assistant_start_explain_prompt, Icons.Outlined.Lightbulb),
-)
+/** One starter per sketch in shuffled order; mornings lead with planning. */
+private fun deal(hour: Int): List<StartSuggestion> {
+    val hand = StartSketch.entries.map { sketch -> SUGGESTIONS.filter { it.sketch == sketch }.random() }.shuffled()
+    return if (hour in 5..10) hand.sortedBy { if (it.sketch == StartSketch.Plan) 0 else 1 } else hand
+}
 
 /**
  * Start-page suggestions, same set as the WebUI (`StartSuggestions.tsx`): glass
@@ -91,15 +159,12 @@ internal fun AssistantStartSuggestions(enabled: Boolean, columns: Int, onPick: (
     val phase: State<Float> = if (reduce) remember { mutableFloatStateOf(0.7f) } else {
         rememberInfiniteTransition(label = "start_sketch").animateFloat(0f, 1f, infiniteRepeatable(tween(5000, easing = LinearEasing)), label = "start_phase")
     }
-    val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
-    val items = remember(hour) {
-        if (hour in 5..10) SUGGESTIONS.sortedBy { if (it.sketch == StartSketch.Plan) 0 else 1 } else SUGGESTIONS
-    }
-    val prompts = items.associate { it.sketch to stringResource(it.prompt) }
+    val items = remember { deal(Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) }
+    val prompts = items.associate { it.prompt to stringResource(it.prompt) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         items.chunked(columns).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { item -> StartCard(item, phase, enabled, Modifier.weight(1f)) { onPick(prompts.getValue(item.sketch)) } }
+                row.forEach { item -> StartCard(item, phase, enabled, Modifier.weight(1f)) { onPick(prompts.getValue(item.prompt)) } }
                 repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
