@@ -13,8 +13,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useGlideMarker } from '@/lib/motion/glide';
-import { launchFlood } from '@/lib/motion/flood';
-import { isPlainClick } from '@/lib/motion/navigation';
+import { isPlainClick, transitionArea } from '@/lib/motion/navigation';
 import { useShallow } from 'zustand/react/shallow';
 import {
   LayoutDashboard,
@@ -1288,17 +1287,15 @@ export function Sidebar({
                 onClick={(event) => {
                   setRememberedMode(item.mode);
                   rememberSidebarMode(item.mode);
-                  // Switching area: a LaunchFlood covers the screen, then the route changes.
-                  if (!selected && isPlainClick(event)) {
-                    event.preventDefault();
-                    const target = SIDEBAR_MODE_HOME[item.mode];
-                    launchFlood(event.currentTarget, () => {
-                      handleLinkClick();
-                      navigate(target);
-                    });
-                    return;
-                  }
                   handleLinkClick();
+                  // Switching area: the work area slides along the pill's order.
+                  if (!selected && isPlainClick(event)) {
+                    const from = MODE_ITEMS.findIndex((entry) => entry.mode === mode);
+                    const to = MODE_ITEMS.findIndex((entry) => entry.mode === item.mode);
+                    const target = SIDEBAR_MODE_HOME[item.mode];
+                    if (transitionArea(to > from ? 'forward' : 'back', () => navigate(target)))
+                      event.preventDefault();
+                  }
                 }}
                 onKeyDown={focusModeItem}
                 aria-current={selected ? (routeMode === item.mode ? 'page' : 'true') : undefined}

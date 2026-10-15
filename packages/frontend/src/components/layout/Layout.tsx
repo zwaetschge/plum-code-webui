@@ -321,7 +321,7 @@ export function Layout() {
         </Sheet>
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col overflow-hidden relative z-10">
+        <div className="plum-area-stage flex-1 flex flex-col overflow-hidden relative z-10">
           {/* Usage Limits Bar - shown on session pages */}
 
           {/* Mobile Header */}

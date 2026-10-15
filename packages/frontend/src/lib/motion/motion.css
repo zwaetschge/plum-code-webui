@@ -333,27 +333,46 @@
   top: 0;
   overflow: visible;
 }
-.plum-stepout-glass {
-  background: hsl(var(--popover));
-  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.16);
+.plum-stepout-glass,
+.plum-stepout:not([data-stepout]) {
+  /* The composer's frosted material, a touch denser because menus cover text. */
+  background:
+    linear-gradient(145deg, hsl(0 0% 100% / 0.12), hsl(0 0% 100% / 0.03) 60%),
+    hsl(var(--card) / 0.5) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(160%) !important;
+  backdrop-filter: blur(24px) saturate(160%) !important;
+  box-shadow:
+    inset 0 1px 0 hsl(0 0% 100% / 0.16),
+    0 18px 40px -24px rgb(0 0 0 / 0.6) !important;
+}
+.plum-stepout:not([data-stepout]) {
+  border-color: hsl(0 0% 100% / 0.16) !important;
+}
+html:not(.dark) :is(.plum-stepout-glass, .plum-stepout:not([data-stepout])) {
+  background:
+    linear-gradient(145deg, hsl(0 0% 100% / 0.62), hsl(0 0% 100% / 0.36) 60%),
+    hsl(var(--card) / 0.5) !important;
+}
+/* Gecko bans live blur on most surfaces; a menu is one glass pane like the
+   composer, so it keeps it (same exception as in assistant-shell.css). */
+html.plum-engine-gecko body :is(.plum-stepout-glass, .plum-stepout:not([data-stepout])) {
+  -webkit-backdrop-filter: blur(24px) saturate(160%) !important;
+  backdrop-filter: blur(24px) saturate(160%) !important;
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :is(.plum-stepout-glass, .plum-stepout:not([data-stepout])) {
+    background: hsl(var(--popover)) !important;
+  }
+}
+html.eink :is(.plum-stepout-glass, .plum-stepout:not([data-stepout])) {
+  background: hsl(var(--popover)) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 .plum-stepout-edge path {
   fill: none;
   stroke: hsl(var(--foreground) / 0.16);
   stroke-width: 1;
-}
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  html:not(.eink):not(.plum-engine-gecko) .plum-stepout-glass {
-    background:
-      linear-gradient(145deg, hsl(0 0% 100% / 0.12), transparent 55%), hsl(var(--popover) / 0.78);
-    -webkit-backdrop-filter: blur(32px) saturate(145%);
-    backdrop-filter: blur(32px) saturate(145%);
-  }
-  html.dark:not(.eink):not(.plum-engine-gecko) .plum-stepout-glass {
-    background:
-      radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.14), transparent 65%),
-      linear-gradient(145deg, hsl(0 0% 100% / 0.15), transparent 55%), hsl(var(--popover) / 0.5);
-  }
 }
 html.dark .plum-stepout-edge path {
   stroke: hsl(0 0% 100% / 0.22);
@@ -364,6 +383,11 @@ html.dark .plum-stepout-edge path {
 }
 .plum-plus-trigger[data-state='open'] svg {
   transform: rotate(45deg);
+}
+
+/* No edge shadow behind the sidebar in the assistant shell (dark themes). */
+html.dark .plum-assistant-shell .app-sidebar-refined::before {
+  background: none !important;
 }
 
 /* ── RailGlide markers in the sidebar ──────────────────────────────────── */
@@ -446,16 +470,53 @@ html.dark .plum-stepout-edge path {
   animation: plum-stepout-out 120ms var(--plum-ease-exit) both;
 }
 
-/* ── LaunchFlood overlay for area switches ─────────────────────────────── */
-.plum-launch-flood {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 30% 20%, hsl(var(--primary) / 0.55), transparent 60%),
-    linear-gradient(160deg, hsl(var(--primary) / 0.35), hsl(var(--background)) 70%),
-    hsl(var(--background));
+/* ── Area switch (Chat · Task · Code · Schwarm) ────────────────────────
+ * The work area slides along the mode pill's order; the sidebar is not part
+ * of the moving group, so only its marker glides. */
+.plum-area-stage {
+  view-transition-name: plum-area;
+}
+html[data-area-direction] .plum-api-scroll {
+  view-transition-name: none;
+}
+html[data-area-direction='forward']::view-transition-old(plum-area) {
+  animation: plum-area-out-left var(--plum-dur-exit) var(--plum-ease-exit) both;
+}
+html[data-area-direction='forward']::view-transition-new(plum-area) {
+  animation: plum-area-in-right 340ms var(--plum-ease-enter) 40ms both;
+}
+html[data-area-direction='back']::view-transition-old(plum-area) {
+  animation: plum-area-out-right var(--plum-dur-exit) var(--plum-ease-exit) both;
+}
+html[data-area-direction='back']::view-transition-new(plum-area) {
+  animation: plum-area-in-left 340ms var(--plum-ease-enter) 40ms both;
+}
+::view-transition-group(plum-area) {
+  animation-duration: 0s;
+}
+@keyframes plum-area-out-left {
+  to {
+    opacity: 0;
+    transform: translateX(-36px);
+  }
+}
+@keyframes plum-area-out-right {
+  to {
+    opacity: 0;
+    transform: translateX(36px);
+  }
+}
+@keyframes plum-area-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+}
+@keyframes plum-area-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-48px);
+  }
 }
 
 /* ── Ambient colour fields behind the chat glass ───────────────────────── */
@@ -579,8 +640,10 @@ html.plum-focus-glide-on
     transition: none !important;
   }
   ::view-transition-old(plum-chat-pane),
-  ::view-transition-new(plum-chat-pane) {
-    animation: none;
+  ::view-transition-new(plum-chat-pane),
+  ::view-transition-old(plum-area),
+  ::view-transition-new(plum-area) {
+    animation: none !important;
   }
 }
 html.eink :is(.plum-rise > *, .plum-chat-welcome > *, .plum-chat-enter, .plum-thinking > span) {

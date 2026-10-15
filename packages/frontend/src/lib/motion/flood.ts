@@ -1,13 +1,6 @@
 import { boxOf, onFrame, SpringBox, type Box } from './spring';
 import { prefersReducedMotion } from './reducedMotion';
-import { EASE, SPRINGS } from './tokens';
-
-const viewport = (): Box => ({
-  left: 0,
-  top: 0,
-  right: window.innerWidth,
-  bottom: window.innerHeight,
-});
+import { SPRINGS } from './tokens';
 
 /** Clip path that shows only `box` (viewport coordinates) of an element placed at `frame`. */
 function clipTo(box: Box, frame: Box, radius: number) {
@@ -16,80 +9,6 @@ function clipTo(box: Box, frame: Box, radius: number) {
   const right = Math.max(0, frame.right - box.right);
   const bottom = Math.max(0, frame.bottom - box.bottom);
   return `inset(${top}px ${right}px ${bottom}px ${left}px round ${Math.max(0, radius)}px)`;
-}
-
-/** 0 at the origin, 1 once the box fills `to`; drives corner radius and fades. */
-function coverage(box: Box, from: Box, to: Box) {
-  const span = (a: number, b: number, v: number) => (a === b ? 1 : (v - a) / (b - a));
-  const parts = [
-    span(from.left, to.left, box.left),
-    span(from.top, to.top, box.top),
-    span(from.right, to.right, box.right),
-    span(from.bottom, to.bottom, box.bottom),
-  ];
-  return Math.min(1, Math.max(0, Math.min(...parts)));
-}
-
-let launching = 0;
-
-/**
- * LaunchFlood: a tinted surface unfolds from the pressed control until it
- * covers the viewport, and only then `onCovered` runs — exactly once. The
- * surface fades away after the next paint so the target appears from under
- * it. A second launch while one runs is ignored.
- */
-export function launchFlood(origin: Element | DOMRect | Box, onCovered: () => void) {
-  if (launching) return;
-  const from = boxOf(origin instanceof Element ? origin.getBoundingClientRect() : origin);
-  if (prefersReducedMotion()) {
-    onCovered();
-    return;
-  }
-  const token = ++launching;
-  const overlay = document.createElement('div');
-  overlay.className = 'plum-launch-flood';
-  overlay.setAttribute('aria-hidden', 'true');
-  document.body.append(overlay);
-  const target = viewport();
-  const box = new SpringBox(from);
-  // The leading edges (furthest from the origin) start a beat earlier.
-  box.setTarget(target, SPRINGS.flood, (edge) => (edge === 'top' || edge === 'left' ? 0 : 24));
-  let covered = false;
-  const finish = () => {
-    if (covered) return;
-    covered = true;
-    stop();
-    window.clearTimeout(guard);
-    overlay.style.clipPath = 'none';
-    onCovered();
-    // Two frames: the route has rendered underneath before the reveal starts.
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        const fade = overlay.animate([{ opacity: 1 }, { opacity: 0 }], {
-          duration: 320,
-          easing: EASE.exit,
-          fill: 'forwards',
-        });
-        const remove = () => {
-          overlay.remove();
-          if (launching === token) launching = 0;
-        };
-        fade.onfinish = remove;
-        fade.oncancel = remove;
-      })
-    );
-  };
-  // Whatever the frame rate, navigation never waits longer than this.
-  const guard = window.setTimeout(finish, 900);
-  const stop = onFrame((dt) => {
-    const current = box.step(dt);
-    const progress = coverage(current, from, target);
-    overlay.style.clipPath = clipTo(current, target, 14 * (1 - progress));
-    if (progress > 0.985 || box.settled) {
-      finish();
-      return false;
-    }
-  });
 }
 
 /**

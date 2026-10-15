@@ -8,7 +8,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { StepOutContent } from '@/components/motion/StepOutContent';
 import { AmbientBackdrop } from '@/components/motion/AmbientBackdrop';
-import { composerHandoffPending, launchFlood, playComposerHandoff } from '@/lib/motion/flood';
+import { composerHandoffPending, playComposerHandoff } from '@/lib/motion/flood';
+import { transitionArea } from '@/lib/motion/navigation';
 import { onFrame, SpringValue } from '@/lib/motion/spring';
 import { prefersReducedMotion } from '@/lib/motion/reducedMotion';
 import { SPRINGS } from '@/lib/motion/tokens';
@@ -372,11 +373,7 @@ export function ApiChatPage() {
       navigate(location.pathname, { replace: true, state: null });
     }
   }, [location.state, location.pathname, owner, navigate]);
-  const saveAnswer = (
-    item: AssistantApiTurn,
-    kind: 'document' | 'task' | 'memory' | 'research',
-    origin?: DOMRect
-  ) =>
+  const saveAnswer = (item: AssistantApiTurn, kind: 'document' | 'task' | 'memory' | 'research') =>
     void invoke(async () => {
       const goal = kind === 'task' ? draft.trim() || item.prompt : undefined;
       const result = (
@@ -390,9 +387,8 @@ export function ApiChatPage() {
       ).data.data;
       if (scopeRef.current !== scope) return;
       const target = `${kind === 'task' ? '/assistant/tasks' : `/assistant/${kind === 'memory' ? 'memory' : 'artifacts'}`}?resource=${result.id}`;
-      // Leaving the chat for another area: cover from where the action was chosen.
-      if (origin) launchFlood(origin, () => navigate(target));
-      else navigate(target);
+      // Leaving the chat for another area moves forward, like the mode pill would.
+      if (!transitionArea('forward', () => navigate(target))) navigate(target);
     });
   if (latest.isPending)
     return (
@@ -736,37 +732,19 @@ export function ApiChatPage() {
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 disabled={busy}
-                                onSelect={(event) =>
-                                  saveAnswer(
-                                    item,
-                                    'document',
-                                    (event.currentTarget as HTMLElement).getBoundingClientRect()
-                                  )
-                                }
+                                onSelect={() => saveAnswer(item, 'document')}
                               >
                                 Als Ergebnis speichern
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 disabled={busy}
-                                onSelect={(event) =>
-                                  saveAnswer(
-                                    item,
-                                    'task',
-                                    (event.currentTarget as HTMLElement).getBoundingClientRect()
-                                  )
-                                }
+                                onSelect={() => saveAnswer(item, 'task')}
                               >
                                 Als Task-Entwurf übernehmen
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 disabled={busy}
-                                onSelect={(event) =>
-                                  saveAnswer(
-                                    item,
-                                    'memory',
-                                    (event.currentTarget as HTMLElement).getBoundingClientRect()
-                                  )
-                                }
+                                onSelect={() => saveAnswer(item, 'memory')}
                               >
                                 Als persönliche Erinnerung speichern
                               </DropdownMenuItem>

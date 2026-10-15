@@ -29,6 +29,31 @@ export function transitionPane(update: () => void): boolean {
   return true;
 }
 
+export type AreaDirection = 'forward' | 'back';
+
+/**
+ * Area switch (Chat · Task · Code · Schwarm): the work area slides in the
+ * direction of the mode pill — further right comes in from the right — while
+ * the sidebar stays put and its marker glides along. Returns false when the
+ * browser cannot, so the caller navigates normally.
+ */
+export function transitionArea(direction: AreaDirection, update: () => void): boolean {
+  const doc = document as TransitionDocument;
+  if (!doc.startViewTransition || prefersReducedMotion()) return false;
+  const root = document.documentElement;
+  // Set before the old state is captured: it also mutes the nested chat-pane name.
+  root.dataset.areaDirection = direction;
+  const transition = doc.startViewTransition(() => flushSync(update)) as
+    | { finished?: Promise<void> }
+    | undefined;
+  const clear = () => {
+    if (root.dataset.areaDirection === direction) delete root.dataset.areaDirection;
+  };
+  if (transition?.finished) transition.finished.then(clear, clear);
+  else window.setTimeout(clear, 700);
+  return true;
+}
+
 /* ── Origin of the library popup (PageFlood) ───────────────────────────── */
 
 let libraryOrigin: { box: Box; at: number } | null = null;
