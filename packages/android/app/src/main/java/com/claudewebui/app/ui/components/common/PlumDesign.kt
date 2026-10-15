@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -142,6 +144,12 @@ val PlumSubtleFill: Color @Composable @ReadOnlyComposable get() = LocalPlumPalet
 val PlumTrackFill: Color @Composable @ReadOnlyComposable get() = LocalPlumPalette.current.trackFill
 
 // ── 2. Navigation model and app-wide locals ──────────────────────────────────
+
+/**
+ * Back to the work area, provided by [PlumNavScaffold] on pages opened from the
+ * header menu (Analyse, Bibliothek, Einstellungen …); headers show it as a back arrow.
+ */
+val LocalMainBack = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 enum class MainDestination(
     private val labelRes: Int,
@@ -523,6 +531,7 @@ fun PlumScreenHeader(
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val tokens = PlumTheme.tokens
+    val back = LocalMainBack.current
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -532,6 +541,10 @@ fun PlumScreenHeader(
             ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (back != null) {
+            PlumIconButton(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.component_back_to_work), back)
+            Spacer(Modifier.width(tokens.spacing.compact))
+        }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -775,131 +788,31 @@ fun PlumNavScaffold(
         }
         return
     }
-    if (isTabletWidth()) {
-        // The header floats over the top-left corner instead of sitting in a row
-        // above everything: a real row also pushes the right-hand pane down, which
-        // left a dead band and a hard edge above the detail view. Panes that need
-        // to clear it get the inset through `content`'s PaddingValues and can
-        // apply it to just the columns that sit underneath.
+    // The header menu (≡) replaced the bottom bar and the rail: pages opened
+    // from it get a back arrow in their header instead (LocalMainBack).
+    val back: (() -> Unit)? = if (selected != MainDestination.SESSIONS) ({ onNavigate(MainDestination.SESSIONS) }) else null
+    CompositionLocalProvider(LocalMainBack provides back) {
         Box(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxSize()) {
-                PlumNavRail(
-                    selected,
-                    onNavigate,
-                    badgeCount = badgeCount,
-                    // Bottom-left corner. The title floats over the space this leaves
-                    // free at the top of the rail column, so neither has to move.
-                    modifier = Modifier.align(Alignment.Bottom),
+            content(
+                PaddingValues(
+                    top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
+                    bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
                 )
-                // Without a Scaffold there is nothing applying window insets, so
-                // the content would slide under the status bar.
-                // No status bar inset here on purpose. The bar is transparent and
-                // floats over the content: backdrops, gradients and glass panels run
-                // all the way to the top edge, and the inset is handed to the screen
-                // so it can offset the parts that must stay readable. Consuming it
-                // here instead cut a hard horizontal edge across the top of every
-                // pane that paints its own background.
-                Box(Modifier.weight(1f)) {
-                    // Rail layouts have no bottom bar consuming the nav-bar inset,
-                    // so hand it to the screen instead of a zero padding.
-                    content(
-                        PaddingValues(
-                            top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
-                            bottom = WindowInsets.navigationBars
-                                .asPaddingValues()
-                                .calculateBottomPadding(),
-                        )
-                    )
-                    SnackbarHost(
-                        snackbarHostState,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .navigationBarsPadding()
-                            .padding(bottom = tokens.spacing.lg),
-                    )
-                    // No bottom bar to sit above, so the action floats in the
-                    // content corner itself.
-                    floatingActionButton?.let { fab ->
-                        Box(
-                            Modifier
-                                .align(Alignment.BottomEnd)
-                                .navigationBarsPadding()
-                                .padding(end = fabInset, bottom = fabInset),
-                        ) { fab() }
-                    }
-                }
-            }
-            header?.let { headerContent ->
+            )
+            SnackbarHost(
+                snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = tokens.spacing.lg),
+            )
+            floatingActionButton?.let { fab ->
                 Box(
                     Modifier
-                        .align(Alignment.TopStart)
-                        .statusBarsPadding()
-                        .padding(start = tokens.spacing.lg, top = tokens.spacing.xs),
-                ) { headerContent() }
-            }
-        }
-    } else {
-        // The bar floats above the content instead of living in Scaffold's
-        // bottomBar slot: that slot reserves an opaque strip which cut the last
-        // session card off with a hard black edge. Content now scrolls beneath
-        // the glass bar and simply gets enough bottom padding to clear it.
-        val short = isShortWindow() || LocalDensity.current.fontScale >= 1.5f
-        val barHeight = if (short) tokens.sizing.navBarHeightShort else tokens.sizing.navBarHeight
-        val barInset = barHeight + if (short) tokens.spacing.sm else tokens.spacing.lg
-
-        val hazeState = remember { HazeState() }
-
-        Scaffold(
-            containerColor = Color.Transparent,
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        ) { _ ->
-            Box(Modifier.fillMaxSize()) {
-                // Everything drawn here is what the bar blurs.
-                Box(Modifier.fillMaxSize().haze(hazeState)) {
-                    // Same rule as the rail layout: the bar floats, and the screen
-                    // gets the inset. Scaffold's own value is zero here because
-                    // contentWindowInsets is cleared, so read the inset directly.
-                    content(
-                        PaddingValues(
-                            top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding(),
-                            bottom = barInset + WindowInsets.navigationBars
-                                .asPaddingValues()
-                                .calculateBottomPadding(),
-                        )
-                    )
-                }
-
-                // Above the floating bar, or the bar covers the message.
-                SnackbarHost(
-                    snackbarHostState,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
+                        .align(Alignment.BottomEnd)
                         .navigationBarsPadding()
-                        .padding(bottom = barInset),
-                )
-
-                // The bar is laid out above the haze source, so it may blur it;
-                // LocalPlumHazeReady tells plumGlass(...) the state is live.
-                CompositionLocalProvider(
-                    LocalPlumHaze provides hazeState,
-                    LocalPlumHazeReady provides true,
-                ) {
-                    PlumBottomBar(
-                        selected,
-                        onNavigate,
-                        modifier = Modifier.align(Alignment.BottomCenter),
-                        badgeCount = badgeCount,
-                    )
-                }
-
-                floatingActionButton?.let { fab ->
-                    Box(
-                        Modifier
-                            .align(Alignment.BottomEnd)
-                            .navigationBarsPadding()
-                            .padding(end = fabInset, bottom = barInset),
-                    ) { fab() }
-                }
+                        .padding(end = fabInset, bottom = fabInset),
+                ) { fab() }
             }
         }
     }

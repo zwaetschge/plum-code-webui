@@ -84,6 +84,8 @@ fun PlumAreaSelector(
     trailingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     trailingLabel: String? = null,
     onTrailing: (() -> Unit)? = null,
+    /** The ≡ header menu; takes the place of the trailing button. */
+    menu: (@Composable () -> Unit)? = null,
 ) {
     val palette = PlumTheme.palette
     val tabs = listOf("chat" to R.string.assistant_tab_chat, "task" to R.string.assistant_tab_task, "code" to R.string.assistant_tab_code, "swarm" to R.string.assistant_swarm)
@@ -116,6 +118,7 @@ fun PlumAreaSelector(
             }
         }
         when {
+            menu != null -> menu()
             onTrailing != null && trailingIcon != null -> PlumRoundButton(trailingIcon, trailingLabel.orEmpty(), onTrailing)
             onPersonalize != null -> PlumRoundButton(Icons.Outlined.Tune, stringResource(R.string.assistant_personalization), onPersonalize)
             else -> Unit

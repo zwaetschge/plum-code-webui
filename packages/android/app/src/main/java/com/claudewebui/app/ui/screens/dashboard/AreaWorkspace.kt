@@ -197,7 +197,7 @@ fun rememberAreaWorkspaceState(): AreaWorkspaceState = rememberSaveable(saver = 
 }
 
 /** Last opened item per area, so the two-column layout can reopen it once. */
-private object AreaLastOpened {
+internal object AreaLastOpened {
     private const val PREFS = "area_workspace"
     fun get(context: Context, area: String): String? =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("last_$area", null)
@@ -282,6 +282,10 @@ fun AreaWorkspace(
 
     // ---- Hand-over from the standalone chat route ----
     val handoff by AreaWorkspaceHandoff.pending.collectAsState()
+    // "Alle anzeigen" on the chat start page: bring the conversation list back.
+    LaunchedEffect(Unit) {
+        DashboardMenuBus.events.collect { command -> if (command == DashboardMenuCommand.HISTORY) ws.listVisible = true }
+    }
     LaunchedEffect(handoff, state.sessions, state.isInitialLoading) {
         val request = handoff ?: return@LaunchedEffect
         // Wait for the session list so the session lands in its own area.
@@ -392,10 +396,13 @@ fun AreaWorkspace(
                 Box(Modifier.padding(top = 8.dp, start = 10.dp, end = 10.dp)) {
                     PlumAreaSelector(
                         columnArea, selectArea,
-                        onPersonalize = if (columnArea == "task" || columnArea == "code") ({ ws.showPersonalization = true }) else null,
-                        trailingIcon = if (columnArea == "chat") Icons.AutoMirrored.Outlined.MenuOpen else null,
-                        trailingLabel = if (columnArea == "chat") stringResource(R.string.workspace_hide_list) else null,
-                        onTrailing = if (columnArea == "chat") ({ ws.listVisible = false }) else null,
+                        menu = {
+                            AreaHeaderMenu(
+                                area = columnArea, viewModel = viewModel, onNavigateMain = onNavigateMain, onOpenSession = { openSession(it) },
+                                onNewChat = { openChat(null) },
+                                onHideList = if (columnArea == "chat") ({ ws.listVisible = false }) else null,
+                            )
+                        },
                     )
                 }
                 AnimatedContent(
@@ -450,7 +457,9 @@ fun AreaWorkspace(
                 onNavigateToChat = { openSession(it) },
                 onNativeChat = { ws.workspacePath = null; ws.area = "chat" },
             )
-            key.area == "swarm" -> SwarmPane(selectArea)
+            key.area == "swarm" -> SwarmPane(selectArea) { onEmergency ->
+                AreaHeaderMenu(area = "swarm", viewModel = viewModel, onNavigateMain = onNavigateMain, onOpenSession = { openSession(it) }, onEmergency = onEmergency)
+            }
             key.area == "chat" -> Box(Modifier.fillMaxSize()) {
                 // Focus mode: a slim top band carries the button that brings
                 // the conversation list back.
@@ -638,7 +647,7 @@ private fun SplitPane(
 
 /** Schwarm at full width, with the area selector floating on top. */
 @Composable
-private fun SwarmPane(selectArea: (String) -> Unit) {
+private fun SwarmPane(selectArea: (String) -> Unit, menu: @Composable (onEmergency: () -> Unit) -> Unit) {
     var headerPx by remember { mutableIntStateOf(0) }
     var emergency by remember { mutableStateOf(false) }
     val topInset = with(LocalDensity.current) { headerPx.toDp() }
@@ -648,12 +657,7 @@ private fun SwarmPane(selectArea: (String) -> Unit) {
             Modifier.align(Alignment.TopCenter).widthIn(max = 640.dp).onSizeChanged { headerPx = it.height }
                 .statusBarsPadding().padding(top = 12.dp, start = 16.dp, end = 16.dp),
         ) {
-            PlumAreaSelector(
-                "swarm", selectArea,
-                trailingIcon = Icons.Outlined.Shield,
-                trailingLabel = stringResource(R.string.assistant_emergency),
-                onTrailing = { emergency = true },
-            )
+            PlumAreaSelector("swarm", selectArea, menu = { menu { emergency = true } })
         }
     }
 }

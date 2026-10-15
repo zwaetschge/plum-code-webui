@@ -409,8 +409,10 @@ fun SettingsPageScaffold(
         ) {
             item(key = "page-header") {
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (onBack != null) {
-                        PlumIconButton(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.settings_hub_back), onBack)
+                    // The root page has no parent page; it goes back to the work area.
+                    val back = onBack ?: com.claudewebui.app.ui.components.common.LocalMainBack.current
+                    if (back != null) {
+                        PlumIconButton(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.settings_hub_back), back)
                         Spacer(Modifier.size(12.dp))
                     }
                     Column(Modifier.weight(1f)) {

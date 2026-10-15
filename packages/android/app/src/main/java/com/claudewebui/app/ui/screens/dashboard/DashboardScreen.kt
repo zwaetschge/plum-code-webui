@@ -83,6 +83,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.key
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -178,7 +180,6 @@ fun DashboardScreen(
         assistantArea == "swarm" -> "swarm"
         else -> "list:$assistantArea"
     }
-    var showHistory by remember { mutableStateOf(false) }
     var showEmergency by remember { mutableStateOf(false) }
     val showHeader = screen != "personalization" && !screen.startsWith("web:")
     // The header floats over the content like the bottom bar: content fills the
@@ -186,6 +187,37 @@ fun DashboardScreen(
     // being cut off by a straight edge.
     var headerPx by remember { mutableIntStateOf(0) }
     val topInset = if (showHeader) with(androidx.compose.ui.platform.LocalDensity.current) { headerPx.toDp() } else 0.dp
+    // Chat history slides in from the left, where the Chat area sits: a swipe
+    // from anywhere on the chat (or "Verlauf" in the ≡ menu) opens it.
+    val historyDrawer = androidx.compose.material3.rememberDrawerState(androidx.compose.material3.DrawerValue.Closed)
+    val historyScope = rememberCoroutineScope()
+    val drawerContext = androidx.compose.ui.platform.LocalContext.current
+    androidx.activity.compose.BackHandler(enabled = historyDrawer.isOpen) { historyScope.launch { historyDrawer.close() } }
+    LaunchedEffect(Unit) {
+        DashboardMenuBus.events.collect { command -> if (command == DashboardMenuCommand.HISTORY) historyDrawer.open() }
+    }
+    androidx.compose.material3.ModalNavigationDrawer(
+        drawerState = historyDrawer,
+        gesturesEnabled = screen == "model" || historyDrawer.isOpen,
+        drawerContent = {
+            androidx.compose.material3.ModalDrawerSheet(
+                drawerContainerColor = com.claudewebui.app.ui.components.common.PlumSurfaceStrong,
+                modifier = Modifier.widthIn(max = 340.dp),
+            ) {
+                ModelChatHistoryList(
+                    selectedChatId = workspace.selection("chat"),
+                    onSelect = { chat ->
+                        workspace.select("chat", chat.id); AreaLastOpened.set(drawerContext, "chat", chat.id)
+                        historyScope.launch { historyDrawer.close() }
+                    },
+                    onNewChat = { workspace.select("chat", null); historyScope.launch { historyDrawer.close() } },
+                    modifier = Modifier.fillMaxSize().statusBarsPadding().padding(start = 12.dp, end = 12.dp, top = 12.dp),
+                    listModifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                )
+            }
+        },
+    ) {
     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
         androidx.compose.foundation.layout.Box(
             Modifier.fillMaxSize().let { base ->
@@ -228,9 +260,9 @@ fun DashboardScreen(
                             onClose = { workspacePath = null; assistantArea = "code" },
                             onPersonalize = { showPersonalization = true }, onNavigateToChat = onNavigateToChat,
                             onNativeChat = { workspacePath = null; assistantArea = "chat"; modelChatMode = true })
-                    target == "model" -> if (modelChat != null) modelChat(topInset, showHistory) { showHistory = false }
+                    target == "model" -> if (modelChat != null) modelChat(topInset, false) {}
                         else AssistantModelChat(
-                            topInset = topInset, historyOpen = showHistory, onHistoryDismiss = { showHistory = false },
+                            topInset = topInset, historyOpen = false, onHistoryDismiss = {},
                             onAreaSelect = selectArea, onAgentChats = { modelChatMode = false },
                             selectedChatId = workspace.selection("chat"), onChatSelected = { workspace.select("chat", it) },
                         )
@@ -252,24 +284,17 @@ fun DashboardScreen(
         ) {
             PlumAreaSelector(
                 assistantArea, selectArea,
-                onPersonalize = if (assistantArea == "code" || assistantArea == "task") ({ showPersonalization = true }) else null,
-                trailingIcon = when (assistantArea) {
-                    "chat" -> androidx.compose.material.icons.Icons.Outlined.History
-                    "swarm" -> androidx.compose.material.icons.Icons.Outlined.Shield
-                    else -> null
-                },
-                trailingLabel = when (assistantArea) {
-                    "chat" -> stringResource(R.string.assistant_history)
-                    "swarm" -> stringResource(R.string.assistant_emergency)
-                    else -> null
-                },
-                onTrailing = when (assistantArea) {
-                    "chat" -> ({ showHistory = true })
-                    "swarm" -> ({ showEmergency = true })
-                    else -> null
+                menu = {
+                    AreaHeaderMenu(
+                        area = assistantArea, viewModel = viewModel, onNavigateMain = onNavigateMain, onOpenSession = onNavigateToChat,
+                        onNewChat = { workspace.select("chat", null) },
+                        onHistory = { historyScope.launch { historyDrawer.open() } },
+                        onEmergency = { showEmergency = true },
+                    )
                 },
             )
         }
+    }
     }
 }
 
@@ -296,7 +321,21 @@ internal fun DashboardListScreen(
     var showNewSessionDialog by remember { mutableStateOf(false) }
     // Selection mode drives the bulk action bar; archiving replaces deleting as
     // the default way to get a session out of the list.
-    val selectionActive = state.selectedSessionIds.isNotEmpty()
+    // "Auswählen" in the ≡ menu turns taps into selection before anything is picked.
+    var selectMode by remember { mutableStateOf(false) }
+    val selectionActive = state.selectedSessionIds.isNotEmpty() || selectMode
+    var previewTarget by remember { mutableStateOf<Session?>(null) }
+    var openedProjects by remember { mutableStateOf(setOf<String>()) }
+    var collapsedProjects by remember { mutableStateOf(setOf<String>()) }
+    val listContext = androidx.compose.ui.platform.LocalContext.current
+    val sessionViews by SessionViewPrefs.flow(listContext).collectAsStateWithLifecycle()
+    val sessionView = sessionViews[assistantArea] ?: SessionView.SITUATION
+    val messageRepository = org.koin.compose.koinInject<com.claudewebui.app.data.repository.MessageRepository>()
+    val outboxFlow = remember(messageRepository) { messageRepository.observePendingOutbox() }
+    val outbox by outboxFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    LaunchedEffect(Unit) {
+        DashboardMenuBus.events.collect { command -> if (command == DashboardMenuCommand.SELECT_SESSIONS) selectMode = true }
+    }
     var selectedFilter by remember { mutableStateOf("All") }
     var showMoreFilters by remember { mutableStateOf(false) }
     var showNotifications by remember { mutableStateOf(false) }
@@ -369,7 +408,8 @@ internal fun DashboardListScreen(
             badgeCount = attentionCount,
             embedded = embedded,
             floatingActionButton = {
-                if (!compactList) Box(
+                // The bottom bar is gone, so the button for a new session is always there.
+                Box(
                     modifier = Modifier
                         .size(62.dp)
                         .clip(RoundedCornerShape(screenTokens.radius.panel))
@@ -401,7 +441,9 @@ internal fun DashboardListScreen(
                 max = 1180.dp,
             ) {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
+                // Tiles take one cell; everything else spans the line. Two tiles
+                // side by side on a phone, four in two columns on wide windows.
+                columns = GridCells.Fixed(if (embedded) 1 else columns * 2),
                 // Cards fade out under the floating nav bar instead of ending
                 // in a straight line across the glass.
                 modifier = Modifier.fillMaxSize().fadingEdges(top = if (embedded) 12.dp else 0.dp, bottom = 36.dp),
@@ -426,20 +468,19 @@ internal fun DashboardListScreen(
                             item { TextButton(onClick = { viewModel.moveSessionsToSurface(state.selectedSessionIds.toList(), if (assistantArea == "task") "code" else "task") }) { Text(stringResource(if (assistantArea == "task") R.string.assistant_move_to_code else R.string.assistant_move_to_task)) } }
                             item { TextButton(onClick = { viewModel.bulkAction(if (state.showArchived) "unarchive" else "archive") }) { Text(screenResources.getString(if (state.showArchived) R.string.action_restore else R.string.action_archive)) } }
                             item { TextButton(onClick = { viewModel.bulkAction("star") }) { Text(dashboardFilterLabel("Starred", screenResources)) } }
-                            item { TextButton(onClick = viewModel::clearSelection) { Text(screenResources.getString(R.string.action_cancel)) } }
+                            item { TextButton(onClick = { viewModel.clearSelection(); selectMode = false }) { Text(screenResources.getString(R.string.action_cancel)) } }
                         }
                     }
                 }
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    CompactSessionsHeader(
-                        online = !state.isOffline, runningCount = runningCount, approvals = attentionCount,
-                        showMetricPills = !embedded && !largeText,
-                        unreadNotifications = state.unreadNotifications,
-                        onNotifications = { viewModel.loadNotifications(); showNotifications = true },
-                        onSettings = onNavigateToSettings,
-                        onNewSession = { showNewSessionDialog = true },
-                        phoneLayout = compactList,
-                        onApprovals = { viewModel.setApprovalsVisible(true) },
+                // Messages typed on this device that the server has not confirmed yet.
+                if (outbox.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                    DashboardStatePanel(
+                        icon = Icons.Outlined.CloudOff,
+                        title = screenResources.getString(R.string.overview_outbox, outbox.size),
+                        detail = screenResources.getString(R.string.overview_outbox_detail),
+                        onRetry = { onNavigateMain(MainDestination.ACTIVITY) },
+                        actionLabel = screenResources.getString(R.string.overview_outbox_show),
+                        compact = true,
                     )
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) {
@@ -555,6 +596,7 @@ internal fun DashboardListScreen(
                         else -> gridItems(
                             state.messageSearchResults,
                             key = { "${it.sessionId}_${it.id}" },
+                            span = { GridItemSpan(maxLineSpan) },
                         ) { result ->
                             MessageSearchResultCard(
                                 result = result,
@@ -605,61 +647,33 @@ internal fun DashboardListScreen(
                         )
                     }
                 } else {
-                    // Grouped by what each session wants from you rather than
-                    // by name or timestamp: finding the one that is blocked on an
-                    // approval is the whole job of this screen, and it used to
-                    // sit wherever its update time happened to put it.
-                    superviseSessions(
-                        visibleSessions,
+                    // Projects with something that needs you or is running start open.
+                    val activeProjects = visibleSessions.filter { effectiveState(it).group == com.claudewebui.app.ui.components.dashboard.SessionGroup.NEEDS_YOU || effectiveState(it).group == com.claudewebui.app.ui.components.dashboard.SessionGroup.WORKING }
+                        .map { it.workingDirectory.trimEnd('/') }.toSet()
+                    val expanded = (activeProjects - collapsedProjects) + openedProjects
+                    sessionOverview(
+                        view = sessionView,
+                        sessions = visibleSessions,
                         idleAfterMinutes = idleAfter.minutes,
-                    ).forEach { section ->
-                        item(
-                            key = "section_${section.group.name}",
-                            span = { GridItemSpan(maxLineSpan) },
-                        ) {
-                            if (embedded) {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                                ) {
-                                    Text(
-                                        section.group.header,
-                                        color = PlumText,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(section.sessions.size.toString(), color = PlumMuted, fontSize = 11.sp)
-                                }
-                            } else {
-                                SectionHeading(
-                                    section.group.header,
-                                    modifier = Modifier.padding(top = screenTokens.spacing.xs),
-                                    caption = section.sessions.size.toString(),
-                                )
-                            }
-                        }
-                        gridItems(section.sessions, key = { it.session.id }) { row ->
-                            PlumSessionCard(
-                                session = row.session,
-                                state = row.state,
-                                compact = compactList,
-                                narrow = denseRows,
-                                onClick = { if (selectionActive) viewModel.toggleSessionSelection(row.session.id) else onNavigateToChat(row.session.id) },
-                                selected = row.session.id in state.selectedSessionIds || row.session.id == selectedSessionId,
-                                onSelect = { viewModel.toggleSessionSelection(row.session.id) },
-                                onArchive = { viewModel.clearSelection(); viewModel.toggleSessionSelection(row.session.id); viewModel.bulkAction(if (state.showArchived) "unarchive" else "archive") },
-                                archived = state.showArchived,
-                                onToggleStar = { viewModel.toggleStar(row.session.id) },
-                                onRename = { renameTarget = row.session },
-                                onMove = { categoryTarget = row.session },
-                                onMoveSurface = { viewModel.moveSessionsToSurface(listOf(row.session.id), if (assistantArea == "task") "code" else "task") },
-                                onDelete = { deleteTarget = row.session },
-                            )
-                        }
-                    }
+                        approvals = state.pendingApprovals,
+                        responding = state.respondingApprovals,
+                        selection = state.selectedSessionIds,
+                        openSessionId = selectedSessionId,
+                        archived = state.showArchived,
+                        expandedProjects = expanded,
+                        onToggleProject = { path ->
+                            if (path in expanded) { collapsedProjects = collapsedProjects + path; openedProjects = openedProjects - path }
+                            else { openedProjects = openedProjects + path; collapsedProjects = collapsedProjects - path }
+                        },
+                        actions = SessionTileActions(
+                            open = { session -> if (selectionActive) viewModel.toggleSessionSelection(session.id) else onNavigateToChat(session.id) },
+                            toggleSelect = { session -> viewModel.toggleSessionSelection(session.id) },
+                            respond = { item, allow -> viewModel.respondToPendingApproval(item, allow) },
+                            star = { session -> viewModel.toggleStar(session.id) },
+                            archive = { session -> viewModel.clearSelection(); viewModel.toggleSessionSelection(session.id); viewModel.bulkAction(if (state.showArchived) "unarchive" else "archive") },
+                            preview = { session -> previewTarget = session },
+                        ),
+                    )
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) { Spacer(Modifier.height(72.dp)) }
             }
@@ -764,25 +778,24 @@ internal fun DashboardListScreen(
         }
     }
 
-    if (showNotifications) {
-        ModalBottomSheet(
-            onDismissRequest = { showNotifications = false },
-            containerColor = PlumSurfaceStrong,
-        ) {
-            NotificationFeedContent(
-                notifications = state.notifications,
-                pendingRequestIds = state.pendingApprovals.map { it.requestId }.toSet(),
-                respondingRequestIds = state.respondingApprovals,
-                unreadCount = state.unreadNotifications,
-                onOpenSession = { sessionId ->
-                    showNotifications = false
-                    onNavigateToChat(sessionId)
-                },
-                onMarkAllRead = { viewModel.markNotificationsRead() },
-                onClearAll = { viewModel.clearNotifications() },
-                onRespond = { item, allow -> viewModel.respondToApproval(item, allow) },
-            )
-        }
+    previewTarget?.let { target ->
+        val current = state.sessions.firstOrNull { it.id == target.id } ?: target
+        val close = { previewTarget = null }
+        SessionPreviewSheet(
+            session = current,
+            state = effectiveState(current, idleAfterMinutes = idleAfter.minutes),
+            archived = state.showArchived,
+            api = org.koin.compose.koinInject(),
+            onDismiss = close,
+            onOpen = { close(); onNavigateToChat(current.id) },
+            onStar = { viewModel.toggleStar(current.id) },
+            onArchive = { close(); viewModel.clearSelection(); viewModel.toggleSessionSelection(current.id); viewModel.bulkAction(if (state.showArchived) "unarchive" else "archive") },
+            onRename = { close(); renameTarget = current },
+            onMove = { close(); categoryTarget = current },
+            onMoveSurface = { close(); viewModel.moveSessionsToSurface(listOf(current.id), if (assistantArea == "task") "code" else "task") },
+            onSelect = { close(); selectMode = true; viewModel.toggleSessionSelection(current.id) },
+            onDelete = { close(); deleteTarget = current },
+        )
     }
 
     renameTarget?.let { target ->
@@ -898,6 +911,7 @@ private fun DashboardStatePanel(
     title: String,
     detail: String,
     onRetry: (() -> Unit)?,
+    actionLabel: String? = null,
     compact: Boolean = false,
 ) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
@@ -917,7 +931,7 @@ private fun DashboardStatePanel(
                     Text(title, color = PlumText, fontWeight = FontWeight.SemiBold)
                     Text(detail, color = PlumMuted, fontSize = 12.sp)
                 }
-                onRetry?.let { TextButton(onClick = it) { Text(screenResources.getString(R.string.dashboard_retry_9f5cd)) } }
+                onRetry?.let { TextButton(onClick = it) { Text(actionLabel ?: screenResources.getString(R.string.dashboard_retry_9f5cd)) } }
             }
         } else {
             Column(

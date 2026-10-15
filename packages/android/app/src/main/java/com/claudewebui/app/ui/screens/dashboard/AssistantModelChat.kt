@@ -296,6 +296,19 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) voiceMode = true
         else voicePermission.launch(android.Manifest.permission.RECORD_AUDIO)
     }
+    // Voice and writing style from the ≡ header menu. Without voice features the
+    // voice sheet opens, which has the switch to turn them on.
+    val voiceAllowed by rememberUpdatedState(voiceEnabled)
+    LaunchedEffect(owner) {
+        DashboardMenuBus.events.collect { command ->
+            when (command) {
+                DashboardMenuCommand.VOICE_MODE -> { if (voiceAllowed) openVoiceMode() else showVoiceSheet = true }
+                DashboardMenuCommand.VOICE -> showVoiceSheet = true
+                DashboardMenuCommand.WRITING_STYLE -> showStyleSheet = true
+                else -> Unit
+            }
+        }
+    }
     // The voice mode (voice = true) also starts a new chat and leaves the draft alone.
     fun send(override: String? = null, voice: Boolean = false) {
         val text = (override ?: prompt).trim()
@@ -356,6 +369,12 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                             Text(stringResource(R.string.assistant_start_sub), color = palette.muted, style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp))
                             AssistantStartSuggestions(enabled = !busy, columns = columns, onPick = { prompt = it }, modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth())
                         }
+                        RecentChatsBlock(
+                            owner, api, enabled = !busy,
+                            onSelect = { resource -> RecentModelChats.put(resource); showChat(resource); currentOnChatSelected(resource.id) },
+                            onShowAll = { DashboardMenuBus.send(DashboardMenuCommand.HISTORY) },
+                            modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth().padding(top = 8.dp),
+                        )
                     }
                 }
             } else {
@@ -714,21 +733,32 @@ fun ModelChatHistoryList(
             }
             if (loaded && chats.isEmpty()) Text(stringResource(R.string.assistant_no_chats), color = palette.muted, modifier = Modifier.padding(vertical = 16.dp, horizontal = 4.dp))
             LazyColumn(listModifier, contentPadding = contentPadding, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                items(chats, key = { it.id }) { resource ->
-                    val active = resource.id == selectedChatId
-                    Text(
-                        resource.title,
-                        Modifier.fillMaxWidth()
-                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-                            .background(if (active) palette.controlSurface else androidx.compose.ui.graphics.Color.Transparent)
-                            .semantics { selected = active }
-                            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button) { RecentModelChats.put(resource); onSelect(resource) }
-                            .padding(vertical = 13.dp, horizontal = 12.dp),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (active) palette.text else palette.text.copy(alpha = .86f),
-                        fontWeight = if (active) FontWeight.SemiBold else null,
-                        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
+                // Grouped by day like the chat apps: Heute, Gestern, Diese Woche, Älter.
+                chats.groupBy { chatBucket(it.updatedAt) }.toSortedMap().forEach { (bucket, group) ->
+                    item(key = "bucket_$bucket") {
+                        Text(stringResource(CHAT_BUCKETS[bucket]), style = MaterialTheme.typography.labelMedium, color = palette.muted, modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 4.dp))
+                    }
+                    items(group, key = { it.id }) { resource ->
+                        val active = resource.id == selectedChatId
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                                .background(if (active) palette.controlSurface else androidx.compose.ui.graphics.Color.Transparent)
+                                .semantics { selected = active }
+                                .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button) { RecentModelChats.put(resource); onSelect(resource) }
+                                .padding(vertical = 12.dp, horizontal = 12.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                resource.title, Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (active) palette.text else palette.text.copy(alpha = .86f),
+                                fontWeight = if (active) FontWeight.SemiBold else null,
+                                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
+                            Text(chatTime(resource.updatedAt, LocalContext.current), style = MaterialTheme.typography.labelSmall, color = palette.muted, modifier = Modifier.padding(start = 8.dp))
+                        }
+                    }
                 }
                 if (hasMore) item { TextButton(onClick = { offset += 100 }) { Text(stringResource(R.string.assistant_more)) } }
             }
@@ -795,4 +825,53 @@ private fun ModelImage(owner: String, api: ApiClient, chatId: String, id: String
     }
     if (failed) Text(stringResource(R.string.assistant_image_unavailable))
     bytes?.let { AsyncImage(it, stringResource(R.string.assistant_image), modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) }
+}
+
+private val CHAT_BUCKETS = listOf(R.string.history_today, R.string.history_yesterday, R.string.history_week, R.string.history_older)
+
+/** 0 today, 1 yesterday, 2 this week, 3 older. */
+private fun chatBucket(iso: String): Int {
+    val day = runCatching { java.time.Instant.parse(iso).atZone(java.time.ZoneId.systemDefault()).toLocalDate() }.getOrNull() ?: return 3
+    val days = java.time.temporal.ChronoUnit.DAYS.between(day, java.time.LocalDate.now())
+    return when { days <= 0 -> 0; days == 1L -> 1; days < 7 -> 2; else -> 3 }
+}
+
+/** Clock time today, otherwise the relative age ("gestern", "vor 3 Tagen"). */
+private fun chatTime(iso: String, context: android.content.Context): String {
+    val instant = runCatching { java.time.Instant.parse(iso) }.getOrNull() ?: return ""
+    return if (chatBucket(iso) == 0) java.time.format.DateTimeFormatter.ofPattern("HH:mm").withZone(java.time.ZoneId.systemDefault()).format(instant)
+    else ageLabel(iso, context)
+}
+
+/**
+ * "Zuletzt" under the start suggestions: the five newest chats, so the way
+ * back into a conversation is a scroll away. "Alle anzeigen" opens the history.
+ */
+@Composable
+private fun RecentChatsBlock(owner: String, api: ApiClient, enabled: Boolean, onSelect: (AssistantResource) -> Unit, onShowAll: () -> Unit, modifier: Modifier = Modifier) {
+    val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
+    val context = LocalContext.current
+    var chats by remember(owner) { mutableStateOf<List<AssistantResource>>(emptyList()) }
+    LaunchedEffect(owner) {
+        chats = runCatching { api.getAssistantResources("api-chats", 0, null).data.orEmpty().take(5) }.getOrDefault(emptyList())
+    }
+    if (chats.isEmpty()) return
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text(stringResource(R.string.history_recent), style = MaterialTheme.typography.titleSmall, color = palette.text, modifier = Modifier.weight(1f).padding(start = 4.dp))
+            TextButton(onClick = onShowAll) { Text(stringResource(R.string.history_show_all)) }
+        }
+        chats.forEach { resource ->
+            Row(
+                Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp)).background(palette.subtleFill)
+                    .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button) { onSelect(resource) }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Icon(androidx.compose.material.icons.Icons.Outlined.History, null, tint = palette.muted, modifier = Modifier.size(18.dp))
+                Text(resource.title, Modifier.weight(1f).padding(horizontal = 10.dp), color = palette.text, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Text(chatTime(resource.updatedAt, context), style = MaterialTheme.typography.labelSmall, color = palette.muted)
+            }
+        }
+    }
 }
