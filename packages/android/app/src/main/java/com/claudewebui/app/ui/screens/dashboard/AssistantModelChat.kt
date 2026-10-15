@@ -302,7 +302,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         if (text.isEmpty() || busy || running) return
         val current = chat
         if (current != null) {
-            command("/api/assistant/api-chats/${current.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", current.revision); put("imageAssetIds", JsonArray(imageIds.map(::JsonPrimitive))); effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send), keepDraft = override != null)
+            command("/api/assistant/api-chats/${current.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", current.revision); put("imageAssetIds", JsonArray(if (voice) emptyList() else imageIds.map(::JsonPrimitive))); if (voice) put("voice", true) else effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send), keepDraft = override != null)
         } else if ((override == null || voice) && providerId.isNotBlank() && model.isNotBlank()) scope.launch {
             busy = true; error = null
             try {
@@ -315,7 +315,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                 val target = chat ?: return@launch
                 // A brand-new chat has no history: its first turn rises in.
                 baselineChat = target.id; baselineSeq = 0L
-                val sent = outbox.send("/api/assistant/api-chats/${target.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", target.revision); put("imageAssetIds", JsonArray(emptyList())); effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send), null)
+                val sent = outbox.send("/api/assistant/api-chats/${target.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", target.revision); put("imageAssetIds", JsonArray(emptyList())); if (voice) put("voice", true) else effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send), null)
                 checkOwner(); accept("/api/assistant/api-chats/${target.id}/turns", sent, keepDraft = voice)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { checkOwner(); error = failure.message }

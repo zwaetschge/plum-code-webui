@@ -152,6 +152,7 @@ import {
 import {
   assistantVoices,
   assistantSpeech,
+  assistantVoiceWarmup,
   assistantTranscription,
 } from '../services/assistant/voice.js';
 
@@ -1545,6 +1546,27 @@ router.post(
     res.setHeader('Content-Type', 'audio/wav');
     res.setHeader('Cache-Control', 'private, no-store');
     res.send(audio);
+  })
+);
+router.post(
+  '/voice/warmup',
+  handle(async (req, res) => {
+    const input = parse(
+      z
+        .object({
+          voice: z.string().trim().min(1).max(100).default('Rufus Beck'),
+          language: z.string().max(80).default('German'),
+        })
+        .strict(),
+      req.body ?? {}
+    );
+    res.json({
+      success: true,
+      data: await assistantVoiceWarmup(owner(req), {
+        voice: input.voice ?? 'Rufus Beck',
+        language: input.language ?? 'German',
+      }),
+    });
   })
 );
 router.post(

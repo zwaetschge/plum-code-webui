@@ -192,6 +192,7 @@ export async function assistantSpeech(
   // Engine is explicit and cannot silently fall back to Kikiri or Edge.
   // Vocarium ids use hyphens ("Rufus-Beck") while profiles and clients store the
   // spoken name ("Rufus Beck"), so the hyphenated form is tried when the name is unknown.
+  // Vocarium also turns non-ASCII letters into hyphens ("Tobi Knödel" -> "Tobi-Kn-del").
   const request = (voice: string) =>
     call(userId, '/api/generate', {
       method: 'POST',
@@ -204,11 +205,23 @@ export async function assistantSpeech(
         response_format: 'wav',
       }),
     });
-  const hyphenated = input.voice.trim().replace(/\s+/g, '-');
-  const response = await request(input.voice).catch((failure) => {
-    if (hyphenated === input.voice) throw failure;
-    return request(hyphenated);
-  });
+  const candidates = [
+    ...new Set([
+      input.voice,
+      input.voice.trim().replace(/\s+/g, '-'),
+      input.voice.trim().replace(/[^A-Za-z0-9]+/g, '-'),
+    ]),
+  ];
+  let response: Response | undefined;
+  for (const [index, voice] of candidates.entries()) {
+    try {
+      response = await request(voice);
+      break;
+    } catch (failure) {
+      if (index === candidates.length - 1) throw failure;
+    }
+  }
+  if (!response) throw new AppError('Stimme nicht gefunden', 404, 'VOICE_NOT_FOUND');
   const chunks: Uint8Array[] = [];
   let size = 0;
   if (response.body)
@@ -251,4 +264,58 @@ export async function assistantTranscription(
     ...(Array.isArray(result.words) ? { words: result.words } : {}),
     ...(Array.isArray(result.segments) ? { segments: result.segments } : {}),
   };
+}
+
+/** Half a second of 16 kHz mono silence as WAV: enough for Whisper to load. */
+function silentWav(): Buffer {
+  const pcm = Buffer.alloc(16000);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVEfmt ', 8);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(16000, 24);
+  header.writeUInt32LE(32000, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+/**
+ * Brings Whisper and the chosen voice up before a voice conversation, so the
+ * first spoken turn does not wait for models to load on the GPU. Both run in
+ * parallel; each reports whether it is ready, how long it took, or its error.
+ */
+export async function assistantVoiceWarmup(
+  userId: string,
+  input: { voice: string; language: string }
+) {
+  const timed = async (work: () => Promise<unknown>) => {
+    const start = Date.now();
+    try {
+      await work();
+      return { ready: true, ms: Date.now() - start };
+    } catch (failure) {
+      return {
+        ready: false,
+        ms: Date.now() - start,
+        error: failure instanceof Error ? failure.message : String(failure),
+      };
+    }
+  };
+  const [whisper, speech] = await Promise.all([
+    timed(() =>
+      assistantTranscription(
+        userId,
+        { buffer: silentWav(), originalname: 'warmup.wav', mimetype: 'audio/wav' },
+        'de'
+      )
+    ),
+    timed(() => assistantSpeech(userId, { text: 'Hallo.', ...input })),
+  ]);
+  return { whisper, speech };
 }

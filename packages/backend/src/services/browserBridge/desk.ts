@@ -144,6 +144,7 @@ export async function deskTurn(
     commandId,
     expectedRevision: chat.revision,
     prompt: input.text,
+    voice: true,
   });
   const deadline = Date.now() + 170_000;
   while (Date.now() < deadline) {

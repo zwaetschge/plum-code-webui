@@ -39,6 +39,8 @@ interface AssistantApi {
     /** Whisper through Vocarium; dictation sends AAC, the voice mode 16 kHz WAV. */
     suspend fun transcribeAssistantAudio(owner: String, bytes: ByteArray, fileName: String = "dictation.m4a", mimeType: String = "audio/mp4"): ApiResponse<JsonObject>
     suspend fun speakAssistantText(owner: String, text: String, voice: String, language: String): ByteArray
+    /** Loads Whisper and [voice] on Vocarium before a voice conversation; reports each one's readiness. */
+    suspend fun warmAssistantVoice(owner: String, voice: String, language: String): ApiResponse<JsonObject>
     suspend fun getAssistantVoices(): ApiResponse<List<AssistantVoiceOption>>
     suspend fun deliverAssistantApiCommand(owner: String, path: String, payload: JsonObject): ApiResponse<JsonObject>
     /** PATCH /api/assistant/api-chats/:id — model, profile, sources and writing style of a model chat. */
@@ -156,6 +158,20 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
             timeout { requestTimeoutMillis = 190_000; socketTimeoutMillis = 190_000 }
             setBody(kotlinx.serialization.json.buildJsonObject {
                 put("text", kotlinx.serialization.json.JsonPrimitive(text))
+                put("voice", kotlinx.serialization.json.JsonPrimitive(voice))
+                put("language", kotlinx.serialization.json.JsonPrimitive(language))
+            })
+        }.body()
+    }
+    override suspend fun warmAssistantVoice(owner: String, voice: String, language: String): ApiResponse<JsonObject> {
+        require(owner == TokenStore.assistantOwnerKey())
+        val server = requireNotNull(TokenStore.getServerUrl()).trimEnd('/')
+        val token = requireNotNull(TokenStore.getToken())
+        return http.client.post("$server/api/assistant/voice/warmup") {
+            attributes.put(AssistantAccountKey, owner)
+            header(HttpHeaders.Authorization, "Bearer $token")
+            timeout { requestTimeoutMillis = 190_000; socketTimeoutMillis = 190_000 }
+            setBody(kotlinx.serialization.json.buildJsonObject {
                 put("voice", kotlinx.serialization.json.JsonPrimitive(voice))
                 put("language", kotlinx.serialization.json.JsonPrimitive(language))
             })

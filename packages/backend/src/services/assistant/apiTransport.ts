@@ -134,7 +134,8 @@ export async function streamApiChat(
   messages: ApiMessage[],
   signal: AbortSignal,
   onText: (text: string) => Promise<void>,
-  effort?: ApiReasoningEffort
+  /** 'auto' lets the model decide how long to think (voice turns). */
+  effort?: ApiReasoningEffort | 'auto'
 ): Promise<ApiStreamResult> {
   const anthropic = endpoint.protocol === 'anthropic',
     gemini = endpoint.protocol === 'gemini';
@@ -212,10 +213,13 @@ export async function streamApiChat(
             })),
             generationConfig: {
               candidateCount: 1,
-              maxOutputTokens: 8192 + (effort ? GEMINI_THINKING_BUDGET[effort] : 0),
-              ...(effort
-                ? { thinkingConfig: { thinkingBudget: GEMINI_THINKING_BUDGET[effort] } }
-                : {}),
+              maxOutputTokens:
+                8192 + (effort === 'auto' ? 8192 : effort ? GEMINI_THINKING_BUDGET[effort] : 0),
+              ...(effort === 'auto'
+                ? { thinkingConfig: { thinkingBudget: -1 } }
+                : effort
+                  ? { thinkingConfig: { thinkingBudget: GEMINI_THINKING_BUDGET[effort] } }
+                  : {}),
             },
           }
         : anthropic
@@ -224,13 +228,20 @@ export async function streamApiChat(
               system,
               messages: wireMessages,
               // The thinking budget counts against max_tokens, so the answer keeps its 8k.
-              max_tokens: 8192 + (effort ? ANTHROPIC_THINKING_BUDGET[effort] : 0),
+              max_tokens:
+                8192 + (effort === 'auto' ? 8192 : effort ? ANTHROPIC_THINKING_BUDGET[effort] : 0),
               stream: true,
-              ...(effort
-                ? {
-                    thinking: { type: 'enabled', budget_tokens: ANTHROPIC_THINKING_BUDGET[effort] },
-                  }
-                : {}),
+              // Adaptive thinking: the model thinks only as long as the question needs.
+              ...(effort === 'auto'
+                ? { thinking: { type: 'adaptive' } }
+                : effort
+                  ? {
+                      thinking: {
+                        type: 'enabled',
+                        budget_tokens: ANTHROPIC_THINKING_BUDGET[effort],
+                      },
+                    }
+                  : {}),
             }
           : {
               model,
@@ -238,7 +249,7 @@ export async function streamApiChat(
               stream: true,
               stream_options: { include_usage: true },
               // OpenAI-style APIs know low/medium/high; max and ultra are the highest of those.
-              ...(effort
+              ...(effort && effort !== 'auto'
                 ? { reasoning_effort: effort === 'max' || effort === 'ultra' ? 'high' : effort }
                 : {}),
             }

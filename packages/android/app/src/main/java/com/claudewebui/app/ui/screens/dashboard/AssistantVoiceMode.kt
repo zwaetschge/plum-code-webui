@@ -24,7 +24,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material3.*
@@ -78,9 +81,12 @@ import kotlin.math.sqrt
  * the microphone listens until you pause, Whisper (Vocarium) writes it down,
  * the text goes into the chat as the next turn, and OmniVoice reads the answer
  * sentence by sentence while it is still streaming, then the microphone
- * listens again. Everything stays an ordinary turn of the chat.
+ * listens again. Turns are sent with `voice: true`, so Plum knows it is being
+ * spoken to and answers short and for the ear (fast Haiku, adaptive thinking).
+ * Before the first word, Whisper and the chosen voice are loaded on Vocarium;
+ * the microphone only opens once both are ready.
  */
-internal enum class VoicePhase { Listening, Transcribing, Thinking, Speaking, Paused }
+internal enum class VoicePhase { Preparing, Listening, Transcribing, Thinking, Speaking, Paused }
 
 private const val RATE = 16_000
 private const val FRAME = 320                 // 20 ms
@@ -346,7 +352,15 @@ internal fun AssistantVoiceMode(
     val haptics = LocalHapticFeedback.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val close by rememberUpdatedState(onClose)
-    var phase by remember { mutableStateOf(VoicePhase.Listening) }
+    var phase by remember { mutableStateOf(VoicePhase.Preparing) }
+    var currentVoice by remember { mutableStateOf(voice) }
+    var readyVoice by remember { mutableStateOf<String?>(null) }   // voice Whisper and OmniVoice were warmed for
+    var whisperReady by remember { mutableStateOf<Boolean?>(null) }
+    var speechReady by remember { mutableStateOf<Boolean?>(null) }
+    var prepareError by remember { mutableStateOf<String?>(null) }
+    var retry by remember { mutableIntStateOf(0) }
+    val settings = com.claudewebui.app.ui.screens.settings.rememberAssistantSettingsController(api)
+    val catalog = com.claudewebui.app.ui.screens.settings.rememberVoiceCatalog(owner, api)
     var hearing by remember { mutableStateOf(false) }
     var paused by remember { mutableStateOf(false) }
     var heardText by remember { mutableStateOf("") }
@@ -358,6 +372,13 @@ internal fun AssistantVoiceMode(
     val current = remember { arrayOfNulls<Job>(1) }
 
     fun interrupt() { current[0]?.cancel() }
+    // A new voice is saved at once and warmed before Plum speaks with it.
+    fun chooseVoice(key: String) {
+        if (com.claudewebui.app.ui.screens.settings.sameVoice(key, currentVoice)) return
+        currentVoice = key
+        settings?.setChoice("voiceName", key)
+        interrupt()
+    }
 
     // Ends with the screen: the microphone never runs in the background.
     DisposableEffect(lifecycle) {
@@ -397,7 +418,7 @@ internal fun AssistantVoiceMode(
             launch {
                 try {
                     for (piece in texts) {
-                        val audio = api.speakAssistantText(owner, piece, voice, "German")
+                        val audio = api.speakAssistantText(owner, piece, currentVoice, "German")
                         if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed")
                         clips.send(piece to audio)
                     }
@@ -426,7 +447,25 @@ internal fun AssistantVoiceMode(
 
         var failures = 0
         while (isActive) {
-            if (paused) { phase = VoicePhase.Paused; snapshotFlow { paused }.first { !it } }
+            if (readyVoice != currentVoice) {
+                val target = currentVoice
+                phase = VoicePhase.Preparing; whisperReady = null; speechReady = null; prepareError = null
+                val warmed = step { api.warmAssistantVoice(owner, target, "German") } ?: continue
+                val response = warmed.getOrNull()
+                val whisper = response?.data?.get("whisper") as? kotlinx.serialization.json.JsonObject
+                val speech = response?.data?.get("speech") as? kotlinx.serialization.json.JsonObject
+                fun ready(part: kotlinx.serialization.json.JsonObject?) = part?.get("ready")?.jsonPrimitive?.content == "true"
+                fun failure(part: kotlinx.serialization.json.JsonObject?) = part?.get("error")?.jsonPrimitive?.content
+                whisperReady = ready(whisper); speechReady = ready(speech)
+                if (whisperReady == true && speechReady == true) { readyVoice = target; continue }
+                prepareError = warmed.exceptionOrNull()?.message ?: response?.error?.message
+                    ?: listOfNotNull(failure(whisper)?.let { "Whisper: $it" }, failure(speech)?.let { "OmniVoice: $it" }).joinToString("\n").ifBlank { null }
+                    ?: context.getString(R.string.assistant_voice_failed)
+                val tries = retry
+                snapshotFlow { retry != tries || currentVoice != target }.first { it }
+                continue
+            }
+            if (paused) { phase = VoicePhase.Paused; snapshotFlow { !paused || readyVoice != currentVoice }.first { it }; continue }
             phase = VoicePhase.Listening; hearing = false; finish[0] = false
             val heard = step {
                 capture.listen(level = { micLevel.floatValue = it }, onSpeech = { hearing = true }, finishNow = { finish[0] })
@@ -475,6 +514,7 @@ internal fun AssistantVoiceMode(
                     style = MaterialTheme.typography.titleMedium, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 8.dp),
                 )
+                VoiceDropdown(catalog, currentVoice, ::chooseVoice)
                 Spacer(Modifier.weight(1f))
                 val level = when (phase) { VoicePhase.Listening -> micLevel.floatValue; VoicePhase.Speaking -> speakLevel.floatValue; else -> 0f }
                 val orbSource = remember { MutableInteractionSource() }
@@ -491,6 +531,7 @@ internal fun AssistantVoiceMode(
                 )
                 Spacer(Modifier.height(36.dp))
                 val status = when (phase) {
+                    VoicePhase.Preparing -> stringResource(if (prepareError != null) R.string.voice_mode_prepare_failed else R.string.voice_mode_preparing)
                     VoicePhase.Listening -> stringResource(if (hearing) R.string.voice_mode_listening else R.string.voice_mode_ready)
                     VoicePhase.Transcribing -> stringResource(R.string.voice_mode_transcribing)
                     VoicePhase.Thinking -> stringResource(R.string.voice_mode_thinking)
@@ -506,7 +547,17 @@ internal fun AssistantVoiceMode(
                     VoicePhase.Thinking, VoicePhase.Speaking -> stringResource(R.string.voice_mode_hint_interrupt)
                     else -> ""
                 }
-                Text(message ?: hint, style = MaterialTheme.typography.bodyMedium, color = if (message != null) MaterialTheme.colorScheme.error else palette.muted, textAlign = TextAlign.Center, minLines = 1, maxLines = 2)
+                if (phase == VoicePhase.Preparing) {
+                    // Both engines must be up before the microphone takes your voice.
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        EngineState(stringResource(R.string.voice_mode_engine_whisper), whisperReady, prepareError != null)
+                        EngineState(stringResource(R.string.voice_mode_engine_voice, com.claudewebui.app.ui.screens.settings.assistantVoiceLabel(currentVoice)), speechReady, prepareError != null)
+                        prepareError?.let { failure ->
+                            Text(failure, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                            TextButton(onClick = { retry++ }) { Text(stringResource(R.string.voice_mode_retry)) }
+                        }
+                    }
+                } else Text(message ?: hint, style = MaterialTheme.typography.bodyMedium, color = if (message != null) MaterialTheme.colorScheme.error else palette.muted, textAlign = TextAlign.Center, minLines = 1, maxLines = 2)
                 Spacer(Modifier.height(20.dp))
                 // What you said, then the sentence Plum is speaking: subtitles for the conversation.
                 Column(Modifier.fillMaxWidth().heightIn(min = 120.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -547,6 +598,7 @@ private fun VoiceOrb(phase: VoicePhase, level: Float, reduce: Boolean, modifier:
     val (inner, outer) = when (phase) {
         VoicePhase.Listening -> palette.accent to palette.blue
         VoicePhase.Transcribing, VoicePhase.Thinking -> palette.accent to palette.amber
+        VoicePhase.Preparing -> palette.accentDeep to palette.muted
         VoicePhase.Speaking -> rose to palette.accent
         VoicePhase.Paused -> palette.muted to palette.border
     }
@@ -566,7 +618,7 @@ private fun VoiceOrb(phase: VoicePhase, level: Float, reduce: Boolean, modifier:
         // Glow behind everything.
         drawCircle(Brush.radialGradient(listOf(b.copy(alpha = .38f + loud * .3f), Color.Transparent), center, base * 1.9f * swell), base * 1.9f * swell, center)
         // Three blobs, each rippling at its own speed.
-        val thinking = phase == VoicePhase.Thinking || phase == VoicePhase.Transcribing
+        val thinking = phase == VoicePhase.Thinking || phase == VoicePhase.Transcribing || phase == VoicePhase.Preparing
         for (layer in 0 until 3) {
             val radius = base * swell * (1f - layer * .14f)
             val wobble = (.035f + loud * .16f) * (1f - layer * .25f)
@@ -589,6 +641,59 @@ private fun VoiceOrb(phase: VoicePhase, level: Float, reduce: Boolean, modifier:
             val angle = time * 2.2f + dot * 2 * PI.toFloat() / 3
             val orbit = base * 1.42f
             drawCircle(b.copy(alpha = .9f), base * .07f, center + Offset(orbit * kotlin.math.cos(angle), orbit * sin(angle)))
+        }
+    }
+}
+
+/** One engine's warm-up line: spinner while loading, check when ready, cross on failure. */
+@Composable
+private fun EngineState(label: String, ready: Boolean?, failed: Boolean) {
+    val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        when {
+            ready == true -> Icon(Icons.Outlined.Check, null, tint = palette.green, modifier = Modifier.size(18.dp))
+            failed -> Icon(Icons.Outlined.Close, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+            else -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = palette.muted)
+        }
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = palette.muted)
+    }
+}
+
+/**
+ * Voice switcher under the chat title: every OmniVoice and Mistral voice in a
+ * dropdown. A choice is saved right away (same as the voice sheet) and warmed
+ * before Plum talks with it.
+ */
+@Composable
+private fun VoiceDropdown(catalog: com.claudewebui.app.ui.screens.settings.VoiceCatalog, selected: String, onSelect: (String) -> Unit) {
+    val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
+    var open by remember { mutableStateOf(false) }
+    Box(Modifier.padding(top = 6.dp)) {
+        val source = remember { MutableInteractionSource() }
+        AssistChip(
+            onClick = { open = true; if (catalog.voices == null && !catalog.loading) catalog.load() },
+            label = { Text(com.claudewebui.app.ui.screens.settings.assistantVoiceLabel(selected), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null, Modifier.size(18.dp)) },
+            trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, stringResource(R.string.voice_mode_change_voice), Modifier.size(18.dp)) },
+            interactionSource = source, modifier = Modifier.pressScale(source),
+        )
+        DropdownMenu(open, { open = false }, Modifier.heightIn(max = 440.dp)) {
+            val voices = catalog.voices
+            when {
+                voices == null && catalog.loadError == null -> DropdownMenuItem(text = { Text(stringResource(R.string.voice_mode_voices_loading)) }, onClick = {}, enabled = false)
+                catalog.loadError != null -> DropdownMenuItem(text = { Text(catalog.loadError.orEmpty(), color = MaterialTheme.colorScheme.error) }, onClick = { catalog.load() })
+                else -> voices.orEmpty().groupBy { if (it.engine == "mistral") "Mistral" else "OmniVoice" }.toSortedMap(compareBy { it != "OmniVoice" }).forEach { (engine, group) ->
+                    Text(engine, style = MaterialTheme.typography.labelMedium, color = palette.muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                    group.forEach { option ->
+                        val chosen = com.claudewebui.app.ui.screens.settings.sameVoice(option.key, selected.ifBlank { com.claudewebui.app.ui.screens.settings.DEFAULT_ASSISTANT_VOICE })
+                        DropdownMenuItem(
+                            text = { Text(option.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            trailingIcon = { if (chosen) Icon(Icons.Outlined.Check, null, tint = palette.accent) },
+                            onClick = { open = false; onSelect(option.key) },
+                        )
+                    }
+                }
+            }
         }
     }
 }

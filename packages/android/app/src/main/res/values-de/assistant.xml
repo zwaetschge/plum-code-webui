@@ -201,4 +201,11 @@
     <string name="voice_mode_resume">Weiter zuhören</string>
     <string name="voice_mode_end">Sprachgespräch beenden</string>
     <string name="voice_mode_orb">Sprachgespräch. Tippen, um fertig zu sprechen oder zu unterbrechen.</string>
+    <string name="voice_mode_preparing">Whisper und Stimme werden geladen …</string>
+    <string name="voice_mode_prepare_failed">Die Sprachdienste sind nicht bereit</string>
+    <string name="voice_mode_engine_whisper">Whisper (Spracherkennung)</string>
+    <string name="voice_mode_engine_voice">Stimme: %1$s</string>
+    <string name="voice_mode_retry">Erneut versuchen</string>
+    <string name="voice_mode_change_voice">Stimme wechseln</string>
+    <string name="voice_mode_voices_loading">Stimmen werden geladen …</string>
 </resources>

@@ -201,4 +201,11 @@
     <string name="voice_mode_resume">Resume listening</string>
     <string name="voice_mode_end">End voice chat</string>
     <string name="voice_mode_orb">Voice chat. Tap to finish speaking or to interrupt.</string>
+    <string name="voice_mode_preparing">Getting Whisper and the voice ready …</string>
+    <string name="voice_mode_prepare_failed">Couldn\'t get the voice ready</string>
+    <string name="voice_mode_engine_whisper">Whisper (speech recognition)</string>
+    <string name="voice_mode_engine_voice">Voice: %1$s</string>
+    <string name="voice_mode_retry">Try again</string>
+    <string name="voice_mode_change_voice">Change voice</string>
+    <string name="voice_mode_voices_loading">Loading voices …</string>
 </resources>

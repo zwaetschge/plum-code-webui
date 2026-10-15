@@ -31,6 +31,7 @@ import { captureTaskSources, taskSourceContext } from './taskSources.js';
 import {
   API_REASONING_EFFORTS,
   apiChatEndpoint,
+  apiChatProviders,
   streamApiChat,
   type ApiMessage,
 } from './apiTransport.js';
@@ -97,8 +98,38 @@ export const API_TURN_INPUT = z
     imageAssetIds: z.array(z.string().uuid()).max(4).optional(),
     /** Thinking depth for this turn; omitted keeps the model's own default. */
     reasoningEffort: z.enum(API_REASONING_EFFORTS).optional(),
+    /**
+     * Spoken in a voice mode: answered for the ear (VOICE_INSTRUCTIONS) by the
+     * fastest Claude with adaptive thinking; reasoningEffort is ignored.
+     */
+    voice: z.boolean().optional(),
   })
   .strict();
+
+/**
+ * Voice turns: Plum knows it is being spoken to and that its answer is read
+ * aloud. Replaces the Dynamic UI instructions (a view cannot be heard).
+ */
+const VOICE_INSTRUCTIONS = [
+  "Voice conversation: the user is talking to you by voice right now, in Plum's voice mode. Their message was transcribed by speech recognition (Whisper) and may contain recognition errors or missing punctuation; infer what they meant and never comment on spelling. Your answer is read aloud by a text-to-speech voice and is not shown as formatted text.",
+  'Answer like a person in a spoken conversation: natural, warm and direct, answer first, usually one to four short sentences; go into detail only when asked. Write plain sentences only: no Markdown, lists, headings, tables, code, emojis, URLs or interactive views. Write numbers, times, units and abbreviations the way they are spoken. If something really needs a long answer, code or a link, give the gist and offer to write the details into the chat. Ask at most one short follow-up question. Reply in the language the user speaks.',
+].join(' ');
+
+/** Voice turns answer with the newest Haiku from an Anthropic connection, if there is one. */
+async function voiceAnswerModel(userId: string) {
+  const version = (model: string) => {
+    const match = /haiku-(\d+)(?:-(\d{1,2}))?(?!\d)/.exec(model);
+    return match ? Number(match[1]) * 100 + Number(match[2] ?? 0) : -1;
+  };
+  for (const provider of await apiChatProviders(userId)) {
+    if (provider.protocol !== 'anthropic') continue;
+    const haiku = provider.models
+      .filter((model) => version(model) >= 0)
+      .sort((a, b) => version(b) - version(a))[0];
+    if (haiku) return { providerId: provider.id, model: haiku };
+  }
+  return null;
+}
 const active = new Map<string, AbortController>();
 function turn(row: Record<string, unknown>): AssistantApiTurn {
   const context = JSON.parse(String(row.profile_json));
@@ -148,7 +179,12 @@ async function profileBody(userId: string, body: Record<string, unknown>) {
   if (!row) throw new AppError('Profilrevision nicht gefunden', 404, 'NOT_FOUND');
   return JSON.parse(row.body_json) as Record<string, unknown>;
 }
-export async function systemContext(userId: string, chat: AssistantResource, query = '') {
+export async function systemContext(
+  userId: string,
+  chat: AssistantResource,
+  query = '',
+  options: { voice?: boolean; providerId?: string } = {}
+) {
   const profile = await profileBody(userId, chat.body);
   const personal = await readPersonalization(userId);
   const candidateProject =
@@ -194,7 +230,8 @@ export async function systemContext(userId: string, chat: AssistantResource, que
     );
   // Interactive views make no sense where the answer must be plain JSON or a
   // bare replacement passage.
-  if (chat.body.workflow !== 'research' && !chat.body.artifactEdit)
+  if (options.voice) parts.push(VOICE_INSTRUCTIONS);
+  else if (chat.body.workflow !== 'research' && !chat.body.artifactEdit)
     parts.push(DYNAMIC_UI_INSTRUCTIONS);
   if (project) {
     parts.push(`Project instructions:\n${String(project.body.instructions ?? '').slice(0, 30000)}`);
@@ -221,7 +258,7 @@ export async function systemContext(userId: string, chat: AssistantResource, que
   }
   return {
     system: parts.join('\n\n'),
-    providerId: String(chat.body.providerId),
+    providerId: options.providerId ?? String(chat.body.providerId),
     profileId: profile ? chat.body.profileId : null,
     profileRevision: profile ? chat.body.profileRevision : null,
     projectId,
@@ -407,6 +444,7 @@ export async function startApiTurn(
           expectedRevision: input.expectedRevision,
           imageAssetIds: input.imageAssetIds ?? [],
           ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+          ...(input.voice ? { voice: true } : {}),
         })
       )
       .digest('hex');
@@ -424,14 +462,16 @@ export async function startApiTurn(
       );
     return turn(prior);
   }
-  const endpoint = await apiChatEndpoint(
-    userId,
-    String(chat.body.providerId),
-    String(chat.body.model)
-  );
+  const voiceModel = input.voice ? await voiceAnswerModel(userId) : null;
+  const providerId = voiceModel?.providerId ?? String(chat.body.providerId),
+    model = voiceModel?.model ?? String(chat.body.model);
+  const endpoint = await apiChatEndpoint(userId, providerId, model);
   if (active.size >= 128)
     throw new AppError('Der Modellchat-Dienst ist ausgelastet', 429, 'API_CHAT_CAPACITY');
-  const context = await systemContext(userId, chat, input.prompt);
+  const context = await systemContext(userId, chat, input.prompt, {
+    voice: input.voice,
+    providerId,
+  });
   const claimed = await transaction(async (tx) => {
     await tx.get('SELECT id FROM users WHERE id=? FOR UPDATE', userId);
     await tx.get(
@@ -503,7 +543,7 @@ export async function startApiTurn(
       seq,
       hash,
       input.prompt,
-      chat.body.model,
+      model,
       JSON.stringify(context),
       JSON.stringify(versions),
       JSON.stringify(input.imageAssetIds ?? []),
@@ -517,8 +557,8 @@ export async function startApiTurn(
       input.commandId,
       userId,
       id,
-      chat.body.providerId,
-      chat.body.model,
+      providerId,
+      model,
       now,
       now
     );
@@ -578,7 +618,7 @@ export async function startApiTurn(
       const sources = await taskSourceContext(userId, claimed.versions, input.prompt);
       const result = await streamApiChat(
         endpoint,
-        String(chat.body.model),
+        model,
         context.system + '\nReference sources (bounded excerpts):\n' + JSON.stringify(sources),
         messages,
         controller.signal,
@@ -601,7 +641,7 @@ export async function startApiTurn(
             if (!update.changes) controller.abort();
           }
         },
-        input.reasoningEffort
+        input.voice ? 'auto' : input.reasoningEffort
       );
       const u = result.usage,
         price = u

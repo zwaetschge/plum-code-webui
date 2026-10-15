@@ -313,7 +313,8 @@ export function ApiChatPage() {
       if (scopeRef.current === captured) setBusy(false);
     }
   };
-  const transmit = async (text: string) => {
+  // Voice-mode turns tell Plum it is being spoken to; the server picks the model.
+  const transmit = async (text: string, voice = false) => {
     if (!chat) throw new Error('Gespräch ist nicht verfügbar');
     const captured = scope;
     const imageAssetIds = [...existingImages, ...(await uploadChatImages(chat.id, images))];
@@ -324,7 +325,7 @@ export function ApiChatPage() {
         expectedRevision: chat.revision,
         prompt: text.trim(),
         imageAssetIds,
-        ...effortPayload(effort),
+        ...(voice ? { voice: true } : effortPayload(effort)),
       },
       'Nachricht im Modellchat',
       { expiresAt: chat.body.temporary ? String(chat.body.expiresAt) : undefined }
@@ -888,7 +889,7 @@ export function ApiChatPage() {
                 voice={speechVoice(profile.data?.body.voice)}
                 language={String(profile.data?.body.language ?? 'German')}
                 text={spoken?.response ?? ''}
-                onSend={transmit}
+                onSend={(text) => transmit(text, true)}
                 modelBusy={!!running || busy}
                 answerKey={spoken?.id}
                 onTranscription={(text) =>
