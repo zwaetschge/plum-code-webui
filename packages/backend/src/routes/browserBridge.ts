@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express';
+import express, { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { get as pgGet } from '../db/pg.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
@@ -14,8 +14,10 @@ import {
 import {
   createBrowserToken,
   listBrowserTokens,
+  resolveBrowserToken,
   revokeBrowserToken,
 } from '../services/browserBridge/tokens.js';
+import { deskSpeech, deskTranscribe, deskTurn } from '../services/browserBridge/desk.js';
 
 /**
  * Firefox browser control.
@@ -258,5 +260,54 @@ internalRouter.post('/call', requireHookSecret, async (req: Request, res: Respon
 });
 
 router.use('/internal', internalRouter);
+
+// ---------------------------------------------------------------- Plum Desk
+//
+// The ESP32 desk board runs the voice-mode loop against these three routes.
+// It has no Plum login; it sends its `plum_ff_` device token as a bearer
+// token. Reachable through the /mobile gateway (see mobileGateway.ts).
+
+async function deskOwner(req: Request): Promise<string> {
+  const token = String(req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  const resolved = await resolveBrowserToken(token);
+  if (!resolved) throw new AppError('Invalid device token', 401, 'UNAUTHORIZED');
+  return resolved.userId;
+}
+
+router.post(
+  '/desk/transcribe',
+  rateLimiters.standard,
+  express.raw({ type: () => true, limit: '8mb' }),
+  async (req: Request, res: Response) => {
+    const userId = await deskOwner(req);
+    if (!Buffer.isBuffer(req.body) || req.body.length < 1000)
+      throw new AppError('Audio fehlt', 400, 'VALIDATION_ERROR');
+    res.json({ success: true, data: { text: await deskTranscribe(userId, req.body) } });
+  }
+);
+
+router.post('/desk/turn', rateLimiters.standard, async (req: Request, res: Response) => {
+  const userId = await deskOwner(req);
+  const parsed = z
+    .object({
+      text: z.string().trim().min(1).max(4000),
+      chatId: z.string().min(1).max(200).optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) throw new AppError('text is required', 400, 'VALIDATION_ERROR');
+  res.json({ success: true, data: await deskTurn(userId, parsed.data) });
+});
+
+router.post('/desk/speech', rateLimiters.standard, async (req: Request, res: Response) => {
+  const userId = await deskOwner(req);
+  const parsed = z.object({ text: z.string().trim().min(1).max(1000) }).safeParse(req.body);
+  if (!parsed.success) throw new AppError('text is required', 400, 'VALIDATION_ERROR');
+  const pcm = await deskSpeech(userId, parsed.data.text);
+  // Raw 16 kHz mono s16le: the board streams it straight into its speaker.
+  res.setHeader('Content-Type', 'audio/L16; rate=16000; channels=1');
+  res.setHeader('Content-Length', String(pcm.length));
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(pcm);
+});
 
 export default router;

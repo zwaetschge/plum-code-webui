@@ -248,7 +248,8 @@ export async function handleBridgeRpc(
       form.append(
         'audio',
         new Blob([Buffer.from(data, 'base64')], { type: mimeType }),
-        'speech.webm'
+        // The transcriber picks the decoder from the file extension.
+        mimeType === 'audio/wav' ? 'speech.wav' : 'speech.webm'
       );
       if (typeof params.language === 'string')
         form.append('language', params.language.slice(0, 10));
