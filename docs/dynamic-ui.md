@@ -58,4 +58,5 @@ inkl. Streaming und Fallback, gemeinsamer State/Neuberechnung, Formatierung, Bei
 ## Konfiguration
 
 Keine. Greift für alle Modell-Chat-Anbieter, sobald das Backend neu gebaut ist (`bash scripts/plum-rebuild.sh`).
-Android zeigt vorerst nur den Text (der Block wird serverseitig entfernt); ein nativer Renderer folgt.
+Android rendert dieselben Ansichten nativ (`packages/android/.../ui/components/dynamicui/`: Kotlin-Port von Formel-Engine,
+Validierung und Laufzeit, Compose-Komponenten, Canvas-Diagramme; Unit-Tests in `src/test/.../dynamicui/`).

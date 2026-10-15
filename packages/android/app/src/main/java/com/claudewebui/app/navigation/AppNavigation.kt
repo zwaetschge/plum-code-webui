@@ -465,6 +465,9 @@ fun AppNavigation(
                     onPersonalize = { navController.popBackStack() },
                     onNavigateToChat = { navController.navigate(Routes.Chat.createRoute(it)) },
                     onNativeChat = { if (!navController.popBackStack(Routes.Dashboard.route, inclusive = false)) navController.navigate(Routes.Dashboard.route) },
+                    standaloneTitle = androidx.compose.ui.res.stringResource(
+                        if (path.startsWith("/assistant/memory")) com.claudewebui.app.R.string.assistant_manage_memory else com.claudewebui.app.R.string.assistant_feature_title,
+                    ),
                 )
             }
 

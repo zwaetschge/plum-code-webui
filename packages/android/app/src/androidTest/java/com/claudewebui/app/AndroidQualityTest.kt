@@ -53,35 +53,28 @@ class AndroidQualityTest {
         compose.runOnIdle { assertTrue(opened) }
     }
 
-    @Test fun sessionToolsGroupCodeToolsAndShowProgressOnlyWithWork() {
+    @Test fun sessionToolsListFilesAndConnectionsAndPreviewOnlyWhenRunning() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         var destination = ""
-        var hasWork by mutableStateOf(true)
+        var running by mutableStateOf(false)
         compose.setContent { ClaudeWebUITheme(darkTheme = true) {
             com.claudewebui.app.ui.screens.chat.SessionToolsMenu(
                 surface = "code",
-                showProgress = hasWork,
-                progressCount = 3,
-                uncommittedCount = 2,
-                previewRunning = false,
-                onProgress = { destination = "progress" },
+                previewRunning = running,
                 onFiles = { destination = "files" },
-                onVersions = { destination = "versions" },
                 onPreview = { destination = "preview" },
                 onConnections = { destination = "connections" },
             )
         } }
-        compose.onNodeWithText(context.getString(R.string.session_tool_progress)).assertIsDisplayed().performClick()
-        compose.runOnIdle { assertEquals("progress", destination) }
-        compose.onNodeWithText(context.getString(R.string.session_tool_uncommitted, 2)).assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.session_tool_versions)).performClick()
-        compose.runOnIdle { assertEquals("versions", destination) }
+        compose.onNodeWithText(context.getString(R.string.chat_files)).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertEquals("files", destination) }
         // Without a reachable dev server there is no preview entry.
         compose.onNodeWithText(context.getString(R.string.session_tool_preview)).assertDoesNotExist()
         compose.onNodeWithText(context.getString(R.string.session_tool_connections)).performScrollTo().performClick()
         compose.runOnIdle { assertEquals("connections", destination) }
-        compose.runOnIdle { hasWork = false }
-        compose.onNodeWithText(context.getString(R.string.session_tool_progress)).assertDoesNotExist()
+        compose.runOnIdle { running = true }
+        compose.onNodeWithText(context.getString(R.string.session_tool_preview)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals("preview", destination) }
     }
 
     @Test fun readButPendingApprovalCanStillBeAnswered() {

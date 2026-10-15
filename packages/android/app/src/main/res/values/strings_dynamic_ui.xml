@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dynamic UI (generative UI) inside model-chat answers. -->
+    <string name="dynamic_ui_pending">Building interactive view …</string>
+    <string name="dynamic_ui_rejected">Interactive view discarded (%1$s).</string>
+    <string name="dynamic_ui_table">Table</string>
+    <string name="dynamic_ui_table_empty">No entries for this selection.</string>
+    <string name="dynamic_ui_chart">Chart: %1$s</string>
+    <string name="dynamic_ui_selected">Selected</string>
+    <string name="dynamic_ui_best">best value</string>
+    <string name="dynamic_ui_trend_up">rising</string>
+    <string name="dynamic_ui_trend_down">falling</string>
+    <string name="assistant_feature_title">Plum</string>
+</resources>

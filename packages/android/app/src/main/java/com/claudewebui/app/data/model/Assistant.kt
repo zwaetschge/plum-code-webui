@@ -37,7 +37,7 @@ data class AssistantSourceVersion(val id: String, val revision: Long)
 @Serializable
 data class AssistantApiUsage(val input: Long, val output: Long, val cached: Long, val cacheWrite: Long, val costUsd: Double? = null)
 @Serializable
-data class AssistantApiTurn(val id: String, val seq: Long, val prompt: String, val response: String, val status: String, val error: String? = null, val model: String, val providerId: String? = null, val profileId: String? = null, val profileRevision: Long? = null, val sourceVersions: List<AssistantSourceVersion> = emptyList(), val imageAssetIds: List<String> = emptyList(), val usage: AssistantApiUsage? = null, val createdAt: String)
+data class AssistantApiTurn(val id: String, val seq: Long, val prompt: String, val response: String, val status: String, val error: String? = null, val model: String, val providerId: String? = null, val profileId: String? = null, val profileRevision: Long? = null, val sourceVersions: List<AssistantSourceVersion> = emptyList(), val imageAssetIds: List<String> = emptyList(), val usage: AssistantApiUsage? = null, val createdAt: String, val ui: JsonObject? = null, val uiError: String? = null, val uiPending: Boolean = false)
 @Serializable
 data class AssistantApiHistory(val chat: AssistantResource, val turns: List<AssistantApiTurn> = emptyList())
 @Serializable

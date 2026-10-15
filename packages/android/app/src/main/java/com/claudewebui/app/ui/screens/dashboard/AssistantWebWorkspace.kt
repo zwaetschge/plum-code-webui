@@ -14,6 +14,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material3.*
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -41,13 +42,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** The APK includes the same audited Plum frontend, without exposing the native token to external pages. */
 @Composable
-fun AssistantWebWorkspace(path: String, area: String, onAreaSelect: (String) -> Unit, onClose: () -> Unit, onPersonalize: () -> Unit, onNavigateToChat: (String) -> Unit, onNativeChat: () -> Unit) {
+fun AssistantWebWorkspace(path: String, area: String, onAreaSelect: (String) -> Unit, onClose: () -> Unit, onPersonalize: () -> Unit, onNavigateToChat: (String) -> Unit, onNativeChat: () -> Unit, standaloneTitle: String? = null) {
     val owner = TokenStore.assistantOwnerKey() ?: return
-    key(owner) { WebWorkspaceAccount(owner, path, area, onAreaSelect, onClose, onPersonalize, onNavigateToChat, onNativeChat) }
+    key(owner) { WebWorkspaceAccount(owner, path, area, onAreaSelect, onClose, onPersonalize, onNavigateToChat, onNativeChat, standaloneTitle) }
 }
 
 @Composable
-private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAreaSelect: (String) -> Unit, onClose: () -> Unit, onPersonalize: () -> Unit, onNavigateToChat: (String) -> Unit, onNativeChat: () -> Unit) {
+private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAreaSelect: (String) -> Unit, onClose: () -> Unit, onPersonalize: () -> Unit, onNavigateToChat: (String) -> Unit, onNativeChat: () -> Unit, standaloneTitle: String?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -165,7 +166,13 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
     } }
     PlumBackdrop {
         Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-            Column(Modifier.padding(horizontal = 12.dp)) {
+            // Opened from the settings (memory management) it is a sub-page of
+            // the settings: a back button and its title, no area selector.
+            if (standaloneTitle != null) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                com.claudewebui.app.ui.components.common.PlumIconButton(androidx.compose.material.icons.Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.settings_hub_back), { if (webView?.canGoBack() == true) webView?.goBack() else onClose() })
+                Spacer(Modifier.size(12.dp))
+                Text(standaloneTitle, Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, color = com.claudewebui.app.ui.components.common.PlumText, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            } else Column(Modifier.padding(horizontal = 12.dp)) {
                 PlumAreaSelector(area, onAreaSelect, onPersonalize = onPersonalize,
                     onNavigation = { webView?.evaluateJavascript("document.querySelector('.mobile-app-header button[aria-label=\"Navigation öffnen\"]')?.click();", null) })
             }

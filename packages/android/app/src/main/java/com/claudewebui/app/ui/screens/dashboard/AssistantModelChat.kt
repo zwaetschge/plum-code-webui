@@ -78,6 +78,9 @@ import kotlinx.serialization.json.*
 import org.koin.compose.koinInject
 import com.claudewebui.app.ui.components.chat.WritingStyleSheet
 import com.claudewebui.app.ui.components.chat.presetName
+import com.claudewebui.app.ui.components.dynamicui.DynamicUi
+import com.claudewebui.app.ui.components.dynamicui.DynamicUiNote
+import com.claudewebui.app.ui.components.dynamicui.DynamicUiPending
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -181,7 +184,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         catch (failure: Exception) { checkOwner(); error = failure.message; currentOnChatSelected(chat?.id) }
     }
     fun updatePending() { scope.launch { checkOwner(); pending = outbox.pending() } }
-    fun accept(path: String, result: JsonObject) {
+    fun accept(path: String, result: JsonObject, keepDraft: Boolean = false) {
         checkOwner()
         if (path == "/api/assistant/api-chats") {
             chat = json.decodeFromJsonElement<AssistantResource>(result); turns = emptyList(); imageIds = emptyList()
@@ -191,15 +194,15 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             currentOnChatSelected(chat?.id)
             turns = emptyList(); prompt = result["prompt"]?.jsonPrimitive?.content.orEmpty()
             imageIds = result["imageAssetIds"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
-        } else if (path == "/api/assistant/api-chats/${chat?.id}/turns") { prompt = ""; imageIds = emptyList() }
+        } else if (path == "/api/assistant/api-chats/${chat?.id}/turns") { if (!keepDraft) prompt = ""; imageIds = emptyList() }
         else if (path.endsWith("/results")) notice = context.getString(R.string.assistant_result_saved)
         refresh++
     }
-    fun command(path: String, payload: JsonObject, label: String, expiresAt: String? = chat?.body?.get("expiresAt")?.jsonPrimitive?.contentOrNull) {
+    fun command(path: String, payload: JsonObject, label: String, expiresAt: String? = chat?.body?.get("expiresAt")?.jsonPrimitive?.contentOrNull, keepDraft: Boolean = false) {
         if (busy) return
         scope.launch {
             busy = true; error = null
-            try { accept(path, outbox.send(path, payload, label, expiresAt)) }
+            try { accept(path, outbox.send(path, payload, label, expiresAt), keepDraft) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { checkOwner(); error = failure.message }
             finally { if (TokenStore.assistantOwnerKey() == owner) { busy = false; updatePending() } }
@@ -281,13 +284,15 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val effortLabel = effortStops.firstOrNull { it.id == effort && it.id != null }?.label
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val reduce = reducedMotion()
-    fun send() {
-        val text = prompt.trim()
+    // A Dynamic UI button (override) sends like the composer, into the open chat,
+    // but leaves the typed draft alone.
+    fun send(override: String? = null) {
+        val text = (override ?: prompt).trim()
         if (text.isEmpty() || busy || running) return
         val current = chat
         if (current != null) {
-            command("/api/assistant/api-chats/${current.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", current.revision); put("imageAssetIds", JsonArray(imageIds.map(::JsonPrimitive))); effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send))
-        } else if (providerId.isNotBlank() && model.isNotBlank()) scope.launch {
+            command("/api/assistant/api-chats/${current.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", current.revision); put("imageAssetIds", JsonArray(imageIds.map(::JsonPrimitive))); effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send), keepDraft = override != null)
+        } else if (override == null && providerId.isNotBlank() && model.isNotBlank()) scope.launch {
             busy = true; error = null
             try {
                 val created = outbox.send("/api/assistant/api-chats", buildJsonObject {
@@ -380,7 +385,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     AnswerHeader(turn.status, palette.muted, palette.accent)
-                                    val thinking = turn.status == "running" && turn.response.isEmpty()
+                                    val thinking = turn.status == "running" && turn.response.isEmpty() && !turn.uiPending
                                     val streaming = turn.status == "running" && turn.response.isNotEmpty()
                                     if (thinking) {
                                         val thinkingLabel = stringResource(R.string.component_thinking)
@@ -391,7 +396,11 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                             inlineContent = mapOf(CARET_ID to InlineTextContent(Placeholder(4.sp, 16.sp, PlaceholderVerticalAlign.TextCenter)) { StreamingCaret(palette.accent) }),
                                             style = MaterialTheme.typography.bodyLarge, color = palette.text,
                                         )
-                                    } else Text(turn.response, style = MaterialTheme.typography.bodyLarge, color = palette.text)
+                                    } else if (turn.response.isNotEmpty() || (turn.ui == null && !turn.uiPending)) Text(turn.response, style = MaterialTheme.typography.bodyLarge, color = palette.text)
+                                    // Dynamic UI: an interactive view below the text, rendered natively.
+                                    if (turn.uiPending) DynamicUiPending()
+                                    turn.ui?.let { spec -> DynamicUi(spec, busy = busy || running || !live, onSendMessage = if (live) ({ text: String -> send(text) }) else null) }
+                                    turn.uiError?.let { note -> if (turn.status != "running") DynamicUiNote(note) }
                                 }
                                 turn.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
                                 if (turn.status != "running" && turn.response.isNotBlank()) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
