@@ -23,7 +23,7 @@ services:
       - 'host.docker.internal:host-gateway'
     environment:
       - NODE_ENV=production
-      - TZ=${TZ:-Europe/Zurich}
+      - TZ=Europe/Zurich
       # Postgres. The host must resolve on the compose network; the password has
       # no default on purpose, so a misconfigured deployment fails at startup
       # rather than silently reaching a database nobody meant to use.

@@ -284,7 +284,7 @@ RUN mkdir -p /home/node/.claude /home/node/.codex /home/node/.pi /home/node/.kim
 EXPOSE 3001
 ENV NODE_ENV=production
 ENV HOME=/home/node
-ENV TZ=Etc/UTC
+ENV TZ=Europe/Zurich
 
 USER node
 
