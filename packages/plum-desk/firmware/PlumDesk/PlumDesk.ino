@@ -30,7 +30,7 @@
 #include "esp_heap_caps.h"
 #include "secrets.h"
 
-#define VERSION "0.2.0"
+#define VERSION "0.2.1"
 
 // ---- pins ----
 #define TFT_SCLK 21
@@ -74,6 +74,9 @@ static volatile uint8_t volume = 80;
 static volatile float speakLevel = 0;   // 0..1, drives the mouth
 static volatile float micLevel = 0;     // 0..1, drives the listening ring
 static volatile bool pressed = false;   // button event for the conversation task
+static volatile bool meterRequested = false;
+static volatile bool questionRequested = false;   // console "q": ask a fixed question, no mic
+static volatile int32_t slotEnergy[2];   // console "m": print mic levels for 6 s
 static uint32_t happyUntil = 0;
 
 // ---------------------------------------------------------------- display
@@ -385,6 +388,7 @@ static size_t readMic(int16_t *out) {
   int64_t e0 = 0, e1 = 0;
   for (int i = 0; i < 512; i++) { e0 += llabs(raw[2 * i] >> 16); e1 += llabs(raw[2 * i + 1] >> 16); }
   int slot = e1 > e0 ? 1 : 0;
+  slotEnergy[0] = e0 / 512; slotEnergy[1] = e1 / 512;
   int32_t peak = 0;
   for (int i = 0; i < 512; i++) {
     int32_t v = raw[2 * i + slot] >> 13;      // 16 bit with 8x gain
@@ -425,34 +429,41 @@ static Heard record(size_t &bytes) {
   mood = LISTENING;
   int16_t *pcm = (int16_t *)(recording + 44);
   size_t samples = 0, maxSamples = RATE * MAX_RECORD_S;
-  float floor = 0;
-  int blocks = 0;
+  float floor = 1e9f, threshold = 0;
+  int loud = 0;
   bool heard = false;
   uint32_t start = millis(), lastVoice = start;
   static int16_t block[512];
   while (true) {
-    if (takePress()) return CANCELLED;
+    if (takePress()) { Serial.println("listening cancelled"); return CANCELLED; }
     size_t n = readMic(block);
     if (!n) continue;
-    // Noise floor from the first 300 ms, then speech is well above it.
     float sum = 0;
     for (size_t i = 0; i < n; i++) sum += (float)block[i] * block[i];
     float rms = sqrtf(sum / n);
-    if (blocks < 10) floor = blocks ? min(floor, rms) * 0.5f + max(floor, rms) * 0.5f : rms;
-    blocks++;
-    float threshold = max(floor * 3.0f, 700.0f);
+    // The quietest 32 ms block is the room's noise, even if speech starts at
+    // once (there are gaps between words); speech is clearly above it for
+    // at least ~100 ms.
+    floor = min(floor, max(rms, 50.0f));
+    threshold = max(floor * 3.0f, 900.0f);
     uint32_t now = millis();
-    if (blocks > 10 && rms > threshold) { heard = true; lastVoice = now; }
+    loud = rms > threshold ? loud + 1 : 0;
+    if (loud >= 3) heard = true;
+    if (rms > threshold) lastVoice = now;
     if (samples + n <= maxSamples) {
       memcpy(pcm + samples, block, n * 2);
       samples += n;
     }
     if (heard && now - lastVoice > SILENCE_END_MS && now - start > 1000) break;
-    if (!heard && now - start > NO_SPEECH_MS) return NOTHING;
+    if (!heard && now - start > NO_SPEECH_MS) {
+      Serial.printf("nothing heard (noise floor %.0f, threshold %.0f)\n", floor, threshold);
+      return NOTHING;
+    }
     if (samples >= maxSamples) break;
   }
   micLevel = 0;
   bytes = samples * 2;
+  Serial.printf("recorded %.1f s (noise floor %.0f)\n", samples / (float)RATE, floor);
   return HEARD;
 }
 
@@ -483,6 +494,7 @@ static bool transcribe(size_t bytes, String &text) {
     JsonDocument doc;
     ok = !deserializeJson(doc, http.getString());
     text = doc["data"]["text"] | "";
+    Serial.printf("transcribed %u bytes\n", (unsigned)bytes);
   } else Serial.printf("transcribe failed: %s\n", errorText(http, status).c_str());
   http.end();
   return ok;
@@ -501,6 +513,7 @@ static bool turn(const String &text, JsonDocument &answer) {
     ok = !deserializeJson(answer, http.getString());
     chatId = answer["data"]["chatId"] | "";
     lastTurnMs = millis();
+    Serial.printf("answer (%u chunks): %.120s\n", answer["data"]["speech"].size(), (const char *)(answer["data"]["text"] | ""));
   } else Serial.printf("turn failed: %s\n", errorText(http, status).c_str());
   http.end();
   return ok;
@@ -614,7 +627,35 @@ static void conversationTask(void *) {
   tls.useBuiltinCACertBundle();   // Plum's certificate is checked against the public CAs
   for (;;) {
     connectWifi();
-    if (takePress()) converse();
+    if (meterRequested) {
+      meterRequested = false;
+      static int16_t block[512];
+      for (int i = 0; i < 190; i++) {   // ~6 s
+        if (!readMic(block)) continue;
+        float sum = 0;
+        int32_t peak = 0;
+        for (int k = 0; k < 512; k++) { sum += (float)block[k] * block[k]; peak = max(peak, (int32_t)abs(block[k])); }
+        if (i % 8 == 0) Serial.printf("mic rms %.0f peak %ld  slot0 %ld slot1 %ld\n", sqrtf(sum / 512), (long)peak, (long)slotEnergy[0], (long)slotEnergy[1]);
+      }
+    }
+    if (questionRequested) {
+      questionRequested = false;
+      mood = THINKING;
+      JsonDocument answer;
+      bool interrupted = false;
+      if (turn("Sag in einem kurzen Satz Hallo vom Schreibtisch.", answer)) {
+        for (JsonVariant chunk : answer["data"]["speech"].as<JsonArray>())
+          if (!speak(chunk.as<const char *>(), interrupted)) break;
+        while (!playbackIdle()) vTaskDelay(pdMS_TO_TICKS(20));
+        Serial.println("question done");
+      } else showError("Plum hat nicht geantwortet");
+      mood = IDLE;
+    }
+    if (takePress()) {
+      Serial.println("conversation start");
+      converse();
+      Serial.println("conversation end");
+    }
     vTaskDelay(pdMS_TO_TICKS(30));
   }
 }
@@ -647,12 +688,24 @@ void loop() {
   static bool wasDown = false;
   uint32_t now = millis();
 
+  // USB console: "t" acts like the button, "s" prints the state.
+  while (Serial.available()) {
+    int c = Serial.read();
+    if (c == 't') { pressed = true; if (mood == SPEAKING) flushPlayback = true; Serial.println("press (console)"); }
+    if (c == 'm') meterRequested = true;
+    if (c == 'q') questionRequested = true;
+    if (c == 's')
+      Serial.printf("Plum Desk %s mood=%d wifi=%s rssi=%d ip=%s heap=%u psram=%u mic=%.3f\n", VERSION, mood,
+                    WiFi.status() == WL_CONNECTED ? "ok" : "down", WiFi.RSSI(), WiFi.localIP().toString().c_str(),
+                    (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getFreePsram(), micLevel);
+  }
   bool down = digitalRead(BUTTON) == LOW;
   if (down != wasDown && now - lastChange > 30) {
     wasDown = down;
     lastChange = now;
     if (down) {
       pressed = true;
+      Serial.println("press (button)");
       // A press while speaking stops the voice right away.
       if (mood == SPEAKING) flushPlayback = true;
     }

@@ -60,5 +60,9 @@ After flashing, any USB power supply is enough. Pins, panel quirks and the
 factory firmware backup are described in the starter kit's `GUIDE.md`
 (`AI/plum-code/esp32-smiley`).
 
+USB console (115200 baud) for diagnosis: `t` acts like the button, `s` prints
+state, Wi-Fi and memory, `m` prints microphone levels for 6 s, `q` asks a fixed
+question without the microphone (tests Wi-Fi, TLS, Plum and the speaker).
+
 Plum's certificate is verified against the public CA bundle built into the
 ESP32 core. Recording (up to 30 s) and a 20 s playback buffer live in PSRAM.
