@@ -1,6 +1,9 @@
 import { lazy, Suspense, useState } from 'react';
 import { DYNAMIC_UI_FIXTURES } from '@/components/assistant/dynamic-ui/fixtures';
 import '@/components/assistant/dynamic-ui/dynamic-ui.css';
+import { StartScene } from '@/components/assistant/StartScene';
+import { START_SUGGESTIONS } from '@/components/assistant/startSuggestionData';
+import '@/components/assistant/start-suggestions.css';
 
 const DynamicUi = lazy(() => import('@/components/assistant/dynamic-ui/DynamicUi'));
 
@@ -33,6 +36,27 @@ export function DynamicUiDemoPage() {
               </Suspense>
             </article>
           ))}
+          <section className="space-y-3" aria-label="Startvorschläge">
+            <h2 className="text-sm font-semibold">
+              Startvorschläge · alle {START_SUGGESTIONS.length}
+            </h2>
+            <div className="plum-start-deck">
+              {START_SUGGESTIONS.map((item) => (
+                <div key={item.key} className="plum-start-card" data-scene={item.key}>
+                  <span className="plum-start-preview" aria-hidden>
+                    <StartScene name={item.key} />
+                  </span>
+                  <span className="plum-start-copy">
+                    <span className="plum-start-title">
+                      <item.icon size={15} aria-hidden />
+                      {item.title}
+                    </span>
+                    <span className="plum-start-hint">{item.hint}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
       </div>
     </main>
