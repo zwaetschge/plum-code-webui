@@ -137,6 +137,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var newChatStyleSet by remember { mutableStateOf(false) }
     var newChatStyle by remember { mutableStateOf<String?>(null) }
     var showStyleSheet by remember { mutableStateOf(false) }
+    var showVoiceSheet by remember { mutableStateOf(false) }
     // Which chat's history defined the "already there" turns, and their highest seq.
     var baselineChat by remember { mutableStateOf<String?>(null) }
     var baselineSeq by remember { mutableLongStateOf(Long.MAX_VALUE) }
@@ -148,6 +149,13 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                 catch (_: Exception) { personalization = null }
                 delay(10000)
             }
+        }
+    }
+    // A voice or switch changed in the settings (or the voice sheet) applies to
+    // the next read-aloud right away instead of after the periodic refresh.
+    LaunchedEffect(owner) {
+        com.claudewebui.app.ui.screens.settings.AssistantPersonalizationEvents.latest.collect { latest ->
+            if (latest != null && latest.first == owner) personalization = latest.second
         }
     }
     val voiceEnabled = personalization?.voiceChat == true
@@ -424,7 +432,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                 }
                             }
                         }
-                        item(key = "read-aloud") { key(owner, shownId, readText) { AssistantReadAloud(owner, api, if (voiceEnabled && live) readText else null, personalization?.voiceName.orEmpty()) { readText = null } } }
+                        item(key = "read-aloud") { key(owner, shownId, readText) { AssistantReadAloud(owner, api, if (voiceEnabled && live) readText else null, personalization?.voiceName.orEmpty(), onPickVoice = { showVoiceSheet = true }) { readText = null } } }
                     }
                 }
             }
@@ -473,6 +481,10 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                 enabled = !busy && !running,
                                 onClick = { plusOpen = false; showStyleSheet = true },
                             )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.settings_hub_voice_menu, com.claudewebui.app.ui.screens.settings.assistantVoiceLabel(personalization?.voiceName.orEmpty())), maxLines = 1) },
+                                onClick = { plusOpen = false; showVoiceSheet = true },
+                            )
                         }
                     }
                     Spacer(Modifier.weight(1f))
@@ -517,6 +529,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             }
         }
     }
+    if (showVoiceSheet) VoicePickerSheet(api) { showVoiceSheet = false }
     if (showStyleSheet) WritingStyleSheet(
         styles = writingStyles,
         selected = activeWritingStyle,

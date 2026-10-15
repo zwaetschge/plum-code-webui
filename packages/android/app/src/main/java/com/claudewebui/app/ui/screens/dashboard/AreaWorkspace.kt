@@ -60,16 +60,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.BlurEffect
-import androidx.compose.ui.graphics.TileMode
-import android.os.Build
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
+import com.claudewebui.app.ui.motion.hingeReveal
+import com.claudewebui.app.ui.motion.rememberUnfoldReveal
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -241,10 +235,11 @@ private data class PaneKey(val area: String, val id: String?)
  * list on the left and exactly one item of that area on the right; Schwarm
  * uses the full width.
  *
- * Fold changes do not hard-switch. Unfolding keeps the open item exactly where
- * the eye is and lays it into the right column at once; the newly gained area
- * shows the list as violet-tinted frosted glass that comes into focus (blur,
- * tint and a slight zoom clear together). Folding back blurs the list away.
+ * Fold changes do not hard-switch. The screen is one picture across both
+ * displays: the open item lands in the right column at once, where the cover
+ * display showed it, and stays sharp. The newly opened part left of the hinge
+ * starts blurred and darkened — growing from the hinge to the outer edge —
+ * and clears as the device opens flat (see HingeReveal).
  * The item is a movable content, so it keeps its state (scroll position,
  * composer text) across the layout change.
  */
@@ -362,9 +357,8 @@ fun AreaWorkspace(
     val listTarget = expanded && !fullWidth && (ws.listVisible || (area != "chat" && selectionHere == null))
 
     // ---- Fold choreography ----
-    // `presence` drives the list column: 0 = gone, 1 = in focus. A fold change
-    // brings it into focus from frosted blur without moving the item; toggling
-    // focus mode slides the item along with the column instead.
+    // `presence` drives the list column for focus mode only. A fold change puts
+    // everything in place at once; the unfold reveal does the rest.
     val presence = remember { Animatable(if (listTarget) 1f else 0f) }
     var glide by remember { mutableStateOf(false) }
     var listExpanded by remember { mutableStateOf(expanded) }
@@ -377,19 +371,13 @@ fun AreaWorkspace(
             presence.snapTo(target)
             return@LaunchedEffect
         }
-        when {
-            foldChange && target == 1f -> {
-                presence.snapTo(0f)
-                presence.animateTo(1f, tween(760, easing = PlumMotionTokens.EnterEasing))
-            }
-            foldChange -> presence.animateTo(0f, tween(260, easing = PlumMotionTokens.ExitEasing))
-            else -> presence.animateTo(target, PlumMotionTokens.menuSpring())
-        }
+        if (foldChange) presence.snapTo(target)
+        else presence.animateTo(target, PlumMotionTokens.menuSpring())
     }
     val listComposed by remember { derivedStateOf { presence.value > 0.001f } }
-    // Stays in the split arrangement until the list has blurred away, then
-    // hands over to the phone layout.
+    // Stays in the split arrangement until a focus-mode list has slid away.
     val splitLayout = expanded || listComposed
+    val reveal = rememberUnfoldReveal(expanded, reduce)
 
     val selectArea: (String) -> Unit = { next -> viewModel.clearSelection(); ws.selectArea(next) }
 
@@ -488,7 +476,12 @@ fun AreaWorkspace(
 
     PlumBackdrop {
         if (splitLayout) {
-            Box(Modifier.fillMaxSize()) {
+            var revealWidth by remember { mutableIntStateOf(0) }
+            Box(
+                Modifier.fillMaxSize()
+                    .onSizeChanged { revealWidth = it.width }
+                    .hingeReveal(strength = { reveal.value }, hingeX = { revealWidth / 2f }),
+            ) {
                 val split: @Composable () -> Unit = {
                     SplitPane(
                         presence = { presence.value },
@@ -618,8 +611,6 @@ private fun SplitPane(
     val listWidth = (configuration.screenWidthDp * .34f).coerceIn(264f, 320f).dp
     val density = LocalDensity.current
     val listPx = with(density) { listWidth.toPx() }
-    val background = com.claudewebui.app.ui.theme.PlumTheme.palette.background
-    val accent = PlumAccent
     Box(Modifier.fillMaxSize()) {
         val target = if (listTarget) 1f else 0f
         Box(
@@ -633,36 +624,10 @@ private fun SplitPane(
         if (listComposed) Box(
             Modifier.width(listWidth).fillMaxHeight().zIndex(1f)
                 .graphicsLayer {
+                    // Focus mode only: the column fades and slides with the item.
                     val p = presence().coerceIn(0f, 1f)
-                    val haze = 1f - p
-                    // Visible as frost at once, then sharpening into the list.
-                    alpha = (p * 3f).coerceAtMost(1f)
-                    val zoom = 1f + .04f * haze
-                    scaleX = zoom
-                    scaleY = zoom
-                    transformOrigin = TransformOrigin(.5f, .5f)
-                    clip = true
-                    val radius = 36.dp.toPx() * haze
-                    renderEffect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && radius > .5f) {
-                        BlurEffect(radius, radius, TileMode.Clamp)
-                    } else {
-                        null
-                    }
-                }
-                // The frost: a violet-tinted veil that clears as the list focuses.
-                .drawWithContent {
-                    drawContent()
-                    val haze = (1f - presence()).coerceIn(0f, 1f)
-                    if (haze > .01f) {
-                        drawRect(background.copy(alpha = .42f * haze))
-                        drawRect(
-                            Brush.radialGradient(
-                                listOf(accent.copy(alpha = .30f * haze), Color.Transparent),
-                                center = Offset(size.width * .3f, size.height * .25f),
-                                radius = size.maxDimension * .9f,
-                            ),
-                        )
-                    }
+                    alpha = p
+                    translationX = -(1f - p) * listPx * .25f
                 },
         ) {
             list()

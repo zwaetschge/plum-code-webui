@@ -444,6 +444,27 @@ fun AppNavigation(
                         }
                     },
                     onNavigateMain = { navController.navigateMain(it) },
+                    onOpenAssistantFeature = { path ->
+                        navController.navigate("$ASSISTANT_WEB_PREFIX?path=" + java.net.URLEncoder.encode(path, "UTF-8"))
+                    },
+                )
+            }
+
+            // Assistant web features opened from the settings (memory
+            // management). Leaving it returns to the settings page.
+            composable(
+                route = "$ASSISTANT_WEB_PREFIX?path={path}",
+                arguments = listOf(navArgument("path") { type = NavType.StringType; defaultValue = "/assistant/memory" }),
+            ) { entry ->
+                val path = entry.arguments?.getString("path").orEmpty().ifBlank { "/assistant/memory" }
+                com.claudewebui.app.ui.screens.dashboard.AssistantWebWorkspace(
+                    path = path,
+                    area = "chat",
+                    onAreaSelect = { if (!navController.popBackStack(Routes.Dashboard.route, inclusive = false)) navController.navigate(Routes.Dashboard.route) },
+                    onClose = { navController.popBackStack() },
+                    onPersonalize = { navController.popBackStack() },
+                    onNavigateToChat = { navController.navigate(Routes.Chat.createRoute(it)) },
+                    onNativeChat = { if (!navController.popBackStack(Routes.Dashboard.route, inclusive = false)) navController.navigate(Routes.Dashboard.route) },
                 )
             }
 
@@ -695,6 +716,7 @@ fun AppNavigation(
 }
 
 private const val MONITOR_PREVIEW_ROUTE = "monitor_preview"
+private const val ASSISTANT_WEB_PREFIX = "settings_assistant_web"
 
 private fun NavHostController.navigateMain(destination: MainDestination) {
     val route = when (destination) {

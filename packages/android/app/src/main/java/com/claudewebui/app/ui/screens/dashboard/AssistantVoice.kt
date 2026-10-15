@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
@@ -152,7 +153,7 @@ internal suspend fun speakThrough(context: android.content.Context, owner: Strin
  * chosen in the personalization (no form), and closes itself when finished.
  */
 @Composable
-internal fun AssistantReadAloud(owner: String, api: ApiClient, text: String?, voice: String, onClose: () -> Unit) {
+internal fun AssistantReadAloud(owner: String, api: ApiClient, text: String?, voice: String, onPickVoice: (() -> Unit)? = null, onClose: () -> Unit) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var failure by remember { mutableStateOf<String?>(null) }
@@ -173,59 +174,58 @@ internal fun AssistantReadAloud(owner: String, api: ApiClient, text: String?, vo
         Row(Modifier.padding(start = 16.dp, end = 4.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             if (failure == null) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
             Text(failure ?: stringResource(R.string.assistant_reading), Modifier.weight(1f).padding(horizontal = 12.dp), style = MaterialTheme.typography.bodyMedium, color = if (failure != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface, maxLines = 2)
+            if (onPickVoice != null) TextButton(onClick = onPickVoice) { Text(stringResource(R.string.assistant_voice_pick)) }
             TextButton(onClick = { onClose() }) { Text(stringResource(R.string.assistant_close_audio)) }
         }
     }
 }
 
-/** Fixed voice choice with a sample per voice, grouped by engine. */
+/**
+ * Voice choice from the chat: the voice-features switch plus every voice with
+ * a preview, grouped by engine. A tap saves the voice at once (no separate
+ * save) and the next read-aloud uses it.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun VoicePickerSheet(owner: String, api: ApiClient, selected: String, onSelect: (String) -> Unit, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var voices by remember { mutableStateOf<List<com.claudewebui.app.data.model.AssistantVoiceOption>?>(null) }
-    var failed by remember { mutableStateOf(false) }
-    var sampling by remember { mutableStateOf<String?>(null) }
-    var job by remember { mutableStateOf<Job?>(null) }
-    LaunchedEffect(owner) {
-        try { val r = api.getAssistantVoices(); if (r.success) voices = r.data.orEmpty() else failed = true }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { failed = true }
-    }
-    DisposableEffect(Unit) { onDispose { job?.cancel() } }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 20.dp), contentPadding = PaddingValues(bottom = 28.dp)) {
-            item { Text(stringResource(R.string.assistant_voice_pick), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 8.dp)) }
-            if (failed) item { Text(stringResource(R.string.assistant_voice_failed), color = MaterialTheme.colorScheme.error) }
-            if (voices == null && !failed) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-            voices.orEmpty().groupBy { it.engine == "mistral" }.toSortedMap(compareBy { it }).forEach { (mistral, group) ->
-                item { Text(if (mistral) "MISTRAL (API)" else "OMNIVOICE (LOKAL)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp)) }
-                items(group.size) { i ->
-                    val voice = group[i]
-                    val active = voice.key == selected
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-                            .background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = .14f) else androidx.compose.ui.graphics.Color.Transparent)
-                            .clickable { onSelect(voice.key) }.padding(start = 12.dp),
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                    ) {
-                        Text(voice.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                        if (active) Icon(androidx.compose.material.icons.Icons.Outlined.Check, null, tint = MaterialTheme.colorScheme.primary)
-                        IconButton(onClick = {
-                            job?.cancel()
-                            if (sampling == voice.key) { sampling = null } else {
-                                sampling = voice.key
-                                job = scope.launch {
-                                    try { speakThrough(context, owner, api, context.getString(R.string.assistant_voice_sample), voice.key, "German") }
-                                    catch (cancelled: CancellationException) { throw cancelled }
-                                    catch (_: Exception) { failed = true }
-                                    finally { if (sampling == voice.key) sampling = null }
-                                }
-                            }
-                        }) { Icon(if (sampling == voice.key) androidx.compose.material.icons.Icons.Outlined.Stop else androidx.compose.material.icons.Icons.Outlined.PlayArrow, stringResource(R.string.assistant_voice_try)) }
+internal fun VoicePickerSheet(api: ApiClient, onDismiss: () -> Unit) {
+    val controller = com.claudewebui.app.ui.screens.settings.rememberAssistantSettingsController(api) ?: return
+    val catalog = com.claudewebui.app.ui.screens.settings.rememberVoiceCatalog(controller.owner, api)
+    val value = controller.value
+    ModalBottomSheet(onDismissRequest = { controller.flush(); onDismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        androidx.compose.foundation.lazy.LazyColumn(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item { Text(stringResource(R.string.settings_hub_voice), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 4.dp)) }
+            if (controller.loading || controller.saving) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            controller.error?.let { message ->
+                item {
+                    com.claudewebui.app.ui.screens.settings.SettingsGroup {
+                        item(hasIcon = false) {
+                            com.claudewebui.app.ui.screens.settings.SettingsMessage(message, error = true, actionLabel = stringResource(R.string.assistant_reload), onAction = { controller.load() })
+                        }
                     }
                 }
+            }
+            if (value != null) {
+                item {
+                    com.claudewebui.app.ui.screens.settings.SettingsGroup {
+                        item {
+                            com.claudewebui.app.ui.screens.settings.SettingsSwitchRow(
+                                stringResource(R.string.assistant_voice_chat), value.voiceChat,
+                                { controller.setBoolean("voiceChat", it) },
+                                androidx.compose.material.icons.Icons.AutoMirrored.Outlined.VolumeUp,
+                                com.claudewebui.app.ui.screens.settings.TileTone.Pink,
+                                enabled = !controller.loading,
+                            )
+                        }
+                    }
+                }
+                item {
+                    com.claudewebui.app.ui.screens.settings.VoiceChoiceGroups(catalog, value.voiceName, !controller.loading) { controller.setChoice("voiceName", it) }
+                }
+                item { Text(stringResource(R.string.settings_hub_voice_footer), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp)) }
             }
         }
     }
