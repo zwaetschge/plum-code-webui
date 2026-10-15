@@ -18,6 +18,7 @@ import { AppBackground } from '@/components/effects/AppBackground';
 import { OutboxPanel } from '@/components/chat/OutboxPanel';
 import { LibraryPanel } from './LibraryPanel';
 import { FocusGlide } from '@/components/motion/FocusGlide';
+import { AmbientBackdrop } from '@/components/motion/AmbientBackdrop';
 import { CommandPalette } from '@/components/CommandPalette';
 import { getSessionRunState } from '@/lib/sessionRunState';
 import { cn } from '@/lib/utils';
@@ -273,6 +274,7 @@ export function Layout() {
       >
         {/* Background effects */}
         <AppBackground animation={backgroundAnimation} />
+        {assistantSurface && <AmbientBackdrop />}
         <div className="absolute inset-0 pattern-bg pointer-events-none" />
         {isFullBleed && !assistantSurface && (
           <>

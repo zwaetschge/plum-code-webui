@@ -74,6 +74,14 @@ import type { ApiResponse, Session } from '@plum-code-webui/shared';
 import type { UsageData } from '@plum-code-webui/shared';
 
 /** Zone ①: the work modes. The route decides which one is active. */
+/** Page code per area, fetched before the area transition starts. */
+const AREA_PRELOAD: Record<SidebarMode, () => Promise<unknown>> = {
+  chat: () => import('@/pages/ChatPage'),
+  task: () => import('@/pages/TaskSessionsPage'),
+  code: () => import('@/pages/DashboardPage'),
+  swarm: () => import('@/pages/SwarmPage'),
+};
+
 const MODE_ITEMS: { mode: SidebarMode; label: string; icon: typeof Code2 }[] = [
   { mode: 'chat', label: 'Chat', icon: MessageSquare },
   { mode: 'task', label: 'Task', icon: ListTodo },
@@ -1293,7 +1301,13 @@ export function Sidebar({
                     const from = MODE_ITEMS.findIndex((entry) => entry.mode === mode);
                     const to = MODE_ITEMS.findIndex((entry) => entry.mode === item.mode);
                     const target = SIDEBAR_MODE_HOME[item.mode];
-                    if (transitionArea(to > from ? 'forward' : 'back', () => navigate(target)))
+                    if (
+                      transitionArea(
+                        to > from ? 'forward' : 'back',
+                        () => navigate(target),
+                        AREA_PRELOAD[item.mode]
+                      )
+                    )
                       event.preventDefault();
                   }
                 }}

@@ -22,7 +22,7 @@ import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/compone
 import { orderChatApiProviders } from '@/lib/chatApiProviders';
 import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
 import { WritingStyleMenu } from '@/components/presets/WritingStyleMenu';
-import { AmbientBackdrop } from '@/components/motion/AmbientBackdrop';
+import { useAmbientSeed } from '@/components/motion/AmbientBackdrop';
 import { rememberComposer } from '@/lib/motion/flood';
 import { prefersReducedMotion } from '@/lib/motion/reducedMotion';
 import { cn } from '@/lib/utils';
@@ -42,6 +42,7 @@ function ChatAccountPage({ owner }: { owner?: string }) {
     fileInput = useRef<HTMLInputElement>(null),
     composer = useRef<HTMLFormElement>(null);
   const [leaving, setLeaving] = useState(false);
+  useAmbientSeed('plum-welcome');
   const [draft, setDraft] = useState(''),
     [selection, setSelection] = useState(''),
     [model, setModel] = useState(''),
@@ -144,7 +145,6 @@ function ChatAccountPage({ owner }: { owner?: string }) {
   };
   return (
     <div className="plum-chat-page">
-      <AmbientBackdrop seed="plum-welcome" />
       <div className={cn('plum-chat-welcome', leaving && 'is-leaving')}>
         <h1>
           {firstName

@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { StepOutContent } from '@/components/motion/StepOutContent';
-import { AmbientBackdrop } from '@/components/motion/AmbientBackdrop';
+import { useAmbientSeed } from '@/components/motion/AmbientBackdrop';
 import { composerHandoffPending, playComposerHandoff } from '@/lib/motion/flood';
 import { transitionArea } from '@/lib/motion/navigation';
 import { onFrame, SpringValue } from '@/lib/motion/spring';
@@ -283,6 +283,7 @@ export function ApiChatPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
   const { preferences } = usePersonalization();
+  useAmbientSeed(String(latest.data?.chat.body.profileId ?? id ?? 'plum-welcome'));
   const spoken = turns.filter((turn) => turn.status === 'completed' && turn.response).at(-1);
   const profile = useQuery({
     queryKey: ['assistant', 'api-profile', chat?.body.profileId, chat?.body.profileRevision, owner],
@@ -423,7 +424,6 @@ export function ApiChatPage() {
   };
   return (
     <main className="plum-api-conversation">
-      <AmbientBackdrop seed={String(chat.body.profileId ?? chat.id)} />
       {/* No top bar: the title shows in the sidebar, options sit in the `+` menu. */}
       <h1 className="sr-only">{chat.title}</h1>
       <div

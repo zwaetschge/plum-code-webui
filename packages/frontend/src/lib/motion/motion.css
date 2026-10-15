@@ -491,8 +491,36 @@ html[data-area-direction='back']::view-transition-old(plum-area) {
 html[data-area-direction='back']::view-transition-new(plum-area) {
   animation: plum-area-in-left 340ms var(--plum-ease-enter) 40ms both;
 }
-::view-transition-group(plum-area) {
+/* The slide stays inside the work area instead of running over the sidebar. */
+::view-transition-group(plum-area),
+::view-transition-group(plum-area-list) {
   animation-duration: 0s;
+  overflow: clip;
+}
+/* The sidebar list belongs to the area too: it fades over with a short drift. */
+html[data-area-direction] .sidebar-sessions {
+  view-transition-name: plum-area-list;
+}
+html[data-area-direction]::view-transition-old(plum-area-list) {
+  animation: plum-fade-out 120ms var(--plum-ease-exit) both;
+}
+html[data-area-direction='forward']::view-transition-new(plum-area-list) {
+  animation: plum-list-in-right 240ms var(--plum-ease-enter) 60ms both;
+}
+html[data-area-direction='back']::view-transition-new(plum-area-list) {
+  animation: plum-list-in-left 240ms var(--plum-ease-enter) 60ms both;
+}
+@keyframes plum-list-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+}
+@keyframes plum-list-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
 }
 @keyframes plum-area-out-left {
   to {
@@ -528,7 +556,7 @@ html[data-area-direction='back']::view-transition-new(plum-area) {
 .plum-ambient {
   position: absolute;
   inset: 0;
-  z-index: -1;
+  z-index: 0;
   overflow: hidden;
   pointer-events: none;
 }
@@ -642,7 +670,9 @@ html.plum-focus-glide-on
   ::view-transition-old(plum-chat-pane),
   ::view-transition-new(plum-chat-pane),
   ::view-transition-old(plum-area),
-  ::view-transition-new(plum-area) {
+  ::view-transition-new(plum-area),
+  ::view-transition-old(plum-area-list),
+  ::view-transition-new(plum-area-list) {
     animation: none !important;
   }
 }
