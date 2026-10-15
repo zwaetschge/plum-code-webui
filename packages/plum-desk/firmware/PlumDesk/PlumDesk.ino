@@ -30,7 +30,7 @@
 #include "esp_heap_caps.h"
 #include "secrets.h"
 
-#define VERSION "0.2.1"
+#define VERSION "0.3.0"
 
 // ---- pins ----
 #define TFT_SCLK 21
@@ -46,6 +46,8 @@
 #define AMP_BCLK 15
 #define AMP_LRC  16
 #define BUTTON   0    // BOOT button, LOW when pressed
+#define VOL_UP   39   // expansion board keys, LOW when pressed
+#define VOL_DOWN 38
 
 #define W 240
 #define H 240
@@ -56,7 +58,7 @@
 // speech, give up after 10 s without any.
 #define SILENCE_END_MS 1300
 #define NO_SPEECH_MS   10000
-#define MAX_RECORD_S   30
+#define MAX_RECORD_S   15
 #define CHAT_IDLE_MS   (30UL * 60 * 1000)   // after 30 min a new chat starts
 
 // ---- states shown on the face ----
@@ -391,7 +393,7 @@ static size_t readMic(int16_t *out) {
   slotEnergy[0] = e0 / 512; slotEnergy[1] = e1 / 512;
   int32_t peak = 0;
   for (int i = 0; i < 512; i++) {
-    int32_t v = raw[2 * i + slot] >> 13;      // 16 bit with 8x gain
+    int32_t v = raw[2 * i + slot] >> 14;      // 16 bit with 4x gain (8x clipped)
     v = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
     out[i] = v;
     peak = max(peak, abs(v));
@@ -424,12 +426,45 @@ static void wavHeader(uint8_t *h, uint32_t bytes) {
   memcpy(h + 36, "data", 4); memcpy(h + 40, &bytes, 4);
 }
 
+// Voice activity on 32 ms blocks: a smoothed level against a noise floor that
+// follows the room (falls at once, rises ~13 %/s while nobody speaks), so fans
+// and hum are not taken for speech and silence after a sentence is recognised.
+struct Vad {
+  float level = 0, noise = 0;
+  bool speech = false, quiet = true;
+  void update(const int16_t *b, size_t n) {
+    float sum = 0;
+    for (size_t i = 0; i < n; i++) sum += (float)b[i] * b[i];
+    float rms = sqrtf(sum / n);
+    level = level > 0 ? level * 0.6f + rms * 0.4f : rms;
+    if (noise <= 0) noise = level;
+    speech = level > max(noise * 4.0f, 450.0f);
+    quiet = level < max(noise * 2.2f, 250.0f);
+    if (level < noise) noise = noise * 0.7f + level * 0.3f;
+    else if (!speech) noise = min(level, noise * 1.004f);
+  }
+};
+static Vad vad;
+
+/** Appends a block; before speech starts only the last `keep` samples are kept (pre-roll). */
+static void append(int16_t *pcm, size_t &samples, size_t maxSamples, const int16_t *block, size_t n, bool started, size_t keep) {
+  if (!started && samples + n > keep) {
+    size_t drop = samples + n - keep;
+    drop = min(drop, samples);
+    memmove(pcm, pcm + drop, (samples - drop) * 2);
+    samples -= drop;
+  }
+  if (samples + n <= maxSamples) {
+    memcpy(pcm + samples, block, n * 2);
+    samples += n;
+  }
+}
+
 /** Records until the speaker is quiet again, like the WebUI voice mode. */
 static Heard record(size_t &bytes) {
   mood = LISTENING;
   int16_t *pcm = (int16_t *)(recording + 44);
   size_t samples = 0, maxSamples = RATE * MAX_RECORD_S;
-  float floor = 1e9f, threshold = 0;
   int loud = 0;
   bool heard = false;
   uint32_t start = millis(), lastVoice = start;
@@ -438,32 +473,22 @@ static Heard record(size_t &bytes) {
     if (takePress()) { Serial.println("listening cancelled"); return CANCELLED; }
     size_t n = readMic(block);
     if (!n) continue;
-    float sum = 0;
-    for (size_t i = 0; i < n; i++) sum += (float)block[i] * block[i];
-    float rms = sqrtf(sum / n);
-    // The quietest 32 ms block is the room's noise, even if speech starts at
-    // once (there are gaps between words); speech is clearly above it for
-    // at least ~100 ms.
-    floor = min(floor, max(rms, 50.0f));
-    threshold = max(floor * 3.0f, 900.0f);
+    vad.update(block, n);
     uint32_t now = millis();
-    loud = rms > threshold ? loud + 1 : 0;
-    if (loud >= 3) heard = true;
-    if (rms > threshold) lastVoice = now;
-    if (samples + n <= maxSamples) {
-      memcpy(pcm + samples, block, n * 2);
-      samples += n;
-    }
-    if (heard && now - lastVoice > SILENCE_END_MS && now - start > 1000) break;
+    loud = vad.speech ? loud + 1 : 0;
+    if (loud >= 4) heard = true;   // ~130 ms clearly above the room
+    if (!vad.quiet) lastVoice = now;
+    append(pcm, samples, maxSamples, block, n, heard, RATE / 2);
+    if (heard && now - lastVoice > SILENCE_END_MS) break;
     if (!heard && now - start > NO_SPEECH_MS) {
-      Serial.printf("nothing heard (noise floor %.0f, threshold %.0f)\n", floor, threshold);
+      Serial.printf("nothing heard (room %.0f)\n", vad.noise);
       return NOTHING;
     }
     if (samples >= maxSamples) break;
   }
   micLevel = 0;
   bytes = samples * 2;
-  Serial.printf("recorded %.1f s (noise floor %.0f)\n", samples / (float)RATE, floor);
+  Serial.printf("recorded %.1f s (room %.0f)\n", samples / (float)RATE, vad.noise);
   return HEARD;
 }
 
@@ -523,6 +548,9 @@ static bool turn(const String &text, JsonDocument &answer) {
 static bool speak(const char *text, bool &interrupted) {
   JsonDocument req;
   req["text"] = text;
+#ifdef PLUM_VOICE
+  req["voice"] = PLUM_VOICE;
+#endif
   String body;
   serializeJson(req, body);
   HTTPClient http;
@@ -567,23 +595,29 @@ static void showError(const char *why) {
   vTaskDelay(pdMS_TO_TICKS(3000));
 }
 
-/** One voice conversation: listen, ask, speak, listen again, until silence or a press. */
-static void converse() {
+/**
+ * One voice conversation: listen, ask, speak, listen again, until silence or
+ * a press. `text` is a question already said together with the wake word.
+ */
+static void converse(String text) {
   chime(CHIME_LISTEN, 1, 90);
   while (true) {
-    while (!playbackIdle()) vTaskDelay(pdMS_TO_TICKS(20));
-    size_t bytes = 0;
-    Heard heard = record(bytes);
-    if (heard != HEARD) break;   // nothing said for 10 s, or the button: end
+    if (!text.length()) {
+      while (!playbackIdle()) vTaskDelay(pdMS_TO_TICKS(20));
+      size_t bytes = 0;
+      if (record(bytes) != HEARD) break;   // nothing said for 10 s, or the button: end
+      mood = THINKING;
+      if (!transcribe(bytes, text)) { showError("Transkription fehlgeschlagen"); break; }
+      text.trim();
+      Serial.printf("heard: %s\n", text.c_str());
+      if (!text.length()) continue;   // only noise: keep listening
+    }
     mood = THINKING;
-    String text;
-    if (!transcribe(bytes, text)) { showError("Transkription fehlgeschlagen"); break; }
-    text.trim();
-    Serial.printf("heard: %s\n", text.c_str());
-    if (!text.length()) continue;   // only noise: keep listening
-    if (takePress()) continue;      // pressed while thinking: talk again
+    if (takePress()) { text = ""; continue; }   // pressed while thinking: talk again
     JsonDocument answer;
-    if (!turn(text, answer)) { showError("Plum hat nicht geantwortet"); break; }
+    bool answered = turn(text, answer);
+    text = "";
+    if (!answered) { showError("Plum hat nicht geantwortet"); break; }
     if (takePress()) continue;
     bool interrupted = false;
     for (JsonVariant chunk : answer["data"]["speech"].as<JsonArray>()) {
@@ -598,6 +632,48 @@ static void converse() {
   micLevel = 0;
   chime(CHIME_BYE, 2, 70);
   mood = IDLE;
+}
+
+/**
+ * Idle: catches one spoken phrase (with a little audio before it) and lets
+ * Plum check it for "Hey Plum". Returns true when woken; `question` holds
+ * whatever was said after the wake word. Returns false at once on a press.
+ */
+static bool listenForWake(String &question) {
+  int16_t *pcm = (int16_t *)(recording + 44);
+  const size_t PRE = RATE * 3 / 10, MAXS = RATE * 7;
+  size_t samples = 0;
+  int loud = 0;
+  bool started = false;
+  uint32_t lastVoice = 0;
+  static int16_t block[512];
+  while (true) {
+    if (pressed || meterRequested || questionRequested || WiFi.status() != WL_CONNECTED) return false;
+    size_t n = readMic(block);
+    if (!n) continue;
+    vad.update(block, n);
+    uint32_t now = millis();
+    loud = vad.speech ? loud + 1 : 0;
+    if (loud >= 3 && !started) started = true;
+    if (!vad.quiet) lastVoice = now;
+    append(pcm, samples, MAXS, block, n, started, PRE);
+    if (started && (now - lastVoice > 700 || samples >= MAXS)) break;
+  }
+  if (samples < RATE * 6 / 10) return false;   // too short for "Hey Plum"
+  wavHeader(recording, samples * 2);
+  HTTPClient http;
+  int status = 0;
+  bool woken = false;
+  if (plumPost(http, "wake", "audio/wav", recording, 44 + samples * 2, status) && status == 200) {
+    JsonDocument doc;
+    if (!deserializeJson(doc, http.getString())) {
+      woken = doc["data"]["wake"] | false;
+      question = (const char *)(doc["data"]["question"] | "");
+      Serial.printf("phrase: %s%s\n", (const char *)(doc["data"]["text"] | ""), woken ? "  -> WAKE" : "");
+    }
+  } else Serial.printf("wake check failed: %s\n", errorText(http, status).c_str());
+  http.end();
+  return woken;
 }
 
 static void connectWifi() {
@@ -652,11 +728,18 @@ static void conversationTask(void *) {
       mood = IDLE;
     }
     if (takePress()) {
-      Serial.println("conversation start");
-      converse();
+      Serial.println("conversation start (button)");
+      converse("");
+      Serial.println("conversation end");
+      continue;
+    }
+    String question;
+    if (listenForWake(question)) {
+      Serial.println("conversation start (Hey Plum)");
+      converse(question);
       Serial.println("conversation end");
     }
-    vTaskDelay(pdMS_TO_TICKS(30));
+    vTaskDelay(pdMS_TO_TICKS(5));
   }
 }
 
@@ -665,6 +748,8 @@ static void conversationTask(void *) {
 void setup() {
   Serial.begin(115200);
   pinMode(BUTTON, INPUT_PULLUP);
+  pinMode(VOL_UP, INPUT_PULLUP);
+  pinMode(VOL_DOWN, INPUT_PULLUP);
   recording = (uint8_t *)heap_caps_malloc(REC_MAX, MALLOC_CAP_SPIRAM);
   // 20 s of speech in PSRAM, so the next chunk can download while one plays.
   const size_t SIZE = RATE * 2 * 20;
@@ -709,6 +794,24 @@ void loop() {
       // A press while speaking stops the voice right away.
       if (mood == SPEAKING) flushPlayback = true;
     }
+  }
+  // Volume keys on the expansion board: ±10 % per press, with a short beep.
+  static bool upWas = false, downWas = false;
+  static uint32_t keyChange = 0;
+  bool up = digitalRead(VOL_UP) == LOW, dn = digitalRead(VOL_DOWN) == LOW;
+  if ((up != upWas || dn != downWas) && now - keyChange > 40) {
+    keyChange = now;
+    if (up && !upWas) volume = min(100, volume + 10);
+    if (dn && !downWas) volume = max(10, volume - 10);
+    if ((up && !upWas) || (dn && !downWas)) {
+      static int16_t beep[RATE / 16];
+      for (int i = 0; i < RATE / 16; i++)
+        beep[i] = (int16_t)(5000 * (1.0f - (float)i / (RATE / 16)) * sinf(2 * M_PI * 1046.5f * i / RATE));
+      xStreamBufferSend(playback, beep, sizeof(beep), 0);
+      Serial.printf("volume %d\n", volume);
+    }
+    upWas = up;
+    downWas = dn;
   }
   if (mood == HAPPY && happyUntil && now > happyUntil) { mood = IDLE; happyUntil = 0; }
 

@@ -5,3 +5,5 @@
 #define PLUM_URL   "https://plum.example.ch/mobile"
 // A browser/device token from Plum: Settings -> Browser control -> Pair browser.
 #define PLUM_TOKEN "plum_ff_..."
+// Optional: a Vocarium voice for this device (default: the personalisation voice).
+// #define PLUM_VOICE "Rufus Beck"

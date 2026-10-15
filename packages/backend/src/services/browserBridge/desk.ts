@@ -25,13 +25,56 @@ const PROVIDER_PRIORITY: Record<string, number> = {
   zai: 3,
 };
 
+/**
+ * Phrases Whisper invents for noise or silence (subtitle credits from its
+ * training data). Heard on their own they are dropped, not answered.
+ */
+const HALLUCINATIONS = [
+  /^(vielen )?dank(e)?( (schön|sehr|fürs zuschauen|für ihre aufmerksamkeit))?$/,
+  /^untertitel(ung)?\b/,
+  /\b(amara\.org|zdf|ard|wdr|swr|funk)\b.*(untertitel|im auftrag)/,
+  /^(tschüss|ciao|bis (zum nächsten mal|bald|dann))$/,
+  /^copyright\b/,
+  /^(\.|…|musik|\[musik\]|\*musik\*)$/,
+];
+
+function invented(text: string): boolean {
+  const plain = text
+    .toLowerCase()
+    .replace(/[.!?,;:"'„“»«()]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return !plain || HALLUCINATIONS.some((pattern) => pattern.test(plain));
+}
+
 export async function deskTranscribe(userId: string, audio: Buffer): Promise<string> {
   const result = (await assistantTranscription(
     userId,
     { buffer: audio, originalname: 'plum-desk.wav', mimetype: 'audio/wav' },
     'de'
   )) as { text?: string };
-  return String(result.text ?? '').trim();
+  const text = String(result.text ?? '').trim();
+  return invented(text) ? '' : text;
+}
+
+/**
+ * "Hey Plum" as Whisper writes it: the name comes out as Plum, Plam, Blum,
+ * Plump … and the greeting as hey, hei, hi, ey or hallo.
+ */
+const WAKE =
+  /^\s*(?:(?:hey|hei|hej|hi|ey|he|hallo|okay|ok)[\s,.!-]*)(?:p|b|f)l(?:u|a|o|ö)m+(?:p|b)?\b[\s,.!?-]*/i;
+
+/** Checks a phrase heard in the room for the wake word. */
+export async function deskWake(
+  userId: string,
+  audio: Buffer
+): Promise<{ wake: boolean; question: string; text: string }> {
+  const text = await deskTranscribe(userId, audio);
+  const match = WAKE.exec(text);
+  if (!match) return { wake: false, question: '', text };
+  const rest = text.slice(match[0].length).trim();
+  // "Hey Plum." alone wakes the board; anything longer is the question itself.
+  return { wake: true, question: rest.split(/\s+/).length >= 2 ? rest : '', text };
 }
 
 /** Turns markdown into something worth hearing and cuts it into sentence groups. */
@@ -151,11 +194,11 @@ function toBoardPcm(wav: Buffer): Promise<Buffer> {
 }
 
 /** One chunk of the answer as 16 kHz PCM, in the voice chosen in the personalisation. */
-export async function deskSpeech(userId: string, text: string): Promise<Buffer> {
+export async function deskSpeech(userId: string, text: string, voice?: string): Promise<Buffer> {
   const personal = await readPersonalization(userId);
   const wav = await assistantSpeech(userId, {
     text,
-    voice: personal.voiceName || 'Rufus Beck',
+    voice: voice || personal.voiceName || 'Rufus Beck',
     language: 'German',
   });
   return toBoardPcm(wav);

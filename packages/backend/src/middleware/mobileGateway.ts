@@ -12,6 +12,7 @@ const PUBLIC_MOBILE_ROUTES = new Set([
   'POST /api/basic-auth/login',
   // Plum Desk authenticates itself with its device token (routes/browserBridge.ts).
   'POST /api/browser-bridge/desk/transcribe',
+  'POST /api/browser-bridge/desk/wake',
   'POST /api/browser-bridge/desk/turn',
   'POST /api/browser-bridge/desk/speech',
 ]);

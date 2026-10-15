@@ -16,7 +16,11 @@ board ──Wi-Fi/TLS──▶ Plum /mobile/api/browser-bridge/desk/*  ──▶
 
 ## Using it
 
-- **Button (BOOT):** starts a conversation (short chime, the plum listens).
+- **"Hey Plum"** (said like "Plam") starts a conversation; "Hey Plum, wie spät ist es?" asks right away.
+  While idle the board sends each spoken phrase to Plum (`/desk/wake`, Whisper on the
+  local Vocarium); nothing is stored and no chat is created unless the wake word is heard.
+- **Button (BOOT):** starts a conversation too (short chime, the plum listens).
+- **Volume keys** on the expansion board (GPIO39 up, GPIO38 down): ±10 % with a beep.
 - Speak; 1.3 s of silence ends your turn. The plum thinks, then answers and listens again.
 - 10 s without speech, or a press while it listens, ends the conversation.
 - A press while it thinks or speaks interrupts it, and you can talk right away.
@@ -35,8 +39,9 @@ bearer token (Settings → Browser control lists and revokes it as "Plum Desk"):
 | Route | Body | Answer |
 |---|---|---|
 | `POST /api/browser-bridge/desk/transcribe` | 16 kHz mono WAV | `{text}` |
+| `POST /api/browser-bridge/desk/wake` | 16 kHz mono WAV (one phrase) | `{wake, question, text}` |
 | `POST /api/browser-bridge/desk/turn` | `{text, chatId?}` | `{chatId, text, speech[]}` (answer cut into spoken chunks, markdown removed) |
-| `POST /api/browser-bridge/desk/speech` | `{text}` | raw 16 kHz mono s16le PCM in the personalisation's voice |
+| `POST /api/browser-bridge/desk/speech` | `{text, voice?}` | raw 16 kHz mono s16le PCM in the personalisation's voice |
 
 They are open on the `/mobile` gateway (no SSO login) only because they check
 the device token themselves (`middleware/mobileGateway.ts`).
@@ -63,6 +68,11 @@ factory firmware backup are described in the starter kit's `GUIDE.md`
 USB console (115200 baud) for diagnosis: `t` acts like the button, `s` prints
 state, Wi-Fi and memory, `m` prints microphone levels for 6 s, `q` asks a fixed
 question without the microphone (tests Wi-Fi, TLS, Plum and the speaker).
+
+Speech detection follows the room: a smoothed level against a noise floor that
+falls at once and rises slowly, so fans do not count as speech. Whisper's
+invented subtitle lines ("Vielen Dank.", "Untertitelung des ZDF …") are dropped
+in Plum. `PLUM_VOICE` in `secrets.h` picks a voice for this device.
 
 Plum's certificate is verified against the public CA bundle built into the
 ESP32 core. Recording (up to 30 s) and a 20 s playback buffer live in PSRAM.

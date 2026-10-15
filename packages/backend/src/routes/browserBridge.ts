@@ -17,7 +17,7 @@ import {
   resolveBrowserToken,
   revokeBrowserToken,
 } from '../services/browserBridge/tokens.js';
-import { deskSpeech, deskTranscribe, deskTurn } from '../services/browserBridge/desk.js';
+import { deskSpeech, deskTranscribe, deskTurn, deskWake } from '../services/browserBridge/desk.js';
 
 /**
  * Firefox browser control.
@@ -286,6 +286,18 @@ router.post(
   }
 );
 
+router.post(
+  '/desk/wake',
+  rateLimiters.standard,
+  express.raw({ type: () => true, limit: '2mb' }),
+  async (req: Request, res: Response) => {
+    const userId = await deskOwner(req);
+    if (!Buffer.isBuffer(req.body) || req.body.length < 1000)
+      throw new AppError('Audio fehlt', 400, 'VALIDATION_ERROR');
+    res.json({ success: true, data: await deskWake(userId, req.body) });
+  }
+);
+
 router.post('/desk/turn', rateLimiters.standard, async (req: Request, res: Response) => {
   const userId = await deskOwner(req);
   const parsed = z
@@ -300,9 +312,14 @@ router.post('/desk/turn', rateLimiters.standard, async (req: Request, res: Respo
 
 router.post('/desk/speech', rateLimiters.standard, async (req: Request, res: Response) => {
   const userId = await deskOwner(req);
-  const parsed = z.object({ text: z.string().trim().min(1).max(1000) }).safeParse(req.body);
+  const parsed = z
+    .object({
+      text: z.string().trim().min(1).max(1000),
+      voice: z.string().trim().min(1).max(100).optional(),
+    })
+    .safeParse(req.body);
   if (!parsed.success) throw new AppError('text is required', 400, 'VALIDATION_ERROR');
-  const pcm = await deskSpeech(userId, parsed.data.text);
+  const pcm = await deskSpeech(userId, parsed.data.text, parsed.data.voice);
   // Raw 16 kHz mono s16le: the board streams it straight into its speaker.
   res.setHeader('Content-Type', 'audio/L16; rate=16000; channels=1');
   res.setHeader('Content-Length', String(pcm.length));
