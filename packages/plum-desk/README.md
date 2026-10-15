@@ -68,6 +68,19 @@ factory firmware backup are described in the starter kit's `GUIDE.md`
 USB console (115200 baud) for diagnosis: `t` acts like the button, `s` prints
 state, Wi-Fi and memory, `m` prints microphone levels for 6 s, `q` asks a fixed
 question without the microphone (tests Wi-Fi, TLS, Plum and the speaker).
+Microphone checks: `l` speaks a phrase and records it at the same time, `r`
+arms a plain 8 s recording on the next button press (clap, then speak), `d`
+prints the last recording as base64 WAV (`l` and `r` do it on their own), `x`
+measures the noise floor at several sample rates, `+`/`-` double or halve the
+microphone gain.
+
+The INMP441 runs at 48 kHz and is decimated to 16 kHz in the firmware (47-tap
+low-pass, then a 150 Hz high-pass against rumble): at 16 kHz its 1 MHz clock is
+at the bottom of its range. A working microphone shows a clap a few centimetres
+away near full scale and a clear pitch in speech; the first board's INMP441 did
+neither (noise floor about -55 dBFS, claps barely 2-5x above it, data format
+and clock edge checked), so it needs replacing. An ICS-43434 is a drop-in
+alternative (same I2S format).
 
 Speech detection follows the room: a smoothed level against a noise floor that
 falls at once and rises slowly, so fans do not count as speech. Whisper's

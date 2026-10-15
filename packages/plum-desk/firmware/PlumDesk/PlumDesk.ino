@@ -30,7 +30,7 @@
 #include "esp_heap_caps.h"
 #include "secrets.h"
 
-#define VERSION "0.3.1"
+#define VERSION "0.4.0"
 
 // ---- pins ----
 #define TFT_SCLK 21
@@ -52,7 +52,9 @@
 #define W 240
 #define H 240
 #define Y_OFF 80
-#define RATE 16000
+#define RATE 16000          // speaker, recordings and Plum
+#define MIC_RATE 48000      // INMP441 (decimated to RATE in readMic)
+#define DECIMATE (MIC_RATE / RATE)
 
 // Voice activity, as in the WebUI voice mode: stop 1.3 s after the last
 // speech, give up after 10 s without any.
@@ -76,9 +78,16 @@ static volatile uint8_t volume = 80;
 static volatile float speakLevel = 0;   // 0..1, drives the mouth
 static volatile float micLevel = 0;     // 0..1, drives the listening ring
 static volatile bool pressed = false;   // button event for the conversation task
-static volatile bool meterRequested = false;
-static volatile bool questionRequested = false;   // console "q": ask a fixed question, no mic
-static volatile int32_t slotEnergy[2];   // console "m": print mic levels for 6 s
+static volatile bool meterRequested = false;     // console "m": print mic levels for 6 s
+static volatile bool questionRequested = false;  // console "q": ask a fixed question, no mic
+static volatile bool dumpRequested = false;      // console "d": print the last recording as base64
+static volatile bool loopbackRequested = false;  // console "l": speak a phrase and record it
+static volatile bool surveyRequested = false;    // console "x": mic noise with/without speaker clock, several rates
+static volatile bool rawTestArmed = false;       // console "r": the next press records 8 s plainly and dumps it
+static volatile bool spkHold = false;            // speaker task pauses (survey ends the speaker I2S)
+static volatile float micGain = 1.0f / 8;       // 24-bit -> 16-bit with 32x gain; console + / - adjust
+static size_t lastRecording = 0;                 // bytes of PCM in `recording`
+static volatile int32_t slotEnergy[2];
 static uint32_t happyUntil = 0;
 
 // ---------------------------------------------------------------- display
@@ -346,6 +355,7 @@ static void aim(uint32_t now) {
 static void speakerTask(void *) {
   static int16_t buf[256];
   for (;;) {
+    if (spkHold) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
     if (flushPlayback) {
       xStreamBufferReset(playback);
       flushPlayback = false;
@@ -382,23 +392,52 @@ static const float CHIME_READY[] = {659.3f, 987.8f};
 static const float CHIME_LISTEN[] = {880.0f};
 static const float CHIME_BYE[] = {987.8f, 659.3f};
 
-/** Reads 32 ms of microphone audio as 16-bit mono (the INMP441 sits on one slot). */
+/**
+ * Reads 32 ms of microphone audio as 16-bit mono at 16 kHz.
+ *
+ * The INMP441 runs at 48 kHz: at 16 kHz its clock (1 MHz) sits at the bottom
+ * of its range and the noise floor was 30 dB above spec, too much for Whisper.
+ * A 47-tap low-pass (7 kHz) takes every third sample down to 16 kHz, a 150 Hz
+ * high-pass removes the rumble the board picks up, then the gain scales the
+ * 24-bit sample to 16 bit.
+ */
 static size_t readMic(int16_t *out) {
-  static int32_t raw[1024];   // 512 stereo frames
+  static const int TAPS = 47, HIST = TAPS - 1, IN = 512 * DECIMATE;
+  static int32_t raw[2 * IN];   // stereo frames, the mic sits on one slot
+  static float x[HIST + IN], fir[TAPS];
+  static float b0, b1, b2, a1, a2, x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  static bool init = false;
+  if (!init) {
+    float fc = 7000.0f / MIC_RATE, sum = 0;
+    for (int k = 0; k < TAPS; k++) {
+      int m = k - HIST / 2;
+      float sinc = m ? sinf(2 * M_PI * fc * m) / (M_PI * m) : 2 * fc;
+      fir[k] = sinc * (0.54f - 0.46f * cosf(2 * M_PI * k / HIST));
+      sum += fir[k];
+    }
+    for (int k = 0; k < TAPS; k++) fir[k] /= sum;
+    float w = 2 * M_PI * 150.0f / RATE, cw = cosf(w), alpha = sinf(w) / (2 * 0.7071f), a0 = 1 + alpha;
+    b0 = (1 + cw) / 2 / a0; b1 = -(1 + cw) / a0; b2 = b0;
+    a1 = -2 * cw / a0; a2 = (1 - alpha) / a0;
+    memset(x, 0, sizeof(x));
+    init = true;
+  }
   size_t got = mic.readBytes((char *)raw, sizeof(raw));
   if (got < sizeof(raw)) return 0;
   int64_t e0 = 0, e1 = 0;
-  for (int i = 0; i < 512; i++) { e0 += llabs(raw[2 * i] >> 16); e1 += llabs(raw[2 * i + 1] >> 16); }
+  for (int i = 0; i < IN; i++) { e0 += llabs(raw[2 * i] >> 16); e1 += llabs(raw[2 * i + 1] >> 16); }
   int slot = e1 > e0 ? 1 : 0;
-  slotEnergy[0] = e0 / 512; slotEnergy[1] = e1 / 512;
+  slotEnergy[0] = e0 / IN; slotEnergy[1] = e1 / IN;
+  memmove(x, x + IN, HIST * sizeof(float));
+  for (int i = 0; i < IN; i++) x[HIST + i] = (float)(raw[2 * i + slot] >> 8);   // 24-bit sample
   int32_t peak = 0;
-  // DC blocker (one-pole high-pass at ~13 Hz): an offset would read as room noise.
-  static float lastIn = 0, lastOut = 0;
   for (int i = 0; i < 512; i++) {
-    float in = (float)(raw[2 * i + slot] >> 14);   // 16 bit with 4x gain (8x clipped)
-    lastOut = in - lastIn + 0.995f * lastOut;
-    lastIn = in;
-    int32_t v = (int32_t)lastOut;
+    const float *p = x + DECIMATE * i + DECIMATE - 1;
+    float in = 0;
+    for (int k = 0; k < TAPS; k++) in += fir[k] * p[k];
+    float y = b0 * in + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+    x2 = x1; x1 = in; y2 = y1; y1 = y;
+    int32_t v = (int32_t)(y * micGain);
     v = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
     out[i] = v;
     peak = max(peak, abs(v));
@@ -495,6 +534,7 @@ static Heard record(size_t &bytes) {
   }
   micLevel = 0;
   bytes = samples * 2;
+  lastRecording = bytes;
   Serial.printf("recorded %.1f s (room %.0f)\n", samples / (float)RATE, vad.noise);
   return HEARD;
 }
@@ -655,7 +695,7 @@ static bool listenForWake(String &question) {
   uint32_t lastVoice = 0;
   static int16_t block[512];
   while (true) {
-    if (pressed || meterRequested || questionRequested || WiFi.status() != WL_CONNECTED) return false;
+    if (pressed || meterRequested || questionRequested || dumpRequested || loopbackRequested || surveyRequested || rawTestArmed || WiFi.status() != WL_CONNECTED) return false;
     size_t n = readMic(block);
     if (!n) continue;
     vad.update(block, n);
@@ -666,6 +706,7 @@ static bool listenForWake(String &question) {
     append(pcm, samples, MAXS, block, n, started, PRE);
     if (started && (now - lastVoice > 700 || samples >= MAXS)) break;
   }
+  lastRecording = samples * 2;
   if (samples < RATE * 6 / 10) return false;   // too short for "Hey Plum"
   wavHeader(recording, samples * 2);
   HTTPClient http;
@@ -721,6 +762,87 @@ static void conversationTask(void *) {
         if (i % 8 == 0) Serial.printf("mic rms %.0f peak %ld  slot0 %ld slot1 %ld\n", sqrtf(sum / 512), (long)peak, (long)slotEnergy[0], (long)slotEnergy[1]);
       }
     }
+    if (surveyRequested) {
+      surveyRequested = false;
+      // One second per setting: 24-bit noise floor (dBFS), its high-frequency part
+      // (first difference) and how many samples jump far from their neighbours.
+      auto measure = [](const char *label, uint32_t rate) {
+        mic.end();
+        mic.setPins(MIC_SCK, MIC_WS, -1, MIC_SD, -1);
+        if (!mic.begin(I2S_MODE_STD, rate, I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO)) { Serial.printf("%s: begin failed\n", label); return; }
+        static int32_t raw[1024];
+        for (int k = 0; k < 8; k++) mic.readBytes((char *)raw, sizeof(raw));   // settle
+        double sum = 0, sq = 0, dsq = 0; long n = 0, jumps = 0; int64_t prev = 0; int64_t s0 = 0, s1 = 0;
+        while (n < (long)rate) {
+          if (mic.readBytes((char *)raw, sizeof(raw)) < sizeof(raw)) continue;
+          for (int i = 0; i < 512; i++) {
+            int64_t v = raw[2 * i] >> 8;
+            s0 += llabs(raw[2 * i] >> 8); s1 += llabs(raw[2 * i + 1] >> 8);
+            sum += v; sq += (double)v * v; if (n) dsq += (double)(v - prev) * (v - prev);
+            prev = v; n++;
+          }
+        }
+        double mean = sum / n, rms = sqrt(sq / n - mean * mean), drms = sqrt(dsq / n);
+        for (int i = 0; i < 512; i++) { int64_t v = raw[2 * i] >> 8; if (fabs(v - mean) > 6 * rms) jumps++; }
+        Serial.printf("%-22s rms %.1f dBFS  diff %.1f dBFS  mean %.0f  slot1/slot0 %.3f  outliers %ld  raw %08lx %08lx %08lx %08lx\n", label,
+                      20 * log10(rms / 8388608.0 + 1e-12), 20 * log10(drms / 8388608.0 + 1e-12), mean, s0 ? (double)s1 / s0 : 0, jumps,
+                      (unsigned long)raw[0], (unsigned long)raw[2], (unsigned long)raw[4], (unsigned long)raw[6]);
+      };
+      measure("16k, speaker on", RATE);
+      spkHold = true;
+      vTaskDelay(pdMS_TO_TICKS(60));
+      spk.end();
+      measure("16k, speaker off", RATE);
+      measure("32k, speaker off", 32000);
+      measure("44.1k, speaker off", 44100);
+      measure("48k, speaker off", 48000);
+      measure("16k again", RATE);
+      measure("48k (normal)", MIC_RATE);
+      spk.setPins(AMP_BCLK, AMP_LRC, AMP_DIN, -1, -1);
+      spk.begin(I2S_MODE_STD, RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
+      spkHold = false;
+      Serial.println("survey done");
+    }
+    if (loopbackRequested) {
+      loopbackRequested = false;
+      bool interrupted = false;
+      // Buffer the whole phrase first, then play and record at the same time.
+      spkHold = true;
+      speak("Hey Plum, wie spät ist es?", interrupted);
+      spkHold = false;
+      int16_t *pcm = (int16_t *)(recording + 44);
+      size_t samples = 0;
+      static int16_t lb[512];
+      while (samples < RATE * 4) {
+        size_t n = readMic(lb);
+        if (n) { memcpy(pcm + samples, lb, n * 2); samples += n; }
+      }
+      lastRecording = samples * 2;
+      mood = IDLE;
+      Serial.println("loopback done");
+      dumpRequested = true;   // right away: the wake listener reuses the buffer
+    }
+    if (dumpRequested) {
+      dumpRequested = false;
+      static const char *B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      wavHeader(recording, lastRecording);
+      size_t total = 44 + lastRecording;
+      Serial.printf("DUMP BEGIN %u\n", (unsigned)total);
+      char line[80];
+      for (size_t i = 0; i < total; i += 57) {
+        size_t n = min((size_t)57, total - i), o = 0;
+        for (size_t k = 0; k < n; k += 3) {
+          uint32_t v = recording[i + k] << 16 | (k + 1 < n ? recording[i + k + 1] << 8 : 0) | (k + 2 < n ? recording[i + k + 2] : 0);
+          line[o++] = B64[v >> 18 & 63]; line[o++] = B64[v >> 12 & 63];
+          line[o++] = k + 1 < n ? B64[v >> 6 & 63] : '=';
+          line[o++] = k + 2 < n ? B64[v & 63] : '=';
+        }
+        line[o] = 0;
+        Serial.printf("B64 %s\n", line);
+        if ((i / 57) % 64 == 0) vTaskDelay(1);
+      }
+      Serial.println("DUMP END");
+    }
     if (questionRequested) {
       questionRequested = false;
       mood = THINKING;
@@ -733,6 +855,29 @@ static void conversationTask(void *) {
         Serial.println("question done");
       } else showError("Plum hat nicht geantwortet");
       mood = IDLE;
+    }
+    if (rawTestArmed && takePress()) {
+      rawTestArmed = false;
+      chime(CHIME_LISTEN, 1, 90);
+      while (!playbackIdle()) vTaskDelay(pdMS_TO_TICKS(20));
+      mood = LISTENING;
+      int16_t *pcm = (int16_t *)(recording + 44);
+      size_t samples = 0;
+      static int16_t rb[512];
+      int tick = 0;
+      while (samples < RATE * 8) {
+        size_t n = readMic(rb);
+        if (!n) continue;
+        memcpy(pcm + samples, rb, n * 2); samples += n;
+        int32_t peak = 0; for (size_t k = 0; k < n; k++) peak = max(peak, (int32_t)abs(rb[k]));
+        if (++tick % 4 == 0) Serial.printf("raw test %.2f s peak %ld\n", samples / (float)RATE, (long)peak);
+      }
+      lastRecording = samples * 2;
+      mood = IDLE;
+      chime(CHIME_BYE, 2, 70);
+      Serial.println("raw test done");
+      dumpRequested = true;
+      continue;
     }
     if (takePress()) {
       Serial.println("conversation start (button)");
@@ -768,7 +913,7 @@ void setup() {
   spk.setPins(AMP_BCLK, AMP_LRC, AMP_DIN, -1, -1);
   spk.begin(I2S_MODE_STD, RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
   mic.setPins(MIC_SCK, MIC_WS, -1, MIC_SD, -1);
-  mic.begin(I2S_MODE_STD, RATE, I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO);
+  mic.begin(I2S_MODE_STD, MIC_RATE, I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO);
 
   xTaskCreatePinnedToCore(speakerTask, "spk", 4096, nullptr, 6, nullptr, 0);
   xTaskCreatePinnedToCore(conversationTask, "talk", 16384, nullptr, 3, nullptr, 0);
@@ -786,6 +931,12 @@ void loop() {
     if (c == 't') { pressed = true; if (mood == SPEAKING) flushPlayback = true; Serial.println("press (console)"); }
     if (c == 'm') meterRequested = true;
     if (c == 'q') questionRequested = true;
+    if (c == 'd') dumpRequested = true;
+    if (c == 'l') loopbackRequested = true;
+    if (c == 'x') surveyRequested = true;
+    if (c == 'r') { rawTestArmed = true; Serial.println("raw test armed: press the button"); }
+    if (c == '+') { micGain *= 2; Serial.printf("mic gain %.4f\n", micGain); }
+    if (c == '-') { micGain /= 2; Serial.printf("mic gain %.4f\n", micGain); }
     if (c == 's')
       Serial.printf("Plum Desk %s mood=%d wifi=%s rssi=%d ip=%s heap=%u psram=%u mic=%.3f\n", VERSION, mood,
                     WiFi.status() == WL_CONNECTED ? "ok" : "down", WiFi.RSSI(), WiFi.localIP().toString().c_str(),
