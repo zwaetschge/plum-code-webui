@@ -42,6 +42,21 @@ Regeln:
 - **Aufklappen** aus einem Vollbild-Detail: derselbe Bereich mit diesem Element rechts ausgewählt.
 - Der Bereich bleibt über Faltwechsel hinweg erhalten.
 
+### Aufklapp-Animation „Naht“ (eigene Plum-Bewegung)
+
+Statt das Layout beim Faltwechsel hart umzuschalten, entfaltet sich die zweite Spalte aus dem Scharnier:
+
+1. **Naht leuchtet auf** (0–180 ms): Entlang der Scharnierlinie (Fensterhälfte bzw. `FoldingFeature`-Position)
+   zieht ein schmaler Lichtstreif in Plum-Violett von der Mitte nach oben und unten.
+2. **Liste entfaltet sich** (80–520 ms): Die Listenspalte wächst aus der Naht nach links, leicht wie ein Buchblatt
+   gedreht (rotationY ≈ −18° → 0°, Pivot an ihrer rechten Kante), mit Fade und der Menü-Feder (0.8 / 380).
+3. **Inhalt rückt zur Seite** (gleichzeitig): Das bisher bildschirmfüllende Element gleitet federnd in die rechte
+   Spalte und behält dabei seinen Inhalt (kein Neuaufbau, keine verlorene Scrollposition).
+4. **Naht verglimmt** (bis ~650 ms): Der Lichtstreif wird zur feinen Trennlinie zwischen den Spalten.
+
+Zuklappen ist die Umkehrung: die Liste faltet sich in die Naht zurück, das offene Element dehnt sich auf die volle
+Breite. Bei „Animationen entfernen“ sofortiger Wechsel. Nur Transform/Alpha, damit es auf dem Fold flüssig bleibt.
+
 ### Später (nicht Teil dieses Schritts)
 
 - Tabletop-Haltung (halb geöffnet, waagrechtes Scharnier): Gespräch oben, Composer und Tastatur unten.
