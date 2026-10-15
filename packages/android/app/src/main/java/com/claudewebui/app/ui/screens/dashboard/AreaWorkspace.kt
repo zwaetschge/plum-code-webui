@@ -49,7 +49,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.movableContentOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -61,16 +60,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlurEffect
+import androidx.compose.ui.graphics.TileMode
+import android.os.Build
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -94,7 +93,6 @@ import com.claudewebui.app.ui.motion.PlumMotionTokens
 import com.claudewebui.app.ui.motion.plumSwitchTransform
 import com.claudewebui.app.ui.screens.chat.ChatScreen
 import com.claudewebui.app.ui.theme.LocalReduceMotion
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -243,10 +241,12 @@ private data class PaneKey(val area: String, val id: String?)
  * list on the left and exactly one item of that area on the right; Schwarm
  * uses the full width.
  *
- * Fold changes do not hard-switch: a violet seam lights up along the hinge,
- * the list column unfolds out of it like a book page, and the open item glides
- * into the right column. The item is a movable content, so it keeps its state
- * (scroll position, composer text) across the layout change.
+ * Fold changes do not hard-switch. Unfolding keeps the open item exactly where
+ * the eye is and lays it into the right column at once; the newly gained area
+ * shows the list as violet-tinted frosted glass that comes into focus (blur,
+ * tint and a slight zoom clear together). Folding back blurs the list away.
+ * The item is a movable content, so it keeps its state (scroll position,
+ * composer text) across the layout change.
  */
 @Composable
 fun AreaWorkspace(
@@ -361,44 +361,35 @@ fun AreaWorkspace(
     // would offer nothing to go back to.
     val listTarget = expanded && !fullWidth && (ws.listVisible || (area != "chat" && selectionHere == null))
 
-    // ---- Seam choreography ----
+    // ---- Fold choreography ----
+    // `presence` drives the list column: 0 = gone, 1 = in focus. A fold change
+    // brings it into focus from frosted blur without moving the item; toggling
+    // focus mode slides the item along with the column instead.
     val presence = remember { Animatable(if (listTarget) 1f else 0f) }
-    val seamGlow = remember { Animatable(0f) }
-    val seamLength = remember { Animatable(0f) }
-    // Separate effects: a selection change during the fold choreography may
-    // restart the list animation, but must never cut the seam off mid-glow.
-    var seamExpanded by remember { mutableStateOf(expanded) }
-    LaunchedEffect(expanded) {
-        if (expanded == seamExpanded) return@LaunchedEffect
-        seamExpanded = expanded
-        if (reduce) return@LaunchedEffect
-        // 0–180 ms: the seam grows from the middle up and down; it then glows
-        // on and fades into the divider by ~650 ms.
-        seamLength.snapTo(0f)
-        seamGlow.snapTo(1f)
-        seamLength.animateTo(1f, tween(180, easing = PlumMotionTokens.EnterEasing))
-        delay(300)
-        seamGlow.animateTo(0f, tween(PlumMotionTokens.EXIT_MS, easing = PlumMotionTokens.ExitEasing))
-    }
+    var glide by remember { mutableStateOf(false) }
     var listExpanded by remember { mutableStateOf(expanded) }
     LaunchedEffect(listTarget, expanded, reduce) {
         val target = if (listTarget) 1f else 0f
         val foldChange = expanded != listExpanded
         listExpanded = expanded
+        glide = !foldChange
         if (reduce) {
-            presence.snapTo(target); seamGlow.snapTo(0f); seamLength.snapTo(0f)
+            presence.snapTo(target)
             return@LaunchedEffect
         }
-        // On a fold change the list starts 80 ms after the seam, then unfolds
-        // (or folds back) with the menu spring.
-        if (foldChange) delay(80)
-        presence.animateTo(target, PlumMotionTokens.menuSpring())
+        when {
+            foldChange && target == 1f -> {
+                presence.snapTo(0f)
+                presence.animateTo(1f, tween(760, easing = PlumMotionTokens.EnterEasing))
+            }
+            foldChange -> presence.animateTo(0f, tween(260, easing = PlumMotionTokens.ExitEasing))
+            else -> presence.animateTo(target, PlumMotionTokens.menuSpring())
+        }
     }
     val listComposed by remember { derivedStateOf { presence.value > 0.001f } }
-    val seamComposed by remember { derivedStateOf { seamGlow.value > 0.001f } }
-    // Stays in the split arrangement until the list has folded away and the
-    // seam has faded, then hands over to the phone layout.
-    val splitLayout = expanded || listComposed || seamComposed
+    // Stays in the split arrangement until the list has blurred away, then
+    // hands over to the phone layout.
+    val splitLayout = expanded || listComposed
 
     val selectArea: (String) -> Unit = { next -> viewModel.clearSelection(); ws.selectArea(next) }
 
@@ -497,21 +488,13 @@ fun AreaWorkspace(
 
     PlumBackdrop {
         if (splitLayout) {
-            var rootX by remember { mutableFloatStateOf(0f) }
-            var rootWidth by remember { mutableIntStateOf(0) }
-            var dividerX by remember { mutableFloatStateOf(-1f) }
-            Box(
-                Modifier.fillMaxSize().onGloballyPositioned {
-                    rootX = it.positionInWindow().x
-                    rootWidth = it.size.width
-                },
-            ) {
+            Box(Modifier.fillMaxSize()) {
                 val split: @Composable () -> Unit = {
                     SplitPane(
                         presence = { presence.value },
                         listTarget = listTarget,
                         listComposed = listComposed || listTarget,
-                        onDivider = { dividerX = it - rootX },
+                        glide = glide,
                         list = { listColumn() },
                         detail = {
                             val paneKey = when {
@@ -545,13 +528,6 @@ fun AreaWorkspace(
                         badgeCount = state.attentionCount,
                     ) { _ -> split() }
                 } else split()
-                if (seamComposed) FoldSeam(
-                    hingeX = { rootWidth / 2f },
-                    dividerX = { dividerX },
-                    presence = { presence.value },
-                    glow = { seamGlow.value },
-                    length = { seamLength.value },
-                )
             }
         } else {
             CompactWorkspace(
@@ -634,7 +610,7 @@ private fun SplitPane(
     presence: () -> Float,
     listTarget: Boolean,
     listComposed: Boolean,
-    onDivider: (Float) -> Unit,
+    glide: Boolean,
     list: @Composable () -> Unit,
     detail: @Composable () -> Unit,
 ) {
@@ -643,73 +619,56 @@ private fun SplitPane(
     val density = LocalDensity.current
     val listPx = with(density) { listWidth.toPx() }
     val background = com.claudewebui.app.ui.theme.PlumTheme.palette.background
+    val accent = PlumAccent
     Box(Modifier.fillMaxSize()) {
         val target = if (listTarget) 1f else 0f
         Box(
             Modifier.fillMaxSize()
                 .padding(start = if (listTarget) listWidth else 0.dp)
-                .graphicsLayer { translationX = (presence() - target) * listPx },
+                .graphicsLayer {
+                    // Unfolding leaves the item where it is; only focus mode slides it.
+                    translationX = if (glide) (presence() - target) * listPx else 0f
+                },
         ) { detail() }
         if (listComposed) Box(
             Modifier.width(listWidth).fillMaxHeight().zIndex(1f)
-                .onGloballyPositioned { onDivider(it.positionInWindow().x + it.size.width) }
                 .graphicsLayer {
-                    val p = presence()
-                    alpha = p.coerceIn(0f, 1f)
-                    rotationY = -18f * (1f - p)
-                    transformOrigin = TransformOrigin(1f, .5f)
-                    cameraDistance = 14f * this.density
-                }
-                // Covers the item gliding underneath while the page turns;
-                // invisible at rest so the column keeps the shared backdrop.
-                .drawBehind {
                     val p = presence().coerceIn(0f, 1f)
-                    val cover = (4f * p * (1f - p)).coerceIn(0f, 1f) * .9f
-                    if (cover > 0.01f) drawRect(background.copy(alpha = cover))
+                    val haze = 1f - p
+                    // Visible as frost at once, then sharpening into the list.
+                    alpha = (p * 3f).coerceAtMost(1f)
+                    val zoom = 1f + .04f * haze
+                    scaleX = zoom
+                    scaleY = zoom
+                    transformOrigin = TransformOrigin(.5f, .5f)
+                    clip = true
+                    val radius = 36.dp.toPx() * haze
+                    renderEffect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && radius > .5f) {
+                        BlurEffect(radius, radius, TileMode.Clamp)
+                    } else {
+                        null
+                    }
+                }
+                // The frost: a violet-tinted veil that clears as the list focuses.
+                .drawWithContent {
+                    drawContent()
+                    val haze = (1f - presence()).coerceIn(0f, 1f)
+                    if (haze > .01f) {
+                        drawRect(background.copy(alpha = .42f * haze))
+                        drawRect(
+                            Brush.radialGradient(
+                                listOf(accent.copy(alpha = .30f * haze), Color.Transparent),
+                                center = Offset(size.width * .3f, size.height * .25f),
+                                radius = size.maxDimension * .9f,
+                            ),
+                        )
+                    }
                 },
         ) {
             list()
             VerticalDivider(Modifier.align(Alignment.CenterEnd).fillMaxHeight(), color = PlumBorder)
         }
     }
-}
-
-/**
- * The light seam along the hinge: grows from the middle up and down, travels
- * to the column edge as the list unfolds and fades into the divider there.
- */
-@Composable
-private fun FoldSeam(
-    hingeX: () -> Float,
-    dividerX: () -> Float,
-    presence: () -> Float,
-    glow: () -> Float,
-    length: () -> Float,
-) {
-    val accent = PlumAccent
-    Box(
-        Modifier.fillMaxHeight().width(14.dp).zIndex(2f)
-            .graphicsLayer {
-                val p = presence().coerceIn(0f, 1f)
-                val divider = dividerX()
-                val hinge = hingeX()
-                val x = if (divider > 0f) hinge + (divider - hinge) * p else hinge
-                translationX = x - 7.dp.toPx()
-                scaleY = length()
-                alpha = glow()
-            }
-            .drawBehind {
-                drawRect(
-                    Brush.horizontalGradient(listOf(Color.Transparent, accent.copy(alpha = .38f), Color.Transparent)),
-                )
-                val core = 2.dp.toPx()
-                drawRect(
-                    Brush.verticalGradient(listOf(Color.Transparent, accent, accent, Color.Transparent)),
-                    topLeft = Offset((size.width - core) / 2f, 0f),
-                    size = Size(core, size.height),
-                )
-            },
-    )
 }
 
 /** Schwarm at full width, with the area selector floating on top. */

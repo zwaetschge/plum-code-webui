@@ -42,20 +42,18 @@ Regeln:
 - **Aufklappen** aus einem Vollbild-Detail: derselbe Bereich mit diesem Element rechts ausgewählt.
 - Der Bereich bleibt über Faltwechsel hinweg erhalten.
 
-### Aufklapp-Animation „Naht“ (eigene Plum-Bewegung)
+### Aufklapp-Animation „Milchglas wird scharf“
 
-Statt das Layout beim Faltwechsel hart umzuschalten, entfaltet sich die zweite Spalte aus dem Scharnier:
+Prinzip wie beim Referenz-GIF (Inhalt bleibt, neue Fläche schärft sich), mit Plum-eigener Glasnote:
 
-1. **Naht leuchtet auf** (0–180 ms): Entlang der Scharnierlinie (Fensterhälfte bzw. `FoldingFeature`-Position)
-   zieht ein schmaler Lichtstreif in Plum-Violett von der Mitte nach oben und unten.
-2. **Liste entfaltet sich** (80–520 ms): Die Listenspalte wächst aus der Naht nach links, leicht wie ein Buchblatt
-   gedreht (rotationY ≈ −18° → 0°, Pivot an ihrer rechten Kante), mit Fade und der Menü-Feder (0.8 / 380).
-3. **Inhalt rückt zur Seite** (gleichzeitig): Das bisher bildschirmfüllende Element gleitet federnd in die rechte
-   Spalte und behält dabei seinen Inhalt (kein Neuaufbau, keine verlorene Scrollposition).
-4. **Naht verglimmt** (bis ~650 ms): Der Lichtstreif wird zur feinen Trennlinie zwischen den Spalten.
+1. **Der Inhalt bleibt stehen.** Das offene Element landet ohne Gleiten direkt in der rechten Spalte – dort, wo der
+   Blick schon ist. Kein Neuaufbau, Scrollposition und Composer-Text bleiben.
+2. **Die neue Fläche ist Milchglas.** Die Listenspalte erscheint sofort an ihrem Platz, aber stark weichgezeichnet
+   (Blur 36 dp), leicht vergrößert (104 %) und von einem violett getönten Schleier überzogen.
+3. **Sie wird scharf.** In ~760 ms (abbremsend) klären sich Blur, Zoom und Tint gemeinsam zur fertigen Liste.
 
-Zuklappen ist die Umkehrung: die Liste faltet sich in die Naht zurück, das offene Element dehnt sich auf die volle
-Breite. Bei „Animationen entfernen“ sofortiger Wechsel. Nur Transform/Alpha, damit es auf dem Fold flüssig bleibt.
+Zuklappen: Die Liste verschwimmt in ~260 ms und verschwindet, das Element füllt danach den kleinen Screen. Keine
+Linie, keine Drehung. Bei „Animationen entfernen“ sofortiger Wechsel; unter Android 12 ohne Blur (nur Tint/Zoom).
 
 ### Später (nicht Teil dieses Schritts)
 
