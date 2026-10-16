@@ -177,7 +177,7 @@ internal fun LazyGridScope.sessionOverview(
             if (rest.isNotEmpty()) {
                 item(key = "recent_header", span = { GridItemSpan(maxLineSpan) }) { OverviewHeading(stringResource(R.string.overview_recent), rest.size, PlumMuted) }
                 items(rest, key = { "recent_${it.session.id}" }) { row ->
-                    SwipeableTile(row, archived, actions) { SessionTile(row, row.session.id in selection || row.session.id == openSessionId, actions) }
+                    SessionTile(row, row.session.id in selection || row.session.id == openSessionId, actions)
                 }
             }
         }
@@ -190,7 +190,7 @@ internal fun LazyGridScope.sessionOverview(
                     ProjectCard(path, rows, path in expandedProjects) { onToggleProject(path) }
                 }
                 if (path in expandedProjects) items(rows.sortedByDescending { it.session.lastTouched() }, key = { "project_${path}_${it.session.id}" }) { row ->
-                    SwipeableTile(row, archived, actions) { SessionTile(row, row.session.id in selection || row.session.id == openSessionId, actions, showProject = false) }
+                    SessionTile(row, row.session.id in selection || row.session.id == openSessionId, actions, showProject = false)
                 }
             }
         }
@@ -341,42 +341,6 @@ internal fun SessionTile(row: SupervisedSession, selected: Boolean, actions: Ses
             }
         }
     }
-}
-
-/** Swipe left archives (or restores in the archive), swipe right stars; the tile snaps back. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SwipeableTile(row: SupervisedSession, archived: Boolean, actions: SessionTileActions, content: @Composable () -> Unit) {
-    val session = row.session
-    val latest by rememberUpdatedState(actions)
-    val state = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            when (value) {
-                SwipeToDismissBoxValue.EndToStart -> latest.archive(session)
-                SwipeToDismissBoxValue.StartToEnd -> latest.star(session)
-                else -> Unit
-            }
-            false
-        },
-        positionalThreshold = { distance -> distance * .35f },
-    )
-    SwipeToDismissBox(
-        state = state,
-        backgroundContent = {
-            val toArchive = state.dismissDirection == SwipeToDismissBoxValue.EndToStart
-            val tint = if (toArchive) PlumMuted else PlumAccent
-            Box(
-                Modifier.fillMaxSize().clip(RoundedCornerShape(18.dp)).background(tint.copy(alpha = .16f)).padding(horizontal = 18.dp),
-                contentAlignment = if (toArchive) Alignment.CenterEnd else Alignment.CenterStart,
-            ) {
-                androidx.compose.material3.Icon(
-                    if (toArchive) Icons.Outlined.Archive else if (session.starred) Icons.Outlined.StarBorder else Icons.Outlined.Star,
-                    stringResource(if (toArchive) (if (archived) R.string.action_restore else R.string.action_archive) else if (session.starred) R.string.dashboard_remove_favorite_8b9da else R.string.dashboard_add_favorite_4914d),
-                    tint = tint,
-                )
-            }
-        },
-    ) { content() }
 }
 
 /** A working directory with its sessions: count, one dot per session, latest activity. */
