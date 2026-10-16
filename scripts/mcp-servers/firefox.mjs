@@ -530,18 +530,29 @@ const TOOLS = [
   },
   {
     name: 'desktop_windows',
-    description: 'List open windows: id, title, app class, position and size in screenshot pixels, active/minimized.',
+    description:
+      'List open windows: id, title, app class, position and size in screenshot pixels, active/minimized.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'desktop_activate_window',
-    description: 'Bring a window to the front: id from desktop_windows, or part of its title or app class.',
-    inputSchema: { type: 'object', properties: { window: { type: 'string' } }, required: ['window'] },
+    description:
+      'Bring a window to the front: id from desktop_windows, or part of its title or app class.',
+    inputSchema: {
+      type: 'object',
+      properties: { window: { type: 'string' } },
+      required: ['window'],
+    },
   },
   {
     name: 'desktop_open',
-    description: 'Open an app by name (e.g. "kwrite", "Blender"), a file path or a URL on the desktop.',
-    inputSchema: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] },
+    description:
+      'Open an app by name (e.g. "kwrite", "Blender"), a file path or a URL on the desktop.',
+    inputSchema: {
+      type: 'object',
+      properties: { target: { type: 'string' } },
+      required: ['target'],
+    },
   },
   {
     name: 'desktop_click',
@@ -554,7 +565,10 @@ const TOOLS = [
         y: DY,
         button: { type: 'string', enum: ['left', 'right', 'middle'] },
         double: { type: 'boolean' },
-        modifiers: { type: 'array', items: { type: 'string', enum: ['ctrl', 'shift', 'alt', 'meta'] } },
+        modifiers: {
+          type: 'array',
+          items: { type: 'string', enum: ['ctrl', 'shift', 'alt', 'meta'] },
+        },
       },
       required: ['x', 'y'],
     },
@@ -577,7 +591,8 @@ const TOOLS = [
   },
   {
     name: 'desktop_scroll',
-    description: 'Scroll with the mouse wheel, at x, y if given. amount in wheel notches (default 3).',
+    description:
+      'Scroll with the mouse wheel, at x, y if given. amount in wheel notches (default 3).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -595,7 +610,8 @@ const TOOLS = [
   },
   {
     name: 'desktop_drag',
-    description: 'Drag with the left button held from fromX, fromY to toX, toY (screenshot pixels).',
+    description:
+      'Drag with the left button held from fromX, fromY to toX, toY (screenshot pixels).',
     inputSchema: {
       type: 'object',
       properties: { fromX: DX, fromY: DY, toX: DX, toY: DY },
@@ -609,7 +625,8 @@ const TOOLS = [
   },
   {
     name: 'desktop_point',
-    description: 'Glide the visible Plum cursor to x, y with an optional label. Show-only; never clicks.',
+    description:
+      'Glide the visible Plum cursor to x, y with an optional label. Show-only; never clicks.',
     inputSchema: {
       type: 'object',
       properties: { x: DX, y: DY, label: { type: 'string' }, color: COLOR },
@@ -636,7 +653,8 @@ const TOOLS = [
   },
   {
     name: 'desktop_draw',
-    description: 'Draw a pen stroke on the desktop through [x, y] points (screenshot pixels). Show-only.',
+    description:
+      'Draw a pen stroke on the desktop through [x, y] points (screenshot pixels). Show-only.',
     inputSchema: {
       type: 'object',
       properties: {
