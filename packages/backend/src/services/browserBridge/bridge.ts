@@ -266,7 +266,7 @@ export class BrowserBridge {
         : this.pickConnection(userId, session.id);
     if (!conn && kind === 'desktop') {
       throw new BrowserBridgeError(
-        'The Plum desktop companion is not running. Start it on the computer (plum-desktop) to show marks over desktop apps.',
+        'The Plum desktop companion is not running. Start it on the computer (plum-desktop) to see and operate desktop apps.',
         'DESKTOP_NOT_CONNECTED'
       );
     }
@@ -276,9 +276,11 @@ export class BrowserBridge {
         'BROWSER_NOT_CONNECTED'
       );
     }
-    if (conn.paused && tool !== 'status' && tool !== 'peek') {
+    if (conn.paused && tool !== 'status' && tool !== 'peek' && tool !== 'desktop_status') {
       throw new BrowserBridgeError(
-        `Browser control is paused in the ${conn.client.name} extension. Ask the user to resume it.`,
+        kind === 'desktop'
+          ? 'Plum Desktop is paused (tray icon). Ask the user to resume it.'
+          : `Browser control is paused in the ${conn.client.name} extension. Ask the user to resume it.`,
         'BROWSER_PAUSED'
       );
     }

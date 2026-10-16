@@ -83,6 +83,8 @@ const COLOR = {
 };
 const X = { type: 'number', description: 'x in pixels of the latest screenshot of this tab.' };
 const Y = { type: 'number', description: 'y in pixels of the latest screenshot of this tab.' };
+const DX = { type: 'number', description: 'x in pixels of the latest desktop_screenshot.' };
+const DY = { type: 'number', description: 'y in pixels of the latest desktop_screenshot.' };
 
 const TOOLS = [
   {
@@ -512,30 +514,117 @@ const TOOLS = [
     },
   },
   {
-    name: 'desktop_screenshot',
+    name: 'desktop_status',
     description:
-      "Screenshot of the user's whole desktop (native apps like Blender, GIMP, Photoshop), via the Plum desktop companion. Coordinates for the other desktop_* tools are pixels of this screenshot.",
+      'Plum desktop companion: mode (control, guide = show only, paused), screens and the active window. Call first for desktop work.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'desktop_point',
+    name: 'desktop_screenshot',
     description:
-      'Show the Plum cursor on the desktop at x, y (screenshot pixels) with an optional label. Show-only; never clicks.',
+      "Screenshot of the user's whole desktop (all screens, native apps). Its pixels are the x/y of every desktop_* tool. Give x, y, width, height to zoom into a region at full resolution (coordinates stay those of the full screenshot).",
     inputSchema: {
       type: 'object',
-      properties: { x: X, y: Y, label: { type: 'string' }, color: COLOR },
+      properties: { x: DX, y: DY, width: { type: 'number' }, height: { type: 'number' } },
+    },
+  },
+  {
+    name: 'desktop_windows',
+    description: 'List open windows: id, title, app class, position and size in screenshot pixels, active/minimized.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'desktop_activate_window',
+    description: 'Bring a window to the front: id from desktop_windows, or part of its title or app class.',
+    inputSchema: { type: 'object', properties: { window: { type: 'string' } }, required: ['window'] },
+  },
+  {
+    name: 'desktop_open',
+    description: 'Open an app by name (e.g. "kwrite", "Blender"), a file path or a URL on the desktop.',
+    inputSchema: { type: 'object', properties: { target: { type: 'string' } }, required: ['target'] },
+  },
+  {
+    name: 'desktop_click',
+    description:
+      'Real mouse click on the desktop at x, y (screenshot pixels); the visible Plum cursor glides there first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        x: DX,
+        y: DY,
+        button: { type: 'string', enum: ['left', 'right', 'middle'] },
+        double: { type: 'boolean' },
+        modifiers: { type: 'array', items: { type: 'string', enum: ['ctrl', 'shift', 'alt', 'meta'] } },
+      },
+      required: ['x', 'y'],
+    },
+  },
+  {
+    name: 'desktop_type',
+    description:
+      'Type text into the focused field (pasted, so every character works). Optional x, y clicks the field first; submit presses Enter.',
+    inputSchema: {
+      type: 'object',
+      properties: { text: { type: 'string' }, x: DX, y: DY, submit: { type: 'boolean' } },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'desktop_press_key',
+    description:
+      'Press keys in the active window. Space-separated sequence, chords with "+": "Enter", "ctrl+s", "alt+F4", "Tab Tab Enter", "ctrl+shift+t".',
+    inputSchema: { type: 'object', properties: { keys: { type: 'string' } }, required: ['keys'] },
+  },
+  {
+    name: 'desktop_scroll',
+    description: 'Scroll with the mouse wheel, at x, y if given. amount in wheel notches (default 3).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        x: DX,
+        y: DY,
+        direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] },
+        amount: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'desktop_hover',
+    description: 'Move the real mouse pointer to x, y without clicking (tooltips, hover menus).',
+    inputSchema: { type: 'object', properties: { x: DX, y: DY }, required: ['x', 'y'] },
+  },
+  {
+    name: 'desktop_drag',
+    description: 'Drag with the left button held from fromX, fromY to toX, toY (screenshot pixels).',
+    inputSchema: {
+      type: 'object',
+      properties: { fromX: DX, fromY: DY, toX: DX, toY: DY },
+      required: ['fromX', 'fromY', 'toX', 'toY'],
+    },
+  },
+  {
+    name: 'desktop_wait',
+    description: 'Wait a few seconds (max 60), e.g. for an app to start.',
+    inputSchema: { type: 'object', properties: { seconds: { type: 'number' } } },
+  },
+  {
+    name: 'desktop_point',
+    description: 'Glide the visible Plum cursor to x, y with an optional label. Show-only; never clicks.',
+    inputSchema: {
+      type: 'object',
+      properties: { x: DX, y: DY, label: { type: 'string' }, color: COLOR },
       required: ['x', 'y'],
     },
   },
   {
     name: 'desktop_annotate',
     description:
-      'Mark something on the desktop: circle, box, arrow or underline at x, y (and width/height for an area, top-left corner), in desktop screenshot pixels, with an optional label. Show-only.',
+      'Mark something on the desktop: circle, box, arrow or underline at x, y (with width/height for an area, top-left corner), optional label. Show-only.',
     inputSchema: {
       type: 'object',
       properties: {
-        x: X,
-        y: Y,
+        x: DX,
+        y: DY,
         width: { type: 'number' },
         height: { type: 'number' },
         shape: { type: 'string', enum: ['circle', 'box', 'arrow', 'underline'] },
@@ -547,8 +636,7 @@ const TOOLS = [
   },
   {
     name: 'desktop_draw',
-    description:
-      'Draw a pen stroke on the desktop through [x, y] points (desktop screenshot pixels). Show-only.',
+    description: 'Draw a pen stroke on the desktop through [x, y] points (screenshot pixels). Show-only.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -560,8 +648,27 @@ const TOOLS = [
     },
   },
   {
+    name: 'desktop_guide_step',
+    description:
+      'Tutorial step on the desktop: marks x, y (and width/height) and shows a card "Schritt n/m: title" with the instruction and an Erledigt button. Erledigt sends you "✓ Schritt n … erledigt"; then show the next step. Works in guide mode.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        instruction: { type: 'string' },
+        x: DX,
+        y: DY,
+        width: { type: 'number' },
+        height: { type: 'number' },
+        step: { type: 'integer' },
+        total: { type: 'integer' },
+      },
+      required: ['title', 'instruction'],
+    },
+  },
+  {
     name: 'desktop_clear',
-    description: 'Remove all desktop marks.',
+    description: 'Remove all desktop marks and the guide card.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -581,7 +688,7 @@ const INSTRUCTIONS = [
   '- Several browsers can be connected; Plum uses the one the user used most recently. If the user says you are in the wrong browser, call browsers and select_browser.',
   '- Tutorials: in guide mode use guide_step for one step at a time; the user clicking the mark (or "Erledigt") sends you "✓ Schritt n erledigt" – then show the next step.',
   '- Saved macros (macros, macro_run) replay demonstrations deterministically; prefer them for recurring tasks and continue by hand where one stops.',
-  '- Native desktop apps (Blender, GIMP, Photoshop …): desktop_screenshot plus desktop_point/annotate/draw/clear through the Plum desktop companion; show-only, the user operates the app.',
+  '- Native desktop apps (Blender, GIMP, file manager …) through the Plum desktop companion: desktop_status, then desktop_screenshot (zoom a region for small text); act with desktop_click/type/press_key/scroll/drag/open/activate_window, show with desktop_point/annotate/guide_step. Coordinates are pixels of the latest desktop_screenshot; take a new one after each change. In guide mode (status) input is blocked: show, the user operates. The same confirmation rules as in the browser apply.',
   '- Guide mode (status shows mode "guide"): the user is learning in their own tab and does the work. Watch with screenshot/read_page, show with point, annotate and draw, explain in chat; clicking, typing, scrolling and navigating are blocked. Clear old marks before the next step.',
   '- A message titled "Vorführung aus dem Browser" is a demonstration the user recorded: numbered steps with element names, CSS paths and screenshots (red circle = click). Learn the task from it and replay it with the browser tools when asked.',
   '- Prefer read_page/find refs over coordinates; take a screenshot to check visual state. Use extract_table for tabular data and wait_for with gone/url after actions that load.',
@@ -594,6 +701,8 @@ function toolTimeoutMs(name, args) {
   if (name === 'macro_run') return 240_000;
   if (name === 'download_file' || name === 'upload_file') return 120_000;
   if (name === 'draw') return 60_000;
+  if (name === 'desktop_wait') return (Math.min(Number(args?.seconds) || 1, 60) + 15) * 1000;
+  if (name === 'desktop_type' || name === 'desktop_open') return 60_000;
   if (name === 'wait_for') return (Math.min(Number(args?.seconds) || 10, 60) + 15) * 1000;
   if (name === 'navigate' || name === 'tab_open') return 75_000;
   return 45_000;
