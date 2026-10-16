@@ -288,18 +288,14 @@ object LocalNotificationManager {
             }
             .launchIn(scope)
 
-        // Completed assistant replies: end-of-turn signal plus the actual
-        // "reply is ready" notification, with goal completions called out.
+        // An assistant message is not the end of a turn: agents post status
+        // texts between tool calls, and announcing each one buzzed the phone
+        // every few minutes. The turn end comes from session:lifecycle, the
+        // single "reply ready" from the server's notification:new.
         socket.messages
             .onEach { message ->
                 if (message.role != MessageRole.ASSISTANT) return@onEach
-                onTurnFinished(message.sessionId)
-                cacheIdle(message.sessionId)
                 refreshWidgets()
-                val content = message.content.trim()
-                if (content.isEmpty()) return@onEach
-                val isGoal = content.startsWith("Goal complete", ignoreCase = true)
-                announce(message.sessionId, if (isGoal) "goal" else "reply", body = content.take(300))
             }
             .launchIn(scope)
 

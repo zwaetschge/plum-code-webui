@@ -3990,6 +3990,45 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
     return null;
   }
 
+  /** The latest assistant text of the running turn, per session, until the turn is over. */
+  private readonly pendingTurnOutcomes = new Map<
+    string,
+    { content: string; turnId: string; quiet: number; timer: ReturnType<typeof setInterval> }
+  >();
+
+  /**
+   * A turn saves every assistant text block as a message, including the short
+   * status lines between tool calls; filing each one sent a "Reply ready"
+   * notification every few minutes. Only the last text is the answer: keep it
+   * and file the outcome once the session is no longer busy. Polling the
+   * runtime snapshot works the same for every provider, and a long tool run
+   * between two texts keeps the session busy, so it never counts as finished.
+   */
+  private queueTurnOutcome(sessionId: string, content: string, turnId: string): void {
+    const pending = this.pendingTurnOutcomes.get(sessionId);
+    if (pending) {
+      pending.content = content;
+      pending.turnId = turnId;
+      pending.quiet = 0;
+      return;
+    }
+    const timer = setInterval(() => this.flushTurnOutcome(sessionId), 2000);
+    timer.unref?.();
+    this.pendingTurnOutcomes.set(sessionId, { content, turnId, quiet: 0, timer });
+  }
+
+  private flushTurnOutcome(sessionId: string): void {
+    const pending = this.pendingTurnOutcomes.get(sessionId);
+    if (!pending) return;
+    // Two quiet checks in a row: providers without an explicit idle flag have
+    // short gaps between a text block and the next tool call.
+    pending.quiet = this.getSessionRuntimeSnapshot(sessionId).busy ? 0 : pending.quiet + 1;
+    if (pending.quiet < 2) return;
+    clearInterval(pending.timer);
+    this.pendingTurnOutcomes.delete(sessionId);
+    void this.recordTurnOutcome(sessionId, pending.content, pending.turnId);
+  }
+
   /**
    * Side effects that belong to a finished turn: capture the working-tree diff
    * and file the reply in the notification centre. Deliberately fire-and-forget
@@ -9483,10 +9522,10 @@ The planning phase is complete. You are now in Auto-Accept mode.
         eventSequence
       );
 
-      // End of a turn: record what changed on disk and file the reply in the
-      // notification centre. Both are best-effort side channels — a failure
-      // here must never affect message delivery.
-      void this.recordTurnOutcome(sessionId, deliveredContent, messageId);
+      // Not necessarily the end of the turn: agents post status texts between
+      // tool calls. The latest text waits until the session stops working,
+      // then the diff and a single notification are filed.
+      this.queueTurnOutcome(sessionId, deliveredContent, messageId);
     };
 
     if (proc && pendingMedia.length > 0) {
