@@ -61,7 +61,8 @@ function text(params: Record<string, unknown>, key: string, max: number): string
   return value;
 }
 
-const MAX_IMAGES = 12;
+// Same cap as a chat message (MAX_CHAT_UPLOAD_FILES): session:send rejects more.
+const MAX_IMAGES = 10;
 const MAX_IMAGE_BASE64 = 4 * 1024 * 1024;
 
 /** Screenshots from a recorded demonstration: JPEG/PNG only, bounded in number and size. */

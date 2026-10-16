@@ -1853,7 +1853,9 @@ async function setGuide(session, windowId, on) {
 // from and replay.
 
 const RECORD_MAX_STEPS = 300;
-const RECORD_MAX_SHOTS = 12;
+// A chat message takes at most 10 images (MAX_CHAT_UPLOAD_FILES on the server);
+// with 12 a demonstration with many clicks was rejected as a whole.
+const RECORD_MAX_SHOTS = 10;
 const RECORD_SHOT_EDGE = 1280;
 state.recordings = new Map();
 
@@ -2014,6 +2016,7 @@ async function sendRecording(windowId, note) {
   if (!rec) throw new Error('Keine Aufnahme vorhanden.');
   if (!rec.stopped) await stopRecording(rec.windowId);
   const images = rec.shots
+    .slice(0, RECORD_MAX_SHOTS)
     .map((data, index) =>
       data ? { data, mimeType: 'image/jpeg', filename: `vorfuehrung-bild-${index + 1}.jpg` } : null
     )
