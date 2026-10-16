@@ -20,7 +20,7 @@ export interface ModelCostEstimate {
   known: boolean;
 }
 
-export const LLM_PRICING_RATE_CARD_VERSION = '2026-09-27-standard-api-equivalent-v15';
+export const LLM_PRICING_RATE_CARD_VERSION = '2026-10-16-standard-api-equivalent-v16';
 
 export const DEFAULT_MODEL_PRICING: ModelPricing = {
   input: 5,
@@ -167,10 +167,11 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
   // Studio, local Ollama) cost nothing per token. Known zero, not unknown, so
   // they stop showing up under "Missing model prices".
   if (
-    provider === 'qwen-local' ||
-    provider === 'llama-local' ||
     provider === 'lmstudio' ||
-    provider === 'ollama'
+    provider === 'ollama' ||
+    // qwen-local, llama-local, strata-local …: OpenCode providers named for
+    // a model served on the user's own machines.
+    (provider?.endsWith('-local') ?? false)
   ) {
     return price(0, 0, 0, 0, 'Local inference on own hardware', 'Local model');
   }
@@ -190,6 +191,11 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
   // surcharge above 272k input tokens is not modelled).
   // GPT-6 Sol and Luna launched 2026-09-22 at permanent (non-promotional)
   // prices; cache writes are 1.25x input, cache reads 10%.
+  // GPT-6.1 Sol (2026-09-29) keeps Sol's input/output price; cached input
+  // halves to $0.10.
+  if (id.startsWith('gpt-6.1-sol')) {
+    return price(2, 10, 0.1, 2.5, 'OpenAI API pricing, 2026-09-29', 'GPT-6.1 Sol');
+  }
   if (id.startsWith('gpt-6-sol')) {
     return price(2, 10, 0.2, 2.5, 'OpenAI API pricing, 2026-09-22', 'GPT-6 Sol');
   }
