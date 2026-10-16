@@ -1,11 +1,11 @@
-import { useMemo } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, Hash, Loader2, OctagonX, Sparkles } from 'lucide-react';
-import type { AssistantAgent } from '@plum-code-webui/shared';
+import type { AssistantAgent, SwarmAgentHealth } from '@plum-code-webui/shared';
 import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 import { cn } from '@/lib/utils';
+import { HEALTH_LABEL, useSwarmDirectory } from '@/components/assistant/SwarmDirectoryPanel';
 
 interface SwarmRoom {
   id: string;
@@ -14,8 +14,14 @@ interface SwarmRoom {
   agents: AssistantAgent[];
 }
 
-/** Agent states the hub reports as running; everything else reads as idle. */
-const ACTIVE_STATES = new Set(['aktiv', 'active', 'busy', 'running', 'arbeitet', 'online']);
+/** Dot per directory state; none of them pulses, the hub reports presence, not work. */
+const DOT: Record<SwarmAgentHealth, string> = {
+  online: 'online',
+  idle: 'live-idle',
+  offline: 'offline',
+  stopped: 'error',
+  unknown: 'idle',
+};
 
 /**
  * Swarm mode of the sidebar: Brian, rooms and agents with status. Reads the same
@@ -49,13 +55,9 @@ export function SwarmSidebarSection({
       (await api.get<{ data: SwarmRoom[] }>('/api/assistant/matrix/rooms')).data.data,
     enabled: !!status.data?.connected,
   });
-  const agents = useMemo(() => {
-    const seen = new Map<string, AssistantAgent>();
-    for (const agent of (rooms.data ?? []).flatMap((room) => room.agents ?? [])) {
-      if (!agent.retired && !seen.has(agent.id)) seen.set(agent.id, agent);
-    }
-    return [...seen.values()];
-  }, [rooms.data]);
+  // Agents come from the server-side directory, so they show even without the Matrix account.
+  const directory = useSwarmDirectory();
+  const agents = (directory.data?.agents ?? []).filter((agent) => agent.kind === 'hub');
   const openBrian = useMutation({
     mutationFn: async () =>
       (await api.post<{ data: { roomId: string } }>('/api/assistant/matrix/brian/conversation'))
@@ -71,18 +73,50 @@ export function SwarmSidebarSection({
     collapsed && 'is-collapsed justify-center px-2'
   );
 
+  const agentList = agents.length > 0 && (
+    <section aria-label="Agenten" className="sidebar-session-group">
+      {!collapsed && <div className="sidebar-section-label px-3 py-1.5">Agenten</div>}
+      {agents.map((agent) => (
+        <Link
+          key={agent.id}
+          to="/swarm"
+          onClick={onNavigate}
+          className={cn(row, 'sidebar-swarm-agent')}
+          title={`${agent.name} · ${HEALTH_LABEL[agent.health]} · ${agent.healthReason}`}
+        >
+          <Bot className="h-4 w-4 shrink-0" />
+          {!collapsed && (
+            <>
+              <span className="min-w-0 flex-1 truncate">{agent.name}</span>
+              <span className="truncate text-[11px] text-muted-foreground">
+                {HEALTH_LABEL[agent.health]}
+              </span>
+            </>
+          )}
+          <span
+            className={cn('sidebar-session-run-dot', `is-${DOT[agent.health]}`, 'is-visible')}
+            aria-hidden="true"
+          />
+        </Link>
+      ))}
+    </section>
+  );
+
   if (!status.data?.connected) {
     return (
       <div className="sidebar-mode-empty">
         {!collapsed && (
           <p className="px-3 py-2 text-xs text-muted-foreground">
-            {status.isLoading ? 'Schwarm wird geladen …' : 'Der Schwarm ist nicht verbunden.'}
+            {status.isLoading
+              ? 'Schwarm wird geladen …'
+              : 'Schwarm-Konto nicht verbunden; Räume und Befehle fehlen.'}
           </p>
         )}
         <Link to="/swarm" onClick={onNavigate} className={row} title="Schwarm öffnen">
           <Bot className="h-4 w-4 shrink-0" />
           {!collapsed && <span className="truncate">Schwarm öffnen</span>}
         </Link>
+        {agentList}
       </div>
     );
   }
@@ -132,38 +166,7 @@ export function SwarmSidebarSection({
         )}
       </nav>
 
-      {agents.length > 0 && (
-        <section aria-label="Agenten" className="sidebar-session-group">
-          {!collapsed && <div className="sidebar-section-label px-3 py-1.5">Agenten</div>}
-          {agents.map((agent) => {
-            const state = agent.state?.trim() || (agent.available ? 'bereit' : 'nicht erreichbar');
-            const tone = !agent.available
-              ? 'error'
-              : ACTIVE_STATES.has(state.toLowerCase())
-                ? 'working'
-                : 'idle';
-            return (
-              <div
-                key={agent.id}
-                className={cn(row, 'sidebar-swarm-agent')}
-                title={`${agent.name} · ${state}`}
-              >
-                <Bot className="h-4 w-4 shrink-0" />
-                {!collapsed && (
-                  <>
-                    <span className="min-w-0 flex-1 truncate">{agent.name}</span>
-                    <span className="truncate text-[11px] text-muted-foreground">{state}</span>
-                  </>
-                )}
-                <span
-                  className={cn('sidebar-session-run-dot', `is-${tone}`, 'is-visible')}
-                  aria-hidden="true"
-                />
-              </div>
-            );
-          })}
-        </section>
-      )}
+      {agentList}
 
       <Link
         to="/swarm?prepare=stop"

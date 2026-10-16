@@ -162,7 +162,7 @@ class SchwarmDienst(
 
         val feste = listOf("schwarm-lobby", "schwarm-auftraege", "schwarm-freigaben", "schwarm-log", "schwarm-alarme", "schwarm")
             .map { n -> async { n to alias(n) } }
-        val agenten = listOf("brian", "claude-code", "codex-host", "hermes-phone", "plum")
+        val agenten = listOf("brian", "claude-code", "codex-host", "hermes-phone", "plum", "betrieb", "git", "trader", "rat")
             .map { a -> async { a to alias("ag-$a") } }
         val f = feste.awaitAll().toMap()
         val a = agenten.awaitAll().mapNotNull { (id, raum) -> raum?.let { id to it } }.toMap()

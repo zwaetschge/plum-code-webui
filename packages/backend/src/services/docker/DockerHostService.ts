@@ -430,6 +430,11 @@ export class DockerHostService {
     };
   }
 
+  /** Start, stop or restart one container; callers decide which names are allowed. */
+  async containerAction(containerId: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
+    await this.docker([action, containerId], { timeout: 90_000 });
+  }
+
   async getContainerLogs(containerId: string, tail = 120): Promise<DockerContainerLogs> {
     const boundedTail = Math.max(1, Math.min(500, Math.floor(tail)));
     const { stdout, stderr } = await this.docker(

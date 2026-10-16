@@ -58,6 +58,8 @@ fun AssistantSwarmScreen(topInset: androidx.compose.ui.unit.Dp, emergencyOpen: B
     var confirmAction by remember { mutableStateOf<String?>(null) }
     var biometric by remember { mutableStateOf(false) }
     var emergencyResult by remember { mutableStateOf<String?>(null) }
+    // Agenten is the start view; it works without the Matrix account.
+    var view by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("agents") }
 
     suspend fun deliver(target: String, command: AssistantMatrixSend) {
         busy = true; error = null
@@ -156,7 +158,21 @@ fun AssistantSwarmScreen(topInset: androidx.compose.ui.unit.Dp, emergencyOpen: B
     Column(Modifier.fillMaxSize().padding(top = topInset).navigationBarsPadding().imePadding().padding(horizontal = 16.dp)) {
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 4.dp)) }
-        if (!connected) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+            FilterChip(selected = view == "agents", onClick = { view = "agents" }, label = { Text(stringResource(R.string.swarm_tab_agents)) })
+            FilterChip(selected = view == "rooms", onClick = { view = "rooms" }, label = { Text(stringResource(R.string.swarm_tab_rooms)) })
+        }
+        if (view == "agents") {
+            SwarmAgentDirectory(
+                api = api,
+                onCommand = if (connected) ({ command: String ->
+                    roomId = rooms.find { it.alias?.startsWith("#schwarm-lobby:") == true }?.id ?: roomId
+                    threadId = null; pending = null; input = command; view = "rooms"
+                }) else null,
+                onOpenRoom = { id -> roomId = id; threadId = null; pending = null; view = "rooms" },
+                modifier = Modifier.weight(1f),
+            )
+        } else if (!connected) {
             Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center, horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
                 Text(stringResource(R.string.assistant_swarm), style = MaterialTheme.typography.headlineMedium, color = palette.text)
                 Spacer(Modifier.height(20.dp))

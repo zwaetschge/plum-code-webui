@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import type { AssistantAgent } from '@plum-code-webui/shared';
 import { SwarmControlPanel } from '@/components/assistant/SwarmControlPanel';
+import { SwarmDirectoryPanel } from '@/components/assistant/SwarmDirectoryPanel';
+import { cn } from '@/lib/utils';
 import { RoomMembership } from '@/components/assistant/RoomMembership';
 import { NativePreferences } from '@/components/assistant/NativePreferences';
 import { VoiceComposer } from '@/components/assistant/VoiceComposer';
@@ -120,6 +122,11 @@ export function SwarmPage() {
   const [exhausted, setExhausted] = useState(false);
   const [attachment, setAttachment] = useState<File | null>(null);
   const [voice, setVoice] = useState('');
+  // Agenten is the start view; a `?room=` link opens the rooms directly.
+  const [view, setView] = useState<'agents' | 'rooms' | 'control'>(
+    params.get('room') || params.get('prepare') ? 'rooms' : 'agents'
+  );
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const status = useQuery({
     queryKey: ['assistant', 'matrix-status', account],
     queryFn: async () =>
@@ -170,6 +177,16 @@ export function SwarmPage() {
       setThreadId(undefined);
     }
     setText(command);
+    setView('rooms');
+    requestAnimationFrame(() => {
+      composerRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      composerRef.current?.focus();
+    });
+  };
+  const openRoom = (id: string) => {
+    setRoomId(id);
+    setThreadId(undefined);
+    setView('rooms');
   };
   // Sidebar links change `?room=` while this page stays mounted.
   // The initial `?room=`/`?thread=` pair is already in state, so only later changes apply.
@@ -180,6 +197,7 @@ export function SwarmPage() {
     appliedRoomParam.current = roomParam;
     setRoomId(roomParam);
     setThreadId(undefined);
+    setView('rooms');
   }, [roomParam]);
   // The sidebar Not-Aus only prepares the stop command; sending it stays a
   // deliberate second step with the usual order delay.
@@ -431,16 +449,41 @@ export function SwarmPage() {
         </Link>
         <h1 className="mt-2 text-2xl font-semibold">Dein Schwarm</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Native Agenten, Räume und Aufträge mit ihrer bestehenden Identität und Historie.
+          Alle Agenten mit ihrem echten Zustand, dazu Räume und Aufträge des Hubs.
         </p>
       </header>
+      <nav aria-label="Schwarm-Ansicht" className="flex flex-wrap gap-2 border-b pb-3">
+        {(
+          [
+            ['agents', 'Agenten'],
+            ['rooms', 'Räume'],
+            ['control', 'Steuerung'],
+          ] as const
+        ).map(([id, label]) => (
+          <Button
+            key={id}
+            size="sm"
+            variant={view === id ? 'default' : 'ghost'}
+            aria-current={view === id ? 'page' : undefined}
+            onClick={() => setView(id)}
+          >
+            {label}
+          </Button>
+        ))}
+      </nav>
+      {view === 'agents' && (
+        <SwarmDirectoryPanel
+          onCommand={status.data?.connected ? prepareCommand : undefined}
+          onOpenRoom={openRoom}
+        />
+      )}
       {(error || status.error || rooms.error || messages.error) && (
         <p role="alert" className="rounded-md border border-destructive bg-card p-3">
           {error || status.error?.message || rooms.error?.message || messages.error?.message}
         </p>
       )}
       {status.isLoading ? (
-        <p role="status">Verbindung wird geprüft …</p>
+        view !== 'agents' && <p role="status">Verbindung wird geprüft …</p>
       ) : !status.data?.connected ? (
         <form
           onSubmit={(e) => {
@@ -479,8 +522,13 @@ export function SwarmPage() {
           </Button>
         </form>
       ) : (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className={cn('space-y-5', view === 'agents' && 'hidden')}>
+          <div
+            className={cn(
+              'flex flex-wrap items-center justify-between gap-3',
+              view !== 'control' && 'hidden'
+            )}
+          >
             <span className="text-sm text-muted-foreground">{status.data.userId}</span>
             <Button variant="outline" disabled={importing} onClick={() => void importHistory()}>
               Historie übernehmen
@@ -517,34 +565,41 @@ export function SwarmPage() {
               {importProgress}
             </p>
           )}
-          <SwarmControlPanel
-            events={(rooms.data ?? []).flatMap((room) => room.state)}
-            userId={status.data.userId ?? ''}
-            onCommand={prepareCommand}
-          />
-          <RoomMembership
-            key={status.data.epoch ?? status.data.userId}
-            roomId={roomId}
-            nativeUserId={status.data.userId ?? ''}
-            epoch={status.data.epoch}
-            onJoined={(id) => {
-              setRoomId(id);
-              setThreadId(undefined);
-            }}
-            onLeft={() => {
-              setRoomId('');
-              setThreadId(undefined);
-            }}
-          />
-          {status.data.userId && status.data.epoch && (
-            <NativePreferences
-              key={`${account}:${status.data.epoch}`}
-              nativeUserId={status.data.userId}
-              epoch={status.data.epoch}
+          <div className={cn('space-y-5', view !== 'control' && 'hidden')}>
+            <SwarmControlPanel
+              events={(rooms.data ?? []).flatMap((room) => room.state)}
+              userId={status.data.userId ?? ''}
               onCommand={prepareCommand}
             />
-          )}
-          <div className="grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
+            <RoomMembership
+              key={status.data.epoch ?? status.data.userId}
+              roomId={roomId}
+              nativeUserId={status.data.userId ?? ''}
+              epoch={status.data.epoch}
+              onJoined={(id) => {
+                setRoomId(id);
+                setThreadId(undefined);
+              }}
+              onLeft={() => {
+                setRoomId('');
+                setThreadId(undefined);
+              }}
+            />
+            {status.data.userId && status.data.epoch && (
+              <NativePreferences
+                key={`${account}:${status.data.epoch}`}
+                nativeUserId={status.data.userId}
+                epoch={status.data.epoch}
+                onCommand={prepareCommand}
+              />
+            )}
+          </div>
+          <div
+            className={cn(
+              'grid items-start gap-5 lg:grid-cols-[260px_minmax(0,1fr)]',
+              view !== 'rooms' && 'hidden'
+            )}
+          >
             <aside className="space-y-4">
               <Button
                 variant="outline"
@@ -570,18 +625,6 @@ export function SwarmPage() {
                   ))}
                 </select>
               </label>
-              <h2 className="font-semibold">Agenten</h2>
-              {rooms.data
-                ?.flatMap((r) => r.agents)
-                .map((agent) => (
-                  <article key={agent.id} className="rounded-md border bg-card p-3">
-                    <h3 className="font-medium">{agent.name}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {agent.state} · {agent.nativeId}
-                    </p>
-                    <p className="mt-2 text-sm">{agent.capabilities.join(' · ')}</p>
-                  </article>
-                ))}
               <h2 className="font-semibold">Befehle</h2>
               <div className="flex flex-wrap gap-2">
                 {COMMANDS.map(([command, label]) => (
@@ -695,6 +738,7 @@ export function SwarmPage() {
                     <label className="grid gap-2 text-sm">
                       {threadId ? 'Antwort im Thread' : 'Neue Nachricht'}
                       <textarea
+                        ref={composerRef}
                         disabled={send.isPending || !!orderDelay.remaining}
                         required={!attachment}
                         className="min-h-24 rounded-md border bg-background p-3"
@@ -798,7 +842,7 @@ export function SwarmPage() {
               )}
             </section>
           </div>
-        </>
+        </div>
       )}
     </main>
   );

@@ -184,3 +184,75 @@ export interface AssistantLibraryHit {
   excerpt: string;
   href: string;
 }
+
+/** Where an agent belongs in the Schwarm tab. */
+export type SwarmAgentGroup = 'swarm' | 'watch' | 'plum' | 'service';
+/**
+ * What the directory knows about an agent right now. `idle` means ready but
+ * not connected all the time (notify agents, CLI providers); `stopped` means
+ * its container exists but is not running.
+ */
+export type SwarmAgentHealth = 'online' | 'idle' | 'offline' | 'stopped' | 'unknown';
+
+export interface SwarmContainerState {
+  name: string;
+  state: string;
+  status: string;
+  running: boolean;
+  health: string;
+}
+
+export interface SwarmDirectoryAgent {
+  id: string;
+  name: string;
+  group: SwarmAgentGroup;
+  kind: 'hub' | 'cli' | 'custom' | 'subagent' | 'service';
+  description?: string;
+  mode?: string;
+  level?: string;
+  trust?: string;
+  runtime?: string;
+  model?: string;
+  skills: string[];
+  accepts: string[];
+  parallel?: number;
+  budgetUsdDay?: number;
+  spentTodayUsd?: number;
+  /** Hub room alias without '#' and server, e.g. `ag-brian`, and its id when the hub reported it. */
+  room?: { alias: string; id?: string };
+  health: SwarmAgentHealth;
+  healthReason: string;
+  /** Worker connection reported by the hub; only for `mode: worker`. */
+  worker?: 'connected' | 'offline';
+  /** Agent card status from the lobby, when the Matrix account is connected. */
+  cardStatus?: string;
+  /** Runs outside this server (the phone), so there is no container to show. */
+  offBox?: boolean;
+  puppets?: string[];
+  containers: SwarmContainerState[];
+  /** Last log line of a worker whose container runs but does not connect. */
+  lastLog?: string;
+}
+
+export interface SwarmHubState {
+  reachable: boolean;
+  ok: boolean;
+  frozen: boolean;
+  problems: string[];
+  openTasks: number;
+  approvalsPending: number;
+  outboxDead: number;
+  costTodayUsd: number;
+  failures: Array<{ task: string; state: string; reason: string; at: string }>;
+  container?: SwarmContainerState;
+  error?: string;
+}
+
+export interface SwarmDirectory {
+  hub: SwarmHubState;
+  agents: SwarmDirectoryAgent[];
+  matrixConnected: boolean;
+  /** Container details and actions need an admin account. */
+  containersVisible: boolean;
+  checkedAt: string;
+}

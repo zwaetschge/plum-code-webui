@@ -42,3 +42,56 @@ data class AssistantApiTurn(val id: String, val seq: Long, val prompt: String, v
 data class AssistantApiHistory(val chat: AssistantResource, val turns: List<AssistantApiTurn> = emptyList())
 @Serializable
 data class AssistantApiImage(val id: String, val filename: String, val mimeType: String, val byteLength: Long)
+
+/** GET /api/assistant/swarm/directory: every agent the server can identify, with its real state. */
+@Serializable
+data class SwarmContainerState(val name: String, val state: String = "", val status: String = "", val running: Boolean = false, val health: String = "")
+@Serializable
+data class SwarmAgentRoom(val alias: String, val id: String? = null)
+@Serializable
+data class SwarmDirectoryAgent(
+    val id: String,
+    val name: String,
+    val group: String,
+    val kind: String,
+    val description: String? = null,
+    val mode: String? = null,
+    val level: String? = null,
+    val trust: String? = null,
+    val runtime: String? = null,
+    val model: String? = null,
+    val skills: List<String> = emptyList(),
+    val accepts: List<String> = emptyList(),
+    val parallel: Int? = null,
+    val budgetUsdDay: Double? = null,
+    val spentTodayUsd: Double? = null,
+    val room: SwarmAgentRoom? = null,
+    val health: String = "unknown",
+    val healthReason: String = "",
+    val worker: String? = null,
+    val cardStatus: String? = null,
+    val offBox: Boolean? = null,
+    val puppets: List<String>? = null,
+    val containers: List<SwarmContainerState> = emptyList(),
+    val lastLog: String? = null,
+)
+@Serializable
+data class SwarmFailure(val task: String, val state: String = "", val reason: String = "", val at: String = "")
+@Serializable
+data class SwarmHubState(
+    val reachable: Boolean = false,
+    val ok: Boolean = false,
+    val frozen: Boolean = false,
+    val problems: List<String> = emptyList(),
+    val openTasks: Int = 0,
+    val approvalsPending: Int = 0,
+    val outboxDead: Int = 0,
+    val costTodayUsd: Double = 0.0,
+    val failures: List<SwarmFailure> = emptyList(),
+    val container: SwarmContainerState? = null,
+    val error: String? = null,
+)
+@Serializable
+data class SwarmDirectory(val hub: SwarmHubState, val agents: List<SwarmDirectoryAgent>, val matrixConnected: Boolean = false, val containersVisible: Boolean = false, val checkedAt: String = "")
+@Serializable
+data class SwarmContainerLogs(val lines: List<String> = emptyList())

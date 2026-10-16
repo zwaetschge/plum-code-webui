@@ -9152,6 +9152,14 @@ html.dark .chat-composer-form.glass-chrome {
   background: hsl(var(--destructive));
   box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.12);
 }
+.sidebar-session-run-dot.is-online {
+  background: hsl(152 70% 48%);
+  box-shadow: 0 0 0 3px hsl(152 70% 48% / 0.12);
+}
+.sidebar-session-run-dot.is-offline {
+  background: hsl(38 92% 52%);
+  box-shadow: 0 0 0 3px hsl(38 92% 52% / 0.14);
+}
 .sidebar-session-provider-icon {
   position: relative;
   display: inline-flex;

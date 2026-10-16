@@ -56,6 +56,10 @@ interface AssistantApi {
     suspend fun getAssistantMatrixMessages(roomId: String, threadId: String? = null, from: String? = null): ApiResponse<AssistantMatrixPage>
     suspend fun sendAssistantMatrixEvent(roomId: String, input: AssistantMatrixSend): ApiResponse<JsonObject>
     suspend fun openAssistantBrianConversation(): ApiResponse<JsonObject>
+    suspend fun getSwarmDirectory(): ApiResponse<SwarmDirectory>
+    /** start, stop or restart; only containers the directory lists, admin only. */
+    suspend fun swarmContainerAction(name: String, action: String): ApiResponse<JsonObject>
+    suspend fun getSwarmContainerLogs(name: String): ApiResponse<SwarmContainerLogs>
     suspend fun getAssistantMatrixMedia(roomId: String, eventId: String): ByteArray
 }
 
@@ -196,5 +200,10 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
     override suspend fun getAssistantMatrixMessages(roomId: String, threadId: String?, from: String?): ApiResponse<AssistantMatrixPage> = http.get("/api/assistant/matrix/rooms/${roomId.encodeURLPathPart()}/messages") { url { threadId?.let { parameters.append("threadId",it) }; from?.let { parameters.append("from",it) } } }
     override suspend fun sendAssistantMatrixEvent(roomId: String, input: AssistantMatrixSend): ApiResponse<JsonObject> = http.post("/api/assistant/matrix/rooms/${roomId.encodeURLPathPart()}/events") { setBody(input) }
     override suspend fun openAssistantBrianConversation(): ApiResponse<JsonObject> = http.post("/api/assistant/matrix/brian/conversation")
+    override suspend fun getSwarmDirectory(): ApiResponse<SwarmDirectory> = http.get("/api/assistant/swarm/directory")
+    override suspend fun swarmContainerAction(name: String, action: String): ApiResponse<JsonObject> =
+        http.post("/api/assistant/swarm/containers/${name.encodeURLPathPart()}/${checked(action)}")
+    override suspend fun getSwarmContainerLogs(name: String): ApiResponse<SwarmContainerLogs> =
+        http.get("/api/docker/containers/${name.encodeURLPathPart()}/logs") { url { parameters.append("tail", "60") } }
     override suspend fun getAssistantMatrixMedia(roomId: String, eventId: String): ByteArray = http.get("/api/assistant/matrix/rooms/${roomId.encodeURLPathPart()}/events/${eventId.encodeURLPathPart()}/media")
 }

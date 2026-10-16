@@ -64,7 +64,14 @@ import { Router, type Request, type RequestHandler } from 'express';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import multer from 'multer';
-import { requireAuth, requireActive, type AuthenticatedRequest } from '../middleware/auth.js';
+import {
+  requireAuth,
+  requireActive,
+  requireAdmin,
+  type AuthenticatedRequest,
+} from '../middleware/auth.js';
+import { directoryContainers, swarmDirectory } from '../services/assistant/swarmDirectory.js';
+import { dockerHost } from '../services/docker/index.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { all, get, run, transaction } from '../db/pg.js';
 import {
@@ -1953,6 +1960,31 @@ router.get(
   '/agents',
   handle(async (req, res) => {
     res.json({ success: true, data: await assistantAgents(owner(req)) });
+  })
+);
+router.get(
+  '/swarm/directory',
+  handle(async (req, res) => {
+    res.json({ success: true, data: await swarmDirectory(owner(req)) });
+  })
+);
+// Only containers the directory knows; the hub itself can be restarted, never stopped.
+router.post(
+  '/swarm/containers/:name/:action',
+  requireAdmin,
+  handle(async (req, res) => {
+    const name = String(req.params.name);
+    const action = z.enum(['start', 'stop', 'restart']).parse(req.params.action);
+    if (!directoryContainers().has(name))
+      throw new AppError('Container gehört nicht zum Schwarm', 404, 'NOT_FOUND');
+    if (name === 'plum-swarm-coordinator' && action === 'stop')
+      throw new AppError(
+        'Den Hub stoppt der Not-Aus, nicht der Container',
+        400,
+        'VALIDATION_ERROR'
+      );
+    await dockerHost.containerAction(name, action);
+    res.json({ success: true, data: { name, action } });
   })
 );
 router.post(
