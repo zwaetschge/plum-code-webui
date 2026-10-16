@@ -42,6 +42,8 @@ data class CreateBrowserTokenInput(val name: String)
 
 @Serializable
 data class BrowserClientInfo(
+    val kind: String = "browser",
+    val platform: String = "",
     val name: String = "",
     val version: String = "",
     val extensionVersion: String = "",
@@ -54,10 +56,32 @@ data class BrowserConnection(
     val tokenName: String = "",
     val client: BrowserClientInfo = BrowserClientInfo(),
     val paused: Boolean = false,
+    /** Plum Desktop: control, guide or paused. */
+    val mode: String? = null,
+    val recording: Boolean = false,
     val tabGroups: Boolean = false,
     val connectedAt: String = "",
     val lastSeenAt: String = "",
 )
+
+/** Plum Desktop per-app rule: block (no input, blacked out) or ask (confirm at the computer). */
+@Serializable
+data class DesktopRule(val match: String, val mode: String, val note: String? = null)
+
+@Serializable
+data class DesktopRulesInput(val rules: List<DesktopRule>)
+
+@Serializable
+data class DesktopModeInput(val mode: String, val connectionId: String? = null)
+
+@Serializable
+data class DesktopRecordInput(val action: String, val connectionId: String? = null)
+
+@Serializable
+data class DesktopInstallInput(val name: String)
+
+@Serializable
+data class DesktopInstall(val command: String = "", val expiresAt: String = "")
 
 /** GET /api/browser-bridge/live/:sessionId — a picture of the session's browser tab. */
 @Serializable

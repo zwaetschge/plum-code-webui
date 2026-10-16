@@ -18,6 +18,13 @@ import {
   revokeBrowserToken,
 } from '../services/browserBridge/tokens.js';
 import { deskSpeech, deskTranscribe, deskTurn, deskWake } from '../services/browserBridge/desk.js';
+import {
+  createInstallCode,
+  DESKTOP_RULES,
+  getDesktopRules,
+  installScript,
+  setDesktopRules,
+} from '../services/browserBridge/desktop.js';
 
 /**
  * Firefox browser control.
@@ -173,6 +180,92 @@ router.post('/pause', requireAuth, (req: Request, res: Response) => {
   const userId = (req as AuthenticatedRequest).userId;
   const paused = req.body?.paused === true;
   res.json({ success: true, data: { paused, browsers: browserBridge.setPaused(userId, paused) } });
+});
+
+// ---------------------------------------------------------------- Plum Desktop
+
+router.get('/desktop/rules', requireAuth, async (req: Request, res: Response) => {
+  res.json({ success: true, data: await getDesktopRules((req as AuthenticatedRequest).userId) });
+});
+
+router.put('/desktop/rules', requireAuth, async (req: Request, res: Response) => {
+  const parsed = DESKTOP_RULES.safeParse(req.body?.rules);
+  if (!parsed.success) throw new AppError('Invalid desktop rules', 400, 'VALIDATION_ERROR');
+  const userId = (req as AuthenticatedRequest).userId;
+  const rules = await setDesktopRules(userId, parsed.data);
+  browserBridge.sendDesktop(userId, { type: 'rules', rules });
+  res.json({ success: true, data: rules });
+});
+
+router.post('/desktop/mode', requireAuth, (req: Request, res: Response) => {
+  const parsed = z
+    .object({
+      mode: z.enum(['control', 'guide', 'paused']),
+      connectionId: z.string().max(40).optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success)
+    throw new AppError('mode must be control, guide or paused', 400, 'VALIDATION_ERROR');
+  const reached = browserBridge.sendDesktop(
+    (req as AuthenticatedRequest).userId,
+    { type: 'control', mode: parsed.data.mode },
+    parsed.data.connectionId
+  );
+  if (!reached) throw new AppError('Plum Desktop is not connected', 409, 'DESKTOP_NOT_CONNECTED');
+  res.json({ success: true, data: { mode: parsed.data.mode, reached } });
+});
+
+router.post('/desktop/record', requireAuth, (req: Request, res: Response) => {
+  const parsed = z
+    .object({
+      action: z.enum(['start', 'stop', 'cancel']),
+      connectionId: z.string().max(40).optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success)
+    throw new AppError('action must be start, stop or cancel', 400, 'VALIDATION_ERROR');
+  const reached = browserBridge.sendDesktop(
+    (req as AuthenticatedRequest).userId,
+    { type: 'control', record: parsed.data.action },
+    parsed.data.connectionId
+  );
+  if (!reached) throw new AppError('Plum Desktop is not connected', 409, 'DESKTOP_NOT_CONNECTED');
+  res.json({ success: true, data: { action: parsed.data.action, reached } });
+});
+
+/** Origin the caller reached Plum on; the installer and the companion use it. */
+function publicOrigin(req: Request): string {
+  const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0]!.trim();
+  const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0]!.trim();
+  return `${proto}://${host}`;
+}
+
+router.post('/desktop/install', requireAuth, rateLimiters.strict, (req: Request, res: Response) => {
+  rejectGatewayCaller(req);
+  const parsed = z.object({ name: z.string().trim().min(1).max(80) }).safeParse(req.body);
+  if (!parsed.success) throw new AppError('A computer name is required', 400, 'VALIDATION_ERROR');
+  const { code, expiresAt } = createInstallCode(
+    (req as AuthenticatedRequest).userId,
+    parsed.data.name
+  );
+  const url = `${publicOrigin(req)}/mobile/api/browser-bridge/desktop/install?code=${code}`;
+  res.json({ success: true, data: { command: `curl -fsSL '${url}' | bash`, expiresAt } });
+});
+
+// Public through the /mobile gateway: the single-use code is the credential.
+router.get('/desktop/install', rateLimiters.strict, async (req: Request, res: Response) => {
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const script = code ? await installScript(code, publicOrigin(req)) : null;
+  res.type('text/x-shellscript');
+  if (!script) {
+    res
+      .status(410)
+      .send(
+        "echo 'Plum: Installationscode ist abgelaufen oder schon benutzt. Neuen Befehl in Plum erzeugen.'; exit 1\n"
+      );
+    return;
+  }
+  res.send(script);
 });
 
 const internalRouter = Router();

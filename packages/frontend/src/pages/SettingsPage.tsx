@@ -117,6 +117,7 @@ import { HomeAssistantSettingsCard } from '@/components/integrations/HomeAssista
 import { CliDeviceLoginDialog } from '@/components/settings/CliDeviceLoginDialog';
 import { GatewayTokensPanel } from '@/components/settings/GatewayTokensPanel';
 import { FirefoxBrowserPanel } from '@/components/settings/FirefoxBrowserPanel';
+import { DesktopCompanionPanel } from '@/components/settings/DesktopCompanionPanel';
 import { SshConnectionsPanel } from '@/components/settings/SshConnectionsPanel';
 import { SubagentUpstreamsSection } from '@/components/settings/SubagentUpstreamsSection';
 import { CliSubagentsSection } from '@/components/settings/CliSubagentsSection';
@@ -2352,6 +2353,9 @@ export function SettingsPage() {
                 </section>
                 <section id="firefox-browser">
                   <FirefoxBrowserPanel />
+                </section>
+                <section id="plum-desktop">
+                  <DesktopCompanionPanel />
                 </section>
               </TabsContent>
 

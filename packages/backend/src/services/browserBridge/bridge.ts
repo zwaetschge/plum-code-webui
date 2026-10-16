@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { ChatRelay } from './chatRelay.js';
 import { latestDesktopCompanion, latestExtensionVersion, versionNewer } from './package.js';
+import { getDesktopRules } from './desktop.js';
 import { handleBridgeRpc } from './rpc.js';
 import { isBrowserTokenActive, resolveBrowserToken } from './tokens.js';
 
@@ -45,6 +46,10 @@ export interface BrowserConnectionSummary {
   tokenName: string;
   client: BrowserClientInfo;
   paused: boolean;
+  /** Desktop companion only: control, guide (show only) or paused. */
+  mode: string | null;
+  /** Desktop companion only: a demonstration is being recorded. */
+  recording: boolean;
   tabGroups: boolean;
   connectedAt: string;
   lastSeenAt: string;
@@ -81,6 +86,8 @@ interface Connection {
   ws: WebSocket;
   client: BrowserClientInfo;
   paused: boolean;
+  mode: string | null;
+  recording: boolean;
   tabGroups: boolean;
   connectedAt: Date;
   lastSeenAt: Date;
@@ -154,6 +161,8 @@ export class BrowserBridge {
         tokenName: conn.tokenName,
         client: conn.client,
         paused: conn.paused,
+        mode: conn.mode,
+        recording: conn.recording,
         tabGroups: conn.tabGroups,
         connectedAt: conn.connectedAt.toISOString(),
         lastSeenAt: conn.lastSeenAt.toISOString(),
@@ -239,6 +248,17 @@ export class BrowserBridge {
     for (const conn of this.openConnections(userId)) {
       conn.ws.send(JSON.stringify({ type: 'control', paused }));
       conn.paused = paused;
+      reached += 1;
+    }
+    return reached;
+  }
+
+  /** Send a frame to the user's desktop companions (one, or all); returns how many got it. */
+  sendDesktop(userId: string, frame: Record<string, unknown>, connectionId?: string): number {
+    let reached = 0;
+    for (const conn of this.openConnections(userId, 'desktop')) {
+      if (connectionId && conn.id !== connectionId) continue;
+      conn.ws.send(JSON.stringify(frame));
       reached += 1;
     }
     return reached;
@@ -400,6 +420,8 @@ export class BrowserBridge {
         label: text(client.label, 80) || resolved.name,
       },
       paused: frame.paused === true,
+      mode: null,
+      recording: false,
       tabGroups: frame.tabGroups === true,
       connectedAt: now,
       lastSeenAt: now,
@@ -422,6 +444,10 @@ export class BrowserBridge {
     // An older desktop companion gets the shipped one; it checks the digest,
     // replaces itself and restarts.
     if (conn.client.kind === 'desktop') {
+      const socket = conn.ws;
+      void getDesktopRules(conn.userId)
+        .then((rules) => socket.send(JSON.stringify({ type: 'rules', rules })))
+        .catch(() => {});
       const companion = latestDesktopCompanion();
       if (
         companion &&
@@ -447,6 +473,8 @@ export class BrowserBridge {
     }
     if (frame.type === 'state') {
       if (typeof frame.paused === 'boolean') conn.paused = frame.paused;
+      if (typeof frame.mode === 'string') conn.mode = frame.mode.slice(0, 20);
+      if (typeof frame.recording === 'boolean') conn.recording = frame.recording;
       if (typeof frame.tabGroups === 'boolean') conn.tabGroups = frame.tabGroups;
       if (frame.active === true) conn.activeAt = new Date();
       return;

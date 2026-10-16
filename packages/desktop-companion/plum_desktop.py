@@ -19,8 +19,15 @@ AT-SPI positions are relative to the window's client area; adding KWin's
 client geometry turns them into desktop coordinates, so refs can be clicked.
 
 The tray icon switches between Steuern (Plum may act), Nur zeigen (guide mode:
-marks only) and Pausiert. While Plum acts, a "Plum steuert · Stopp" pill sits
-at the top of the screen; Stopp pauses at once.
+marks only) and Pausiert; Plum can switch it remotely too. While Plum acts, a
+"Plum steuert · Esc stoppt" pill sits at the top; Escape on the real keyboard
+or Stopp pauses at once. Per-app rules from Plum block apps (no input, blacked
+out in screenshots) or ask before every input.
+
+The tray also records demonstrations (clicks with the element under the
+pointer, keys, screenshots) and sends them to the session; saved as macros
+they replay by element name. Text recognition (tesseract) finds text in apps
+without accessibility data.
 
 It dials out to Plum's browser bridge with a `plum_ff_` pairing token, as a
 client of kind "desktop"; the `desktop_*` MCP tools are routed to it.
@@ -70,11 +77,11 @@ from PySide6.QtGui import (
     QPixmap,
     QPolygonF,
 )
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget
 
 import websockets
 
-VERSION = "0.3.0"
+VERSION = "0.4.1"
 CONFIG_DIR = os.path.expanduser("~/.config/plum-desktop")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
@@ -102,6 +109,7 @@ INPUT_TOOLS = {
     "desktop_drag",
     "desktop_activate_window",
     "desktop_open",
+    "desktop_macro_run",
 }
 TERMINALS = {"konsole", "org.kde.konsole", "alacritty", "kitty", "foot", "wezterm", "org.wezfurlong.wezterm", "gnome-terminal-server", "xterm", "yakuake", "ghostty", "com.mitchellh.ghostty"}
 
@@ -127,15 +135,32 @@ def save_state(state):
         log("state not saved:", error)
 
 
+class Stopped(RuntimeError):
+    """The user pressed Escape while Plum was acting."""
+
+
+# Set by the Escape key; every wait inside a running tool call checks it.
+ABORT = {"set": False}
+
+
 def pump(seconds):
     """Wait while keeping the overlay painting and DBus replies flowing."""
     end = time.time() + seconds
     while True:
         QApplication.processEvents()
+        if ABORT["set"]:
+            raise Stopped("Gestoppt: Der Nutzer hat Escape gedrückt. Plum Desktop ist jetzt pausiert.")
         left = end - time.time()
         if left <= 0:
             return
         time.sleep(min(0.01, left))
+
+
+def pump_safe(seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        QApplication.processEvents()
+        time.sleep(0.01)
 
 
 def ease(t):
@@ -204,7 +229,7 @@ class KWin(QObject):
         return QPointF(point["x"], point["y"])
 
     WINDOWS_JS = """
-var list = workspace.windowList ? workspace.windowList() : workspace.clientList();
+var list = workspace.stackingOrder || (workspace.windowList ? workspace.windowList() : workspace.clientList());
 var out = [];
 for (var i = 0; i < list.length; i++) {
   var w = list[i];
@@ -371,6 +396,18 @@ class Input:
         for code in reversed(codes[:-1]):
             time.sleep(0.02)
             self.key(code, False)
+
+    def release_all(self):
+        """After a stop: no button or modifier may stay pressed."""
+        if not self.pointer:
+            return
+        e = self.e
+        for code in (e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE):
+            self.pointer.write(e.EV_KEY, code, 0)
+        self.pointer.syn()
+        for name in ("KEY_LEFTCTRL", "KEY_LEFTSHIFT", "KEY_LEFTALT", "KEY_RIGHTALT", "KEY_LEFTMETA"):
+            self.keyboard.write(e.EV_KEY, getattr(e, name), 0)
+        self.keyboard.syn()
 
     def hold(self, modifiers, down):
         for name in modifiers:
@@ -612,7 +649,7 @@ class Pill(Floating):
         super().__init__()
         row = QHBoxLayout(self.card)
         row.setContentsMargins(14, 8, 8, 8)
-        self.label = QLabel("Plum steuert")
+        self.label = QLabel("Plum steuert · Esc stoppt")
         self.label.setObjectName("title")
         row.addWidget(self.label)
         stop = QPushButton("Stopp")
@@ -856,8 +893,18 @@ class Tools(QObject):
                     "Zeige mit desktop_point, desktop_annotate oder desktop_guide_step, der Nutzer bedient selbst."
                 )
             self.session = session or {}
+            if self.session.get("id") and self.session.get("id") != self.s.last_session.get("id"):
+                self.s.last_session = self.session
+                self.s.state["session"] = {"id": self.session.get("id"), "name": self.session.get("name")}
+                save_state(self.s.state)
+            ABORT["set"] = False
+            if tool in INPUT_TOOLS:
+                self.s.last_action = time.time()
             content = handler(args or {})
             self.s.bridge.send({"type": "result", "id": call_id, "ok": True, "content": content})
+        except Stopped as error:
+            self.s.input.release_all()
+            self.s.bridge.send({"type": "result", "id": call_id, "ok": False, "error": str(error)})
         except Exception as error:  # noqa: BLE001 - every failure goes back to the agent
             self.s.bridge.send({"type": "result", "id": call_id, "ok": False, "error": str(error)})
 
@@ -879,6 +926,11 @@ class Tools(QObject):
     def _point(self, args, x="x", y="y"):
         if args.get("ref") and x == "x":
             return self._ref_center(str(args["ref"]))
+        if args.get("text") and x == "x" and args.get(x) is None:
+            hits = self._find_text(str(args["text"]))
+            if not hits:
+                raise RuntimeError(f"Text „{args['text']}“ nicht auf dem Bildschirm gefunden")
+            return self.overlay.to_local(hits[0][1], hits[0][2])
         if args.get(x) is None or args.get(y) is None:
             raise RuntimeError(f"{x} und {y} (Screenshot-Pixel) oder ref fehlen")
         return self.overlay.to_local(args[x], args[y])
@@ -894,6 +946,9 @@ class Tools(QObject):
             match = next((w for w in windows if w["active"]), None)
         if not match:
             raise RuntimeError("Kein passendes Fenster; desktop_windows listet alle")
+        rule = self._rule(match)
+        if rule and rule["mode"] == "block":
+            raise RuntimeError(f"„{match['caption']}“ ist für Plum gesperrt (Regel „{rule['match']}“)")
         return match
 
     def _ref_center(self, ref):
@@ -934,11 +989,69 @@ class Tools(QObject):
         return screen.geometry()
 
     def _acting(self, local, what):
-        self.s.pill.flash(self._screen_of(local), f"Plum steuert · {what}")
+        self.s.last_action = time.time()
+        self.s.pill.flash(self._screen_of(local), f"Plum steuert · {what} · Esc stoppt")
 
     def _label(self):
         name = str(self.session.get("name") or "").strip()
         return name[:40] if name else "Plum"
+
+    # ---- app rules
+
+    def _rule(self, window):
+        haystack = f"{window.get('cls', '')} {window.get('caption', '')}".lower()
+        for rule in self.s.rules:
+            if str(rule.get("match", "")).lower() in haystack:
+                return rule
+        return None
+
+    def _window_at(self, windows, local):
+        point = self.overlay.global_point(local)
+        hits = [
+            w for w in windows
+            if not w.get("minimized")
+            and w["x"] <= point.x() < w["x"] + w["width"]
+            and w["y"] <= point.y() < w["y"] + w["height"]
+        ]
+        return hits[-1] if hits else None  # stacking order: topmost last
+
+    def _guard(self, local, what):
+        """App rules before any input: blocked apps refuse, 'ask' apps confirm at the desktop."""
+        if not self.s.rules:
+            return
+        windows = self.s.kwin.windows()
+        targets = [w for w in windows if w.get("active")]
+        if local is not None:
+            under = self._window_at(windows, local)
+            if under:
+                targets.insert(0, under)
+        for window in targets:
+            rule = self._rule(window)
+            if not rule:
+                continue
+            if rule["mode"] == "block":
+                raise RuntimeError(
+                    f"„{window['caption']}“ ({window['cls']}) ist für Plum gesperrt (Regel „{rule['match']}“). "
+                    "Bitte den Nutzer, das selbst zu erledigen."
+                )
+            if self.s.allowed_until.get(window["id"], 0) > time.time():
+                continue
+            anchor = (
+                self.overlay.global_point(local)
+                if local is not None
+                else QPointF(window["x"] + window["width"] / 2, window["y"] + 40)
+            )
+            screen = QGuiApplication.screenAt(anchor.toPoint()) or QGuiApplication.primaryScreen()
+            answer = self.s.confirm.ask(
+                f"Plum möchte {what}",
+                f"in „{window['caption'][:80]}“. Die Regel „{rule['match']}“ verlangt deine Bestätigung.",
+                anchor,
+                screen.geometry(),
+            )
+            if answer == "deny":
+                raise RuntimeError(f"Der Nutzer hat abgelehnt: {what} in „{window['caption']}“.")
+            if answer == "window":
+                self.s.allowed_until[window["id"]] = time.time() + 300
 
     def _pointer_to(self, local):
         """Glide the Plum cursor, move the real pointer and check where it landed."""
@@ -991,6 +1104,7 @@ class Tools(QObject):
                 if pill:
                     self.s.pill.show()
         logical = self.overlay.geometry()
+        self._black_out(image, logical)
         scale = min(1.0, SHOT_MAX_EDGE / max(image.width(), image.height()))
         full_w, full_h = round(image.width() * scale), round(image.height() * scale)
         # Tool coordinates are screenshot pixels; the overlay works in logical ones.
@@ -1027,6 +1141,35 @@ class Tools(QObject):
             self._text(note),
         ]
 
+    def _black_out(self, image, logical):
+        """Blocked apps never leave the computer, not even as pixels."""
+        if not any(rule.get("mode") == "block" for rule in self.s.rules):
+            return
+        try:
+            windows = self.s.kwin.windows()
+        except RuntimeError:
+            return
+        ratio = image.width() / max(1, logical.width())
+        painter = None
+        for window in windows:
+            rule = self._rule(window)
+            if window.get("minimized") or not rule or rule["mode"] != "block":
+                continue
+            if painter is None:
+                painter = QPainter(image)
+            rect = QRect(
+                round((window["x"] - logical.x()) * ratio), round((window["y"] - logical.y()) * ratio),
+                round(window["width"] * ratio), round(window["height"] * ratio),
+            )
+            painter.fillRect(rect, QColor("#1d1b26"))
+            painter.setPen(QColor("#ffffff"))
+            font = QFont("Sans")
+            font.setPixelSize(max(14, round(22 * ratio)))
+            painter.setFont(font)
+            painter.drawText(rect, Qt.AlignCenter, f"Für Plum gesperrt: {window['cls']}")
+        if painter:
+            painter.end()
+
     def desktop_windows(self, _args):
         windows = self.s.kwin.windows()
         if not windows:
@@ -1036,6 +1179,9 @@ class Tools(QObject):
             x, y = self.overlay.to_shot(self.overlay.local_point(QPointF(w["x"], w["y"])))
             size = f"{round(w['width'] * self.overlay.factor)}×{round(w['height'] * self.overlay.factor)}"
             flags = " · aktiv" if w["active"] else (" · minimiert" if w["minimized"] else "")
+            rule = self._rule(w)
+            if rule:
+                flags += " · gesperrt" if rule["mode"] == "block" else " · fragt vor Eingaben"
             lines.append(f"{w['id']} · {w['caption']} ({w['cls']}) bei {x},{y} {size}{flags}")
         return [self._text("\n".join(lines))]
 
@@ -1152,6 +1298,208 @@ class Tools(QObject):
             return [self._text("Zwischenablage ist leer oder enthält keinen Text")]
         return [self._text(got.stdout.decode("utf-8", "replace")[:20000])]
 
+    def _capture(self):
+        """Full-resolution screenshot without Plum's own cursor, blocked apps blacked out."""
+        self.overlay.hide_cursor = True
+        self.overlay.repaint()
+        pump(0.03)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                image = take_screenshot(os.path.join(tmp, "shot.png"))
+        finally:
+            self.overlay.hide_cursor = False
+            self.overlay.update()
+        self._black_out(image, self.overlay.geometry())
+        return image
+
+    def _ocr(self, image, region=None):
+        """Words with boxes in screenshot pixels, via tesseract."""
+        if not shutil.which("tesseract"):
+            raise RuntimeError("Texterkennung fehlt (dnf install tesseract tesseract-langpack-deu)")
+        ratio = image.width() / max(1, self.overlay.geometry().width()) / self.overlay.factor  # image px per shot px
+        ox = oy = 0
+        if region:
+            ox, oy = region[0], region[1]
+            image = image.copy(QRect(round(region[0] * ratio), round(region[1] * ratio), round(region[2] * ratio), round(region[3] * ratio)))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "ocr.png")
+            image.save(path)
+            out = subprocess.run(["tesseract", path, "-", "-l", "deu+eng", "--psm", "11", "tsv"],
+                                 capture_output=True, text=True, timeout=60, env=CHILD_ENV).stdout
+        words = []
+        for line in out.splitlines()[1:]:
+            cols = line.split("\t")
+            if len(cols) < 12 or not cols[11].strip() or float(cols[10] or -1) < 40:
+                continue
+            left, top, width, height = (int(cols[i]) for i in (6, 7, 8, 9))
+            words.append({
+                "text": cols[11].strip(), "block": (cols[2], cols[3], cols[4]),
+                "x": ox + left / ratio, "y": oy + top / ratio, "w": width / ratio, "h": height / ratio,
+            })
+        return words
+
+    @staticmethod
+    def _lines(words):
+        lines = {}
+        for word in words:
+            line = lines.setdefault(word["block"], {"words": []})
+            line["words"].append(word)
+        out = []
+        for line in lines.values():
+            ws = line["words"]
+            x0, y0 = min(w["x"] for w in ws), min(w["y"] for w in ws)
+            x1, y1 = max(w["x"] + w["w"] for w in ws), max(w["y"] + w["h"] for w in ws)
+            out.append({"text": " ".join(w["text"] for w in ws), "x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0, "words": ws})
+        return sorted(out, key=lambda l: (round(l["y"] / 8), l["x"]))
+
+    def _find_text(self, query, region=None):
+        """Lines (or word runs) containing query: [(text, cx, cy)] in screenshot pixels."""
+        needle = query.lower()
+        hits = []
+        for line in self._lines(self._ocr(self._capture(), region)):
+            if needle not in line["text"].lower():
+                continue
+            ws = line["words"]
+            # Narrow to the words that make up the match, so the click lands on them.
+            for start in range(len(ws)):
+                for end in range(start + 1, len(ws) + 1):
+                    if needle in " ".join(w["text"] for w in ws[start:end]).lower():
+                        part = ws[start:end]
+                        x0, y0 = min(w["x"] for w in part), min(w["y"] for w in part)
+                        x1, y1 = max(w["x"] + w["w"] for w in part), max(w["y"] + w["h"] for w in part)
+                        hits.append((line["text"], round((x0 + x1) / 2), round((y0 + y1) / 2)))
+                        break
+                else:
+                    continue
+                break
+        return hits
+
+    def desktop_ocr(self, args):
+        region = None
+        if args.get("width") and args.get("height"):
+            region = tuple(float(args.get(k) or 0) for k in ("x", "y", "width", "height"))
+        query = str(args.get("query") or "").strip()
+        if query:
+            hits = self._find_text(query, region)
+            if not hits:
+                return [self._text(f"„{query}“ nicht auf dem Bildschirm gefunden")]
+            return [self._text("\n".join(f"„{text[:100]}“ @ {x},{y}" for text, x, y in hits[:20]))]
+        lines = self._lines(self._ocr(self._capture(), region))
+        if not lines:
+            return [self._text("Kein Text erkannt")]
+        return [self._text("\n".join(f"@ {round(l['x'] + l['w'] / 2)},{round(l['y'] + l['h'] / 2)}  {l['text'][:160]}" for l in lines[:300]))]
+
+    def desktop_wait_change(self, args):
+        """Wait until a region (or the whole desktop) changes, or with still=true stops changing."""
+        region = None
+        if args.get("width") and args.get("height"):
+            region = tuple(float(args.get(k) or 0) for k in ("x", "y", "width", "height"))
+        still = bool(args.get("still"))
+        end = time.time() + max(1, min(float(args.get("seconds") or 20), 120))
+
+        def sample():
+            image = self._capture()
+            if region:
+                ratio = image.width() / max(1, self.overlay.geometry().width()) / self.overlay.factor
+                image = image.copy(QRect(*(round(v * ratio) for v in region)))
+            return image.scaled(160, 90, Qt.IgnoreAspectRatio, Qt.SmoothTransformation).convertToFormat(QImage.Format_Grayscale8)
+
+        def differs(a, b):
+            changed = sum(1 for y in range(90) for x in range(160) if abs(a.pixelColor(x, y).value() - b.pixelColor(x, y).value()) > 18)
+            return changed > 160 * 90 * 0.004
+
+        previous = sample()
+        calm = 0
+        while time.time() < end:
+            pump(1.0)
+            current = sample()
+            moved = differs(previous, current)
+            previous = current
+            if not still and moved:
+                return [self._text("Der Bereich hat sich geändert")]
+            calm = 0 if moved else calm + 1
+            if still and calm >= 2:
+                return [self._text("Der Bereich ist zur Ruhe gekommen")]
+        raise RuntimeError("Zeit abgelaufen: " + ("noch in Bewegung" if still else "keine Änderung"))
+
+    # ---- macros
+
+    def desktop_macros(self, _args):
+        macros = load_macros()
+        if not macros:
+            return [self._text("Keine Desktop-Makros. Der Nutzer nimmt sie im Tray unter „Vorführung aufnehmen“ auf.")]
+        return [self._text("\n".join(f"„{m['name']}“ · {len(m['steps'])} Schritte · {m.get('created', '')}" for m in macros))]
+
+    def desktop_macro_run(self, args):
+        name = str(args.get("name") or "").strip().lower()
+        macro = next((m for m in load_macros() if m["name"].lower() == name), None) or next(
+            (m for m in load_macros() if name and name in m["name"].lower()), None)
+        if not macro:
+            raise RuntimeError(f"Kein Makro „{name}“; desktop_macros listet alle")
+        log_lines = []
+        for number, step in enumerate(macro["steps"], 1):
+            try:
+                self._replay(step)
+            except Stopped:
+                raise
+            except Exception as error:  # noqa: BLE001
+                log_lines.append(f"{number}. fehlgeschlagen: {error}")
+                return [self._text(
+                    f"Makro „{macro['name']}“ bei Schritt {number} von {len(macro['steps'])} angehalten. "
+                    "Mach von hier aus von Hand weiter.\n" + "\n".join(log_lines))]
+            log_lines.append(f"{number}. ok")
+            pump(0.35)
+        return [self._text(f"Makro „{macro['name']}“ abgespielt ({len(macro['steps'])} Schritte)")]
+
+    def _replay(self, step):
+        if step["kind"] == "click":
+            local = None
+            if step.get("window"):
+                windows = self.s.kwin.windows()
+                window = next((w for w in windows if w["cls"] == step["window"] and w["caption"] == step.get("caption")), None) \
+                    or next((w for w in windows if w["cls"] == step["window"]), None)
+                if not window:
+                    raise RuntimeError(f"Fenster {step['window']} ist nicht offen")
+                if not window["active"]:
+                    self.s.kwin.activate(window["id"])
+                    pump(0.3)
+                if step.get("name"):
+                    try:
+                        frame = a11y_frame(window)
+                        origin = QPointF(window["cx"], window["cy"])
+                        for node, _d, role, name, rect, _st in a11y_walk(frame, False):
+                            if name[:120] == step["name"] and role == step.get("role"):
+                                local = self.overlay.local_point(QPointF(origin.x() + rect.x + rect.width / 2, origin.y() + rect.y + rect.height / 2))
+                                break
+                    except RuntimeError:
+                        pass
+                if local is None and step.get("rx") is not None:
+                    local = self.overlay.local_point(QPointF(window["cx"] + step["rx"], window["cy"] + step["ry"]))
+            if local is None:
+                local = self.overlay.local_point(QPointF(step["x"], step["y"]))
+            x, y = self.overlay.to_shot(local)
+            self.desktop_click({"x": x, "y": y, "button": step.get("button", "left")})
+        elif step["kind"] == "type":
+            self._guard(None, "Text einzugeben")
+            for code, shift in step["codes"]:
+                if shift:
+                    self.s.input.key(self.s.input.key_code("shift"), True)
+                self.s.input.key(code, True)
+                self.s.input.key(code, False)
+                if shift:
+                    self.s.input.key(self.s.input.key_code("shift"), False)
+                pump(0.015)
+        else:
+            self._guard(None, f"Tasten zu drücken ({step['keys']})")
+            mods = [self.s.input.key_code(m if m != "altgr" else "altgr") for m in step.get("mods", [])]
+            for code in mods:
+                self.s.input.key(code, True)
+            for code in step["codes"]:
+                self.s.input.key(code, True)
+                self.s.input.key(code, False)
+            for code in reversed(mods):
+                self.s.input.key(code, False)
+
     # ---- act
 
     def desktop_activate_window(self, args):
@@ -1179,6 +1527,7 @@ class Tools(QObject):
             raise RuntimeError("button: left, right oder middle")
         count = 2 if args.get("double") else 1
         modifiers = [str(m) for m in (args.get("modifiers") or [])]
+        self._guard(local, "zu klicken")
         self._acting(local, "Doppelklick" if count == 2 else ("Rechtsklick" if button == "right" else "Klick"))
         self._pointer_to(local)
         self.s.input.hold(modifiers, True)
@@ -1194,11 +1543,12 @@ class Tools(QObject):
         self.overlay.ripple(local)
         pump(0.25)
         what = "Doppelklick" if count == 2 else {"left": "Klick", "right": "Rechtsklick", "middle": "Mittelklick"}[button]
-        where = args.get("ref") or f"{args.get('x')},{args.get('y')}"
+        where = args.get("ref") or (f"„{args['text']}“" if args.get("text") and args.get("x") is None else f"{args.get('x')},{args.get('y')}")
         return [self._text(f"{what} bei {where}")]
 
     def desktop_hover(self, args):
         local = self._point(args)
+        self._guard(local, "den Zeiger zu bewegen")
         self._acting(local, "Zeiger")
         self._pointer_to(local)
         pump(0.3)
@@ -1208,6 +1558,7 @@ class Tools(QObject):
     def desktop_drag(self, args):
         start = self._point(args, "fromX", "fromY")
         end = self._point(args, "toX", "toY")
+        self._guard(start, "zu ziehen")
         self._acting(start, "Ziehen")
         self._pointer_to(start)
         self.s.input.button("left", True)
@@ -1229,6 +1580,7 @@ class Tools(QObject):
     def desktop_scroll(self, args):
         if args.get("ref") or (args.get("x") is not None and args.get("y") is not None):
             local = self._point(args)
+            self._guard(local, "zu scrollen")
             self._acting(local, "Scrollen")
             self._pointer_to(local)
         direction = str(args.get("direction") or "down")
@@ -1244,6 +1596,7 @@ class Tools(QObject):
         keys = str(args.get("keys") or "").strip()
         if not keys:
             raise RuntimeError('keys fehlt, z. B. "Enter", "ctrl+s" oder "Tab Tab Enter"')
+        self._guard(None, f"Tasten zu drücken ({keys})")
         if self.overlay.cursor:
             self._acting(self.overlay.cursor[0], keys)
         for spec in keys.split():
@@ -1257,6 +1610,7 @@ class Tools(QObject):
             raise RuntimeError("text fehlt")
         if args.get("ref") or (args.get("x") is not None and args.get("y") is not None):
             self.desktop_click({k: args[k] for k in ("x", "y", "ref") if args.get(k) is not None})
+        self._guard(None, f"Text einzugeben ({len(text)} Zeichen)")
         if self.overlay.cursor:
             self._acting(self.overlay.cursor[0], "Tippen")
         if not shutil.which("wl-copy"):
@@ -1433,13 +1787,37 @@ class Bridge(threading.Thread):
         self.s = app_state
         self.loop = None
         self.socket = None
+        self.pending_rpc = {}
+
+    def rpc(self, method, params, timeout=40):
+        """Call Plum (chat.send, sessions.list …) from the Qt thread and wait for the answer."""
+        if not self.socket:
+            raise RuntimeError("Nicht mit Plum verbunden")
+        rpc_id = f"rpc-{uuid.uuid4().hex}"
+        box = {}
+        self.pending_rpc[rpc_id] = box
+        self.send({"type": "rpc", "id": rpc_id, "method": method, "params": params})
+        end = time.time() + timeout
+        try:
+            while "reply" not in box and time.time() < end:
+                QApplication.processEvents()
+                time.sleep(0.02)
+        finally:
+            self.pending_rpc.pop(rpc_id, None)
+        reply = box.get("reply")
+        if not reply:
+            raise RuntimeError("Plum antwortet nicht")
+        if not reply.get("ok"):
+            raise RuntimeError(reply.get("error") or "Plum hat abgelehnt")
+        return reply.get("data")
 
     def send(self, frame):
         if self.loop and self.socket:
             asyncio.run_coroutine_threadsafe(self.socket.send(json.dumps(frame)), self.loop)
 
     def send_state(self):
-        self.send({"type": "state", "paused": self.s.mode == "paused"})
+        self.send({"type": "state", "paused": self.s.mode == "paused", "mode": self.s.mode,
+                   "recording": bool(getattr(self.s, "recorder", None) and self.s.recorder.active)})
 
     def run(self):
         self.loop = asyncio.new_event_loop()
@@ -1486,6 +1864,16 @@ class Bridge(threading.Thread):
                     raise RuntimeError(frame.get("message") or "rejected")
                 elif frame.get("type") == "update":
                     self.s.update.emit(frame)
+                elif frame.get("type") == "rules":
+                    self.s.rules_changed.emit(frame.get("rules") or [])
+                elif frame.get("type") == "control" and frame.get("mode") in MODE_LABELS:
+                    self.s.remote_mode.emit(frame["mode"])
+                elif frame.get("type") == "control" and frame.get("record") in ("start", "stop", "cancel"):
+                    self.s.remote_record.emit(frame["record"])
+                elif frame.get("type") == "rpcResult":
+                    box = self.pending_rpc.get(frame.get("id"))
+                    if box is not None:
+                        box["reply"] = frame
                 elif frame.get("type") == "call":
                     self.s.tools.call.emit(
                         frame["id"], frame.get("tool", ""), frame.get("args") or {}, frame.get("session") or {}
@@ -1494,12 +1882,407 @@ class Bridge(threading.Thread):
             self.s.connected.emit(False)
 
 
+# --------------------------------------------------------------------------- confirm, record, chat
+
+
+class ConfirmCard(Floating):
+    """'Plum möchte …' for apps whose rule asks before every input."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedWidth(380)
+        column = QVBoxLayout(self.card)
+        column.setContentsMargins(16, 14, 16, 12)
+        self.title = QLabel()
+        self.title.setObjectName("title")
+        self.title.setWordWrap(True)
+        self.text = QLabel()
+        self.text.setObjectName("text")
+        self.text.setWordWrap(True)
+        column.addWidget(self.title)
+        column.addWidget(self.text)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self.answer = None
+        for label, value, name in (("Ablehnen", "deny", "ghost"), ("5 Min. erlauben", "window", "ghost"), ("Erlauben", "once", "")):
+            button = QPushButton(label)
+            if name:
+                button.setObjectName(name)
+            button.clicked.connect(lambda _c=False, v=value: setattr(self, "answer", v))
+            row.addWidget(button)
+        column.addLayout(row)
+
+    def ask(self, title, text, anchor_global, screen_rect):
+        self.title.setText(title)
+        self.text.setText(text)
+        self.answer = None
+        self.adjustSize()
+        x = max(screen_rect.left() + 8, min(anchor_global.x() + 30, screen_rect.right() - self.width() - 8))
+        y = max(screen_rect.top() + 8, min(anchor_global.y() - self.height() / 2, screen_rect.bottom() - self.height() - 8))
+        self.move(round(x), round(y))
+        self.show()
+        self.raise_()
+        end = time.time() + 120
+        try:
+            while self.answer is None and time.time() < end:
+                pump(0.05)
+        finally:
+            self.hide()
+        return self.answer or "deny"
+
+
+class RecordPill(Floating):
+    """'● Vorführung · n Schritte · Beenden' while a demonstration is recorded."""
+
+    def __init__(self, on_stop, on_cancel):
+        super().__init__()
+        row = QHBoxLayout(self.card)
+        row.setContentsMargins(14, 8, 8, 8)
+        self.label = QLabel()
+        self.label.setObjectName("title")
+        row.addWidget(self.label)
+        cancel = QPushButton("Verwerfen")
+        cancel.setObjectName("ghost")
+        cancel.clicked.connect(on_cancel)
+        stop = QPushButton("Beenden")
+        stop.setObjectName("stop")
+        stop.clicked.connect(on_stop)
+        row.addWidget(cancel)
+        row.addWidget(stop)
+
+    def show_count(self, count):
+        self.label.setText(f"● Vorführung · {count} Schritte")
+        self.adjustSize()
+        screen = QGuiApplication.primaryScreen().geometry()
+        self.move(screen.center().x() - self.width() // 2, screen.top() + 14)
+        self.show()
+        self.raise_()
+
+
+class TextCard(Floating):
+    """A small input at the desktop: message to Plum, or a name for a macro."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedWidth(420)
+        column = QVBoxLayout(self.card)
+        column.setContentsMargins(16, 14, 16, 12)
+        self.title = QLabel()
+        self.title.setObjectName("title")
+        self.title.setWordWrap(True)
+        column.addWidget(self.title)
+        self.edit = QLineEdit()
+        self.edit.setStyleSheet("QLineEdit { background: rgba(255,255,255,0.08); color: white; border: 1px solid rgba(255,255,255,0.25); border-radius: 8px; padding: 7px; }")
+        self.edit.returnPressed.connect(self._ok)
+        column.addWidget(self.edit)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = QPushButton("Abbrechen")
+        cancel.setObjectName("ghost")
+        cancel.clicked.connect(self.hide)
+        self.ok = QPushButton("Senden")
+        self.ok.clicked.connect(self._ok)
+        row.addWidget(cancel)
+        row.addWidget(self.ok)
+        column.addLayout(row)
+        self.callback = None
+        # Unlike the other cards this one takes keyboard focus.
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, False)
+
+    def _ok(self):
+        text = self.edit.text().strip()
+        self.hide()
+        if text and self.callback:
+            self.callback(text)
+
+    def prompt(self, title, button, callback, preset=""):
+        self.title.setText(title)
+        self.ok.setText(button)
+        self.callback = callback
+        self.edit.setText(preset)
+        self.adjustSize()
+        screen = QGuiApplication.primaryScreen().geometry()
+        self.move(screen.center().x() - self.width() // 2, screen.top() + screen.height() // 4)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.edit.setFocus()
+
+
+# Real keyboard and mouse: Escape stops Plum, and demonstrations are recorded.
+
+KEY_CHARS = {f"KEY_{c}": c.lower() for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
+KEY_CHARS.update({f"KEY_{d}": d for d in "0123456789"})
+KEY_CHARS.update({"KEY_SPACE": " ", "KEY_MINUS": "-", "KEY_DOT": ".", "KEY_COMMA": ",", "KEY_SLASH": "/"})
+KEY_LABELS = {
+    "KEY_ENTER": "Enter", "KEY_TAB": "Tab", "KEY_ESC": "Escape", "KEY_BACKSPACE": "Backspace", "KEY_DELETE": "Delete",
+    "KEY_UP": "Up", "KEY_DOWN": "Down", "KEY_LEFT": "Left", "KEY_RIGHT": "Right", "KEY_HOME": "Home", "KEY_END": "End",
+    "KEY_PAGEUP": "PageUp", "KEY_PAGEDOWN": "PageDown",
+}
+MOD_KEYS = {"KEY_LEFTCTRL": "ctrl", "KEY_RIGHTCTRL": "ctrl", "KEY_LEFTSHIFT": "shift", "KEY_RIGHTSHIFT": "shift",
+            "KEY_LEFTALT": "alt", "KEY_RIGHTALT": "altgr", "KEY_LEFTMETA": "meta", "KEY_RIGHTMETA": "meta"}
+
+
+class InputWatcher(QObject):
+    """Reads the physical keyboards and mice (not Plum's own virtual devices)."""
+
+    escape = Signal()
+    clicked = Signal(str)  # button
+    key = Signal(int, str, object)  # code, name, held modifiers
+
+    def __init__(self):
+        super().__init__()
+        self.recording = False
+        self.running = True
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _devices(self):
+        from evdev import InputDevice, ecodes as e, list_devices
+        out = []
+        for path in list_devices():
+            try:
+                device = InputDevice(path)
+            except OSError:
+                continue
+            if device.name.startswith("Plum Desktop"):
+                continue
+            keys = device.capabilities().get(e.EV_KEY, [])
+            if e.KEY_ESC in keys or e.BTN_LEFT in keys:
+                out.append(device)
+            else:
+                device.close()
+        return out
+
+    def _run(self):
+        try:
+            from evdev import ecodes as e
+            import selectors
+        except ImportError:
+            log("python-evdev missing: no Escape stop and no demonstrations")
+            return
+        while self.running:
+            devices = self._devices()
+            if not devices:
+                log("no readable keyboard/mouse (udev rule 70-plum-desktop.rules missing?); retry in 60 s")
+                time.sleep(60)
+                continue
+            selector = selectors.DefaultSelector()
+            for device in devices:
+                selector.register(device, selectors.EVENT_READ)
+            held = set()
+            from evdev import list_devices
+            known = sorted(list_devices())
+            rescan = time.time() + 5
+            try:
+                while self.running:
+                    # Keyboards plugged in later (Bluetooth, docks) join after a few seconds.
+                    if time.time() > rescan:
+                        rescan = time.time() + 5
+                        if sorted(list_devices()) != known:
+                            break
+                    for key, _mask in selector.select(timeout=2):
+                        for event in key.fileobj.read():
+                            if event.type != e.EV_KEY:
+                                continue
+                            name = e.KEY.get(event.code) or e.BTN.get(event.code)
+                            name = name[0] if isinstance(name, list) else name
+                            if not name:
+                                continue
+                            if name in MOD_KEYS:
+                                (held.add if event.value else held.discard)(MOD_KEYS[name])
+                                continue
+                            if event.value != 1:
+                                continue
+                            if name == "KEY_ESC" and not held:
+                                self.escape.emit()
+                            if not self.recording:
+                                continue
+                            if name in ("BTN_LEFT", "BTN_RIGHT", "BTN_MIDDLE"):
+                                self.clicked.emit({"BTN_LEFT": "left", "BTN_RIGHT": "right", "BTN_MIDDLE": "middle"}[name])
+                            elif name.startswith("KEY_"):
+                                self.key.emit(event.code, name, sorted(held))
+            except OSError:
+                time.sleep(2)  # a device went away; rescan
+            finally:
+                selector.close()
+                for device in devices:
+                    try:
+                        device.close()
+                    except OSError:
+                        pass
+
+
+class Recorder(QObject):
+    """A demonstration: steps with the clicked element, screenshots, keys and text."""
+
+    def __init__(self, app_state):
+        super().__init__()
+        self.s = app_state
+        self.steps = []
+        self.shots = []
+        self.active = False
+
+    def start(self):
+        self.steps, self.shots = [], []
+        self.active = True
+        self.s.watcher.recording = True
+        self.s.record_pill.show_count(0)
+        self.s.bridge.send_state()
+
+    def stop(self):
+        self.active = False
+        self.s.watcher.recording = False
+        self.s.record_pill.hide()
+        self.s.bridge.send_state()
+
+    def _flush_text(self):
+        if self.steps and self.steps[-1]["kind"] == "type" and not self.steps[-1].get("closed"):
+            self.steps[-1]["closed"] = True
+
+    def on_click(self, button):
+        if not self.active:
+            return
+        self._flush_text()
+        try:
+            point = self.s.kwin.cursor()
+            windows = self.s.kwin.windows()
+        except RuntimeError:
+            return
+        tools = self.s.tools
+        local = self.s.overlay.local_point(point)
+        window = tools._window_at(windows, local)
+        if window and window["id"] == "":
+            window = None
+        step = {"kind": "click", "button": button, "x": point.x(), "y": point.y()}
+        if window:
+            if self.s.record_pill.geometry().contains(point.toPoint()):
+                return  # the pill's own buttons
+            rule = tools._rule(window)
+            step.update(window=window["cls"], caption=window["caption"],
+                        rx=point.x() - window["cx"], ry=point.y() - window["cy"])
+            if not (rule and rule["mode"] == "block"):
+                element = element_at(window, point)
+                if element:
+                    step.update(role=element[0], name=element[1])
+        self.steps.append(step)
+        if len(self.shots) < 40 and not (window and (tools._rule(window) or {}).get("mode") == "block"):
+            QTimer.singleShot(350, lambda s=step, p=point: self._shot(s, p))
+        self.s.record_pill.show_count(len(self.steps))
+
+    def _shot(self, step, point):
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                image = take_screenshot(os.path.join(tmp, "s.png"))
+        except Exception:  # noqa: BLE001
+            return
+        logical = self.s.overlay.geometry()
+        self.s.tools._black_out(image, logical)
+        ratio = image.width() / max(1, logical.width())
+        # Around the click on its screen, not the whole desktop.
+        screen = (QGuiApplication.screenAt(point.toPoint()) or QGuiApplication.primaryScreen()).geometry()
+        crop = image.copy(QRect(round((screen.x() - logical.x()) * ratio), round((screen.y() - logical.y()) * ratio),
+                                round(screen.width() * ratio), round(screen.height() * ratio)))
+        painter = QPainter(crop)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor("#ea2143"), max(4, round(4 * ratio))))
+        cx, cy = (point.x() - screen.x()) * ratio, (point.y() - screen.y()) * ratio
+        painter.drawEllipse(QPointF(cx, cy), 28 * ratio, 28 * ratio)
+        painter.end()
+        scale = min(1.0, 1280 / max(crop.width(), crop.height()))
+        small = crop.scaled(round(crop.width() * scale), round(crop.height() * scale), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        data = QByteArray()
+        buffer = QBuffer(data)
+        buffer.open(QIODevice.WriteOnly)
+        small.save(buffer, "JPEG", 72)
+        step["shot"] = len(self.shots) + 1
+        self.shots.append({"data": base64.b64encode(bytes(data)).decode(), "mimeType": "image/jpeg",
+                           "filename": f"schritt-{self.steps.index(step) + 1}.jpg"})
+
+    def on_key(self, code, name, held):
+        if not self.active:
+            return
+        mods = [m for m in held if m != "shift"]
+        char = KEY_CHARS.get(name)
+        if char is not None and not mods:
+            if self.s.input.swap_yz and char in "yz":
+                char = "z" if char == "y" else "y"
+            if "shift" in held:
+                char = char.upper()
+            last = self.steps[-1] if self.steps else None
+            if not last or last["kind"] != "type" or last.get("closed"):
+                last = {"kind": "type", "text": "", "codes": []}
+                self.steps.append(last)
+            last["text"] += char
+            last["codes"].append([code, "shift" in held])
+        else:
+            self._flush_text()
+            label = KEY_LABELS.get(name) or name.removeprefix("KEY_").lower()
+            self.steps.append({"kind": "key", "keys": "+".join([*held, label]), "codes": [code], "mods": list(held)})
+        self.s.record_pill.show_count(len(self.steps))
+
+    def describe(self):
+        lines = []
+        for number, step in enumerate(self.steps, 1):
+            if step["kind"] == "click":
+                where = f" in „{step['caption'][:60]}“ ({step['window']})" if step.get("window") else ""
+                what = f"{step['role']} „{step['name']}“" if step.get("name") else (step.get("role") or "Stelle")
+                button = {"left": "Klick", "right": "Rechtsklick", "middle": "Mittelklick"}[step["button"]]
+                shot = f" [Bild {step['shot']}]" if step.get("shot") else ""
+                lines.append(f"{number}. {button} auf {what}{where}{shot}")
+            elif step["kind"] == "type":
+                lines.append(f"{number}. Getippt: „{step['text']}“ (Tastatur ohne Sonderzeichen erkannt)")
+            else:
+                lines.append(f"{number}. Taste {step['keys']}")
+        return lines
+
+
+def element_at(window, point):
+    """(role, name) of the innermost named accessible under a global point."""
+    if Atspi is None:
+        return None
+    try:
+        frame = a11y_frame(window)
+    except RuntimeError:
+        return None
+    rx, ry = point.x() - window["cx"], point.y() - window["cy"]
+    best = None
+    for _node, _depth, role, name, rect, _states in a11y_walk(frame, False):
+        if rect.x <= rx < rect.x + rect.width and rect.y <= ry < rect.y + rect.height and name:
+            area = rect.width * rect.height
+            if role in INTERACTIVE_ROLES:
+                area /= 4  # prefer the control over the label inside it
+            if best is None or area <= best[0]:
+                best = (area, role, name[:120])
+    return (best[1], best[2]) if best else None
+
+
+MACROS = os.path.join(CONFIG_DIR, "macros.json")
+
+
+def load_macros():
+    try:
+        with open(MACROS, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return []
+
+
+def save_macros(macros):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(MACROS, "w", encoding="utf-8") as handle:
+        json.dump(macros, handle, ensure_ascii=False, indent=1)
+
+
 # --------------------------------------------------------------------------- app
 
 
 class App(QObject):
     connected = Signal(bool)
     update = Signal(object)
+    rules_changed = Signal(object)
+    remote_mode = Signal(str)
+    remote_record = Signal(str)
 
     def __init__(self, config):
         super().__init__()
@@ -1516,6 +2299,21 @@ class App(QObject):
         self.connected.connect(self._on_connected)
         self.update.connect(self._self_update)
         self.config = config
+        self.rules = self.state.get("rules") if isinstance(self.state.get("rules"), list) else []
+        self.allowed_until = {}
+        self.last_action = 0.0
+        self.last_session = self.state.get("session") or {}
+        self.confirm = ConfirmCard()
+        self.text_card = TextCard()
+        self.record_pill = RecordPill(self.stop_recording, self.cancel_recording)
+        self.watcher = InputWatcher()
+        self.recorder = Recorder(self)
+        self.watcher.escape.connect(self._escape)
+        self.watcher.clicked.connect(self.recorder.on_click)
+        self.watcher.key.connect(self.recorder.on_key)
+        self.rules_changed.connect(self._set_rules)
+        self.remote_mode.connect(self.set_mode)
+        self.remote_record.connect(self._remote_record)
         self._tray()
 
     def _tray(self):
@@ -1534,6 +2332,13 @@ class App(QObject):
             group.addAction(action)
             menu.addAction(action)
             self.mode_actions[mode] = action
+        menu.addSeparator()
+        self.record_action = QAction("Vorführung aufnehmen", menu)
+        self.record_action.triggered.connect(self.toggle_recording)
+        menu.addAction(self.record_action)
+        message = QAction("Nachricht an Plum …", menu)
+        message.triggered.connect(self.message_prompt)
+        menu.addAction(message)
         menu.addSeparator()
         clear = QAction("Markierungen entfernen", menu)
         clear.triggered.connect(lambda: (self.overlay.clear(), self.card.hide()))
@@ -1570,6 +2375,99 @@ class App(QObject):
         self.bridge.send_state()
         self._refresh_tray()
         log("mode:", mode)
+
+    def _set_rules(self, rules):
+        self.rules = [r for r in rules if isinstance(r, dict) and r.get("match") and r.get("mode") in ("block", "ask")]
+        self.state["rules"] = self.rules
+        save_state(self.state)
+        log("rules:", len(self.rules))
+
+    def _escape(self):
+        """Escape on the real keyboard stops Plum while it acts."""
+        acting = self.tools.busy or time.time() - self.last_action < 4 or self.confirm.isVisible()
+        if not acting or self.mode == "paused":
+            return
+        ABORT["set"] = True
+        self.confirm.answer = "deny"
+        self.set_mode("paused")
+        self.overlay.cursor = None
+        self.overlay.update()
+        self.pill.flash(QGuiApplication.primaryScreen().geometry(), "Plum gestoppt · Tray: Steuern setzt fort")
+        log("stopped by Escape")
+
+    def _session_id(self):
+        if self.last_session.get("id"):
+            return self.last_session["id"]
+        sessions = self.bridge.rpc("sessions.list", {}) or []
+        busy = [s for s in sessions if s.get("busy")]
+        pick = (busy or sessions or [None])[0]
+        if not pick:
+            raise RuntimeError("Keine Plum-Sitzung gefunden")
+        return pick["id"]
+
+    def toggle_recording(self):
+        if self.recorder.active:
+            self.stop_recording()
+        else:
+            self.recorder.start()
+            self.record_action.setText("Vorführung beenden")
+
+    def _remote_record(self, action):
+        if action == "start" and not self.recorder.active:
+            self.toggle_recording()
+        elif action == "stop" and self.recorder.active:
+            self.stop_recording()
+        elif action == "cancel":
+            self.cancel_recording()
+
+    def cancel_recording(self):
+        self.recorder.stop()
+        self.record_action.setText("Vorführung aufnehmen")
+
+    def stop_recording(self):
+        self.recorder.stop()
+        self.record_action.setText("Vorführung aufnehmen")
+        pump_safe(0.5)  # the last screenshot
+        steps, shots = self.recorder.steps, self.recorder.shots
+        if not steps:
+            return
+        lines = self.recorder.describe()
+        body = "\n".join(
+            [f"🎬 **Vorführung vom Desktop** – {len(steps)} Schritte" + (f", {len(shots)} Bilder" if shots else ""), "", *lines,
+             "", "Lerne die Aufgabe daraus und spiele sie mit den desktop_*-Werkzeugen nach, wenn ich darum bitte."]
+        )
+        # Spread up to 20 screenshots over the whole demonstration.
+        if len(shots) > 20:
+            shots = [shots[round(i * (len(shots) - 1) / 19)] for i in range(20)]
+        try:
+            self.bridge.rpc("chat.send", {
+                "sessionId": self._session_id(), "message": body, "images": shots,
+                "clientMessageId": f"desktop-demo-{int(time.time() * 1000)}",
+            }, timeout=60)
+            self.tray.showMessage("Plum Desktop", "Vorführung an die Sitzung gesendet")
+        except RuntimeError as error:
+            self.tray.showMessage("Plum Desktop", f"Senden fehlgeschlagen: {error}")
+        saved = [dict(step) for step in steps]
+        self.text_card.prompt("Als Makro speichern? Name eingeben (leer lassen = nicht speichern)", "Speichern",
+                              lambda name: self.save_macro(name, saved))
+
+    def save_macro(self, name, steps):
+        macros = [m for m in load_macros() if m.get("name") != name]
+        for step in steps:
+            step.pop("shot", None)
+            step.pop("closed", None)
+        macros.append({"name": name[:60], "steps": steps, "created": time.strftime("%Y-%m-%d %H:%M")})
+        save_macros(macros)
+        self.tray.showMessage("Plum Desktop", f"Makro „{name}“ gespeichert ({len(steps)} Schritte)")
+
+    def message_prompt(self):
+        def send(text):
+            try:
+                self.bridge.rpc("chat.send", {"sessionId": self._session_id(), "message": text,
+                                              "clientMessageId": f"desktop-msg-{int(time.time() * 1000)}"})
+            except RuntimeError as error:
+                self.tray.showMessage("Plum Desktop", f"Senden fehlgeschlagen: {error}")
+        self.text_card.prompt("Nachricht an Plum (an die zuletzt aktive Sitzung)", "Senden", send)
 
     def _self_update(self, frame):
         """Plum pushes its shipped companion to older ones; replace and restart."""

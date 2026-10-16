@@ -283,4 +283,26 @@
     <string name="swarm_puppets">Council voices: %1$s</string>
     <string name="swarm_no_output">No output</string>
     <string name="swarm_loading">Identifying agents …</string>
+    <string name="desktop_title">Plum Desktop</string>
+    <string name="desktop_description">Plum sees and operates programs on your computer. Escape on the keyboard stops it at any time.</string>
+    <string name="desktop_none">No computer connected.</string>
+    <string name="desktop_mode_control">Control</string>
+    <string name="desktop_mode_guide">Show only</string>
+    <string name="desktop_mode_paused">Paused</string>
+    <string name="desktop_recording">● Recording</string>
+    <string name="desktop_record_start">Record demonstration</string>
+    <string name="desktop_record_stop">Finish and send</string>
+    <string name="desktop_record_cancel">Discard</string>
+    <string name="desktop_rules">Rules per program</string>
+    <string name="desktop_rules_hint">Blocked: no input, blacked out in screenshots. Ask: you confirm every input at the computer. Tap the chip to switch.</string>
+    <string name="desktop_rule_block">Blocked</string>
+    <string name="desktop_rule_ask">Ask</string>
+    <string name="desktop_rule_remove">Remove rule</string>
+    <string name="desktop_rule_new">Program or window title</string>
+    <string name="desktop_rule_add">Add</string>
+    <string name="desktop_install">Set up another computer (Linux)</string>
+    <string name="desktop_install_name">Name, e.g. Laptop</string>
+    <string name="desktop_install_create">Create command</string>
+    <string name="desktop_install_copy">Copy command</string>
+    <string name="desktop_install_hint">Run it in the computer\'s terminal. Valid once for 15 minutes; installs dependencies (sudo), keyboard and mouse access and autostart.</string>
 </resources>

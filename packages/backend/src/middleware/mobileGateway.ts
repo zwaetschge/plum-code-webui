@@ -15,6 +15,8 @@ const PUBLIC_MOBILE_ROUTES = new Set([
   'POST /api/browser-bridge/desk/wake',
   'POST /api/browser-bridge/desk/turn',
   'POST /api/browser-bridge/desk/speech',
+  // Plum Desktop installer; the single-use code in the query is the credential.
+  'GET /api/browser-bridge/desktop/install',
 ]);
 
 function normalizePath(path: string): string {

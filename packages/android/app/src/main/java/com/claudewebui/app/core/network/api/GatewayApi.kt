@@ -25,6 +25,13 @@ interface GatewayApi {
     /** DELETE /api/gateway/tokens/:id */
     suspend fun revokeGatewayToken(id: String): ApiResponse<JsonElement>
 
+    /** Plum Desktop: per-app rules, remote mode, demonstrations, installer. */
+    suspend fun getDesktopRules(): ApiResponse<List<DesktopRule>>
+    suspend fun setDesktopRules(rules: List<DesktopRule>): ApiResponse<List<DesktopRule>>
+    suspend fun setDesktopMode(mode: String, connectionId: String?): ApiResponse<JsonElement>
+    suspend fun desktopRecord(action: String, connectionId: String?): ApiResponse<JsonElement>
+    suspend fun createDesktopInstall(name: String): ApiResponse<DesktopInstall>
+
     /** GET /api/browser-bridge/status — connected Firefox extensions. */
     suspend fun getBrowserBridgeStatus(): ApiResponse<BrowserBridgeStatus>
 
@@ -62,6 +69,21 @@ class GatewayApiImpl(private val http: ApiHttp) : GatewayApi {
 
     override suspend fun revokeGatewayToken(id: String): ApiResponse<JsonElement> =
         http.delete("/api/gateway/tokens/$id")
+
+    override suspend fun getDesktopRules(): ApiResponse<List<DesktopRule>> =
+        http.get("/api/browser-bridge/desktop/rules")
+
+    override suspend fun setDesktopRules(rules: List<DesktopRule>): ApiResponse<List<DesktopRule>> =
+        http.put("/api/browser-bridge/desktop/rules") { setBody(DesktopRulesInput(rules)) }
+
+    override suspend fun setDesktopMode(mode: String, connectionId: String?): ApiResponse<JsonElement> =
+        http.post("/api/browser-bridge/desktop/mode") { setBody(DesktopModeInput(mode, connectionId)) }
+
+    override suspend fun desktopRecord(action: String, connectionId: String?): ApiResponse<JsonElement> =
+        http.post("/api/browser-bridge/desktop/record") { setBody(DesktopRecordInput(action, connectionId)) }
+
+    override suspend fun createDesktopInstall(name: String): ApiResponse<DesktopInstall> =
+        http.post("/api/browser-bridge/desktop/install") { setBody(DesktopInstallInput(name)) }
 
     override suspend fun getBrowserBridgeStatus(): ApiResponse<BrowserBridgeStatus> =
         http.get("/api/browser-bridge/status")

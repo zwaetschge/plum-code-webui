@@ -283,4 +283,26 @@
     <string name="swarm_puppets">Stimmen im Rat: %1$s</string>
     <string name="swarm_no_output">Keine Ausgabe</string>
     <string name="swarm_loading">Agenten werden ermittelt …</string>
+    <string name="desktop_title">Plum Desktop</string>
+    <string name="desktop_description">Plum sieht und bedient Programme auf deinem Computer. Escape auf der Tastatur stoppt es jederzeit.</string>
+    <string name="desktop_none">Kein Computer verbunden.</string>
+    <string name="desktop_mode_control">Steuern</string>
+    <string name="desktop_mode_guide">Nur zeigen</string>
+    <string name="desktop_mode_paused">Pausiert</string>
+    <string name="desktop_recording">● Vorführung läuft</string>
+    <string name="desktop_record_start">Vorführung aufnehmen</string>
+    <string name="desktop_record_stop">Beenden und senden</string>
+    <string name="desktop_record_cancel">Verwerfen</string>
+    <string name="desktop_rules">Regeln pro Programm</string>
+    <string name="desktop_rules_hint">Gesperrt: keine Eingaben, im Screenshot geschwärzt. Fragen: jede Eingabe bestätigst du am Computer. Tippe auf den Chip zum Umschalten.</string>
+    <string name="desktop_rule_block">Gesperrt</string>
+    <string name="desktop_rule_ask">Fragen</string>
+    <string name="desktop_rule_remove">Regel entfernen</string>
+    <string name="desktop_rule_new">Programm oder Fenstertitel</string>
+    <string name="desktop_rule_add">Hinzufügen</string>
+    <string name="desktop_install">Weiteren Computer einrichten (Linux)</string>
+    <string name="desktop_install_name">Name, z. B. Laptop</string>
+    <string name="desktop_install_create">Befehl erzeugen</string>
+    <string name="desktop_install_copy">Befehl kopieren</string>
+    <string name="desktop_install_hint">Im Terminal des Computers ausführen. Gilt 15 Minuten und nur einmal; installiert Abhängigkeiten (sudo), Rechte für Tastatur und Maus und den Autostart.</string>
 </resources>

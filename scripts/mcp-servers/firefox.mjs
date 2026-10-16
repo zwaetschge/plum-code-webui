@@ -594,6 +594,49 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
   },
   {
+    name: 'desktop_ocr',
+    description:
+      'Text recognition on the desktop for apps without accessibility data (Blender, games, some Electron apps). With query: positions of matching text; without: all text lines with positions. Optional x/y/width/height region. Slower than desktop_find (~5-10 s).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        x: DX,
+        y: DY,
+        width: { type: 'number' },
+        height: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'desktop_wait_change',
+    description:
+      'Wait until the screen (or an x/y/width/height region) changes, or with still=true until it stops changing (renders, progress bars). Max 120 s.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        x: DX,
+        y: DY,
+        width: { type: 'number' },
+        height: { type: 'number' },
+        still: { type: 'boolean' },
+        seconds: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'desktop_macros',
+    description:
+      'List desktop macros the user saved from demonstrations (tray: Vorführung aufnehmen). Run one with desktop_macro_run.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'desktop_macro_run',
+    description:
+      'Replay a saved desktop macro: finds clicked elements by name, falls back to the recorded window position. Stops at the first step it cannot do; continue by hand from there.',
+    inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+  },
+  {
     name: 'desktop_activate_window',
     description:
       'Bring a window to the front: id from desktop_windows, or part of its title or app class.',
@@ -616,11 +659,15 @@ const TOOLS = [
   {
     name: 'desktop_click',
     description:
-      'Real mouse click on the desktop at a ref (from desktop_read_ui/find) or at x, y (screenshot pixels); the visible Plum cursor glides there first.',
+      'Real mouse click on the desktop at a ref (from desktop_read_ui/find), on visible text, or at x, y (screenshot pixels); the visible Plum cursor glides there first.',
     inputSchema: {
       type: 'object',
       properties: {
         ref: DESKTOP_REF,
+        text: {
+          type: 'string',
+          description: 'Click visible text found by text recognition (when no ref is available).',
+        },
         x: DX,
         y: DY,
         button: { type: 'string', enum: ['left', 'right', 'middle'] },
@@ -773,7 +820,7 @@ const INSTRUCTIONS = [
   '- Several browsers can be connected; Plum uses the one the user used most recently. If the user says you are in the wrong browser, call browsers and select_browser.',
   '- Tutorials: in guide mode use guide_step for one step at a time; the user clicking the mark (or "Erledigt") sends you "✓ Schritt n erledigt" – then show the next step.',
   '- Saved macros (macros, macro_run) replay demonstrations deterministically; prefer them for recurring tasks and continue by hand where one stops.',
-  '- Native desktop apps (Blender, GIMP, file manager …) through the Plum desktop companion: desktop_status, then desktop_read_ui/desktop_find for refs (most KDE, Qt and GTK apps) or desktop_screenshot (zoom a region for small text); act with desktop_click/type/press_key/scroll/drag/open/activate_window, wait with desktop_wait_for, show with desktop_point/annotate/guide_step. Prefer refs; otherwise coordinates are pixels of the latest desktop_screenshot; check the result after each change. In guide mode (status) input is blocked: show, the user operates. The same confirmation rules as in the browser apply.',
+  '- Native desktop apps (Blender, GIMP, file manager …) through the Plum desktop companion: desktop_status, then desktop_read_ui/desktop_find for refs (most KDE, Qt and GTK apps) or desktop_screenshot (zoom a region for small text); act with desktop_click/type/press_key/scroll/drag/open/activate_window, wait with desktop_wait_for, show with desktop_point/annotate/guide_step. desktop_ocr / click text for apps without accessibility data, desktop_wait_change for renders. Saved demonstrations: desktop_macros/desktop_macro_run. Blocked apps (rules) refuse input and are blacked out; ask-apps wait for the user. If the user presses Escape, Plum Desktop pauses: stop and ask. Prefer refs; otherwise coordinates are pixels of the latest desktop_screenshot; check the result after each change. In guide mode (status) input is blocked: show, the user operates. The same confirmation rules as in the browser apply.',
   '- Guide mode (status shows mode "guide"): the user is learning in their own tab and does the work. Watch with screenshot/read_page, show with point, annotate and draw, explain in chat; clicking, typing, scrolling and navigating are blocked. Clear old marks before the next step.',
   '- A message titled "Vorführung aus dem Browser" is a demonstration the user recorded: numbered steps with element names, CSS paths and screenshots (red circle = click). Learn the task from it and replay it with the browser tools when asked.',
   '- Prefer read_page/find refs over coordinates; take a screenshot to check visual state. Use extract_table for tabular data and wait_for with gone/url after actions that load.',
@@ -786,6 +833,11 @@ function toolTimeoutMs(name, args) {
   if (name === 'macro_run') return 240_000;
   if (name === 'download_file' || name === 'upload_file') return 120_000;
   if (name === 'draw') return 60_000;
+  if (name === 'desktop_wait_change')
+    return (Math.min(Number(args?.seconds) || 20, 120) + 30) * 1000;
+  if (name === 'desktop_macro_run') return 240_000;
+  if (name === 'desktop_ocr' || name === 'desktop_click') return 120_000;
+  if (name === 'desktop_type' || name === 'desktop_press_key') return 150_000;
   if (name === 'desktop_wait_for') return (Math.min(Number(args?.seconds) || 10, 60) + 15) * 1000;
   if (name === 'desktop_wait') return (Math.min(Number(args?.seconds) || 1, 60) + 15) * 1000;
   if (name === 'desktop_type' || name === 'desktop_open') return 60_000;

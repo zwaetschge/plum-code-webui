@@ -482,7 +482,10 @@ private fun AppSettingsPage(
             }
             SettingsPages.SUBAGENTS -> item(key = "subagents") { CliSubagentsPanel(state = state, viewModel = viewModel) }
             SettingsPages.CODEX_PLUGINS -> item(key = "codex") { CodexPluginsPanel(state = state, viewModel = viewModel) }
-            SettingsPages.BROWSER -> item(key = "browser") { FirefoxBrowserPanel(state = state, viewModel = viewModel) }
+            SettingsPages.BROWSER -> {
+                item(key = "browser") { FirefoxBrowserPanel(state = state, viewModel = viewModel) }
+                item(key = "desktop") { DesktopCompanionPanel() }
+            }
             SettingsPages.GATEWAY -> item(key = "gateway") { GatewayTokensPanel(state = state, viewModel = viewModel) }
             SettingsPages.APPEARANCE -> {
                 item(key = "look") {
