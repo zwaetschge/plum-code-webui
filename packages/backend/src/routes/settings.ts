@@ -108,6 +108,10 @@ export function buildClaudeApiEnv(config: ClaudeApiConfig | null): Record<string
     ANTHROPIC_AUTH_TOKEN: config.authToken,
     API_TIMEOUT_MS: String(config.apiTimeoutMs),
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    // The CLI turns tool search off for any non-Anthropic base URL, so every
+    // MCP schema went inline: ~200k tokens (rea alone ~170k) before the first
+    // word, and autocompact thrashed. Z.AI handles deferred tools fine.
+    ENABLE_TOOL_SEARCH: 'true',
   };
 
   if (config.opusModel) env.ANTHROPIC_DEFAULT_OPUS_MODEL = config.opusModel;
