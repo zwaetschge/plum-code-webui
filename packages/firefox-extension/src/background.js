@@ -910,13 +910,27 @@ async function chromeEvaluate(tabId, code) {
   return String(result.ok).slice(0, 50000);
 }
 
-async function chromeHookConsole(tabId) {
+/**
+ * console-hook.js installs the wrapper as a page script, so Chrome does not
+ * file the site's console warnings under this extension. Pages whose CSP
+ * forbids inline scripts stay unhooked, unless an agent explicitly reads the
+ * console (`force`): then the wrapper comes from the extension after all.
+ */
+async function chromeHookConsole(tabId, force = false) {
+  const target = { tabId, frameIds: [0] };
+  await browser.scripting
+    .executeScript({ target, world: 'MAIN', injectImmediately: true, files: ['console-hook.js'] })
+    .catch(() => {});
+  if (!force) return;
   await browser.scripting
     .executeScript({
-      target: { tabId, frameIds: [0] },
+      target,
       world: 'MAIN',
       injectImmediately: true,
-      files: ['console-hook.js'],
+      func: () => {
+        if (typeof window.__plumInstallConsoleHook === 'function')
+          window.__plumInstallConsoleHook();
+      },
     })
     .catch(() => {});
 }
@@ -2289,7 +2303,7 @@ function routeMessage(message, sender) {
     return Promise.resolve(false);
   }
   if (message.plumConsoleHook && sender.tab) {
-    if (PLUM_IS_CHROME) void chromeHookConsole(sender.tab.id);
+    if (PLUM_IS_CHROME) void chromeHookConsole(sender.tab.id, !!message.force);
     return undefined;
   }
   if (message.plumOpenChat) {

@@ -1040,6 +1040,8 @@
 
   const consoleBuffer = [];
   let consoleHooked = false;
+  // Chrome: whether the MAIN-world wrapper has reported anything yet.
+  let pageHookSeen = false;
 
   function stringifyArg(arg) {
     try {
@@ -1070,14 +1072,21 @@
   window.addEventListener('message', (event) => {
     const data = event.data;
     if (!consoleHooked || event.source !== window || !data || data.__plumConsole !== true) return;
+    pageHookSeen = true;
     record(String(data.level), [String(data.text)]);
   });
 
-  function hookConsole() {
+  function hookConsole(force = false) {
+    // Chrome: an explicit read on a page that forbids page scripts installs
+    // the extension's wrapper once, even if the console is already "hooked".
+    if (!FIREFOX_XRAYS && force && consoleHooked && !pageHookSeen) {
+      browser.runtime.sendMessage({ plumConsoleHook: true, force: true }).catch(() => {});
+      return;
+    }
     if (consoleHooked) return;
     consoleHooked = true;
     if (!FIREFOX_XRAYS) {
-      browser.runtime.sendMessage({ plumConsoleHook: true }).catch(() => {});
+      browser.runtime.sendMessage({ plumConsoleHook: true, force }).catch(() => {});
       return;
     }
     try {
@@ -1124,9 +1133,10 @@
 
   function readConsole({ pattern, onlyErrors, clear: clearBuffer, limit = 100 } = {}) {
     if (!consoleHooked) {
-      hookConsole();
+      hookConsole(true);
       return 'Konsolen-Mitschnitt war für diesen Tab noch nicht aktiv und läuft ab jetzt. Lade die Seite neu (navigate "reload"), um Meldungen ab dem Seitenstart zu sehen.';
     }
+    if (!FIREFOX_XRAYS && !pageHookSeen) hookConsole(true);
     let entries = consoleBuffer.slice();
     if (onlyErrors)
       entries = entries.filter((entry) => entry.level === 'error' || entry.level === 'warn');

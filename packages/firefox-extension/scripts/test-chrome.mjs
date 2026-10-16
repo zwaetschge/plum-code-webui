@@ -36,6 +36,8 @@ const PAGE = (host) => `<html><head><title>${host}</title></head><body><h1>${hos
 
 const http = createServer((req, res) => {
   res.setHeader('content-type', 'text/html; charset=utf-8');
+  // /csp forbids inline scripts, like many enterprise apps.
+  if (req.url.startsWith('/csp')) res.setHeader('content-security-policy', "script-src 'self'");
   res.end(PAGE(req.headers.host));
 });
 const wss = new WebSocketServer({ server: http, path: '/api/browser-bridge/ws' });
@@ -85,8 +87,13 @@ const chromium = spawn(
 await sleep(2500);
 
 async function devtools(match) {
-  const targets = await (await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`)).json();
-  const target = targets.find((t) => t.type === 'page' && match(t));
+  // A tab opened a moment ago can take a beat to appear in the target list.
+  let target;
+  for (let i = 0; i < 20 && !target; i += 1) {
+    const targets = await (await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`)).json();
+    target = targets.find((t) => t.type === 'page' && match(t));
+    if (!target) await sleep(250);
+  }
   const socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve) => (socket.onopen = resolve));
   let id = 0;
@@ -169,8 +176,18 @@ await inExtension(`chrome.runtime.sendMessage({plumStopSession:{id:'s1',stopped:
 reply = await call('find', { query: 'Knopf' });
 check('resumed session works', reply.ok, text(reply));
 
-// Protected site: Escape on the approval card denies.
+// DevTools handle on the test page, taken before evaluate_js attaches the debugger.
 const page = await devtools((t) => t.url.includes('open.test'));
+
+// Console: the wrapper is a page script (not filed under the extension in
+// chrome://extensions) and captures new messages.
+await call('read_console', {});
+await call('evaluate_js', { code: 'console.warn("plum-console-check"); return 1' });
+await sleep(300);
+reply = await call('read_console', { pattern: 'plum-console-check' });
+check('read_console captures', /plum-console-check/.test(text(reply)), text(reply));
+
+// Protected site: Escape on the approval card denies.
 await inExtension(`chrome.storage.local.set({protectedSites:'open.test'})`);
 await sleep(300);
 const approval = call('click', { ref: button });
@@ -241,6 +258,19 @@ check(
   state.recentActions.some((action) => action.result === 'error') &&
     state.recentActions.some((action) => typeof action.ms === 'number')
 );
+
+// A page that forbids inline scripts: no automatic wrapper, but an explicit
+// read_console falls back to the extension's wrapper.
+await inExtension(`chrome.runtime.sendMessage({plumStopSession:{id:'s1',stopped:false}})`);
+await sleep(61_000); // the runaway guard counts the last minute
+await call('navigate', { url: `http://open.test:${PORT}/csp` });
+await sleep(800);
+await call('read_console', {});
+await sleep(300);
+await page('Runtime.evaluate', { expression: 'console.warn("plum-csp-check")' });
+await sleep(300);
+reply = await call('read_console', { pattern: 'plum-csp-check' });
+check('read_console CSP fallback', /plum-csp-check/.test(text(reply)), text(reply));
 
 chromium.kill();
 await new Promise((resolve) => chromium.once('exit', resolve));

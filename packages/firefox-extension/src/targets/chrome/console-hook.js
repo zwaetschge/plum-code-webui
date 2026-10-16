@@ -1,8 +1,16 @@
-// Chrome MAIN-world console hook for Plum-managed tabs. Registered for the
-// origins of session tabs at document_start (so a reload sees the page's first
-// messages) and injected on demand otherwise; forwards to the isolated content
-// script via postMessage. Idempotent.
-(() => {
+// Chrome MAIN-world console hook for Plum-managed tabs. Runs only on hosts
+// whose console an agent asked for: registered at document_start for those
+// (so a reload sees the page's first messages) and injected on demand
+// otherwise; forwards to the isolated content script via postMessage.
+// Idempotent.
+//
+// The wrapper is installed through an inline <script>, so it belongs to the
+// page: wrapped from this file, Chrome lists every console warning of the
+// site as an error of the extension. Pages whose CSP forbids inline scripts
+// stay unhooked; an explicit read_console calls window.__plumInstallConsoleHook
+// (defined here) to wrap from the extension after all.
+
+function plumInstallConsoleHook() {
   if (window.__plumConsoleHook) return;
   window.__plumConsoleHook = true;
   const toText = (arg) => {
@@ -26,5 +34,18 @@
       );
       return original.apply(this, args);
     };
+  }
+}
+
+window.__plumInstallConsoleHook = plumInstallConsoleHook;
+(() => {
+  if (window.__plumConsoleHook) return;
+  try {
+    const script = document.createElement('script');
+    script.textContent = `(${plumInstallConsoleHook.toString()})();`;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
+  } catch {
+    /* no document yet */
   }
 })();
