@@ -25,7 +25,8 @@ const UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 const uploadLocks = new Map<string, Promise<unknown>>();
 
-export const MAX_CHAT_UPLOAD_FILES = 10;
+// 20 so a recorded browser demonstration fits one message; the composer offers 10.
+export const MAX_CHAT_UPLOAD_FILES = 20;
 export const MAX_CHAT_UPLOAD_TOTAL_BYTES = 32 * 1024 * 1024;
 
 interface UploadRow {
@@ -597,20 +598,46 @@ const cleanupTimer = setInterval(
 cleanupTimer.unref();
 
 /** Account export reads original upload bytes without reserving or re-sending them. */
-export async function exportOwnedChatUpload(userId:string,sessionId:string,uploadId:string):Promise<Buffer> {
-  const row=await readOwnedUpload(userId,sessionId,uploadId);
-  const filename=completedPath(row);
-  const file=await open(filename,fsConstants.O_RDONLY|fsConstants.O_NOFOLLOW);
-  let bytes:Buffer;try { if (!(await file.stat()).isFile()) throw new ChatUploadError('Original upload is unavailable',404);bytes=await file.readFile(); } finally { await file.close(); }
-  if (bytes.length!==row.byteSize || createHash('sha256').update(bytes).digest('hex')!==row.sha256) throw new ChatUploadError('Original upload is unavailable',404,'UPLOAD_UNAVAILABLE');
+export async function exportOwnedChatUpload(
+  userId: string,
+  sessionId: string,
+  uploadId: string
+): Promise<Buffer> {
+  const row = await readOwnedUpload(userId, sessionId, uploadId);
+  const filename = completedPath(row);
+  const file = await open(filename, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  let bytes: Buffer;
+  try {
+    if (!(await file.stat()).isFile())
+      throw new ChatUploadError('Original upload is unavailable', 404);
+    bytes = await file.readFile();
+  } finally {
+    await file.close();
+  }
+  if (
+    bytes.length !== row.byteSize ||
+    createHash('sha256').update(bytes).digest('hex') !== row.sha256
+  )
+    throw new ChatUploadError('Original upload is unavailable', 404, 'UPLOAD_UNAVAILABLE');
   return bytes;
 }
 /** Retention is scoped to the expired session, including uploads already consumed by a message. */
-export async function purgeSessionChatUploads(userId:string,sessionId:string):Promise<void> {
-  if (!(await pgGet('SELECT id FROM sessions WHERE id = ? AND user_id = ?',sessionId,userId))) throw new ChatUploadError('Session not found',404);
-  const rows=await pgAll('SELECT id FROM chat_uploads WHERE user_id = ? AND session_id = ?',userId,sessionId);
-  for (const row of rows) await withUploadLock(String(row.id),async()=>{
-    await rm(uploadDirectory(userId,String(row.id)),{recursive:true,force:true});
-    await pgRun('DELETE FROM chat_uploads WHERE id = ? AND user_id = ? AND session_id = ?',row.id,userId,sessionId);
-  });
+export async function purgeSessionChatUploads(userId: string, sessionId: string): Promise<void> {
+  if (!(await pgGet('SELECT id FROM sessions WHERE id = ? AND user_id = ?', sessionId, userId)))
+    throw new ChatUploadError('Session not found', 404);
+  const rows = await pgAll(
+    'SELECT id FROM chat_uploads WHERE user_id = ? AND session_id = ?',
+    userId,
+    sessionId
+  );
+  for (const row of rows)
+    await withUploadLock(String(row.id), async () => {
+      await rm(uploadDirectory(userId, String(row.id)), { recursive: true, force: true });
+      await pgRun(
+        'DELETE FROM chat_uploads WHERE id = ? AND user_id = ? AND session_id = ?',
+        row.id,
+        userId,
+        sessionId
+      );
+    });
 }

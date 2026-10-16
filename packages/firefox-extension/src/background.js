@@ -1853,9 +1853,21 @@ async function setGuide(session, windowId, on) {
 // from and replay.
 
 const RECORD_MAX_STEPS = 300;
-// A chat message takes at most 10 images (MAX_CHAT_UPLOAD_FILES on the server);
-// with 12 a demonstration with many clicks was rejected as a whole.
-const RECORD_MAX_SHOTS = 10;
+// Screenshots taken while recording (one per click), and how many go to the
+// session: a chat message takes at most 20 images (MAX_CHAT_UPLOAD_FILES).
+const RECORD_MAX_SHOTS = 40;
+const RECORD_SEND_SHOTS = 20;
+
+/**
+ * Up to RECORD_SEND_SHOTS screenshots spread over the whole demonstration,
+ * always with the first and the last: the result at the end matters most.
+ */
+function pickShots(shots) {
+  const taken = shots.map((data, index) => ({ data, index })).filter((shot) => shot.data);
+  if (taken.length <= RECORD_SEND_SHOTS) return taken;
+  const step = (taken.length - 1) / (RECORD_SEND_SHOTS - 1);
+  return Array.from({ length: RECORD_SEND_SHOTS }, (_, i) => taken[Math.round(i * step)]);
+}
 const RECORD_SHOT_EDGE = 1280;
 state.recordings = new Map();
 
@@ -1983,8 +1995,15 @@ function stepLine(step) {
   }
 }
 
-function recordingMessage(rec, note) {
-  const lines = rec.steps.map((step, index) => {
+/**
+ * `attached` maps a screenshot's capture slot to its position among the
+ * attached images, so "[Bild n]" in the step list points at the right
+ * attachment even when only a spread of the screenshots is sent.
+ */
+function recordingMessage(rec, note, attached = new Map()) {
+  const lines = rec.steps.map((original, index) => {
+    const position = original.shot ? attached.get(original.shot - 1) : undefined;
+    const step = { ...original, shot: position };
     const detail =
       step.css || step.id
         ? `\n   ↳ ${[
@@ -1998,9 +2017,12 @@ function recordingMessage(rec, note) {
         : '';
     return `${index + 1}. ${stepLine(step)}${detail}`;
   });
-  const shots = rec.shots.filter(Boolean).length;
+  const taken = rec.shots.filter(Boolean).length;
+  const shots = attached.size
+    ? `, ${attached.size} Screenshots${attached.size < taken ? ` (gleichmässig verteilt aus ${taken})` : ''}`
+    : '';
   return [
-    `🎬 **Vorführung aus dem Browser** – ${rec.steps.length} Schritte${shots ? `, ${shots} Screenshots` : ''}`,
+    `🎬 **Vorführung aus dem Browser** – ${rec.steps.length} Schritte${shots}`,
     note ? `\n**Hinweis:** ${note}` : '',
     '',
     'Ich habe dir diese Abfolge im Browser vorgeführt. Lerne daraus, wie die Aufgabe geht. Du kannst sie mit den Browser-Werkzeugen nachspielen (tab_open, find, click, type …); Element-Name und CSS-Pfad helfen beim Wiederfinden. Die angehängten Bilder sind in der Reihenfolge der Markierungen [Bild n], der rote Kreis zeigt die Klickstelle.',
@@ -2015,15 +2037,16 @@ async function sendRecording(windowId, note) {
   const rec = state.recordings.get(Number(windowId));
   if (!rec) throw new Error('Keine Aufnahme vorhanden.');
   if (!rec.stopped) await stopRecording(rec.windowId);
-  const images = rec.shots
-    .slice(0, RECORD_MAX_SHOTS)
-    .map((data, index) =>
-      data ? { data, mimeType: 'image/jpeg', filename: `vorfuehrung-bild-${index + 1}.jpg` } : null
-    )
-    .filter(Boolean);
+  const picked = pickShots(rec.shots);
+  const attached = new Map(picked.map((shot, position) => [shot.index, position + 1]));
+  const images = picked.map(({ data }, position) => ({
+    data,
+    mimeType: 'image/jpeg',
+    filename: `vorfuehrung-bild-${position + 1}.jpg`,
+  }));
   const ack = await rpc('chat.send', {
     sessionId: rec.session.id,
-    message: recordingMessage(rec, String(note || '').trim()),
+    message: recordingMessage(rec, String(note || '').trim(), attached),
     clientMessageId: `rec-${Date.now()}`,
     images,
   });
