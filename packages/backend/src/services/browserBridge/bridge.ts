@@ -3,7 +3,7 @@ import type { Duplex } from 'node:stream';
 import { nanoid } from 'nanoid';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { ChatRelay } from './chatRelay.js';
-import { latestExtensionVersion } from './package.js';
+import { latestDesktopCompanion, latestExtensionVersion, versionNewer } from './package.js';
 import { handleBridgeRpc } from './rpc.js';
 import { isBrowserTokenActive, resolveBrowserToken } from './tokens.js';
 
@@ -419,6 +419,21 @@ export class BrowserBridge {
         latestVersion: latestExtensionVersion(),
       })
     );
+    // An older desktop companion gets the shipped one; it checks the digest,
+    // replaces itself and restarts.
+    if (conn.client.kind === 'desktop') {
+      const companion = latestDesktopCompanion();
+      if (
+        companion &&
+        conn.client.version &&
+        versionNewer(companion.version, conn.client.version)
+      ) {
+        ws.send(JSON.stringify({ type: 'update', ...companion }));
+        console.log(
+          `[BROWSER] Desktop companion ${conn.client.version} -> ${companion.version} pushed (${conn.client.label})`
+        );
+      }
+    }
     console.log(
       `[BROWSER] Firefox connected (${conn.client.label}, ${conn.client.name} ${conn.client.version}) user=${conn.userId}`
     );

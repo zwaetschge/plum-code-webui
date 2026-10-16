@@ -249,6 +249,8 @@ COPY --from=builder --chown=node:node /app/packages/frontend/package.json ./pack
 COPY --from=builder --chown=node:node /app/packages/frontend/dist ./packages/frontend/dist
 # Firefox browser-control extension, served at /api/browser-bridge/extension.xpi.
 COPY --from=builder --chown=node:node /app/packages/firefox-extension/dist ./packages/firefox-extension/dist
+# Plum Desktop companion; the bridge pushes it to older companions (self-update).
+COPY --chown=node:node packages/desktop-companion/plum_desktop.py ./packages/desktop-companion/plum_desktop.py
 
 # Helper scripts (mcp-comfyui, etc.) — no build step, copied as-is.
 COPY --chown=node:node scripts ./scripts

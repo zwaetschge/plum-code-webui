@@ -85,6 +85,15 @@ const X = { type: 'number', description: 'x in pixels of the latest screenshot o
 const Y = { type: 'number', description: 'y in pixels of the latest screenshot of this tab.' };
 const DX = { type: 'number', description: 'x in pixels of the latest desktop_screenshot.' };
 const DY = { type: 'number', description: 'y in pixels of the latest desktop_screenshot.' };
+const DESKTOP_REF = {
+  type: 'string',
+  description: 'Element ref like "d12" from desktop_read_ui or desktop_find.',
+};
+const DESKTOP_WINDOW = {
+  type: 'string',
+  description:
+    'Window id from desktop_windows, part of its title or its app class; default the active window.',
+};
 
 const TOOLS = [
   {
@@ -535,6 +544,56 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'desktop_read_ui',
+    description:
+      'Outline of a window from its accessibility tree (default: active window): roles, names, values and refs like d12 with positions. filter "interactive" (default) lists controls only, "all" also text. Prefer refs over pixel guesses.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        window: DESKTOP_WINDOW,
+        filter: { type: 'string', enum: ['interactive', 'all'] },
+        max: { type: 'integer', description: 'Max elements (default 250).' },
+      },
+    },
+  },
+  {
+    name: 'desktop_find',
+    description:
+      'Find elements in a window by visible text, label or role; returns refs (exact names and controls first).',
+    inputSchema: {
+      type: 'object',
+      properties: { query: { type: 'string' }, window: DESKTOP_WINDOW },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'desktop_get_text',
+    description: 'Readable text of a window (or of one ref) from its accessibility tree.',
+    inputSchema: {
+      type: 'object',
+      properties: { window: DESKTOP_WINDOW, ref: DESKTOP_REF, maxChars: { type: 'integer' } },
+    },
+  },
+  {
+    name: 'desktop_wait_for',
+    description:
+      'Wait until a window (title/app) and/or a text in it appears, or with gone=true disappears. Max 60 s.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        window: DESKTOP_WINDOW,
+        text: { type: 'string' },
+        gone: { type: 'boolean' },
+        seconds: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'desktop_clipboard',
+    description: 'Read the clipboard text, or set it when text is given.',
+    inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+  },
+  {
     name: 'desktop_activate_window',
     description:
       'Bring a window to the front: id from desktop_windows, or part of its title or app class.',
@@ -557,10 +616,11 @@ const TOOLS = [
   {
     name: 'desktop_click',
     description:
-      'Real mouse click on the desktop at x, y (screenshot pixels); the visible Plum cursor glides there first.',
+      'Real mouse click on the desktop at a ref (from desktop_read_ui/find) or at x, y (screenshot pixels); the visible Plum cursor glides there first.',
     inputSchema: {
       type: 'object',
       properties: {
+        ref: DESKTOP_REF,
         x: DX,
         y: DY,
         button: { type: 'string', enum: ['left', 'right', 'middle'] },
@@ -570,16 +630,21 @@ const TOOLS = [
           items: { type: 'string', enum: ['ctrl', 'shift', 'alt', 'meta'] },
         },
       },
-      required: ['x', 'y'],
     },
   },
   {
     name: 'desktop_type',
     description:
-      'Type text into the focused field (pasted, so every character works). Optional x, y clicks the field first; submit presses Enter.',
+      'Type text into the focused field (pasted, so every character works). Optional ref or x, y clicks the field first; submit presses Enter.',
     inputSchema: {
       type: 'object',
-      properties: { text: { type: 'string' }, x: DX, y: DY, submit: { type: 'boolean' } },
+      properties: {
+        text: { type: 'string' },
+        ref: DESKTOP_REF,
+        x: DX,
+        y: DY,
+        submit: { type: 'boolean' },
+      },
       required: ['text'],
     },
   },
@@ -592,10 +657,11 @@ const TOOLS = [
   {
     name: 'desktop_scroll',
     description:
-      'Scroll with the mouse wheel, at x, y if given. amount in wheel notches (default 3).',
+      'Scroll with the mouse wheel, at a ref or x, y if given. amount in wheel notches (default 3).',
     inputSchema: {
       type: 'object',
       properties: {
+        ref: DESKTOP_REF,
         x: DX,
         y: DY,
         direction: { type: 'string', enum: ['up', 'down', 'left', 'right'] },
@@ -605,8 +671,9 @@ const TOOLS = [
   },
   {
     name: 'desktop_hover',
-    description: 'Move the real mouse pointer to x, y without clicking (tooltips, hover menus).',
-    inputSchema: { type: 'object', properties: { x: DX, y: DY }, required: ['x', 'y'] },
+    description:
+      'Move the real mouse pointer to a ref or x, y without clicking (tooltips, hover menus).',
+    inputSchema: { type: 'object', properties: { ref: DESKTOP_REF, x: DX, y: DY } },
   },
   {
     name: 'desktop_drag',
@@ -706,7 +773,7 @@ const INSTRUCTIONS = [
   '- Several browsers can be connected; Plum uses the one the user used most recently. If the user says you are in the wrong browser, call browsers and select_browser.',
   '- Tutorials: in guide mode use guide_step for one step at a time; the user clicking the mark (or "Erledigt") sends you "✓ Schritt n erledigt" – then show the next step.',
   '- Saved macros (macros, macro_run) replay demonstrations deterministically; prefer them for recurring tasks and continue by hand where one stops.',
-  '- Native desktop apps (Blender, GIMP, file manager …) through the Plum desktop companion: desktop_status, then desktop_screenshot (zoom a region for small text); act with desktop_click/type/press_key/scroll/drag/open/activate_window, show with desktop_point/annotate/guide_step. Coordinates are pixels of the latest desktop_screenshot; take a new one after each change. In guide mode (status) input is blocked: show, the user operates. The same confirmation rules as in the browser apply.',
+  '- Native desktop apps (Blender, GIMP, file manager …) through the Plum desktop companion: desktop_status, then desktop_read_ui/desktop_find for refs (most KDE, Qt and GTK apps) or desktop_screenshot (zoom a region for small text); act with desktop_click/type/press_key/scroll/drag/open/activate_window, wait with desktop_wait_for, show with desktop_point/annotate/guide_step. Prefer refs; otherwise coordinates are pixels of the latest desktop_screenshot; check the result after each change. In guide mode (status) input is blocked: show, the user operates. The same confirmation rules as in the browser apply.',
   '- Guide mode (status shows mode "guide"): the user is learning in their own tab and does the work. Watch with screenshot/read_page, show with point, annotate and draw, explain in chat; clicking, typing, scrolling and navigating are blocked. Clear old marks before the next step.',
   '- A message titled "Vorführung aus dem Browser" is a demonstration the user recorded: numbered steps with element names, CSS paths and screenshots (red circle = click). Learn the task from it and replay it with the browser tools when asked.',
   '- Prefer read_page/find refs over coordinates; take a screenshot to check visual state. Use extract_table for tabular data and wait_for with gone/url after actions that load.',
@@ -719,6 +786,7 @@ function toolTimeoutMs(name, args) {
   if (name === 'macro_run') return 240_000;
   if (name === 'download_file' || name === 'upload_file') return 120_000;
   if (name === 'draw') return 60_000;
+  if (name === 'desktop_wait_for') return (Math.min(Number(args?.seconds) || 10, 60) + 15) * 1000;
   if (name === 'desktop_wait') return (Math.min(Number(args?.seconds) || 1, 60) + 15) * 1000;
   if (name === 'desktop_type' || name === 'desktop_open') return 60_000;
   if (name === 'wait_for') return (Math.min(Number(args?.seconds) || 10, 60) + 15) * 1000;

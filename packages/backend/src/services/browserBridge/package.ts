@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateRawSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { createBrowserToken } from './tokens.js';
 
 /**
@@ -42,6 +43,39 @@ export function latestExtensionVersion(): string | null {
   } catch {
     return null;
   }
+}
+
+/** The desktop companion this Plum ships, for self-update over the bridge socket. */
+export function latestDesktopCompanion(): {
+  version: string;
+  source: string;
+  sha256: string;
+} | null {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const file = [
+    path.resolve(here, '../../../../desktop-companion/plum_desktop.py'),
+    path.resolve('/app/packages/desktop-companion/plum_desktop.py'),
+  ].find((candidate) => fs.existsSync(candidate));
+  if (!file) return null;
+  try {
+    const source = fs.readFileSync(file, 'utf8');
+    const version = /^VERSION = "([0-9.]+)"/m.exec(source)?.[1];
+    if (!version) return null;
+    return { version, source, sha256: createHash('sha256').update(source).digest('hex') };
+  } catch {
+    return null;
+  }
+}
+
+/** Numeric dotted-version comparison ("0.10.0" > "0.9.3"). */
+export function versionNewer(candidate: string, current: string): boolean {
+  const a = candidate.split('.').map(Number);
+  const b = current.split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const diff = (a[i] || 0) - (b[i] || 0);
+    if (diff) return diff > 0;
+  }
+  return false;
 }
 
 function walk(dir: string): string[] {

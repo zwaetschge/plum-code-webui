@@ -5,6 +5,8 @@ Gives a Plum session the browser extension's abilities over the whole desktop
 and its native apps (Blender, GIMP, Photoshop, file manager …):
 
 - look: screenshots, also zoomed regions; window list and the active window;
+  the accessibility tree (AT-SPI) of a window as an outline with refs, search
+  by text, window text, waiting for text or windows;
 - show: a gliding Plum cursor, circles, boxes, arrows, underlines, pen strokes,
   labels and guide steps with an "Erledigt" button, on a transparent,
   click-through overlay above every window;
@@ -13,6 +15,8 @@ and its native apps (Blender, GIMP, Photoshop, file manager …):
 
 Input goes through virtual uinput devices, so it works on Wayland. KWin
 scripts report the real pointer position and the window list back over DBus.
+AT-SPI positions are relative to the window's client area; adding KWin's
+client geometry turns them into desktop coordinates, so refs can be clicked.
 
 The tray icon switches between Steuern (Plum may act), Nur zeigen (guide mode:
 marks only) and Pausiert. While Plum acts, a "Plum steuert · Stopp" pill sits
@@ -28,6 +32,7 @@ wl-clipboard, and spectacle (KDE) or grim for screenshots.
 
 import asyncio
 import base64
+import hashlib
 import json
 import math
 import os
@@ -69,7 +74,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QPushBut
 
 import websockets
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 CONFIG_DIR = os.path.expanduser("~/.config/plum-desktop")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
@@ -205,9 +210,9 @@ for (var i = 0; i < list.length; i++) {
   var w = list[i];
   if (!w.normalWindow && !w.dialog) continue;
   if (w.skipTaskbar && !w.dialog) continue;
-  var g = w.frameGeometry;
+  var g = w.frameGeometry, c = w.clientGeometry || g;
   out.push({id: String(w.internalId), caption: w.caption, cls: String(w.resourceClass), pid: w.pid,
-            x: g.x, y: g.y, width: g.width, height: g.height,
+            x: g.x, y: g.y, width: g.width, height: g.height, cx: c.x, cy: c.y,
             active: w === workspace.activeWindow, minimized: !!w.minimized});
 }
 """
@@ -691,6 +696,98 @@ def plum_icon(color):
     return QIcon(pixmap)
 
 
+# --------------------------------------------------------------------------- accessibility
+
+
+try:
+    import gi
+
+    gi.require_version("Atspi", "2.0")
+    from gi.repository import Atspi
+
+    Atspi.set_timeout(2000, 8000)  # a hung app must not freeze the companion
+except (ImportError, ValueError):
+    Atspi = None
+
+INTERACTIVE_ROLES = {
+    "push button", "toggle button", "check box", "radio button", "menu item", "check menu item",
+    "radio menu item", "menu", "combo box", "entry", "password text", "text", "link", "page tab",
+    "list item", "tree item", "slider", "spin button", "icon", "split button", "button", "toolbar button",
+    "table cell", "terminal",
+}
+SKIP_ROLES = {"redundant object", "invalid", "filler", "unknown"}
+MAX_WALK = 8000
+
+
+def a11y_frame(window):
+    """The AT-SPI frame of a KWin window: same process, then same title."""
+    if Atspi is None:
+        raise RuntimeError("AT-SPI fehlt (python3-gobject mit Atspi)")
+    desktop = Atspi.get_desktop(0)
+    candidates = []
+    for index in range(desktop.get_child_count()):
+        app = desktop.get_child_at_index(index)
+        try:
+            if app is None or app.get_process_id() != window["pid"]:
+                continue
+            for frame_index in range(app.get_child_count()):
+                frame = app.get_child_at_index(frame_index)
+                if frame is not None:
+                    candidates.append(frame)
+        except Exception:  # noqa: BLE001 - apps vanish while we look
+            continue
+    if not candidates:
+        raise RuntimeError(f"„{window['caption']}“ hat keine Barrierefreiheits-Daten; nutze Screenshot-Koordinaten")
+    caption = window["caption"]
+    for frame in candidates:
+        name = frame.get_name() or ""
+        if name and (name == caption or name in caption or caption in name):
+            return frame
+    for frame in candidates:
+        if frame.get_state_set().contains(Atspi.StateType.ACTIVE):
+            return frame
+    return candidates[0]
+
+
+def a11y_text(node):
+    try:
+        text = node.get_text_iface()
+        if text:
+            return Atspi.Text.get_text(text, 0, min(Atspi.Text.get_character_count(text), 4000)) or ""
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+def a11y_walk(root, interactive_only):
+    """Yield (node, depth, role, name, rect) for visible nodes, depth-first."""
+    stack = [(root, 0)]
+    seen = 0
+    while stack and seen < MAX_WALK:
+        node, depth = stack.pop()
+        seen += 1
+        try:
+            states = node.get_state_set()
+            if not states.contains(Atspi.StateType.SHOWING) and depth > 0:
+                continue
+            role = node.get_role_name()
+            name = (node.get_name() or "").strip()
+            rect = node.get_extents(Atspi.CoordType.WINDOW)
+            count = node.get_child_count()
+        except Exception:  # noqa: BLE001
+            continue
+        if role not in SKIP_ROLES and rect.width > 0 and rect.height > 0 and rect.x >= -2 and rect.y >= -2:
+            if not interactive_only or role in INTERACTIVE_ROLES or states.contains(Atspi.StateType.FOCUSABLE):
+                yield node, depth, role, name, rect, states
+        for index in reversed(range(min(count, 400))):
+            try:
+                child = node.get_child_at_index(index)
+            except Exception:  # noqa: BLE001
+                continue
+            if child is not None:
+                stack.append((child, depth + 1))
+
+
 # --------------------------------------------------------------------------- tools
 
 
@@ -726,6 +823,7 @@ class Tools(QObject):
         self.s = app_state
         self.overlay = app_state.overlay
         self.session = {}
+        self.refs = {}  # "d12" -> (accessible, client origin QPointF, window id)
         # Waiting on KWin or an animation processes events, which would start the
         # next queued call inside the current one; calls run strictly one by one.
         self.busy = False
@@ -779,9 +877,57 @@ class Tools(QObject):
         return QRectF(top_left.x(), top_left.y(), width, height)
 
     def _point(self, args, x="x", y="y"):
+        if args.get("ref") and x == "x":
+            return self._ref_center(str(args["ref"]))
         if args.get(x) is None or args.get(y) is None:
-            raise RuntimeError(f"{x} und {y} (Screenshot-Pixel) fehlen")
+            raise RuntimeError(f"{x} und {y} (Screenshot-Pixel) oder ref fehlen")
         return self.overlay.to_local(args[x], args[y])
+
+    def _target_window(self, args):
+        windows = self.s.kwin.windows()
+        query = str(args.get("window") or "").strip().lower()
+        if query:
+            match = next((w for w in windows if w["id"].lower() == query), None) or next(
+                (w for w in windows if query in w["caption"].lower() or query == w["cls"].lower()), None
+            )
+        else:
+            match = next((w for w in windows if w["active"]), None)
+        if not match:
+            raise RuntimeError("Kein passendes Fenster; desktop_windows listet alle")
+        return match
+
+    def _ref_center(self, ref):
+        entry = self.refs.get(ref)
+        if not entry:
+            raise RuntimeError(f"Unbekannte Referenz {ref}; erst desktop_read_ui oder desktop_find aufrufen")
+        node, origin, _window = entry
+        try:
+            rect = node.get_extents(Atspi.CoordType.WINDOW)
+        except Exception as error:  # noqa: BLE001
+            raise RuntimeError(f"Element {ref} ist nicht mehr da; neu lesen") from error
+        if rect.width <= 0 or rect.height <= 0:
+            raise RuntimeError(f"Element {ref} ist nicht sichtbar")
+        return self.overlay.local_point(QPointF(origin.x() + rect.x + rect.width / 2, origin.y() + rect.y + rect.height / 2))
+
+    def _shot_rect(self, origin, rect):
+        x, y = self.overlay.to_shot(self.overlay.local_point(QPointF(origin.x() + rect.x, origin.y() + rect.y)))
+        return x, y, round(rect.width * self.overlay.factor), round(rect.height * self.overlay.factor)
+
+    def _describe(self, ref, role, name, origin, rect, states, extra=""):
+        x, y, w, h = self._shot_rect(origin, rect)
+        flags = []
+        if states.contains(Atspi.StateType.FOCUSED):
+            flags.append("fokussiert")
+        if states.contains(Atspi.StateType.CHECKED):
+            flags.append("an")
+        if states.contains(Atspi.StateType.SELECTED):
+            flags.append("ausgewählt")
+        if not states.contains(Atspi.StateType.ENABLED) and not states.contains(Atspi.StateType.SENSITIVE):
+            flags.append("inaktiv")
+        label = f" „{name[:80]}“" if name else ""
+        extra = f" = „{extra[:80]}“" if extra and extra != name else ""
+        tail = f" ({', '.join(flags)})" if flags else ""
+        return f"[{ref}] {role}{label}{extra} @ {x + w // 2},{y + h // 2} ({w}×{h}){tail}"
 
     def _screen_of(self, local):
         screen = QGuiApplication.screenAt(self.overlay.global_point(local).toPoint()) or QGuiApplication.primaryScreen()
@@ -893,6 +1039,119 @@ class Tools(QObject):
             lines.append(f"{w['id']} · {w['caption']} ({w['cls']}) bei {x},{y} {size}{flags}")
         return [self._text("\n".join(lines))]
 
+    def desktop_read_ui(self, args):
+        window = self._target_window(args)
+        frame = a11y_frame(window)
+        origin = QPointF(window["cx"], window["cy"])
+        interactive = str(args.get("filter") or "interactive") != "all"
+        limit = max(20, min(int(args.get("max") or 250), 600))
+        self.refs = {}
+        lines = [f"Fenster „{window['caption']}“ ({window['cls']}), Koordinaten in Screenshot-Pixeln:"]
+        for node, depth, role, name, rect, states in a11y_walk(frame, interactive):
+            if not interactive and not name and role not in INTERACTIVE_ROLES:
+                continue
+            ref = f"d{len(self.refs) + 1}"
+            self.refs[ref] = (node, origin, window["id"])
+            value = a11y_text(node) if role in ("entry", "text", "password text", "combo box", "spin button") else ""
+            indent = "  " * min(depth, 12) if not interactive else ""
+            lines.append(indent + self._describe(ref, role, name, origin, rect, states, value if role != "password text" else ""))
+            if len(self.refs) >= limit:
+                lines.append(f"… gekürzt nach {limit} Elementen; desktop_find sucht gezielt.")
+                break
+        if len(lines) == 1:
+            lines.append("Keine sichtbaren Elemente gefunden; nutze desktop_screenshot.")
+        return [self._text("\n".join(lines))]
+
+    def desktop_find(self, args):
+        query = str(args.get("query") or "").strip().lower()
+        if not query:
+            raise RuntimeError("query fehlt: sichtbarer Text, Beschriftung oder Rolle")
+        window = self._target_window(args)
+        frame = a11y_frame(window)
+        origin = QPointF(window["cx"], window["cy"])
+        hits = []
+        for node, _depth, role, name, rect, states in a11y_walk(frame, False):
+            try:
+                description = (node.get_description() or "").lower()
+            except Exception:  # noqa: BLE001
+                description = ""
+            text = a11y_text(node) if not name and role in ("label", "static", "text", "paragraph", "heading") else ""
+            haystack = f"{name} {description} {text}".lower()
+            if query in haystack or query == role:
+                # Exact names and controls first: those are what the agent wants to click.
+                rank = (0 if name.lower() == query else 1) + (0 if role in INTERACTIVE_ROLES else 2)
+                hits.append((rank, len(hits), node, role, name or text.strip()[:80], rect, states))
+                if len(hits) >= 60:
+                    break
+        if not hits:
+            return [self._text(f"Nichts zu „{query}“ in „{window['caption']}“ gefunden")]
+        lines = []
+        for _rank, _order, node, role, name, rect, states in sorted(hits, key=lambda hit: hit[:2])[:25]:
+            ref = f"d{len(self.refs) + 1}"
+            self.refs[ref] = (node, origin, window["id"])
+            lines.append(self._describe(ref, role, name, origin, rect, states))
+        return [self._text("\n".join(lines))]
+
+    def desktop_get_text(self, args):
+        window = self._target_window(args)
+        frame = a11y_frame(window)
+        if args.get("ref"):
+            entry = self.refs.get(str(args["ref"]))
+            if not entry:
+                raise RuntimeError("Unbekannte Referenz; erst desktop_read_ui oder desktop_find")
+            frame = entry[0]
+        limit = max(500, min(int(args.get("maxChars") or 20000), 60000))
+        parts, size, last = [], 0, ""
+        for node, _depth, role, name, _rect, _states in a11y_walk(frame, False):
+            text = a11y_text(node).strip() or (name if role in ("label", "heading", "link", "push button", "menu item") else "")
+            if not text or text == last:
+                continue
+            last = text
+            parts.append(text)
+            size += len(text) + 1
+            if size >= limit:
+                parts.append("… gekürzt")
+                break
+        body = "\n".join(parts) if parts else "(kein Text über Barrierefreiheit verfügbar)"
+        return [self._text(f"„{window['caption']}“\n\n{body}")]
+
+    def desktop_wait_for(self, args):
+        text = str(args.get("text") or "").strip().lower()
+        title = str(args.get("window") or "").strip().lower()
+        gone = bool(args.get("gone"))
+        if not text and not title:
+            raise RuntimeError("text oder window angeben")
+        end = time.time() + max(1, min(float(args.get("seconds") or 10), 60))
+        while True:
+            windows = self.s.kwin.windows()
+            present = True
+            if title:
+                present = any(title in w["caption"].lower() or title == w["cls"].lower() for w in windows)
+            if present and text:
+                present = False
+                try:
+                    window = self._target_window({"window": args.get("window")} if title else {})
+                    for node, _d, role, name, _r, _s in a11y_walk(a11y_frame(window), False):
+                        if text in name.lower() or (role in ("label", "text", "paragraph", "heading", "static") and text in a11y_text(node).lower()):
+                            present = True
+                            break
+                except RuntimeError:
+                    present = False
+            if present != gone:
+                return [self._text(("Verschwunden: " if gone else "Gefunden: ") + (text or title))]
+            if time.time() >= end:
+                raise RuntimeError(f"Zeit abgelaufen: „{text or title}“ {'noch da' if gone else 'nicht erschienen'}")
+            pump(0.4)
+
+    def desktop_clipboard(self, args):
+        if args.get("text") is not None:
+            subprocess.run(["wl-copy", "--type", "text/plain"], input=str(args["text"]).encode(), check=True, timeout=5, env=CHILD_ENV)
+            return [self._text(f"In die Zwischenablage gelegt: {len(str(args['text']))} Zeichen")]
+        got = subprocess.run(["wl-paste", "--no-newline", "--type", "text/plain"], capture_output=True, timeout=3, env=CHILD_ENV)
+        if got.returncode != 0:
+            return [self._text("Zwischenablage ist leer oder enthält keinen Text")]
+        return [self._text(got.stdout.decode("utf-8", "replace")[:20000])]
+
     # ---- act
 
     def desktop_activate_window(self, args):
@@ -935,14 +1194,16 @@ class Tools(QObject):
         self.overlay.ripple(local)
         pump(0.25)
         what = "Doppelklick" if count == 2 else {"left": "Klick", "right": "Rechtsklick", "middle": "Mittelklick"}[button]
-        return [self._text(f"{what} bei {args['x']},{args['y']}")]
+        where = args.get("ref") or f"{args.get('x')},{args.get('y')}"
+        return [self._text(f"{what} bei {where}")]
 
     def desktop_hover(self, args):
         local = self._point(args)
         self._acting(local, "Zeiger")
         self._pointer_to(local)
         pump(0.3)
-        return [self._text(f"Zeiger auf {args['x']},{args['y']}")]
+        where = args.get("ref") or f"{args.get('x')},{args.get('y')}"
+        return [self._text(f"Zeiger auf {where}")]
 
     def desktop_drag(self, args):
         start = self._point(args, "fromX", "fromY")
@@ -966,7 +1227,7 @@ class Tools(QObject):
         return [self._text(f"Gezogen von {args['fromX']},{args['fromY']} nach {args['toX']},{args['toY']}")]
 
     def desktop_scroll(self, args):
-        if args.get("x") is not None and args.get("y") is not None:
+        if args.get("ref") or (args.get("x") is not None and args.get("y") is not None):
             local = self._point(args)
             self._acting(local, "Scrollen")
             self._pointer_to(local)
@@ -994,8 +1255,8 @@ class Tools(QObject):
         text = str(args.get("text") or "")
         if not text:
             raise RuntimeError("text fehlt")
-        if args.get("x") is not None and args.get("y") is not None:
-            self.desktop_click({"x": args["x"], "y": args["y"]})
+        if args.get("ref") or (args.get("x") is not None and args.get("y") is not None):
+            self.desktop_click({k: args[k] for k in ("x", "y", "ref") if args.get(k) is not None})
         if self.overlay.cursor:
             self._acting(self.overlay.cursor[0], "Tippen")
         if not shutil.which("wl-copy"):
@@ -1223,6 +1484,8 @@ class Bridge(threading.Thread):
                     log("connected:", url)
                 elif frame.get("type") == "error":
                     raise RuntimeError(frame.get("message") or "rejected")
+                elif frame.get("type") == "update":
+                    self.s.update.emit(frame)
                 elif frame.get("type") == "call":
                     self.s.tools.call.emit(
                         frame["id"], frame.get("tool", ""), frame.get("args") or {}, frame.get("session") or {}
@@ -1236,6 +1499,7 @@ class Bridge(threading.Thread):
 
 class App(QObject):
     connected = Signal(bool)
+    update = Signal(object)
 
     def __init__(self, config):
         super().__init__()
@@ -1250,6 +1514,8 @@ class App(QObject):
         self.tools = Tools(self)
         self.online = False
         self.connected.connect(self._on_connected)
+        self.update.connect(self._self_update)
+        self.config = config
         self._tray()
 
     def _tray(self):
@@ -1304,6 +1570,36 @@ class App(QObject):
         self.bridge.send_state()
         self._refresh_tray()
         log("mode:", mode)
+
+    def _self_update(self, frame):
+        """Plum pushes its shipped companion to older ones; replace and restart."""
+        if self.config.get("autoUpdate") is False:
+            log("update to", frame.get("version"), "available; autoUpdate is off")
+            return
+        source = str(frame.get("source") or "")
+        if hashlib.sha256(source.encode()).hexdigest() != frame.get("sha256"):
+            log("update rejected: digest mismatch")
+            return
+        try:
+            compile(source, "plum_desktop.py", "exec")
+        except SyntaxError as error:
+            log("update rejected:", error)
+            return
+        if self.tools.busy:
+            QTimer.singleShot(5000, lambda: self._self_update(frame))
+            return
+        path = os.path.abspath(__file__)
+        try:
+            shutil.copy2(path, path + ".prev")
+            with open(path + ".new", "w", encoding="utf-8") as handle:
+                handle.write(source)
+            os.replace(path + ".new", path)
+        except OSError as error:
+            log("update failed:", error)
+            return
+        log(f"updated {VERSION} -> {frame.get('version')}, restarting")
+        self.tray.hide()
+        os.execv(sys.executable, [sys.executable, path])
 
     def guide_done(self, step):
         if not step or not step.get("session"):
