@@ -485,6 +485,7 @@ private fun AppSettingsPage(
             SettingsPages.BROWSER -> {
                 item(key = "browser") { FirefoxBrowserPanel(state = state, viewModel = viewModel) }
                 item(key = "desktop") { DesktopCompanionPanel() }
+                item(key = "device-control") { DeviceControlPanel() }
             }
             SettingsPages.GATEWAY -> item(key = "gateway") { GatewayTokensPanel(state = state, viewModel = viewModel) }
             SettingsPages.APPEARANCE -> {

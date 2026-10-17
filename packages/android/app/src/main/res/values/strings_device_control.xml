@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="device_control_title">Device control</string>
+    <string name="device_control_subtitle">Let Plum sessions use this phone through the app — no adb, no pairing code. Plum reads the screen, taps, types and takes screenshots while you watch.</string>
+    <string name="device_control_accessibility_label">Plum device control</string>
+    <string name="device_control_accessibility_description">Lets Plum sessions read and operate this phone: read the screen, tap, type, scroll and take screenshots. No data leaves your Plum server.</string>
+    <string name="device_control_notification_title">Device control</string>
+    <string name="device_control_notification_text">This phone is connected to Plum and can be operated by your sessions.</string>
+    <string name="device_control_enable_hint">Enable “Plum device control” in Android’s accessibility settings; the phone pairs itself.</string>
+    <string name="device_control_open_accessibility">Open accessibility settings</string>
+    <string name="device_control_status_connected">Connected</string>
+    <string name="device_control_status_connecting">Accessibility on — connecting…</string>
+    <string name="device_control_status_accessibility_off">Not enabled — accessibility service is off</string>
+    <string name="device_control_status_paused">Paused — sessions cannot use the phone</string>
+    <string name="device_control_pause">Allow sessions to control this phone</string>
+    <string name="device_control_pause_footer">While connected, a notification shows that sessions can operate the phone. Keep this off to pause without turning the accessibility service off.</string>
+</resources>

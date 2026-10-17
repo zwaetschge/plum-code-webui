@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Device control: list launchable apps for open_app/list_apps -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
     <!-- POST_NOTIFICATIONS required on Android 13+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -321,6 +324,26 @@
              notifications arrive even when the app is backgrounded. -->
         <service
             android:name=".core.notifications.AgentWatchService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- ── Device control (accessibility bridge, no adb) ────────────── -->
+        <!-- The accessibility service is the user's consent moment; it starts
+             DeviceControlService, which pairs the phone with the backend. -->
+        <service
+            android:name=".core.devicecontrol.DeviceControlAccessibilityService"
+            android:exported="false"
+            android:label="@string/device_control_accessibility_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/device_control_accessibility" />
+        </service>
+        <service
+            android:name=".core.devicecontrol.DeviceControlService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 

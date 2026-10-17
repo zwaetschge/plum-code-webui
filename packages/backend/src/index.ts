@@ -79,9 +79,11 @@ import opencodeRoutes from './routes/opencode.js';
 import setupRoutes from './routes/setup.js';
 import gatewayRoutes from './routes/gateway.js';
 import browserBridgeRoutes from './routes/browserBridge.js';
+import deviceBridgeRoutes from './routes/deviceBridge.js';
 import connectionsRoutes, { sessionConnectionsRouter } from './routes/connections.js';
 import { resetSessionSshBundles } from './services/connections/sshRuntime.js';
 import { browserBridge } from './services/browserBridge/bridge.js';
+import { deviceBridge } from './services/deviceBridge/bridge.js';
 import memoriesRoutes from './routes/memories.js';
 import androidRoutes from './routes/android.js';
 import appRoutes from './routes/app.js';
@@ -278,6 +280,8 @@ async function main() {
   await resetSessionSshBundles();
   // Firefox extension relay; its own upgrade path and token auth.
   browserBridge.attach(httpServer);
+  // Android device control relay (Plum app accessibility bridge, no adb).
+  deviceBridge.attach(httpServer);
   attachNotificationIo(io);
 
   // Initialize task delegation system
@@ -388,6 +392,8 @@ async function main() {
 
   // Agents upload files into web forms through the browser bridge (hook-secret only).
   app.use('/api/browser-bridge/internal', express.json({ limit: '40mb' }));
+  // Device screenshots come back through the same kind of relay.
+  app.use('/api/device-bridge/internal', express.json({ limit: '40mb' }));
   app.use('/api/assistant/memory-system/transfer', express.json({ limit: '2mb' }));
   app.use(express.json());
   app.use(cookieParser());
@@ -462,6 +468,7 @@ async function main() {
   app.use('/api/setup', setupRoutes);
   app.use('/api/gateway', gatewayRoutes);
   app.use('/api/browser-bridge', browserBridgeRoutes);
+  app.use('/api/device-bridge', deviceBridgeRoutes);
   app.use('/api/codex', codexRoutes);
   app.use('/api/opencode', opencodeRoutes);
   app.use('/api/memories', memoriesRoutes);

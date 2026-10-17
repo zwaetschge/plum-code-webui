@@ -97,6 +97,7 @@ import { MessageBubble } from '@/components/chat/MessageBubble';
 import { ToolExecutionCard } from '@/components/chat/ToolExecutionCard';
 import { ToolDetailDialog } from '@/components/session/ToolDetailDialog';
 import { AndroidDevicePanel } from '@/components/session/AndroidDevicePanel';
+import { DeviceBridgeStatus } from '@/components/session/DeviceBridgeStatus';
 import { DesignPresetDialog } from '@/components/presets/DesignPresetDialog';
 import { WritingStyleMenu } from '@/components/presets/WritingStyleMenu';
 import { designLabel, useStyleLibrary } from '@/components/presets/useStyleLibrary';
@@ -3749,6 +3750,12 @@ export function SessionPage() {
               icon: <Smartphone className="h-3.5 w-3.5" />,
               summary: session.androidDeviceSerial ? 'Gerät angehängt' : undefined,
               content: <AndroidDevicePanel sessionId={session.id} />,
+            },
+            {
+              id: 'device-control',
+              title: 'Gerätesteuerung (App)',
+              icon: <Smartphone className="h-3.5 w-3.5" />,
+              content: <DeviceBridgeStatus />,
             },
             {
               id: 'ssh',

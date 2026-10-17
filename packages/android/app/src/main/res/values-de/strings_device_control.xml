@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="device_control_title">Gerätesteuerung</string>
+    <string name="device_control_subtitle">Plum-Sessions können dieses Handy über die App bedienen — ohne adb und ohne Kopplungscode. Plum liest den Bildschirm, tippt, gibt Text ein und macht Screenshots, während du zusiehst.</string>
+    <string name="device_control_accessibility_label">Plum Gerätesteuerung</string>
+    <string name="device_control_accessibility_description">Erlaubt Plum-Sessions, dieses Handy zu lesen und zu bedienen: Bildschirm lesen, tippen, Text eingeben, scrollen und Screenshots. Es verlassen keine Daten deinen Plum-Server.</string>
+    <string name="device_control_notification_title">Gerätesteuerung</string>
+    <string name="device_control_notification_text">Dieses Handy ist mit Plum verbunden und kann von deinen Sessionen bedient werden.</string>
+    <string name="device_control_enable_hint">Aktiviere „Plum Gerätesteuerung“ in den Android-Bedienungshilfen — das Handy koppelt sich von selbst.</string>
+    <string name="device_control_open_accessibility">Bedienungshilfen öffnen</string>
+    <string name="device_control_status_connected">Verbunden</string>
+    <string name="device_control_status_connecting">Bedienungshilfen aktiv — verbindet…</string>
+    <string name="device_control_status_accessibility_off">Nicht aktiviert — Bedienungshilfen sind aus</string>
+    <string name="device_control_status_paused">Pausiert — Sessionen können das Handy nicht bedienen</string>
+    <string name="device_control_pause">Sessionen dürfen dieses Handy bedienen</string>
+    <string name="device_control_pause_footer">Solange verbunden, zeigt eine Benachrichtigung, dass Sessionen das Handy bedienen können. Schalte das aus, um zu pausieren, ohne die Bedienungshilfen zu deaktivieren.</string>
+</resources>
