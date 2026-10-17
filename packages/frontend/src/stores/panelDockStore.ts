@@ -18,6 +18,7 @@ export type DockablePanel =
   | 'versions'
   | 'notes'
   | 'preview'
+  | 'designs'
   | 'toolLog';
 
 const DOCKABLE_PANELS: DockablePanel[] = [
@@ -30,6 +31,7 @@ const DOCKABLE_PANELS: DockablePanel[] = [
   'versions',
   'notes',
   'preview',
+  'designs',
   'toolLog',
 ];
 
@@ -42,6 +44,7 @@ const LEGACY_PANEL_GROUPS: Record<string, DockablePanel> = {
   checkpoints: 'versions',
   android: 'connections',
   browser: 'connections',
+  designStyle: 'designs',
 };
 
 function unpinnedPanels(): Record<DockablePanel, boolean> {

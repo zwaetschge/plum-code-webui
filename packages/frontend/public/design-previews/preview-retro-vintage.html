@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Retro Vintage — design preview · 400×300</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Righteous&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     RETRO VINTAGE DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     70s period print · halftone sun · burnt-orange · ticket stubs
+     ============================================================ */
+  :root {
+    --rv-cream: #F4EBD9;
+    --rv-orange: #D96C2C;
+    --rv-brown: #5A3A22;
+    --rv-olive: #8A8040;
+    --rv-mustard: #D9A23B;
+    --rv-teal: #2E6B62;
+    --rv-ink: #3B2B18;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    background:
+      repeating-linear-gradient(90deg, transparent 0 3px, rgba(59, 43, 24, 0.016) 3px 4px),
+      radial-gradient(320px 200px at 82% 8%, rgba(217, 162, 59, 0.16), transparent 62%),
+      var(--rv-cream);
+    color: var(--rv-ink);
+    position: relative;
+    padding: 16px;
+  }
+
+  .ticket {
+    position: absolute;
+    inset: 14px;
+    border: 2px solid var(--rv-brown);
+    border-radius: 8px;
+    background:
+      repeating-linear-gradient(45deg, rgba(90, 58, 34, 0.035) 0 8px, transparent 8px 16px),
+      linear-gradient(180deg, #FBF4E4 0%, #F4EBD9 100%);
+    box-shadow: 0 14px 30px -16px rgba(59, 43, 24, 0.5);
+    overflow: hidden;
+  }
+
+  /* perforated bottom edge */
+  .ticket::after {
+    content: '';
+    position: absolute;
+    left: -10px; right: -10px; bottom: 42px;
+    height: 0;
+    border-top: 2px dashed rgba(90, 58, 34, 0.55);
+  }
+
+  .starburst {
+    position: absolute;
+    left: 26px; top: -84px;
+    width: 240px; height: 240px;
+    background: conic-gradient(
+      var(--rv-orange) 0 4.5%, transparent 4.5% 9%,
+      var(--rv-mustard) 9% 13.5%, transparent 13.5% 18%,
+      var(--rv-orange) 18% 22.5%, transparent 22.5% 27%,
+      var(--rv-mustard) 27% 31.5%, transparent 31.5% 36%,
+      var(--rv-orange) 36% 40.5%, transparent 40.5% 45%,
+      var(--rv-mustard) 45% 49.5%, transparent 49.5% 54%,
+      var(--rv-orange) 54% 58.5%, transparent 58.5% 63%,
+      var(--rv-mustard) 63% 67.5%, transparent 67.5% 72%,
+      var(--rv-orange) 72% 76.5%, transparent 76.5% 81%,
+      var(--rv-mustard) 81% 85.5%, transparent 85.5% 90%,
+      var(--rv-orange) 90% 94.5%, transparent 94.5% 100%
+    );
+    border-radius: 50%;
+    mask: radial-gradient(circle, transparent 0 52px, #000 52px);
+    -webkit-mask: radial-gradient(circle, transparent 0 52px, #000 52px);
+    opacity: 0.9;
+  }
+
+  .sun {
+    position: absolute;
+    right: 118px; top: 18px;
+    width: 74px; height: 74px;
+    border-radius: 50%;
+    background:
+      repeating-radial-gradient(circle at 50% 50%, var(--rv-mustard) 0 2.5px, var(--rv-orange) 2.5px 6px);
+    box-shadow: 0 0 0 3px var(--rv-cream), 0 0 0 5px var(--rv-olive);
+  }
+
+  .headline {
+    position: absolute;
+    right: 20px; top: 100px;
+    font-family: 'Righteous', 'IBM Plex Mono', sans-serif;
+    font-size: 31px;
+    line-height: 0.95;
+    text-align: right;
+    color: var(--rv-orange);
+    text-shadow: 2.5px 2.5px 0 var(--rv-cream), 4px 4px 0 var(--rv-teal);
+    text-transform: uppercase;
+    width: 200px;
+  }
+
+  .corner {
+    position: absolute;
+    left: 20px; top: 88px;
+    width: 128px;
+  }
+  .corner .badge {
+    display: inline-block;
+    background: var(--rv-teal);
+    color: #F9F2E4;
+    font-size: 8px;
+    letter-spacing: 0.26em;
+    padding: 4px 10px;
+    border-radius: 2px;
+    transform: rotate(-2deg);
+  }
+  .corner .copy {
+    font-size: 8.5px;
+    line-height: 1.6;
+    color: rgba(59, 43, 24, 0.75);
+    margin-top: 10px;
+    border-left: 3px solid var(--rv-mustard);
+    padding-left: 8px;
+  }
+
+  .stub {
+    position: absolute;
+    left: 0; right: 0; bottom: 0; height: 42px;
+    background: var(--rv-brown);
+    color: #F2E7D2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px;
+    font-size: 8px;
+    letter-spacing: 0.18em;
+  }
+  .stub .seat { color: var(--rv-mustard); }
+  .stub .serial {
+    font-size: 7.5px;
+    letter-spacing: 0.3em;
+    opacity: 0.7;
+  }
+</style>
+</head>
+<body>
+  <div class="ticket">
+    <div class="starburst"></div>
+    <div class="sun"></div>
+    <div class="headline">Sun<br>Route<br>77</div>
+    <div class="corner">
+      <span class="badge">SINCE 1974</span>
+      <div class="copy">Period print cues, warm ink on aged stock, and one honest route from here to the coast.</div>
+    </div>
+    <div class="stub">
+      <span>ADMIT ONE · DRIVE-IN</span>
+      <span class="seat">ROW C — SEAT 12</span>
+      <span class="serial">№ 004729</span>
+    </div>
+  </div>
+</body>
+</html>

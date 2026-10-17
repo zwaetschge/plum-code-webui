@@ -12,7 +12,6 @@
     <string name="preset_design_caption">Gilt für Oberflächen, die der Agent in dieser Session baut oder ändert.</string>
     <string name="preset_design_none">Ohne Design-Vorgabe</string>
     <string name="preset_design_search">Alle Design-Vorgaben durchsuchen</string>
-    <string name="preset_design_more">%1$d weitere Vorgaben über die Suche</string>
     <string name="preset_design_empty">Keine Design-Vorgabe gefunden.</string>
     <string name="preset_defaults_title">Vorgaben für neue Gespräche</string>
     <string name="preset_default_writing">Schreibstil in Chat und Task</string>

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hand Drawn — design preview · 400×300</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gochi+Hand&family=Patrick+Hand:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     HAND-DRAWN DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     Ink sketchbook · wobbly borders · pencil annotations
+     ============================================================ */
+  :root {
+    --hd-paper: #FBF7EE;
+    --hd-ink: #2B2A33;
+    --hd-pencil: rgba(43, 42, 51, 0.55);
+    --hd-blue: #4C86C8;
+    --hd-red: #D65A54;
+    --hd-marker: #FFD98E;
+    --hd-line: rgba(43, 42, 51, 0.14);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: 'Patrick Hand', 'Comic Sans MS', cursive, sans-serif;
+    font-size: 13px;
+    color: var(--hd-ink);
+    background:
+      radial-gradient(circle at 12% 12%, rgba(76, 134, 200, 0.05) 0%, transparent 30%),
+      repeating-linear-gradient(0deg, transparent 0 27px, var(--hd-line) 27px 28px),
+      var(--hd-paper);
+    padding: 20px;
+    position: relative;
+  }
+
+  /* notebook margin */
+  body::before {
+    content: '';
+    position: absolute;
+    left: 34px; top: 0; bottom: 0;
+    width: 1.5px;
+    background: rgba(214, 90, 84, 0.4);
+  }
+  /* punched holes */
+  body::after {
+    content: '';
+    position: absolute;
+    left: 12px; top: 130px;
+    width: 12px; height: 40px;
+    border-radius: 8px;
+    background: #EDE7D8;
+    box-shadow: 0 38px 0 -12px #EDE7D8, 0 84px 0 -8px #EDE7D8;
+    transform: rotate(-2deg);
+  }
+
+  .sketch {
+    border: 2.5px solid var(--hd-ink);
+    border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+    background: #fff;
+    position: relative;
+  }
+
+  .hero {
+    padding: 14px 16px;
+    transform: rotate(-0.8deg);
+    box-shadow: 3px 4px 0 rgba(43, 42, 51, 0.14);
+  }
+
+  .eyebrow {
+    display: inline-block;
+    font-family: 'Gochi Hand', cursive;
+    font-size: 11px;
+    color: #fff;
+    background: var(--hd-blue);
+    padding: 2px 12px;
+    border-radius: 255px 12px 225px 12px / 12px 225px 12px 255px;
+    transform: rotate(-2deg);
+  }
+
+  .headline { font-size: 26px; line-height: 1.05; margin-top: 6px; }
+  .headline u {
+    text-decoration: none;
+    background: linear-gradient(transparent 55%, var(--hd-marker) 55%, var(--hd-marker) 92%, transparent 92%);
+    padding: 0 4px;
+  }
+  .sub { font-size: 12px; color: var(--hd-pencil); margin-top: 5px; }
+
+  .arrow {
+    position: absolute;
+    right: 52px; top: 34px;
+    font-family: 'Gochi Hand', cursive;
+    font-size: 12px;
+    color: var(--hd-red);
+    transform: rotate(14deg);
+  }
+  .arrow::after {
+    content: '↘';
+    position: absolute;
+    right: -14px; top: 14px;
+    font-size: 16px;
+  }
+
+  .steps {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 16px;
+  }
+
+  .note {
+    padding: 10px 12px 12px;
+    font-size: 11.5px;
+    line-height: 1.4;
+    position: relative;
+  }
+  .note:nth-child(1) { transform: rotate(0.7deg); }
+  .note:nth-child(2) {
+    transform: rotate(-1.4deg);
+    background: var(--hd-marker);
+    border-color: var(--hd-ink);
+  }
+
+  .note .num {
+    position: absolute;
+    top: -10px; left: -10px;
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    background: #fff;
+    border: 2px solid var(--hd-ink);
+    border-radius: 46% 54% 52% 48% / 55% 48% 52% 45%;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .note:nth-child(2) .num { background: #fff; }
+
+  .tape {
+    position: absolute;
+    width: 58px; height: 15px;
+    background: rgba(255, 217, 142, 0.55);
+    border: 1px solid rgba(43, 42, 51, 0.12);
+    border-left: none; border-right: none;
+    top: -8px; left: 50%;
+    transform: translateX(-50%) rotate(-3deg);
+  }
+
+  .caption {
+    position: absolute;
+    right: 20px; bottom: 16px;
+    font-family: 'Gochi Hand', cursive;
+    font-size: 10.5px;
+    color: var(--hd-pencil);
+    transform: rotate(-2deg);
+  }
+</style>
+</head>
+<body>
+  <div class="sketch hero">
+    <span class="eyebrow">field notes</span>
+    <div class="headline">Drawn, not<br><u>generated.</u></div>
+    <div class="sub">Sketchy borders and pencil hints keep it honest.</div>
+    <div class="arrow">just a pen!</div>
+  </div>
+
+  <div class="steps">
+    <div class="sketch note"><span class="num">1</span>Scribble the idea while it is still warm — no rulers allowed.</div>
+    <div class="sketch note"><span class="tape"></span><span class="num">2</span>Pin it up, live with it, erase what nobody needed.</div>
+  </div>
+
+  <div class="caption">fig. 01 — the whole system, by hand</div>
+</body>
+</html>

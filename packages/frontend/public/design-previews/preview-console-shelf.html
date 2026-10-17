@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Console Shelf — design preview · 400×300</title>
+<style>
+  /* ============================================================
+     CONSOLE SHELF DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     Framed cover artwork · near-achromatic glass chrome · shelf
+     ============================================================ */
+  :root {
+    --cs-ink: #E9F0ED;
+    --cs-ink-2: rgba(233, 240, 237, 0.66);
+    --cs-surface: #2E2F43;
+    --cs-panel: rgba(255, 255, 255, 0.07);
+    --cs-line: rgba(255, 255, 255, 0.16);
+    --cs-accent: #5FBF8A;
+    --cs-accent-warm: #E0A94F;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background:
+      radial-gradient(360px 210px at 20% -12%, rgba(94, 96, 152, 0.5) 0%, transparent 60%),
+      radial-gradient(300px 200px at 92% 108%, rgba(92, 122, 110, 0.4) 0%, transparent 58%),
+      linear-gradient(165deg, #23242F 0%, #1C1D26 100%);
+    color: var(--cs-ink);
+    padding: 16px;
+    position: relative;
+  }
+
+  .chrome {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: linear-gradient(160deg, rgba(255,255,255,0.13), rgba(255,255,255,0.03));
+    border: 1px solid var(--cs-line);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.22);
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+  }
+  .chrome .tab { color: var(--cs-ink-2); }
+  .chrome .tab.on {
+    color: var(--cs-surface);
+    background: rgba(233, 240, 237, 0.92);
+    border-radius: 999px;
+    padding: 3px 10px;
+  }
+  .chrome .count { margin-left: auto; color: var(--cs-accent-warm); }
+
+  .shelf-label {
+    margin-top: 16px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--cs-ink-2);
+  }
+  .shelf-label b { color: var(--cs-ink); font-size: 11px; letter-spacing: 0.14em; }
+
+  .shelf {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 10px;
+  }
+
+  .cover { position: relative; }
+  .cover .art {
+    aspect-ratio: 3 / 4;
+    border-radius: 6px;
+    border: 1px solid var(--cs-line);
+    box-shadow: 0 12px 22px -10px rgba(0, 0, 0, 0.75), inset 0 1px 0 rgba(255,255,255,0.16);
+    position: relative;
+    overflow: hidden;
+  }
+  .cover .frame-badge {
+    position: absolute;
+    top: 6px; left: 6px;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(20, 21, 30, 0.72);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: var(--cs-ink);
+    z-index: 2;
+  }
+  .cover .title {
+    margin-top: 6px;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--cs-ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cover .meta { font-size: 8px; color: var(--cs-ink-2); margin-top: 1px; }
+
+  .art-1 { background: linear-gradient(150deg, #E0A94F 0%, #B4533A 58%, #6E3B4E 100%); }
+  .art-1::after { content:''; position:absolute; inset:0; background: radial-gradient(circle at 70% 22%, rgba(255,255,255,0.35), transparent 42%); }
+  .art-2 { background: linear-gradient(160deg, #2E4A62 0%, #1E2C3C 55%, #0F141C 100%); }
+  .art-2::after { content:''; position:absolute; inset:0; background: repeating-linear-gradient(115deg, rgba(255,255,255,0.08) 0 2px, transparent 2px 9px); }
+  .art-3 { background: linear-gradient(140deg, #5FBF8A 0%, #2E6B52 60%, #17281F 100%); }
+  .art-3::after { content:''; position:absolute; left:14%; right:14%; top:30%; bottom:0; background: linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0.02) 70%); clip-path: polygon(30% 0, 70% 0, 100% 100%, 0 100%); }
+  .art-4 { background: linear-gradient(155deg, #8E7DBE 0%, #4B3D75 55%, #211B36 100%); }
+  .art-4::after { content:''; position:absolute; inset:0; background: radial-gradient(circle at 30% 68%, rgba(255,255,255,0.3), transparent 36%), radial-gradient(circle at 68% 30%, rgba(255,255,255,0.18), transparent 30%); }
+
+  .cover.selected .art { border-color: rgba(95, 191, 138, 0.85); box-shadow: 0 0 0 2px rgba(95, 191, 138, 0.5), 0 14px 26px -10px rgba(0,0,0,0.8); }
+  .cover.selected .art::before {
+    content: '▶';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: rgba(233, 240, 237, 0.95);
+    background: rgba(15, 16, 24, 0.34);
+    z-index: 1;
+  }
+
+  .dock {
+    position: absolute;
+    left: 50%; bottom: 12px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    padding: 7px 12px;
+    border-radius: 14px;
+    background: linear-gradient(160deg, rgba(255,255,255,0.14), rgba(255,255,255,0.03));
+    border: 1px solid var(--cs-line);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 10px 22px -10px rgba(0,0,0,0.8);
+    align-items: center;
+  }
+  .dock i {
+    width: 22px; height: 6px;
+    border-radius: 3px;
+    background: rgba(233, 240, 237, 0.28);
+  }
+  .dock i.on { background: var(--cs-accent); box-shadow: 0 0 10px rgba(95, 191, 138, 0.6); }
+</style>
+</head>
+<body>
+  <div class="chrome">
+    <span class="tab on">Library</span>
+    <span class="tab">Store</span>
+    <span class="tab">Friends</span>
+    <span class="count">128 titles</span>
+  </div>
+
+  <div class="shelf-label"><b>Recently played</b><span>covers carry the colour</span></div>
+
+  <div class="shelf">
+    <div class="cover selected">
+      <div class="art art-1"><span class="frame-badge">NOW</span></div>
+      <div class="title">Amber Run</div>
+      <div class="meta">Chapter 3 · 62%</div>
+    </div>
+    <div class="cover">
+      <div class="art art-2"><span class="frame-badge">RPG</span></div>
+      <div class="title">Deep Signal</div>
+      <div class="meta">12h played</div>
+    </div>
+    <div class="cover">
+      <div class="art art-3"><span class="frame-badge">PULSE</span></div>
+      <div class="title">Overgrowth</div>
+      <div class="meta">Co-op · 4</div>
+    </div>
+    <div class="cover">
+      <div class="art art-4"><span class="frame-badge">VOYAGE</span></div>
+      <div class="title">Night Atlas</div>
+      <div class="meta">New</div>
+    </div>
+  </div>
+
+  <div class="dock"><i class="on"></i><i></i><i></i><i></i><i></i></div>
+</body>
+</html>

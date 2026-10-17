@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terminal Cyber — design preview · 400×300</title>
+<style>
+  /* ============================================================
+     TERMINAL CYBER DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     Dark console · monospaced density · phosphor accents
+     ============================================================ */
+  :root {
+    --tc-bg: #0B0C14;
+    --tc-panel: #10121E;
+    --tc-ink: #E6FFF7;
+    --tc-dim: rgba(230, 255, 247, 0.55);
+    --tc-faint: rgba(230, 255, 247, 0.28);
+    --tc-mint: #46F2B8;
+    --tc-cyan: #57D9F2;
+    --tc-magenta: #F25FD9;
+    --tc-line: rgba(230, 255, 247, 0.12);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: 'Cascadia Code', 'JetBrains Mono', ui-monospace, 'Courier New', monospace;
+    font-size: 10px;
+    background:
+      radial-gradient(420px 240px at 88% -10%, rgba(70, 242, 184, 0.07), transparent 60%),
+      var(--tc-bg);
+    color: var(--tc-ink);
+    padding: 12px 14px;
+    position: relative;
+  }
+
+  /* CRT flicker band */
+  body::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px);
+    pointer-events: none;
+  }
+
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--tc-line);
+    background: var(--tc-panel);
+    border-radius: 6px 6px 0 0;
+    padding: 5px 10px;
+  }
+  .titlebar .dots { display: flex; gap: 5px; }
+  .titlebar .dots i { width: 7px; height: 7px; border-radius: 50%; }
+  .titlebar .dots i:nth-child(1) { background: var(--tc-magenta); }
+  .titlebar .dots i:nth-child(2) { background: var(--tc-cyan); }
+  .titlebar .dots i:nth-child(3) { background: var(--tc-mint); }
+  .titlebar .path { font-size: 8.5px; letter-spacing: 0.14em; color: var(--tc-dim); }
+  .titlebar .conn { margin-left: auto; font-size: 8px; color: var(--tc-mint); }
+
+  .console {
+    border: 1px solid var(--tc-line);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    background: linear-gradient(180deg, #0C0E17, #0A0B12);
+    padding: 10px 12px 8px;
+    height: 226px;
+    overflow: hidden;
+    line-height: 1.62;
+  }
+
+  .l .p { color: var(--tc-mint); }
+  .l .c { color: var(--tc-cyan); }
+  .l .m { color: var(--tc-magenta); }
+  .l .d { color: var(--tc-dim); }
+  .l .ok { color: var(--tc-mint); }
+
+  .ascbar {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    vertical-align: middle;
+  }
+  .ascbar i { width: 5px; background: var(--tc-faint); }
+  .ascbar i.on { background: var(--tc-mint); box-shadow: 0 0 5px rgba(70, 242, 184, 0.45); }
+
+  .ascii { color: var(--tc-faint); letter-spacing: 0.1em; white-space: pre; }
+
+  .cursor {
+    display: inline-block;
+    width: 6px; height: 11px;
+    background: var(--tc-mint);
+    vertical-align: -1px;
+    animation: blink 0.9s steps(2, start) infinite;
+    box-shadow: 0 0 8px rgba(70, 242, 184, 0.7);
+  }
+  @keyframes blink { to { visibility: hidden; } }
+
+  .statusline {
+    position: absolute;
+    left: 14px; right: 14px; bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 7.5px;
+    letter-spacing: 0.18em;
+    color: var(--tc-faint);
+    border-top: 1px dashed var(--tc-line);
+    padding-top: 4px;
+  }
+  .statusline .u { color: var(--tc-cyan); }
+</style>
+</head>
+<body>
+  <div class="titlebar">
+    <span class="dots"><i></i><i></i><i></i></span>
+    <span class="path">root@plum:~/ops ▸ sh -i</span>
+    <span class="conn">▚ TLS OK</span>
+  </div>
+
+  <div class="console">
+    <div class="l"><span class="p">plum@ops</span>:<span class="c">~</span>$ ./probe --net --density</div>
+    <div class="l d">[00.004] handshake .......... <span class="ok">OK</span></div>
+    <div class="l d">[00.121] nodes online ...... <span class="m">14</span>/<span class="m">16</span></div>
+    <div class="l d">[00.203] uplink sats ....... <span class="ascbar"><i class="on" style="height:4px"></i><i class="on" style="height:6px"></i><i class="on" style="height:5px"></i><i class="on" style="height:8px"></i><i class="on" style="height:7px"></i><i style="height:3px"></i><i style="height:4px"></i></span> <span class="ok">42.1 Gb/s</span></div>
+    <div class="l">&nbsp;</div>
+    <div class="l"><span class="p">plum@ops</span>:<span class="c">~</span>$ status --matrix</div>
+    <div class="ascii">  ██░░ CYBER GRID ░░██░  SECTOR 09  ░░ SAFE</div>
+    <div class="ascii">  ░█░ CYBERPUNK? NO. THIS IS HONEST ENGINEERING █░</div>
+    <div class="l">&nbsp;</div>
+    <div class="l"><span class="p">plum@ops</span>:<span class="c">~</span>$ cat notes.md</div>
+    <div class="l d">» monospaced everything. density is a feature, not a bug.</div>
+    <div class="l d">» one accent, one phosphor glow, zero decorative pixels.</div>
+    <div class="l">&nbsp;</div>
+    <div class="l"><span class="p">plum@ops</span>:<span class="c">~</span>$ <span class="cursor"></span></div>
+  </div>
+
+  <div class="statusline">
+    <span>TTY1 · 80×24</span>
+    <span class="u">UTF-8</span>
+    <span>MEM 41% · CPU 12%</span>
+    <span>UPTIME 114d</span>
+  </div>
+</body>
+</html>

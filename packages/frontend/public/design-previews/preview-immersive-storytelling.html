@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Immersive Storytelling — design preview · 400×300</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     IMMERSIVE STORYTELLING DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     Narrative journey · layered scene depth · chapter reveals
+     ============================================================ */
+  :root {
+    --is-night: #0E1526;
+    --is-ridge: #1B2440;
+    --is-mist: #2A3654;
+    --is-gold: #E4B363;
+    --is-rose: #C98A9E;
+    --is-paper: #F3EDE0;
+    --is-ink: #101521;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: linear-gradient(180deg, #0E1526 0%, #131B30 52%, #1B2440 100%);
+    color: var(--is-paper);
+    position: relative;
+  }
+
+  /* moon */
+  .moon {
+    position: absolute;
+    right: 46px; top: 38px;
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 34%, #F6EAD2, #D9C49A 62%, #B99F6E 100%);
+    box-shadow: 0 0 44px rgba(228, 179, 99, 0.32);
+  }
+
+  /* layered ridges */
+  .ridge { position: absolute; left: -6%; right: -6%; }
+  .ridge.r1 { bottom: 64px; height: 110px; background: linear-gradient(180deg, #22305A, #1B2440); clip-path: polygon(0 62%, 12% 40%, 24% 58%, 38% 30%, 52% 55%, 66% 34%, 80% 56%, 92% 42%, 100% 60%, 100% 100%, 0 100%); opacity: 0.9; }
+  .ridge.r2 { bottom: 30px; height: 96px; background: linear-gradient(180deg, #1A2547, #141C36); clip-path: polygon(0 70%, 10% 52%, 22% 66%, 36% 44%, 50% 64%, 62% 48%, 76% 66%, 88% 50%, 100% 66%, 100% 100%, 0 100%); }
+  .ridge.r3 { bottom: 0; height: 78px; background: linear-gradient(180deg, #101728, #0B101E); clip-path: polygon(0 58%, 14% 40%, 30% 56%, 44% 36%, 58% 58%, 72% 42%, 86% 58%, 100% 46%, 100% 100%, 0 100%); }
+
+  .stars {
+    position: absolute; inset: 0;
+    background-image:
+      radial-gradient(1.4px 1.4px at 30px 40px, rgba(243, 237, 224, 0.9), transparent),
+      radial-gradient(1.2px 1.2px at 120px 26px, rgba(243, 237, 224, 0.7), transparent),
+      radial-gradient(1.6px 1.6px at 210px 60px, rgba(228, 179, 99, 0.8), transparent),
+      radial-gradient(1px 1px at 300px 30px, rgba(243, 237, 224, 0.6), transparent),
+      radial-gradient(1.2px 1.2px at 356px 70px, rgba(243, 237, 224, 0.75), transparent);
+  }
+
+  .copy { position: absolute; left: 26px; top: 40px; width: 250px; z-index: 3; }
+
+  .kicker {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.34em;
+    text-transform: uppercase;
+    color: var(--is-gold);
+  }
+
+  .headline {
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 29px;
+    font-weight: 600;
+    line-height: 1.12;
+    margin-top: 8px;
+    text-wrap: balance;
+  }
+  .headline em {
+    font-style: italic;
+    color: var(--is-rose);
+  }
+
+  .lede {
+    font-size: 10.5px;
+    line-height: 1.6;
+    color: rgba(243, 237, 224, 0.74);
+    margin-top: 10px;
+    max-width: 210px;
+  }
+
+  /* chapter rail */
+  .chapters {
+    position: absolute;
+    left: 26px; right: 26px;
+    bottom: 20px;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 0;
+  }
+  .chapter { flex: 1; position: relative; padding-top: 10px; }
+  .chapter::before {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; top: 3.5px;
+    height: 1.5px;
+    background: rgba(243, 237, 224, 0.24);
+  }
+  .chapter.on::before { background: var(--is-gold); box-shadow: 0 0 8px rgba(228, 179, 99, 0.55); }
+  .chapter .node {
+    position: absolute;
+    left: 0; top: 0;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #0E1526;
+    border: 1.5px solid rgba(243, 237, 224, 0.5);
+  }
+  .chapter.on .node { background: var(--is-gold); border-color: var(--is-gold); }
+  .chapter .name {
+    font-size: 8px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(243, 237, 224, 0.62);
+    padding-right: 10px;
+  }
+  .chapter.on .name { color: var(--is-paper); }
+</style>
+</head>
+<body>
+  <div class="stars"></div>
+  <div class="moon"></div>
+  <div class="ridge r1"></div>
+  <div class="ridge r2"></div>
+  <div class="ridge r3"></div>
+
+  <div class="copy">
+    <div class="kicker">Chapter II · Nightfall</div>
+    <div class="headline">The story is<br>the <em>interface.</em></div>
+    <div class="lede">Scenes unfold as the visitor scrolls; each layer carries one more beat of the narrative.</div>
+  </div>
+
+  <div class="chapters">
+    <div class="chapter on"><span class="node"></span><span class="name">Arrival</span></div>
+    <div class="chapter"><span class="node"></span><span class="name">Descent</span></div>
+    <div class="chapter"><span class="node"></span><span class="name">Reveal</span></div>
+    <div class="chapter"><span class="node"></span><span class="name">Return</span></div>
+  </div>
+</body>
+</html>

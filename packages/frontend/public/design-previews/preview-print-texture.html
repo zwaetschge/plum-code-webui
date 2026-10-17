@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Print Texture — design preview · 400×300</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     PRINT TEXTURE DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     Paper · halftone · riso misregistration · newsprint columns
+     ============================================================ */
+  :root {
+    --pt-paper: #F4EFE3;
+    --pt-ink: #22211C;
+    --pt-ink-soft: rgba(34, 33, 28, 0.62);
+    --pt-riso-blue: #3D64C4;
+    --pt-riso-red: #E0513F;
+    --pt-riso-yellow: #EFC742;
+    --pt-rule: rgba(34, 33, 28, 0.2);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    background:
+      radial-gradient(circle at 6% 4%, rgba(255, 255, 255, 0.7), transparent 26%),
+      repeating-linear-gradient(0deg, transparent 0 3px, rgba(34, 33, 28, 0.018) 3px 4px),
+      var(--pt-paper);
+    color: var(--pt-ink);
+    padding: 16px 18px;
+    position: relative;
+  }
+
+  .masthead {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 2px solid var(--pt-ink);
+    padding-bottom: 6px;
+  }
+  .masthead .issue { font-size: 8.5px; font-weight: 600; letter-spacing: 0.14em; }
+  .masthead .date { font-size: 8.5px; color: var(--pt-ink-soft); }
+
+  .cover-block { position: relative; height: 148px; margin-top: 12px; }
+
+  .riso {
+    position: absolute;
+    width: 116px; height: 116px;
+    border-radius: 50%;
+    left: 16px; top: 14px;
+  }
+  .riso.blue { background: var(--pt-riso-blue); transform: translate(-7px, -4px); }
+  .riso.red  { background: var(--pt-riso-red); transform: translate(7px, 5px); }
+  .riso.yellow { background: var(--pt-riso-yellow); transform: translate(0, 0); mix-blend-mode: multiply; }
+
+  .halftone {
+    position: absolute;
+    left: 18px; top: 26px;
+    width: 112px; height: 92px;
+    background-image: radial-gradient(circle, rgba(34,33,28,0.85) 1.3px, transparent 1.5px);
+    background-size: 6px 6px;
+    clip-path: polygon(50% 0, 100% 26%, 88% 100%, 22% 88%, 0 30%);
+    transform: rotate(-6deg);
+  }
+
+  .plate {
+    position: absolute;
+    right: 4px; top: 8px;
+    width: 168px;
+  }
+  .plate h1 {
+    font-family: 'Alfa Slab One', 'IBM Plex Mono', serif;
+    font-size: 30px;
+    line-height: 0.98;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    -webkit-text-stroke: 0.6px var(--pt-ink);
+  }
+  .plate h1 .two { color: var(--pt-riso-red); }
+  .plate .deck {
+    font-size: 9px;
+    line-height: 1.5;
+    color: var(--pt-ink-soft);
+    margin-top: 8px;
+    border-top: 1.5px solid var(--pt-ink);
+    padding-top: 6px;
+  }
+
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 1px 1fr;
+    gap: 12px;
+    margin-top: 14px;
+    border-top: 2px solid var(--pt-ink);
+    padding-top: 8px;
+  }
+  .cols .divider { background: var(--pt-rule); }
+  .col h3 { font-size: 9.5px; font-weight: 600; letter-spacing: 0.02em; }
+  .col p { font-size: 8px; line-height: 1.55; color: var(--pt-ink-soft); margin-top: 3px; }
+  .col .bars { display: flex; gap: 3px; margin-top: 6px; }
+  .col .bars i { flex: 1; height: 12px; }
+  .col .bars i:nth-child(1) { background: var(--pt-riso-blue); }
+  .col .bars i:nth-child(2) { background: var(--pt-riso-yellow); }
+  .col .bars i:nth-child(3) { background: var(--pt-riso-red); }
+  .col .bars i:nth-child(4) { background: var(--pt-ink); }
+
+  .stamp {
+    position: absolute;
+    right: 14px; bottom: 52px;
+    font-size: 7.5px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    color: var(--pt-riso-red);
+    border: 1.5px solid var(--pt-riso-red);
+    border-radius: 2px;
+    padding: 3px 8px;
+    transform: rotate(-4deg);
+    opacity: 0.9;
+  }
+</style>
+</head>
+<body>
+  <div class="masthead">
+    <span class="issue">PRESS &amp; GRAIN — № 39</span>
+    <span class="date">INK ON PAPER EDITION</span>
+  </div>
+
+  <div class="cover-block">
+    <div class="riso blue"></div>
+    <div class="riso yellow"></div>
+    <div class="riso red"></div>
+    <div class="halftone"></div>
+    <div class="plate">
+      <h1>Ink<br><span class="two">Offset</span><br>Glory</h1>
+      <div class="deck">Two plates, one pass: colour never quite lands in the same place twice.</div>
+    </div>
+    <div class="stamp">HAND-SET</div>
+  </div>
+
+  <div class="cols">
+    <div class="divider"></div>
+    <div class="col">
+      <h3>Registration, loosely</h3>
+      <p>Let the plates drift a hair apart. The overlap is the texture that sells the print.</p>
+    </div>
+    <div class="col">
+      <h3>Colourplates</h3>
+      <div class="bars"><i></i><i></i><i></i><i></i></div>
+      <p style="margin-top:5px">Blue over yellow over red, on uncoated stock.</p>
+    </div>
+  </div>
+</body>
+</html>

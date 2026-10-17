@@ -60,7 +60,7 @@ import com.claudewebui.app.ui.components.common.PlumSubtleFill
 import com.claudewebui.app.ui.components.common.PlumSurfaceStrong
 import com.claudewebui.app.ui.components.common.PlumText
 
-/** Shown without a search, as in the WebUI; the rest is reachable through it. */
+/** Pinned to the front without a search; every other preset follows them. */
 val CuratedDesignPresets = listOf(
     "design-plum-style",
     "design-minimal",
@@ -160,9 +160,9 @@ private fun PresetRow(title: String, subtitle: String?, isSelected: Boolean, ena
 }
 
 /**
- * Design-Vorgabe as preview cards: eight curated presets, the rest via
- * search. Opened from ⋯ → Darstellung in Code/Task and from the
- * personalisation default.
+ * Design-Vorgabe as preview cards: curated presets first, then the full
+ * library, plus the search. Opened from ⋯ → Darstellung in Code/Task and
+ * from the personalisation default.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -186,11 +186,11 @@ fun DesignPresetSheet(
             }
         } else {
             val curated = CuratedDesignPresets.mapNotNull { key -> styles.firstOrNull { it.presetKey == key } }
+            val rest = styles.filter { it !in curated }
             val active = styles.firstOrNull { it.presetKey == selected }
-            if (active != null && active !in curated) listOf(active) + curated.take(7) else curated
+            if (active != null && active !in curated) listOf(active) + curated + rest.filter { it != active } else curated + rest
         }
     }
-    val hidden = if (needle.isEmpty()) (styles.size - visible.size).coerceAtLeast(0) else 0
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = PlumSurfaceStrong) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(title, color = PlumText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -236,7 +236,6 @@ fun DesignPresetSheet(
                     Text(stringResource(R.string.preset_design_empty), color = PlumMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 24.dp))
                 }
             }
-            if (hidden > 0) Text(stringResource(R.string.preset_design_more, hidden), color = PlumMuted, fontSize = 11.sp)
         }
     }
 }

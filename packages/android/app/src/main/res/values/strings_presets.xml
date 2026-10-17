@@ -12,7 +12,6 @@
     <string name="preset_design_caption">Used for interfaces the agent builds or changes in this session.</string>
     <string name="preset_design_none">No design preset</string>
     <string name="preset_design_search">Search all design presets</string>
-    <string name="preset_design_more">%1$d more presets via search</string>
     <string name="preset_design_empty">No design preset found.</string>
     <string name="preset_defaults_title">Presets for new conversations</string>
     <string name="preset_default_writing">Writing style in Chat and Task</string>

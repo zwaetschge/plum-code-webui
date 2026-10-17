@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Friendly Playful — design preview · 400×300</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     FRIENDLY PLAYFUL DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     Pastel storybook · tactile blobs · wobbly-friendly geometry
+     ============================================================ */
+  :root {
+    --fp-cream: #FFF7EC;
+    --fp-blush: #FFD9E0;
+    --fp-sky: #CDE8FF;
+    --fp-mint: #D9F3E4;
+    --fp-butter: #FFF1BF;
+    --fp-lilac: #E8DDFF;
+    --fp-ink: #3A2E39;
+    --fp-ink-soft: rgba(58, 46, 57, 0.6);
+    --fp-juice: #FF8A5C;
+    --fp-berry: #B86B9E;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: 'Baloo 2', -apple-system, system-ui, sans-serif;
+    background:
+      radial-gradient(140px 90px at 96% 6%, var(--fp-lilac) 0%, transparent 68%),
+      radial-gradient(150px 100px at 4% 96%, var(--fp-mint) 0%, transparent 66%),
+      var(--fp-cream);
+    color: var(--fp-ink);
+    padding: 18px;
+    position: relative;
+  }
+
+  .blob {
+    position: absolute;
+    border-radius: 46% 54% 52% 48% / 55% 48% 52% 45%;
+    opacity: 0.85;
+  }
+  .blob.b1 { width: 90px; height: 74px; background: var(--fp-blush); right: 26px; top: 34px; transform: rotate(8deg); }
+  .blob.b2 { width: 56px; height: 48px; background: var(--fp-sky); right: 96px; top: 74px; transform: rotate(-12deg); opacity: 0.9; }
+
+  .hello { font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fp-berry); }
+  .headline { font-size: 30px; font-weight: 800; line-height: 1.04; margin-top: 4px; }
+  .headline span {
+    background: var(--fp-butter);
+    border-radius: 12px;
+    padding: 0 8px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+  .sub { font-size: 11px; color: var(--fp-ink-soft); margin-top: 8px; max-width: 210px; line-height: 1.45; }
+
+  .cards { position: absolute; left: 18px; bottom: 20px; right: 18px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+  .card {
+    background: #FFFFFF;
+    border-radius: 18px 20px 18px 22px;
+    padding: 12px 12px 10px;
+    box-shadow: 0 8px 0 rgba(58, 46, 57, 0.08), 0 14px 24px -12px rgba(58, 46, 57, 0.22);
+    position: relative;
+  }
+  .card .face {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    margin-bottom: 8px;
+  }
+  .card:nth-child(1) .face { background: var(--fp-blush); }
+  .card:nth-child(2) .face { background: var(--fp-sky); }
+  .card:nth-child(3) .face { background: var(--fp-mint); }
+  .card h3 { font-size: 11.5px; font-weight: 800; }
+  .card p { font-size: 8.5px; color: var(--fp-ink-soft); margin-top: 2px; line-height: 1.4; }
+  .card .tag {
+    position: absolute;
+    top: -8px; right: 10px;
+    background: var(--fp-juice);
+    color: #FFF;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    padding: 3px 8px;
+    border-radius: 999px;
+    transform: rotate(4deg);
+    box-shadow: 0 3px 8px rgba(255, 138, 92, 0.5);
+  }
+  .card:nth-child(2) { transform: translateY(8px); }
+
+  .cta {
+    position: absolute;
+    right: 20px;
+    top: 128px;
+    background: var(--fp-juice);
+    color: #FFF;
+    font-weight: 800;
+    font-size: 11px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 999px;
+    box-shadow: 0 6px 0 rgba(214, 100, 62, 0.5), 0 12px 20px -8px rgba(255, 138, 92, 0.6);
+    transform: rotate(-3deg);
+  }
+</style>
+</head>
+<body>
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+
+  <div class="hello">Storybook mode</div>
+  <div class="headline">Learning feels<br>like <span>playtime</span></div>
+  <div class="sub">Chunky shapes, soft pastels and tactile steps guide little hands from one win to the next.</div>
+
+  <div class="cta">Start ▸</div>
+
+  <div class="cards">
+    <div class="card"><span class="tag">NEW</span><div class="face">✿</div><h3>Explore</h3><p>Twelve tiny worlds to poke and prod.</p></div>
+    <div class="card"><div class="face">★</div><h3>Collect</h3><p>Earn stickers for every finished page.</p></div>
+    <div class="card"><div class="face">✎</div><h3>Create</h3><p>Draw your own ending to the story.</p></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Console Glass — design preview · 400×300</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     CONSOLE GLASS DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     Handheld shell · glass tiles over a live wallpaper · rim light
+     ============================================================ */
+  :root {
+    --cg-primary: #6E7BE8;
+    --cg-secondary: #C098B7;
+    --cg-success: #3FBF7F;
+    --cg-warning: #E8A13F;
+    --cg-ink: #162D2F;
+    --cg-tile: rgba(255, 255, 255, 0.16);
+    --cg-tile-line: rgba(255, 255, 255, 0.42);
+    --cg-glow: rgba(110, 123, 232, 0.55);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: 'Chakra Petch', system-ui, sans-serif;
+    background:
+      radial-gradient(420px 240px at 78% -10%, #C098B7 0%, transparent 62%),
+      radial-gradient(380px 220px at 12% 110%, #3FBF7F 0%, transparent 55%),
+      linear-gradient(155deg, #2A2D55 0%, #1B1E3E 46%, #33203F 100%);
+    color: #F2F5FA;
+    position: relative;
+    padding: 18px;
+  }
+
+  /* Wallpaper grain */
+  body::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle, rgba(255,255,255,0.05) 0.8px, transparent 1px);
+    background-size: 7px 7px;
+    pointer-events: none;
+  }
+
+  .glass {
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.06) 55%, rgba(255, 255, 255, 0.12));
+    border: 1px solid var(--cg-tile-line);
+    border-radius: 16px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.5),
+      inset 0 -14px 22px -16px var(--cg-glow),
+      0 14px 30px -14px rgba(10, 12, 34, 0.8);
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .topbar .os { color: rgba(242, 245, 250, 0.8); }
+  .topbar .spacer { flex: 1; }
+  .pill {
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+  .pill.battery { background: rgba(63, 191, 127, 0.2); color: #7FE0AF; border: 1px solid rgba(63,191,127,0.5); }
+  .pill.live { background: rgba(232, 161, 63, 0.18); color: #F2C078; border: 1px solid rgba(232,161,63,0.45); }
+
+  .stage { display: grid; grid-template-columns: 1.35fr 1fr; gap: 12px; margin-top: 12px; }
+
+  .hero { padding: 14px; min-height: 128px; display: flex; flex-direction: column; justify-content: space-between; }
+  .hero .title { font-size: 17px; font-weight: 700; line-height: 1.15; letter-spacing: 0.01em; }
+  .hero .sub { font-size: 9px; color: rgba(242, 245, 250, 0.75); margin-top: 4px; letter-spacing: 0.06em; }
+
+  .duo { display: flex; flex-direction: column; gap: 12px; }
+  .stat { padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; }
+  .stat .label { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(242,245,250,0.72); }
+  .stat .value { font-size: 16px; font-weight: 700; color: #FFFFFF; text-shadow: 0 0 12px var(--cg-glow); }
+
+  /* Handheld dock */
+  .dock {
+    position: absolute;
+    left: 50%;
+    bottom: 14px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    align-items: center;
+  }
+  .dock .key {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #F2F5FA;
+    background: radial-gradient(circle at 32% 28%, rgba(255,255,255,0.5), rgba(255,255,255,0.08) 62%);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: inset 0 -3px 6px rgba(0,0,0,0.35), 0 6px 14px -6px rgba(10,12,34,0.8);
+  }
+  .dock .key.accent { color: #DDE3FF; box-shadow: inset 0 -3px 6px rgba(0,0,0,0.35), 0 0 16px var(--cg-glow); border-color: rgba(110,123,232,0.8); }
+  .dock .plus {
+    width: 8px; height: 8px; position: relative;
+  }
+  .dock .plus::before, .dock .plus::after {
+    content: ''; position: absolute; background: rgba(242,245,250,0.85); border-radius: 2px;
+  }
+  .dock .plus::before { left: 0; top: 3px; width: 8px; height: 2px; }
+  .dock .plus::after { left: 3px; top: 0; width: 2px; height: 8px; }
+
+  .rim {
+    position: absolute;
+    inset: 8px;
+    border-radius: 20px;
+    border: 1.5px solid transparent;
+    background: linear-gradient(140deg, rgba(255,255,255,0.22), transparent 34%, transparent 70%, rgba(192,152,183,0.3)) border-box;
+    -webkit-mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+  <div class="rim"></div>
+  <div class="glass topbar">
+    <span class="os">HOME&nbsp;SHELL</span>
+    <span class="spacer"></span>
+    <span class="pill live">● LIVE WALLPAPER</span>
+    <span class="pill battery">▮ 82%</span>
+  </div>
+
+  <div class="stage">
+    <div class="glass hero">
+      <div>
+        <div class="title">Tiles pick up<br>the light.</div>
+        <div class="sub">GLASS SHELL · FIRMWARE 2.4</div>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <span style="font-size:8.5px;font-weight:700;letter-spacing:0.1em;padding:4px 10px;border-radius:999px;background:rgba(110,123,232,0.35);border:1px solid rgba(110,123,232,0.65)">PLAY</span>
+        <span style="font-size:8.5px;font-weight:700;letter-spacing:0.1em;padding:4px 10px;border-radius:999px;border:1px solid rgba(255,255,255,0.4)">LIBRARY</span>
+      </div>
+    </div>
+    <div class="duo">
+      <div class="glass stat"><span class="label">Friends</span><span class="value">4</span></div>
+      <div class="glass stat"><span class="label">Now&nbsp;playing</span><span class="value" style="color:#F2C078">02:14</span></div>
+    </div>
+  </div>
+
+  <div class="glass dock">
+    <span class="key accent">A</span>
+    <span class="key">B</span>
+    <span class="plus"></span>
+    <span class="key">⟨</span>
+    <span class="key">⟩</span>
+  </div>
+</body>
+</html>

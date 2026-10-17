@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sci-Fi — design preview · 400×300</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     SCI-FI DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     Deep-space hull · HUD frames · luminous edges · starfield
+     ============================================================ */
+  :root {
+    --sf-void: #080B16;
+    --sf-panel: rgba(16, 24, 48, 0.72);
+    --sf-line: rgba(122, 162, 255, 0.34);
+    --sf-cyan: #56C8FF;
+    --sf-violet: #9D7BFF;
+    --sf-amber: #FFB84D;
+    --sf-text: #F4F7FF;
+    --sf-dim: rgba(244, 247, 255, 0.6);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: 'Share Tech Mono', ui-monospace, monospace;
+    background:
+      radial-gradient(560px 300px at 76% 118%, rgba(157, 123, 255, 0.16), transparent 62%),
+      radial-gradient(420px 260px at 12% -14%, rgba(86, 200, 255, 0.12), transparent 58%),
+      var(--sf-void);
+    color: var(--sf-text);
+    position: relative;
+  }
+
+  .stars {
+    position: absolute; inset: 0;
+    background-image:
+      radial-gradient(1.2px 1.2px at 22px 30px, rgba(244,247,255,0.8), transparent),
+      radial-gradient(1px 1px at 90px 66px, rgba(244,247,255,0.5), transparent),
+      radial-gradient(1.6px 1.6px at 160px 22px, rgba(86,200,255,0.9), transparent),
+      radial-gradient(1px 1px at 240px 80px, rgba(244,247,255,0.6), transparent),
+      radial-gradient(1.3px 1.3px at 330px 34px, rgba(157,123,255,0.9), transparent),
+      radial-gradient(1px 1px at 370px 120px, rgba(244,247,255,0.5), transparent),
+      radial-gradient(1.2px 1.2px at 120px 130px, rgba(244,247,255,0.45), transparent);
+  }
+
+  /* HUD corner brackets */
+  .hud { position: absolute; inset: 16px; pointer-events: none; }
+  .hud i { position: absolute; width: 22px; height: 22px; border: 1.5px solid var(--sf-cyan); opacity: 0.85; }
+  .hud i:nth-child(1) { left: 0; top: 0; border-right: none; border-bottom: none; }
+  .hud i:nth-child(2) { right: 0; top: 0; border-left: none; border-bottom: none; }
+  .hud i:nth-child(3) { left: 0; bottom: 0; border-right: none; border-top: none; }
+  .hud i:nth-child(4) { right: 0; bottom: 0; border-left: none; border-top: none; }
+
+  .title {
+    position: absolute;
+    left: 34px; top: 34px;
+    font-family: 'Orbitron', monospace;
+    font-size: 24px;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    background: linear-gradient(90deg, #FFFFFF 30%, var(--sf-cyan) 70%, var(--sf-violet));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-transform: uppercase;
+  }
+  .subtitle {
+    position: absolute;
+    left: 36px; top: 66px;
+    font-size: 8.5px;
+    letter-spacing: 0.42em;
+    color: var(--sf-dim);
+    text-transform: uppercase;
+  }
+
+  .deck {
+    position: absolute;
+    left: 36px; top: 92px;
+    width: 196px;
+    font-size: 9.5px;
+    line-height: 1.65;
+    color: var(--sf-dim);
+  }
+
+  .panel {
+    position: absolute;
+    right: 26px; top: 96px;
+    width: 128px;
+    background: var(--sf-panel);
+    border: 1px solid var(--sf-line);
+    border-radius: 4px;
+    padding: 10px 12px;
+    backdrop-filter: blur(4px);
+    box-shadow: inset 0 0 18px rgba(86, 200, 255, 0.08), 0 8px 22px rgba(0,0,0,0.5);
+  }
+  .panel .row { display: flex; justify-content: space-between; font-size: 8px; letter-spacing: 0.08em; padding: 4px 0; border-bottom: 1px solid rgba(122,162,255,0.16); }
+  .panel .row:last-child { border-bottom: none; }
+  .panel .v { color: var(--sf-cyan); }
+  .panel .v.warn { color: var(--sf-amber); }
+
+  .gauge {
+    position: absolute;
+    left: 36px; bottom: 44px;
+    display: flex;
+    gap: 10px;
+  }
+  .hex {
+    width: 44px; height: 50px;
+    background: linear-gradient(180deg, rgba(86,200,255,0.16), rgba(8,11,22,0.4));
+    border: 1px solid var(--sf-line);
+    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-size: 8px;
+    color: var(--sf-dim);
+  }
+  .hex b { font-size: 12px; color: var(--sf-text); display: block; }
+  .hex.on { background: linear-gradient(180deg, rgba(86,200,255,0.4), rgba(86,200,255,0.08)); border-color: var(--sf-cyan); box-shadow: 0 0 14px rgba(86,200,255,0.35); }
+
+  .horizon {
+    position: absolute;
+    left: 0; right: 0; bottom: 30px;
+    height: 1.5px;
+    background: linear-gradient(90deg, transparent, var(--sf-cyan) 22%, var(--sf-violet) 78%, transparent);
+    opacity: 0.7;
+  }
+  .horizon::before {
+    content: '';
+    position: absolute;
+    left: 30%; top: -3px;
+    width: 7px; height: 7px;
+    transform: rotate(45deg);
+    background: var(--sf-cyan);
+    box-shadow: 0 0 12px rgba(86,200,255,0.9);
+  }
+
+  .status {
+    position: absolute;
+    left: 36px; right: 26px; bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 7.5px;
+    letter-spacing: 0.24em;
+    color: var(--sf-dim);
+    text-transform: uppercase;
+  }
+  .status .ok { color: var(--sf-cyan); }
+</style>
+</head>
+<body>
+  <div class="stars"></div>
+  <div class="hud"><i></i><i></i><i></i><i></i></div>
+
+  <div class="title">Orbital&nbsp;IV</div>
+  <div class="subtitle">Deep-space family</div>
+  <div class="deck">Hard hull, luminous seams. Every panel reports its state; every edge carries light. Readouts stay compact and honest.</div>
+
+  <div class="panel">
+    <div class="row"><span>NAV LOCK</span><span class="v">OK</span></div>
+    <div class="row"><span>O₂ MIX</span><span class="v">21%</span></div>
+    <div class="row"><span>HULL</span><span class="v warn">96.4</span></div>
+    <div class="row"><span>JUMP</span><span class="v">READY</span></div>
+  </div>
+
+  <div class="gauge">
+    <div class="hex on"><b>04</b>SECT</div>
+    <div class="hex"><b>72</b>DAYS</div>
+    <div class="hex on"><b>∞</b>FUEL</div>
+  </div>
+
+  <div class="horizon"></div>
+  <div class="status"><span class="ok">▲ ALL SYSTEMS NOMINAL</span><span>SOL 268 · 04:12</span></div>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Refined Premium — design preview · 400×300</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     REFINED PREMIUM DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     Serif editorial · ivory and charcoal · gold hairlines · restraint
+     ============================================================ */
+  :root {
+    --rp-ivory: #F7F5F0;
+    --rp-ivory-2: #F1EEE7;
+    --rp-charcoal: #232220;
+    --rp-charcoal-soft: rgba(35, 34, 32, 0.62);
+    --rp-gold: #A8863C;
+    --rp-gold-soft: rgba(168, 134, 60, 0.4);
+    --rp-line: rgba(35, 34, 32, 0.14);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background:
+      radial-gradient(420px 260px at 50% -12%, #FFFFFF 0%, transparent 62%),
+      linear-gradient(180deg, var(--rp-ivory) 0%, var(--rp-ivory-2) 100%);
+    color: var(--rp-charcoal);
+    position: relative;
+  }
+
+  .rail {
+    position: absolute;
+    left: 22px; top: 22px; bottom: 22px;
+    width: 1px;
+    background: linear-gradient(180deg, transparent, var(--rp-gold) 18%, var(--rp-gold) 82%, transparent);
+    opacity: 0.55;
+  }
+
+  .content {
+    position: absolute;
+    left: 44px; right: 26px; top: 26px;
+    text-align: left;
+  }
+
+  .est {
+    font-size: 8px;
+    font-weight: 500;
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+    color: var(--rp-gold);
+  }
+
+  .name {
+    font-family: 'Cormorant Garamond', 'Times New Roman', serif;
+    font-size: 34px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1.08;
+    margin-top: 10px;
+  }
+  .name em { font-style: italic; color: var(--rp-gold); }
+
+  .rule {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .rule::before, .rule::after {
+    content: '';
+    height: 1px;
+    background: var(--rp-gold-soft);
+    flex: 1;
+  }
+  .rule span { font-size: 8px; letter-spacing: 0.3em; color: var(--rp-gold); }
+
+  .claim {
+    font-size: 10px;
+    line-height: 1.75;
+    color: var(--rp-charcoal-soft);
+    margin-top: 14px;
+    max-width: 300px;
+  }
+
+  .lineup {
+    display: flex;
+    gap: 14px;
+    margin-top: 20px;
+  }
+  .piece {
+    flex: 1;
+    border-top: 1px solid var(--rp-line);
+    padding-top: 8px;
+  }
+  .piece .num {
+    font-family: 'Cormorant Garamond', serif;
+    font-style: italic;
+    font-size: 15px;
+    color: var(--rp-gold);
+  }
+  .piece .label {
+    font-size: 8.5px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    margin-top: 3px;
+  }
+  .piece .sub {
+    font-size: 8px;
+    color: var(--rp-charcoal-soft);
+    margin-top: 3px;
+    line-height: 1.5;
+  }
+
+  .seal {
+    position: absolute;
+    right: 26px; top: 22px;
+    width: 52px; height: 52px;
+    border: 1px solid var(--rp-gold);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-size: 6.5px;
+    letter-spacing: 0.22em;
+    line-height: 1.7;
+    color: var(--rp-gold);
+    transform: rotate(-8deg);
+  }
+  .seal::before {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    border: 1px solid var(--rp-gold-soft);
+    border-radius: 50%;
+  }
+
+  .footer {
+    position: absolute;
+    left: 44px; right: 26px; bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 7.5px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--rp-charcoal-soft);
+    border-top: 2px solid var(--rp-charcoal);
+    padding-top: 8px;
+  }
+</style>
+</head>
+<body>
+  <div class="rail"></div>
+  <div class="seal">ATELIER<br>· № 7 ·</div>
+
+  <div class="content">
+    <div class="est">Est. MMXXVI — Private Commission</div>
+    <div class="name">Quiet things,<br>made <em>properly.</em></div>
+    <div class="rule"><span>I V</span></div>
+    <div class="claim">Nothing shouts here. Weighted serifs, a single gold hairline and honest whitespace do the persuading — polish you can feel without a single ornament.</div>
+
+    <div class="lineup">
+      <div class="piece"><div class="num">i.</div><div class="label">The Archive</div><div class="sub">Two hundred pieces, one index.</div></div>
+      <div class="piece"><div class="num">ii.</div><div class="label">The Fitting</div><div class="sub">By appointment, at ease.</div></div>
+      <div class="piece"><div class="num">iii.</div><div class="label">The Delivery</div><div class="sub">White-glove, always.</div></div>
+    </div>
+  </div>
+
+  <div class="footer"><span>Refined Premium</span><span>Serif · Ivory · Gold</span></div>
+</body>
+</html>

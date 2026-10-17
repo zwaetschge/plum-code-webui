@@ -8,7 +8,7 @@ import { DesignStylePreview } from '@/components/session/SessionStyleLibraryPane
 import { getDesignDisplayName } from '@/components/session/designPreviewTemplates';
 import { useStyleLibrary } from './useStyleLibrary';
 
-/** Shown without a search; the rest of the library is reachable through it. */
+/** Pinned to the front without a search; every other preset follows them. */
 export const CURATED_DESIGN_PRESETS = [
   'design-plum-style',
   'design-minimal',
@@ -32,9 +32,9 @@ interface DesignPresetDialogProps {
 }
 
 /**
- * Design-Vorgabe as preview cards: eight curated presets, every other preset
- * through the search. Used from ⋯ → Darstellung, the new-session chat bar and
- * the personalisation default.
+ * Design-Vorgabe as preview cards: curated presets first, then the full
+ * library, plus the search. Used from ⋯ → Darstellung, the new-session chat
+ * bar and the personalisation default.
  */
 export function DesignPresetDialog({
   open,
@@ -67,10 +67,13 @@ export function DesignPresetDialog({
     const curated = CURATED_DESIGN_PRESETS.map((name) =>
       designs.find((item) => item.baseName === name)
     ).filter((item): item is SkillLibraryItem => Boolean(item));
+    const rest = designs.filter((item) => !curated.includes(item));
     const active = value ? designs.find((item) => item.baseName === value) : undefined;
-    return active && !curated.includes(active) ? [active, ...curated.slice(0, 7)] : curated;
+    if (active && !curated.includes(active)) {
+      return [active, ...curated, ...rest.filter((item) => item !== active)];
+    }
+    return [...curated, ...rest];
   }, [designs, needle, value]);
-  const hiddenCount = needle ? 0 : Math.max(0, designs.length - visible.length);
 
   const choose = (next: string | null) => {
     if (pending) return;
@@ -173,11 +176,7 @@ export function DesignPresetDialog({
             </p>
           )}
         </div>
-        {hiddenCount > 0 && (
-          <p className="text-xs text-muted-foreground">
-            {hiddenCount} weitere Vorgaben über die Suche.
-          </p>
-        )}
+
       </DialogContent>
     </Dialog>
   );

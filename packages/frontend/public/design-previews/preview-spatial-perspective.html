@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spatial Perspective — design preview · 400×300</title>
+<style>
+  /* ============================================================
+     SPATIAL PERSPECTIVE DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     Layered depth · stacked planes · dimensional composition
+     ============================================================ */
+  :root {
+    --sp-bg: #EDEEF2;
+    --sp-deep: #181C2E;
+    --sp-card1: #FFFFFF;
+    --sp-card2: #F4F5F9;
+    --sp-ink: #20243A;
+    --sp-ink-2: rgba(32, 36, 58, 0.62);
+    --sp-blue: #3D6DF2;
+    --sp-blue-deep: #2A4CB8;
+    --sp-coral: #FF6B57;
+    --sp-line: rgba(32, 36, 58, 0.1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background:
+      linear-gradient(180deg, #F3F4F8 0%, var(--sp-bg) 46%, #E2E4EC 100%);
+    color: var(--sp-ink);
+    position: relative;
+  }
+
+  /* vanishing grid floor */
+  .floor {
+    position: absolute;
+    left: -10%; right: -10%; bottom: 0;
+    height: 132px;
+    background:
+      repeating-linear-gradient(90deg, var(--sp-line) 0 1px, transparent 1px 40px),
+      repeating-linear-gradient(180deg, var(--sp-line) 0 1px, transparent 1px 26px);
+    transform: perspective(340px) rotateX(56deg);
+    transform-origin: 50% 0;
+  }
+
+  .scene { position: absolute; left: 46px; top: 40px; transform-style: preserve-3d; }
+
+  .plane {
+    position: absolute;
+    border-radius: 14px;
+    transform-origin: 50% 100%;
+  }
+
+  .plane.back {
+    width: 210px; height: 132px;
+    background: linear-gradient(160deg, var(--sp-deep) 0%, #232A47 100%);
+    box-shadow: 0 24px 40px -18px rgba(24, 28, 46, 0.55);
+    transform: translate3d(48px, -6px, 0) rotate(-4deg);
+    color: #EDF0FA;
+    padding: 14px;
+  }
+  .plane.back .kicker { font-size: 8px; letter-spacing: 0.3em; color: rgba(237,240,250,0.66); text-transform: uppercase; }
+  .plane.back h1 { font-size: 17px; font-weight: 700; margin-top: 6px; letter-spacing: -0.01em; }
+  .plane.back .bar { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--sp-blue), var(--sp-coral)); margin-top: 10px; }
+
+  .plane.mid {
+    width: 150px; height: 96px;
+    background: var(--sp-card1);
+    box-shadow: 0 26px 44px -16px rgba(24, 28, 46, 0.4);
+    transform: translate3d(-14px, 26px, 0) rotate(-3deg);
+    padding: 12px;
+    border: 1px solid rgba(32,36,58,0.06);
+  }
+  .plane.mid .tag { font-size: 8px; font-weight: 700; letter-spacing: 0.14em; color: var(--sp-blue); }
+  .plane.mid .metric { font-size: 21px; font-weight: 700; margin-top: 4px; }
+  .plane.mid .metric small { font-size: 9px; color: var(--sp-ink-2); font-weight: 500; }
+  .plane.mid .spark { display: flex; gap: 3px; align-items: flex-end; margin-top: 8px; height: 18px; }
+  .plane.mid .spark i { width: 7px; border-radius: 2px; background: rgba(61, 109, 242, 0.2); }
+  .plane.mid .spark i:nth-child(3) { background: var(--sp-blue); }
+  .plane.mid .spark i:nth-child(4) { background: var(--sp-coral); }
+
+  .plane.front {
+    width: 118px; height: 74px;
+    background: var(--sp-card2);
+    box-shadow: 0 22px 36px -14px rgba(24, 28, 46, 0.38);
+    transform: translate3d(96px, 62px, 0) rotate(-2deg);
+    padding: 11px;
+    border: 1px solid rgba(32,36,58,0.06);
+  }
+  .plane.front .label { font-size: 8px; letter-spacing: 0.2em; color: var(--sp-ink-2); text-transform: uppercase; }
+  .plane.front .value { display: flex; align-items: center; gap: 7px; margin-top: 6px; }
+  .plane.front .value .ring {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: conic-gradient(var(--sp-blue-deep) 0 74%, rgba(61,109,242,0.16) 74% 100%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .plane.front .value .ring::after { content: ''; width: 18px; height: 18px; border-radius: 50%; background: var(--sp-card2); }
+  .plane.front .value b { font-size: 14px; }
+
+  .chip {
+    position: absolute;
+    font-size: 9px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--sp-coral);
+    padding: 5px 12px;
+    border-radius: 999px;
+    box-shadow: 0 8px 18px -6px rgba(255, 107, 87, 0.6);
+  }
+  .chip.c1 { right: 44px; top: 36px; transform: rotate(3deg); }
+  .chip.c2 { right: 30px; top: 64px; background: var(--sp-blue); box-shadow: 0 8px 18px -6px rgba(61,109,242,0.5); transform: rotate(-2deg); }
+
+  .shadow { position: absolute; background: radial-gradient(closest-side, rgba(24,28,46,0.32), transparent); }
+  .shadow.s1 { width: 260px; height: 36px; left: 30px; bottom: 40px; }
+  .shadow.s2 { width: 180px; height: 22px; left: 10px; bottom: 26px; }
+</style>
+</head>
+<body>
+  <div class="floor"></div>
+  <div class="shadow s1"></div>
+  <div class="shadow s2"></div>
+
+  <div class="scene">
+    <div class="plane back">
+      <div class="kicker">Depth as a system</div>
+      <h1>Three planes,<br>one story.</h1>
+      <div class="bar"></div>
+    </div>
+    <div class="plane mid">
+      <div class="tag">PARALLAX · 2.4×</div>
+      <div class="metric">86<small>ms</small></div>
+      <div class="spark"><i style="height:8px"></i><i style="height:12px"></i><i style="height:9px"></i><i style="height:15px"></i></div>
+    </div>
+    <div class="plane front">
+      <div class="label">Layer trust</div>
+      <div class="value"><span class="ring"></span><b>74%</b></div>
+    </div>
+  </div>
+
+  <span class="chip c1">Z 200</span>
+  <span class="chip c2">Z 040</span>
+</body>
+</html>

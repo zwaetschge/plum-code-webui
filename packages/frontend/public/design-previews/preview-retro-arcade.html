@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Retro Arcade — design preview · 400×300</title>
+<style>
+  /* ============================================================
+     RETRO ARCADE DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     CRT cabinet · pixel sprites · block grid · marquee glow
+     (original shapes only — no protected characters)
+     ============================================================ */
+  :root {
+    --ra-bg: #14141E;
+    --ra-crt: #1D1D2E;
+    --ra-ink: #EAEAF2;
+    --ra-cyan: #5CE1E6;
+    --ra-magenta: #F45B9C;
+    --ra-yellow: #F5D547;
+    --ra-green: #7DE28A;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    background:
+      radial-gradient(360px 220px at 50% -8%, rgba(92, 225, 230, 0.1), transparent 60%),
+      var(--ra-bg);
+    color: var(--ra-ink);
+    font-family: 'Courier New', ui-monospace, monospace;
+    position: relative;
+    padding: 16px;
+    image-rendering: pixelated;
+  }
+
+  .cabinet {
+    position: absolute;
+    inset: 14px;
+    border: 3px solid #2C2C40;
+    border-radius: 10px;
+    background: var(--ra-crt);
+    overflow: hidden;
+    box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.55);
+  }
+
+  /* scanlines */
+  .cabinet::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 1.5px, transparent 1.5px 4px);
+    pointer-events: none;
+    z-index: 5;
+  }
+
+  .marquee {
+    text-align: center;
+    font-weight: bold;
+    font-size: 15px;
+    letter-spacing: 0.34em;
+    padding: 10px 0 8px;
+    background: linear-gradient(180deg, #252538, #1B1B2A);
+    border-bottom: 3px solid #2C2C40;
+    text-shadow: 0 0 6px var(--ra-magenta), 0 0 14px rgba(244, 91, 156, 0.6);
+  }
+  .marquee span { color: var(--ra-yellow); text-shadow: 0 0 6px var(--ra-yellow); }
+
+  .hud {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 14px 0;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: var(--ra-cyan);
+  }
+  .hud b { color: var(--ra-yellow); }
+
+  /* playfield: block grid with pixel sprites */
+  .field {
+    position: absolute;
+    left: 14px; right: 14px; top: 64px; height: 156px;
+    background:
+      linear-gradient(rgba(92, 225, 230, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(92, 225, 230, 0.05) 1px, transparent 1px);
+    background-size: 14px 14px;
+    border: 1px solid #2C2C40;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .sprite { position: absolute; width: 14px; height: 14px; }
+
+  .foe { background: var(--ra-magenta); box-shadow: 0 0 8px rgba(244, 91, 156, 0.7); border-radius: 2px; }
+  .foe::before { content:''; position:absolute; inset:4px; background: var(--ra-crt); }
+  .foe::after { content:''; position:absolute; left:3px; top:5px; width:8px; height:2px; background: var(--ra-bg); }
+
+  .ship { background: var(--ra-cyan); box-shadow: 0 0 10px rgba(92, 225, 230, 0.8); border-radius: 2px; }
+  .ship::before { content:''; position:absolute; left:5px; top:-7px; width:4px; height:8px; background: var(--ra-cyan); opacity:0.85; }
+
+  .shot { width: 4px; height: 10px; background: var(--ra-yellow); box-shadow: 0 0 8px rgba(245, 213, 71, 0.9); border-radius: 1px; }
+
+  .block { position: absolute; background: var(--ra-green); box-shadow: 0 0 6px rgba(125, 226, 138, 0.6); border-radius: 2px; }
+
+  .prompt {
+    position: absolute;
+    left: 0; right: 0; top: 118px;
+    text-align: center;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    color: var(--ra-ink);
+    animation: blink 1.1s steps(2, start) infinite;
+    z-index: 4;
+  }
+  @keyframes blink { to { visibility: hidden; } }
+
+  .panel {
+    position: absolute;
+    left: 14px; right: 14px; bottom: 12px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: linear-gradient(180deg, #252538, #1B1B2A);
+    border: 3px solid #2C2C40;
+    border-radius: 8px;
+  }
+  .stick {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 36% 30%, #4A4A66, #23233A 70%);
+    border: 2px solid #35354E;
+    position: relative;
+  }
+  .stick::after {
+    content: '';
+    position: absolute; left: 50%; top: 50%;
+    width: 8px; height: 8px; transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: var(--ra-red, #F45B9C);
+    background: #F45B9C;
+    box-shadow: 0 0 6px rgba(244, 91, 156, 0.8);
+  }
+  .coin { text-align: center; font-size: 8px; letter-spacing: 0.2em; color: var(--ra-yellow); line-height: 1.7; }
+  .btns { justify-self: end; display: flex; gap: 8px; }
+  .btn {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: 2px solid #35354E;
+    box-shadow: inset 0 -3px 0 rgba(0,0,0,0.4), 0 0 8px rgba(92,225,230,0.35);
+  }
+  .btn.r { background: var(--ra-magenta); }
+  .btn.y { background: var(--ra-yellow); }
+  .btn.c { background: var(--ra-cyan); }
+</style>
+</head>
+<body>
+  <div class="cabinet">
+    <div class="marquee">BL<span>O</span>CK&nbsp;RA<span>I</span>D</div>
+    <div class="hud"><span>SCORE <b>042150</b></span><span>HI <b>098700</b></span><span>STAGE <b>3</b></span></div>
+
+    <div class="field">
+      <div class="sprite foe" style="left:34px; top:18px"></div>
+      <div class="sprite foe" style="left:90px; top:18px"></div>
+      <div class="sprite foe" style="left:146px; top:18px"></div>
+      <div class="sprite foe" style="left:202px; top:18px"></div>
+      <div class="sprite foe" style="left:258px; top:18px"></div>
+      <div class="sprite foe" style="left:62px; top:46px; opacity:0.85"></div>
+      <div class="sprite foe" style="left:118px; top:46px; opacity:0.85"></div>
+      <div class="sprite foe" style="left:174px; top:46px; opacity:0.85"></div>
+      <div class="sprite foe" style="left:230px; top:46px; opacity:0.85"></div>
+      <div class="sprite block" style="left:52px; top:100px; width:28px; height:10px"></div>
+      <div class="sprite block" style="left:120px; top:100px; width:28px; height:10px; opacity:.8"></div>
+      <div class="sprite block" style="left:188px; top:100px; width:28px; height:10px; opacity:.6"></div>
+      <div class="sprite shot" style="left:150px; top:76px"></div>
+      <div class="sprite ship" style="left:144px; top:128px"></div>
+    </div>
+
+    <div class="prompt">READY PLAYER ONE</div>
+
+    <div class="panel">
+      <div class="stick"></div>
+      <div class="coin">CREDIT 02<br>INSERT COIN</div>
+      <div class="btns"><span class="btn r"></span><span class="btn y"></span><span class="btn c"></span></div>
+    </div>
+  </div>
+</body>
+</html>

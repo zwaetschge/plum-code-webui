@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cel Anime Action — design preview · 400×300</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Chakra+Petch:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  /* ============================================================
+     CEL ANIME ACTION DESIGN SYSTEM — 400×300 THUMBNAIL PREVIEW
+     Inked silhouettes · speed cues · halftone · energetic framing
+     ============================================================ */
+  :root {
+    --ca-ink: #10121F;
+    --ca-white: #FFFFFF;
+    --ca-red: #E63946;
+    --ca-blue: #2B6CB0;
+    --ca-yellow: #FFD166;
+    --ca-line: rgba(16, 18, 31, 0.16);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { width: 400px; height: 300px; overflow: hidden; }
+
+  body {
+    font-family: 'Chakra Petch', system-ui, sans-serif;
+    background:
+      repeating-linear-gradient(-55deg, transparent 0 26px, rgba(43, 108, 176, 0.07) 26px 27px),
+      radial-gradient(circle at 88% 12%, var(--ca-yellow) 0%, transparent 34%),
+      linear-gradient(160deg, #FDFDFE 0%, #EDF1F7 100%);
+    color: var(--ca-ink);
+    position: relative;
+  }
+
+  /* Speed lines — horizontal cue bars */
+  .speed {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, transparent 0 6%, var(--ca-ink) 6% 9%, transparent 9% 22%),
+      linear-gradient(90deg, transparent 0 30%, var(--ca-blue) 30% 31.6%, transparent 31.6% 52%),
+      linear-gradient(90deg, transparent 0 70%, var(--ca-red) 70% 71.4%, transparent 71.4% 92%),
+      linear-gradient(90deg, transparent 0 88%, var(--ca-ink) 88% 89.4%, transparent 89.4%);
+    background-size: 100% 2.5px, 100% 1.6px, 100% 1.2px, 100% 2px;
+    background-repeat: no-repeat;
+    background-position: 0 46px, 0 52px, 0 57px, 0 63px;
+  }
+
+  .frame {
+    position: absolute;
+    inset: 14px;
+    border: 3px solid var(--ca-ink);
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--ca-white);
+    box-shadow: 6px 6px 0 rgba(16, 18, 31, 0.9);
+  }
+
+  .halftone {
+    position: absolute;
+    right: -30px;
+    top: -30px;
+    width: 170px;
+    height: 170px;
+    background: radial-gradient(circle, var(--ca-ink) 1.6px, transparent 1.8px);
+    background-size: 9px 9px;
+    opacity: 0.14;
+    transform: rotate(12deg);
+  }
+
+  .burst {
+    position: absolute;
+    right: 18px;
+    top: 20px;
+    width: 132px;
+    height: 132px;
+  }
+  .burst .core {
+    position: absolute; inset: 26px;
+    background: var(--ca-red);
+    border: 4px solid var(--ca-ink);
+    border-radius: 50%;
+    box-shadow: inset -10px -8px 0 rgba(16, 18, 31, 0.22);
+  }
+  .burst .blade {
+    position: absolute; inset: 0;
+    background: conic-gradient(
+      var(--ca-yellow) 0 6%, transparent 6% 19%,
+      var(--ca-yellow) 19% 25%, transparent 25% 38%,
+      var(--ca-yellow) 38% 44%, transparent 44% 57%,
+      var(--ca-yellow) 57% 63%, transparent 63% 76%,
+      var(--ca-yellow) 76% 82%, transparent 82% 94%,
+      var(--ca-yellow) 94% 100%
+    );
+    clip-path: polygon(50% 50%, 100% 22%, 82% 82%, 22% 100%, 18% 18%, 78% 0);
+    opacity: 0.9;
+  }
+
+  .slash {
+    position: absolute;
+    left: 208px;
+    top: 158px;
+    width: 160px;
+    height: 5px;
+    background: var(--ca-ink);
+    transform: rotate(-24deg);
+    border-radius: 3px;
+  }
+  .slash::after {
+    content: '';
+    position: absolute;
+    left: 18px; top: 10px;
+    width: 120px; height: 3px;
+    background: var(--ca-blue);
+    border-radius: 3px;
+  }
+
+  .kicker {
+    position: absolute;
+    left: 18px;
+    top: 18px;
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--ca-white);
+    background: var(--ca-ink);
+    padding: 4px 10px 4px 12px;
+    clip-path: polygon(0 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  }
+
+  .headline {
+    position: absolute;
+    left: 18px;
+    bottom: 68px;
+    font-family: 'Archivo Black', 'Chakra Petch', sans-serif;
+    font-size: 34px;
+    line-height: 0.98;
+    letter-spacing: -0.01em;
+    text-transform: uppercase;
+    color: var(--ca-ink);
+    text-shadow: 3px 3px 0 var(--ca-yellow);
+  }
+  .headline em {
+    font-style: normal;
+    color: var(--ca-white);
+    -webkit-text-stroke: 2px var(--ca-ink);
+    text-shadow: none;
+  }
+
+  .caption {
+    position: absolute;
+    left: 20px;
+    bottom: 34px;
+    width: 240px;
+    font-size: 9.5px;
+    font-weight: 600;
+    line-height: 1.5;
+    color: rgba(16, 18, 31, 0.72);
+    border-top: 2px solid var(--ca-ink);
+    padding-top: 5px;
+  }
+
+  .tag {
+    position: absolute;
+    left: 20px;
+    bottom: 12px;
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    color: var(--ca-red);
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+  <div class="speed"></div>
+  <div class="frame">
+    <div class="halftone"></div>
+    <div class="burst"><div class="blade"></div><div class="core"></div></div>
+    <div class="slash"></div>
+    <div class="kicker">Episode 01</div>
+    <div class="headline">Motion<br><em>Cut.</em></div>
+    <div class="caption">Framed action panels, inked silhouettes and speed cues set the pace of the story.</div>
+    <div class="tag">▶ Now boarding</div>
+  </div>
+</body>
+</html>

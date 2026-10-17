@@ -101,6 +101,7 @@ import { DesignPresetDialog } from '@/components/presets/DesignPresetDialog';
 import { WritingStyleMenu } from '@/components/presets/WritingStyleMenu';
 import { designLabel, useStyleLibrary } from '@/components/presets/useStyleLibrary';
 import { ToolLogPanel } from '@/components/session/ToolLogPanel';
+import { SessionStyleLibraryPanel } from '@/components/session/SessionStyleLibraryPanel';
 import { VersionsPanel, type VersionsTab } from '@/components/session/VersionsPanel';
 import { ConnectionsPanel } from '@/components/session/ConnectionsPanel';
 import { SessionSshPanel } from '@/components/session/SessionSshPanel';
@@ -197,6 +198,7 @@ const DOCKED_PANEL_KEYS: WorkspaceSheetPanel[] = [
   'progress',
   'versions',
   'preview',
+  'designs',
   'connections',
   'notes',
   'toolLog',
@@ -2341,6 +2343,13 @@ export function SessionPage() {
   const sessionWritingStyle = session?.writingStyleSkill ?? null;
   const designStyleName = designLabel(styleLibrary.data?.designStyles, sessionDesignStyle);
   const changeSessionStyle = sessionStyleMutation.mutate;
+  const handleStyleSessionUpdated = (updatedSession: Session) => {
+    queryClient.setQueryData(['session', id], updatedSession);
+    if (id) {
+      useSessionStore.getState().updateSession(id, updatedSession);
+    }
+    queryClient.invalidateQueries({ queryKey: ['sessions'] });
+  };
 
   const linkPeerMutation = useMutation({
     mutationFn: async ({ targetSessionId, role }: { targetSessionId: string; role: string }) => {
@@ -3671,6 +3680,11 @@ export function SessionPage() {
       icon: <Cable className="h-3.5 w-3.5" />,
       badge: session.androidDeviceSerial ? <span className="panel-badge">1</span> : null,
     },
+    designs: {
+      title: 'Designs',
+      icon: <Palette className="h-3.5 w-3.5" />,
+      badge: session.designStyleSkill ? <span className="panel-badge">An</span> : null,
+    },
     mesh: {
       title: 'Session Mesh',
       icon: <Network className="h-3.5 w-3.5" />,
@@ -3711,6 +3725,18 @@ export function SessionPage() {
       );
     } else if (panel === 'mesh') body = meshBody;
     else if (panel === 'config') body = renderConfigBody('h-full');
+    else if (panel === 'designs') {
+      body = (
+        <SessionStyleLibraryPanel
+          sessionId={session.id}
+          provider={sessionProvider}
+          kind="design"
+          selectedSkill={session.designStyleSkill}
+          onSessionUpdated={handleStyleSessionUpdated}
+          className="h-full"
+        />
+      );
+    }
     else if (panel === 'connections') {
       body = (
         <ConnectionsPanel
@@ -4270,6 +4296,7 @@ export function SessionPage() {
               nested: true,
             })}
           {isCodeSession && showPreviewTool && renderPanelMenuItem('preview')}
+          {sessionSurfaceKind !== 'chat' && renderPanelMenuItem('designs')}
           {renderPanelMenuItem('connections', {
             onOpen: () => setConnectionsFocus(null),
             badge: session.androidDeviceSerial ? 1 : 0,
