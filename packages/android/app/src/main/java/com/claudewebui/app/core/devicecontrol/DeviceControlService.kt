@@ -13,7 +13,6 @@ import androidx.core.app.ServiceCompat
 import com.claudewebui.app.BuildConfig
 import com.claudewebui.app.R
 import com.claudewebui.app.core.security.TokenStore
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,7 +22,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -158,11 +156,13 @@ class DeviceControlService : Service() {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (socket === webSocket) socket = null
                 _connectionState.value = false
                 scheduleReconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (socket === webSocket) socket = null
                 _connectionState.value = false
                 scheduleReconnect()
             }

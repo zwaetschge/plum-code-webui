@@ -60,6 +60,8 @@ export interface BrowserConnectionSummary {
 export interface BrowserCallSession {
   id: string;
   name: string;
+  /** Desktop only: the agent's latest status line, shown next to its cursor. */
+  note?: string;
 }
 
 export interface BrowserToolContent {

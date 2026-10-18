@@ -71,6 +71,7 @@ from PySide6.QtGui import (
     QIcon,
     QImage,
     QImageReader,
+    QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
@@ -81,7 +82,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QMen
 
 import websockets
 
-VERSION = "0.4.1"
+VERSION = "0.5.0"
 CONFIG_DIR = os.path.expanduser("~/.config/plum-desktop")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
@@ -89,6 +90,12 @@ SHOT_MAX_EDGE = 1568
 MARK_TTL_S = 15 * 60
 CURSOR_IDLE_S = 120
 PILL_IDLE_S = 4
+# Edge glow while Plum uses the computer: band width (logical px) and how long
+# it lingers after the last tool call.
+GLOW_WIDTH = 26
+GLOW_LINGER_S = 4.0
+# How long the agent's status line stays next to the cursor.
+NOTE_TTL_S = 45
 DBUS_SERVICE = "ch.zwaetschge.PlumDesktop"
 COLORS = {
     "purple": "#7a4cff",
@@ -436,6 +443,15 @@ class Overlay(QWidget):
         self.cursor = None  # (QPointF, label)
         self.cursor_at = 0.0
         self.hide_cursor = False
+        # Edge glow: lit while Plum uses the computer, fades after GLOW_LINGER_S.
+        self.glow_enabled = True
+        self.active_until = 0.0
+        self.glow_started = 0.0
+        # What the agent says it is doing: (text, session name, at).
+        self.note = None
+        self._note_rect = QRectF()
+        self.glow_timer = QTimer(self)
+        self.glow_timer.timeout.connect(self._glow_tick)
         geometry = QGuiApplication.primaryScreen().virtualGeometry()
         self.setGeometry(geometry)
         # screenshot pixels per logical pixel; the first screenshot measures it
@@ -468,6 +484,9 @@ class Overlay(QWidget):
         self.marks = kept
         if self.cursor and now - self.cursor_at > CURSOR_IDLE_S:
             self.cursor = None
+            changed = True
+        if self.note and now - self.note[2] > NOTE_TTL_S:
+            self.note = None
             changed = True
         if changed:
             self.update()
@@ -516,13 +535,171 @@ class Overlay(QWidget):
         self.cursor = None
         self.update()
 
+    # ---- edge glow and the agent's status line
+
+    def activity(self, seconds=GLOW_LINGER_S):
+        """Plum is using the computer: light the screen edges for a while."""
+        now = time.time()
+        if now >= self.active_until:
+            self.glow_started = now
+        self.active_until = max(self.active_until, now + seconds)
+        if not self.glow_timer.isActive():
+            self.glow_timer.start(33)
+        self.raise_()
+
+    def stop_activity(self):
+        self.active_until = 0.0
+        self.note = None
+        self.glow_timer.stop()
+        self.update()
+
+    def set_note(self, text, name=None):
+        text = " ".join(str(text or "").split())
+        if not text:
+            return
+        self.note = (text[:220], (name or "Plum")[:40], time.time())
+        self.update(self._note_rect.toAlignedRect().adjusted(-4, -4, 4, 4))
+        self.update(self._note_box().toAlignedRect().adjusted(-4, -4, 4, 4))
+
+    def glowing(self):
+        return self.glow_enabled and time.time() < self.active_until
+
+    def _screens_local(self):
+        origin = QPointF(self.geometry().x(), self.geometry().y())
+        return [QRectF(screen.geometry()).translated(-origin) for screen in QGuiApplication.screens()]
+
+    def _glow_tick(self):
+        now = time.time()
+        done = now >= self.active_until
+        # Repaint only the edge bands (and the note), not the whole desktop.
+        band = GLOW_WIDTH + 6
+        for r in self._screens_local():
+            rect = r.toAlignedRect()
+            self.update(QRect(rect.left(), rect.top(), rect.width(), band))
+            self.update(QRect(rect.left(), rect.bottom() - band, rect.width(), band + 1))
+            self.update(QRect(rect.left(), rect.top(), band, rect.height()))
+            self.update(QRect(rect.right() - band, rect.top(), band + 1, rect.height()))
+        if done:
+            self.glow_timer.stop()
+            self.update(self._note_rect.toAlignedRect().adjusted(-4, -4, 4, 4))
+
+    def _paint_glow(self, painter):
+        now = time.time()
+        fade_in = min(1.0, (now - self.glow_started) / 0.35)
+        fade_out = min(1.0, max(0.0, (self.active_until - now) / 1.2))
+        strength = min(fade_in, fade_out)
+        if strength <= 0:
+            return
+        pulse = 0.72 + 0.28 * math.sin(now * 3.2)
+        alpha = strength * pulse
+        # Drift between Plum violet and blue.
+        mix = (math.sin(now * 1.1) + 1) / 2
+        violet, blue = QColor("#7a4cff"), QColor("#1856ff")
+        base = QColor(
+            round(violet.red() + (blue.red() - violet.red()) * mix),
+            round(violet.green() + (blue.green() - violet.green()) * mix),
+            round(violet.blue() + (blue.blue() - violet.blue()) * mix),
+        )
+
+        def shade(a):
+            color = QColor(base)
+            color.setAlphaF(max(0.0, min(1.0, a)))
+            return color
+
+        w = GLOW_WIDTH
+        painter.setPen(Qt.NoPen)
+        for r in self._screens_local():
+            bands = (
+                (QRectF(r.left(), r.top(), r.width(), w), QPointF(0, r.top()), QPointF(0, r.top() + w)),
+                (QRectF(r.left(), r.bottom() - w, r.width(), w), QPointF(0, r.bottom()), QPointF(0, r.bottom() - w)),
+                (QRectF(r.left(), r.top(), w, r.height()), QPointF(r.left(), 0), QPointF(r.left() + w, 0)),
+                (QRectF(r.right() - w, r.top(), w, r.height()), QPointF(r.right(), 0), QPointF(r.right() - w, 0)),
+            )
+            for rect, start, end in bands:
+                gradient = QLinearGradient(start, end)
+                gradient.setColorAt(0.0, shade(alpha * 0.85))
+                gradient.setColorAt(0.35, shade(alpha * 0.32))
+                gradient.setColorAt(1.0, shade(0.0))
+                painter.fillRect(rect, gradient)
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QPen(shade(alpha), 3))
+            painter.drawRect(r.adjusted(1.5, 1.5, -1.5, -1.5))
+            painter.setPen(Qt.NoPen)
+
+    def _note_box(self):
+        """Where the status line goes: under the Plum cursor, else bottom right."""
+        if not self.note:
+            return QRectF()
+        text, name, _at = self.note
+        font = QFont("Sans", 11)
+        metrics = QFontMetrics(font)
+        body = metrics.boundingRect(0, 0, 340, 400, Qt.TextWordWrap, text)
+        width = max(body.width(), QFontMetrics(QFont("Sans", 9, QFont.DemiBold)).horizontalAdvance(name) + 40) + 28
+        height = body.height() + 40
+        cursor_fresh = self.cursor and not self.hide_cursor and time.time() - self.cursor_at < 30
+        if cursor_fresh:
+            point = self.cursor[0] + QPointF(16, 58)
+            box = QRectF(point.x(), point.y(), width, height)
+        else:
+            screen = QRectF(QGuiApplication.primaryScreen().geometry()).translated(
+                -self.geometry().x(), -self.geometry().y()
+            )
+            box = QRectF(screen.right() - width - 28, screen.bottom() - height - 28, width, height)
+        # Keep it on the screen the box is mostly on.
+        for r in self._screens_local():
+            if r.contains(box.topLeft()):
+                if box.right() > r.right() - 12:
+                    box.moveRight(r.right() - 12)
+                if box.bottom() > r.bottom() - 12:
+                    box.moveBottom(r.bottom() - 12)
+                break
+        return box
+
+    def _paint_note(self, painter):
+        if not self.note:
+            return
+        text, name, at = self.note
+        age = time.time() - at
+        if age > NOTE_TTL_S:
+            self.note = None
+            return
+        box = self._note_box()
+        self._note_rect = box
+        fade = min(1.0, max(0.0, (NOTE_TTL_S - age) / 3.0))
+        background = QColor(24, 22, 38)
+        background.setAlphaF(0.92 * fade)
+        border = QColor("#7a4cff")
+        border.setAlphaF(0.85 * fade)
+        painter.setPen(QPen(border, 1.5))
+        painter.setBrush(background)
+        painter.drawRoundedRect(box, 12, 12)
+        dot = QColor("#07ca6b" if self.glowing() else "#8a8a98")
+        dot.setAlphaF(fade)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(dot)
+        painter.drawEllipse(QPointF(box.left() + 16, box.top() + 17), 4, 4)
+        head = QColor(255, 255, 255)
+        head.setAlphaF(0.66 * fade)
+        painter.setPen(head)
+        painter.setFont(QFont("Sans", 9, QFont.DemiBold))
+        painter.drawText(QRectF(box.left() + 26, box.top() + 8, box.width() - 34, 18), Qt.AlignLeft | Qt.AlignVCenter,
+                         f"{name} · macht gerade")
+        body = QColor(255, 255, 255)
+        body.setAlphaF(fade)
+        painter.setPen(body)
+        painter.setFont(QFont("Sans", 11))
+        painter.drawText(box.adjusted(14, 28, -14, -10), Qt.TextWordWrap, text)
+
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         for mark in self.marks:
             self._paint_mark(painter, mark)
+        if self.glowing():
+            self._paint_glow(painter)
         if self.cursor and not self.hide_cursor:
             self._paint_cursor(painter, *self.cursor)
+        self._paint_note(painter)
 
     def _pen(self, color, width=4):
         pen = QPen(QColor(color), width)
@@ -893,6 +1070,11 @@ class Tools(QObject):
                     "Zeige mit desktop_point, desktop_annotate oder desktop_guide_step, der Nutzer bedient selbst."
                 )
             self.session = session or {}
+            # Light the screen edges and show what the agent says it is doing.
+            self.overlay.activity(GLOW_LINGER_S + 2)
+            note = str(self.session.get("note") or "").strip()
+            if note:
+                self.overlay.set_note(note, self._label())
             if self.session.get("id") and self.session.get("id") != self.s.last_session.get("id"):
                 self.s.last_session = self.session
                 self.s.state["session"] = {"id": self.session.get("id"), "name": self.session.get("name")}
@@ -901,6 +1083,7 @@ class Tools(QObject):
             if tool in INPUT_TOOLS:
                 self.s.last_action = time.time()
             content = handler(args or {})
+            self.overlay.activity(GLOW_LINGER_S)
             self.s.bridge.send({"type": "result", "id": call_id, "ok": True, "content": content})
         except Stopped as error:
             self.s.input.release_all()
@@ -2289,6 +2472,7 @@ class App(QObject):
         self.state = load_state()
         self.mode = self.state.get("mode") if self.state.get("mode") in MODE_LABELS else "control"
         self.overlay = Overlay(self.state.get("factor"))
+        self.overlay.glow_enabled = self.state.get("edgeGlow", True) is not False
         self.input = Input(self.overlay.geometry())
         self.kwin = KWin()
         self.pill = Pill(lambda: self.set_mode("paused"))
@@ -2340,6 +2524,10 @@ class App(QObject):
         message.triggered.connect(self.message_prompt)
         menu.addAction(message)
         menu.addSeparator()
+        self.glow_action = QAction("Bildschirmrand leuchten, wenn Plum steuert", menu, checkable=True)
+        self.glow_action.setChecked(self.overlay.glow_enabled)
+        self.glow_action.triggered.connect(self._toggle_glow)
+        menu.addAction(self.glow_action)
         clear = QAction("Markierungen entfernen", menu)
         clear.triggered.connect(lambda: (self.overlay.clear(), self.card.hide()))
         menu.addAction(clear)
@@ -2350,6 +2538,12 @@ class App(QObject):
         self.menu = menu
         self._refresh_tray()
         self.tray.show()
+
+    def _toggle_glow(self, checked):
+        self.overlay.glow_enabled = bool(checked)
+        self.state["edgeGlow"] = bool(checked)
+        save_state(self.state)
+        self.overlay.update()
 
     def _refresh_tray(self):
         color = {"control": "#7a4cff", "guide": "#1856ff", "paused": "#8a8a98"}[self.mode]
@@ -2371,7 +2565,7 @@ class App(QObject):
         if mode == "paused":
             self.pill.hide()
             self.overlay.cursor = None
-            self.overlay.update()
+            self.overlay.stop_activity()
         self.bridge.send_state()
         self._refresh_tray()
         log("mode:", mode)
@@ -2391,7 +2585,7 @@ class App(QObject):
         self.confirm.answer = "deny"
         self.set_mode("paused")
         self.overlay.cursor = None
-        self.overlay.update()
+        self.overlay.stop_activity()
         self.pill.flash(QGuiApplication.primaryScreen().geometry(), "Plum gestoppt · Tray: Steuern setzt fort")
         log("stopped by Escape")
 

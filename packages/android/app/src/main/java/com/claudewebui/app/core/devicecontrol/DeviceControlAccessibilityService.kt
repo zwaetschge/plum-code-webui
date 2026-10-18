@@ -85,11 +85,11 @@ class DeviceControlAccessibilityService : AccessibilityService() {
         val lines = ArrayList<String>(max.coerceAtMost(400) + 4)
         walk(root, 0, lines, max.coerceAtMost(400))
         val header = "screen ${resources.displayMetrics.widthPixels}x${resources.displayMetrics.heightPixels}, foreground ${root.packageName}"
-        return if (lines.isEmpty()) "$header\n(no readable elements)" else lines.joinToString("\n")
+        return if (lines.isEmpty()) "$header\n(no readable elements)" else header + "\n" + lines.joinToString("\n")
     }
 
     private fun walk(node: AccessibilityNodeInfo, depth: Int, out: MutableList<String>, max: Int) {
-        if (node == null || out.size >= max) return
+        if (out.size >= max) return
         if (!node.isVisibleToUser) return
         val r = Rect().also { node.getBoundsInScreen(it) }
         if (!r.isEmpty) {
@@ -132,7 +132,7 @@ class DeviceControlAccessibilityService : AccessibilityService() {
         val stroke = GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(20, 10_000))
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
         val done = CompletableDeferred<Boolean>()
-        dispatchGesture(gesture, object : GestureResultCallback() {
+        dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
             override fun onCompleted(gestureDescription: GestureDescription?) { done.complete(true) }
             override fun onCancelled(gestureDescription: GestureDescription?) { done.complete(false) }
         }, null)
@@ -169,11 +169,11 @@ class DeviceControlAccessibilityService : AccessibilityService() {
 
     fun press(key: String): String {
         val action = when (key.lowercase().trim()) {
-            "back" -> GLOBAL_ACTION_BACK
-            "home" -> GLOBAL_ACTION_HOME
-            "recents" -> GLOBAL_ACTION_RECENTS
-            "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
-            "quick_settings" -> GLOBAL_ACTION_QUICK_SETTINGS
+            "back" -> AccessibilityService.GLOBAL_ACTION_BACK
+            "home" -> AccessibilityService.GLOBAL_ACTION_HOME
+            "recents" -> AccessibilityService.GLOBAL_ACTION_RECENTS
+            "notifications" -> AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS
+            "quick_settings" -> AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS
             else -> return "error: unknown key \"$key\" (back, home, recents, notifications, quick_settings)"
         }
         return if (performGlobalAction(action)) "Pressed $key." else "error: $key was refused"
@@ -202,8 +202,8 @@ class DeviceControlAccessibilityService : AccessibilityService() {
         }
         val done = CompletableDeferred<String>()
         takeScreenshot(android.view.Display.DEFAULT_DISPLAY, mainExecutor,
-            object : TakeScreenshotCallback {
-                override fun onSuccess(screenshot: ScreenshotResult) {
+            object : AccessibilityService.TakeScreenshotCallback {
+                override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
                     try {
                         val hardware = screenshot.hardwareBuffer ?: run {
                             done.complete("error: empty screenshot buffer"); return

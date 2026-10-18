@@ -270,6 +270,41 @@ router.get('/desktop/install', rateLimiters.strict, async (req: Request, res: Re
 
 const internalRouter = Router();
 
+/**
+ * The agent's current status line: a turn saves every assistant text block
+ * (also the short lines between tool calls) as a message, so the latest one
+ * of the last few minutes says what it is doing right now. Markdown is
+ * flattened and long texts are cut to their last paragraph.
+ */
+async function latestAgentNote(sessionId: string): Promise<string | undefined> {
+  try {
+    const row = (await pgGet(
+      `SELECT content, created_at FROM messages
+        WHERE session_id = ? AND role = 'assistant'
+        ORDER BY created_at DESC LIMIT 1`,
+      sessionId
+    )) as unknown as { content: string | null; created_at: string | null } | undefined;
+    const raw = String(row?.content || '').trim();
+    if (!raw) return undefined;
+    // created_at is TEXT "YYYY-MM-DD HH:MM:SS" in UTC; older than 10 minutes is stale.
+    const stamp = String(row?.created_at || '');
+    const at = Date.parse(stamp.includes('T') ? stamp : `${stamp.replace(' ', 'T')}Z`);
+    if (Number.isFinite(at) && Date.now() - at > 10 * 60 * 1000) return undefined;
+    const paragraphs = raw.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
+    const last = paragraphs[paragraphs.length - 1] || raw;
+    const flat = last
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/[*_`#>]+/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!flat) return undefined;
+    return flat.length > 180 ? `${flat.slice(0, 177).trimEnd()}…` : flat;
+  } catch {
+    return undefined;
+  }
+}
+
 const callSchema = z.object({
   tool: z.string().min(1).max(64),
   args: z.record(z.string(), z.unknown()).optional().default({}),
@@ -327,9 +362,15 @@ internalRouter.post('/call', requireHookSecret, async (req: Request, res: Respon
   }
 
   try {
+    const isDesktop = parsed.data.tool.startsWith('desktop_');
     const result = await browserBridge.call(
       row.user_id,
-      { id: sessionId, name: row.name || sessionId },
+      {
+        id: sessionId,
+        name: row.name || sessionId,
+        // Plum Desktop shows what the agent is doing next to its cursor.
+        ...(isDesktop ? { note: await latestAgentNote(sessionId) } : {}),
+      },
       parsed.data.tool,
       parsed.data.args,
       {
