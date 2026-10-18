@@ -54,4 +54,7 @@
     <string name="desktop_layout_right">Rechte Bildschirmhälfte</string>
     <string name="desktop_chat_hide">Chat am PC ausblenden</string>
     <string name="desktop_chat_show">Chat am PC einblenden</string>
+    <string name="desktop_layout_full">Ganze Bildschirmfläche</string>
+    <string name="desktop_chat_zoom">Schrift und Bedienung</string>
+    <string name="desktop_chat_top_space">Platz oben für Dock und Taskleiste</string>
 </resources>

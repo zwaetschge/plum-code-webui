@@ -15,7 +15,13 @@ export interface DesktopActivity {
   resultTarget: string;
   chat: string;
   screens: Array<{ name: string; width: number; height: number; primary: boolean }>;
-  layout?: { chatScreen: string; chatPlacement: string; chatVisible: boolean };
+  layout?: {
+    chatScreen: string;
+    chatPlacement: string;
+    chatVisible: boolean;
+    chatZoom: number;
+    chatInsetTop: number;
+  };
 }
 
 export function DesktopActivityCard({
@@ -148,6 +154,45 @@ export function DesktopActivityCard({
               <option value="floating">Frei verschiebbar</option>
               <option value="left">Linke Hälfte</option>
               <option value="right">Rechte Hälfte</option>
+              <option value="full">Ganze Bildschirmfläche</option>
+            </select>
+          </label>
+          <label>
+            Schrift und Bedienung{' '}
+            <select
+              className="rounded border border-border bg-background p-1"
+              value={activity.layout.chatZoom}
+              onChange={(e) =>
+                action.mutate({ action: 'layout', layout: { chatZoom: Number(e.target.value) } })
+              }
+            >
+              {[100, 125, 150, 175, 200, 250].map((zoom) => (
+                <option key={zoom} value={zoom}>
+                  {zoom} %
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Platz oben für Dock{' '}
+            <select
+              className="rounded border border-border bg-background p-1"
+              value={activity.layout.chatInsetTop}
+              onChange={(e) =>
+                action.mutate({
+                  action: 'layout',
+                  layout: { chatInsetTop: Number(e.target.value) },
+                })
+              }
+            >
+              {[0, 48, 64, 80, 96, 120, 160, 200, activity.layout.chatInsetTop]
+                .filter((v, i, a) => a.indexOf(v) === i)
+                .sort((a, b) => a - b)
+                .map((space) => (
+                  <option key={space} value={space}>
+                    {space} px
+                  </option>
+                ))}
             </select>
           </label>
           <Button

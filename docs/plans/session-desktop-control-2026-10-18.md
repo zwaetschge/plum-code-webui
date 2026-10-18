@@ -16,6 +16,7 @@ Ziel: alle zehn gewünschten Verbesserungen im Desktop-Companion, WebUI und Andr
 - [x] WebUI und Android: Live-Aktivität, Steuerung, Nachrichten, Monitor-/Layout-Einstellungen implementiert und bestehende Settings-Einstiegspunkte geprüft.
 - [x] Verhaltenstests und Typechecks; Android über android-builder bauen, APK kopieren und SHA-256 prüfen.
 - [ ] Über repair-bot ausliefern; Desktop-Autoupdate und echte Oberfläche/Interaktionen prüfen.
+- [ ] Lesbarkeit auf dem echten kleinen Bildschirm korrigieren: ganze nutzbare Fläche, explizite Text-/Bediengrösse, Dock oben freihalten; in WebUI und Android einstellbar.
 
 Stand: Version 0.6.0 in Commit `4ed9ec6`; repair-bot hat am 18.10.2026 um 10:45 UTC erfolgreich ausgeliefert, /health/ready bestätigt. Backend- und Frontend-Typecheck, ESLint, acht Python-Verhaltenstests und zwei Backend-Tests grün. Echte Qt-Widgets mit simulierten Daten sowie WebUI bei 1440/390 Pixeln geprüft; Bedienaktionen und Layout passen. Echte Geekom-Prüfung läuft: Companion meldet 0.6.0, Chat ist auf secondary/right/visible eingestellt und im Screenshot auf dem kleinen DP-1 zu sehen. Fremde Änderungen in AGENTS.md und piConfig.ts bestehen bereits.
 
@@ -24,6 +25,10 @@ Android: finaler Build (Commit `11680c9`) erfolgreich, inklusive DesktopLayoutSe
 Live-API geprüft: ohne Anmeldung 401, ungültige Anordnung 400, unbekannter Computer 409. Status liefert die Monitorwahl des richtigen verbundenen Companions.
 
 Realer Geekom-Test: Chat rechts auf DP-1, Retroid/Taskleiste bleiben erreichbar. Entwurf in natives Eingabefeld getippt und gelöscht, nicht gesendet; Ausblenden gibt das Panel frei; Endzustand pausiert, Chat sekundär/rechts/sichtbar. Dabei vorhandenen Skalierungsfehler bestätigt: Spectacle lieferte 6880×3360 mit DP-1 an einer anderen Pixelposition als die Qt-Eingabegeometrie. 0.6.1 nimmt deshalb jeden Ausgang über KWins CaptureScreen auf und setzt alle Ausgänge mit einer gemeinsamen Pixel-Skalierung anhand ihrer echten Qt-Positionen zusammen. Zehn Python-Tests grün, inklusive Geekom-Geometrie und Monitor links vom Ursprung. Zweite Auslieferung und Nachtest der Screenshot-Klickkoordinaten stehen noch aus.
+
+## Lesbarkeit – Nutzerkorrektur
+
+0.6.1 ist seit 13:13 UTC live. Neuer echter Screenshot bestätigt die korrigierte Geometrie (1568×985; DP-1 bei 769,656). Der Nutzer meldet zu kleine Schrift; Screenshot bestätigt etwa 11 native Pixel und ungenutzte linke Hälfte. 0.6.2 ergänzt `full`, `chatZoom` (100–250 %) und `chatInsetTop` (0–200 px), wendet Schrift explizit auch auf QTextDocument an und fasst die Kopfzeilen zusammen. Grosse Pause/Weiter-/Stoppen-Tasten direkt im Chat. Geekom-Ziel: secondary/full, 200 %, 80 px für das Dock oben. Auswahl bleibt flexibel und auf diesem Computer gespeichert. Android-/WebUI-Parität wird in diesem Durchgang gebaut; reale Nachprüfung steht aus.
 
 ## Integration mit „oled control“
 

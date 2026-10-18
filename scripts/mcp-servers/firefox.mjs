@@ -553,7 +553,20 @@ const TOOLS = [
       'Place the standalone desktop chat on any connected screen. Screen names come from desktop_status; primary and secondary are portable choices. Left/right share a screen with other apps; floating can be dragged. Settings persist on that computer.',
     inputSchema: obj({
       chatScreen: S,
-      chatPlacement: { type: 'string', enum: ['floating', 'left', 'right'] },
+      chatPlacement: { type: 'string', enum: ['floating', 'left', 'right', 'full'] },
+      chatZoom: {
+        type: 'integer',
+        minimum: 100,
+        maximum: 250,
+        description: 'Text and control size in percent.',
+      },
+      chatInsetTop: {
+        type: 'integer',
+        minimum: 0,
+        maximum: 200,
+        description:
+          'Keep this much space above the chat for a dock or taskbar, in logical pixels.',
+      },
       chatVisible: { type: 'boolean' },
     }),
   },

@@ -242,8 +242,10 @@ router.post('/desktop/action', requireAuth, (req: Request, res: Response) => {
       layout: z
         .object({
           chatScreen: z.string().max(120).optional(),
-          chatPlacement: z.enum(['floating', 'left', 'right']).optional(),
+          chatPlacement: z.enum(['floating', 'left', 'right', 'full']).optional(),
           chatVisible: z.boolean().optional(),
+          chatZoom: z.number().int().min(100).max(250).optional(),
+          chatInsetTop: z.number().int().min(0).max(200).optional(),
         })
         .optional(),
     })

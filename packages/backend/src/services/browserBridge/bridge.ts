@@ -57,8 +57,10 @@ export const desktopActivitySchema = z.object({
   layout: z
     .object({
       chatScreen: z.string().max(120),
-      chatPlacement: z.enum(['floating', 'left', 'right']),
+      chatPlacement: z.enum(['floating', 'left', 'right', 'full']),
       chatVisible: z.boolean(),
+      chatZoom: z.number().int().min(100).max(250).default(100),
+      chatInsetTop: z.number().int().min(0).max(200).default(0),
     })
     .optional(),
 });

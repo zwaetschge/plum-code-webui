@@ -21,6 +21,21 @@ test('desktop state is bounded, plain data; invalid updates keep last known acti
   });
   assert.equal(conn.desktopActivity, saved);
   assert.equal(desktopActivitySchema.safeParse({ chat: 'x'.repeat(4001) }).success, false);
+  const readable = desktopActivitySchema.parse({
+    layout: {
+      chatScreen: 'secondary',
+      chatPlacement: 'full',
+      chatVisible: true,
+      chatZoom: 200,
+      chatInsetTop: 80,
+    },
+  });
+  assert.equal(readable.layout?.chatZoom, 200);
+  assert.equal(readable.layout?.chatInsetTop, 80);
+  assert.equal(
+    desktopActivitySchema.safeParse({ layout: { ...readable.layout, chatZoom: 500 } }).success,
+    false
+  );
   assert.equal(
     desktopActivitySchema.safeParse({
       layout: { chatScreen: 'DP-2', chatPlacement: 'full-desktop', chatVisible: true },

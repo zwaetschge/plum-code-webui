@@ -58,4 +58,7 @@
     <string name="desktop_layout_right">Right half of screen</string>
     <string name="desktop_chat_hide">Hide chat on PC</string>
     <string name="desktop_chat_show">Show chat on PC</string>
+    <string name="desktop_layout_full">Entire screen area</string>
+    <string name="desktop_chat_zoom">Text and control size</string>
+    <string name="desktop_chat_top_space">Top space for dock and taskbar</string>
 </resources>

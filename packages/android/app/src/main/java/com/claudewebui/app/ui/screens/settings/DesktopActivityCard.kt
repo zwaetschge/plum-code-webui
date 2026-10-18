@@ -2,7 +2,10 @@ package com.claudewebui.app.ui.screens.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
@@ -51,8 +54,20 @@ fun DesktopActivityCard(connectionId: String, activity: DesktopActivity?, busy: 
             screens.forEach { (id, label) ->
                 FilterChip(selected = layout.chatScreen == id, enabled = !busy, onClick = { dispatch(DesktopActionInput(connectionId, "layout", layout = layout.copy(chatScreen = id))) }, label = { Text(label) })
             }
-            listOf("floating" to R.string.desktop_layout_floating, "left" to R.string.desktop_layout_left, "right" to R.string.desktop_layout_right).forEach { (id, label) ->
+            listOf("floating" to R.string.desktop_layout_floating, "left" to R.string.desktop_layout_left, "right" to R.string.desktop_layout_right, "full" to R.string.desktop_layout_full).forEach { (id, label) ->
                 FilterChip(selected = layout.chatPlacement == id, enabled = !busy, onClick = { dispatch(DesktopActionInput(connectionId, "layout", layout = layout.copy(chatPlacement = id))) }, label = { Text(stringResource(label)) })
+            }
+            Text(stringResource(R.string.desktop_chat_zoom), color = PlumMuted, fontSize = 12.sp)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(100, 125, 150, 175, 200, 250).forEach { zoom ->
+                    FilterChip(selected = layout.chatZoom == zoom, enabled = !busy, onClick = { dispatch(DesktopActionInput(connectionId, "layout", layout = layout.copy(chatZoom = zoom))) }, label = { Text("$zoom %") })
+                }
+            }
+            Text(stringResource(R.string.desktop_chat_top_space), color = PlumMuted, fontSize = 12.sp)
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(0, 48, 64, 80, 96, 120, 160, 200).forEach { space ->
+                    FilterChip(selected = layout.chatInsetTop == space, enabled = !busy, onClick = { dispatch(DesktopActionInput(connectionId, "layout", layout = layout.copy(chatInsetTop = space))) }, label = { Text("$space px") })
+                }
             }
             TextButton(enabled = !busy, onClick = { dispatch(DesktopActionInput(connectionId, "layout", layout = layout.copy(chatVisible = !layout.chatVisible))) }) {
                 Text(stringResource(if (layout.chatVisible) R.string.desktop_chat_hide else R.string.desktop_chat_show))

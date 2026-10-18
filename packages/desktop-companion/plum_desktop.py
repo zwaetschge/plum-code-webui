@@ -80,11 +80,11 @@ from PySide6.QtGui import (
     QPixmap,
     QPolygonF,
 )
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget, QPlainTextEdit, QComboBox, QScrollArea
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget, QPlainTextEdit, QComboBox, QScrollArea, QSpinBox
 
 import websockets
 
-VERSION = "0.6.1"
+VERSION = "0.6.2"
 CONFIG_DIR = os.path.expanduser("~/.config/plum-desktop")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
@@ -892,23 +892,26 @@ class DesktopDock(Floating):
         outer_chat.addWidget(scroll)
         body = QVBoxLayout(self.details)
         body.setContentsMargins(16, 12, 16, 12)
-        chat_header = QLabel("Plum Chat · Ziehen zum Verschieben")
+        header_row = QHBoxLayout()
+        chat_header = QLabel("Plum Chat")
         chat_header.mousePressEvent = self._chat_drag_start
         chat_header.mouseMoveEvent = self._chat_drag_move
         chat_header.mouseReleaseEvent = self._chat_drag_end
         self.chat_drag = None
-        body.addWidget(chat_header)
-        hide_chat = QPushButton("Chat ausblenden")
+        header_row.addWidget(chat_header, 1)
+        hide_chat = QPushButton("Deck")
+        hide_chat.setAccessibleName("Chat ausblenden und Deck anzeigen")
         hide_chat.setObjectName("ghost")
         hide_chat.clicked.connect(lambda: self.s.set_layout({"chatVisible": False}))
-        body.addWidget(hide_chat)
+        header_row.addWidget(hide_chat)
         self.layout_settings = QWidget()
         layout_options = QVBoxLayout(self.layout_settings)
         layout_options.setContentsMargins(0, 0, 0, 0)
-        layout_button = QPushButton("Bildschirm und Anordnung")
+        layout_button = QPushButton("Anordnung")
         layout_button.setObjectName("ghost")
         layout_button.clicked.connect(lambda: self.layout_settings.setVisible(not self.layout_settings.isVisible()))
-        body.addWidget(layout_button)
+        header_row.addWidget(layout_button)
+        body.addLayout(header_row)
         body.addWidget(self.layout_settings)
         self.layout_settings.hide()
         self.screen_choice = QComboBox()
@@ -916,11 +919,25 @@ class DesktopDock(Floating):
         layout_options.addWidget(self.screen_choice)
         self.placement_choice = QComboBox()
         self.placement_choice.setAccessibleName("Chat-Anordnung")
-        for key, label in [("floating", "Frei verschiebbar"), ("left", "Linke Bildschirmhälfte"), ("right", "Rechte Bildschirmhälfte")]:
+        for key, label in [("floating", "Frei verschiebbar"), ("left", "Linke Bildschirmhälfte"), ("right", "Rechte Bildschirmhälfte"), ("full", "Ganze Bildschirmfläche")]:
             self.placement_choice.addItem(label, key)
         self.screen_choice.activated.connect(self._layout_changed)
         self.placement_choice.activated.connect(self._layout_changed)
         layout_options.addWidget(self.placement_choice)
+        self.zoom_choice = QComboBox()
+        self.zoom_choice.setAccessibleName("Schrift und Bedienelemente vergrössern")
+        for zoom in (100, 125, 150, 175, 200, 250):
+            self.zoom_choice.addItem(f"Schrift und Bedienung: {zoom} %", zoom)
+        self.zoom_choice.activated.connect(self._layout_changed)
+        layout_options.addWidget(self.zoom_choice)
+        self.top_space = QSpinBox()
+        self.top_space.setAccessibleName("Platz oben für Dock und Taskleiste")
+        self.top_space.setRange(0, 200)
+        self.top_space.setSingleStep(8)
+        self.top_space.setPrefix("Platz oben: ")
+        self.top_space.setSuffix(" px")
+        self.top_space.valueChanged.connect(self._layout_changed)
+        layout_options.addWidget(self.top_space)
         self.sessions = QComboBox()
         self.sessions.setAccessibleName("Plum-Sitzung")
         self.sessions.activated.connect(self._choose_session)
@@ -957,7 +974,16 @@ class DesktopDock(Floating):
         body.addWidget(self.open_result)
         self.history_button = QPushButton("Letzte Schritte anzeigen")
         self.history_button.clicked.connect(lambda: self.history.setVisible(not self.history.isVisible()))
-        body.addWidget(self.history_button)
+        chat_controls = QHBoxLayout()
+        self.chat_pause = QPushButton("Pause")
+        self.chat_pause.clicked.connect(lambda: self.s.set_mode("control" if self.s.mode == "paused" else "paused"))
+        chat_controls.addWidget(self.chat_pause)
+        chat_stop = QPushButton("Stoppen")
+        chat_stop.setObjectName("stop")
+        chat_stop.clicked.connect(self.s.stop_task)
+        chat_controls.addWidget(chat_stop)
+        chat_controls.addWidget(self.history_button)
+        body.addLayout(chat_controls)
         self.history = QPlainTextEdit()
         self.history.setReadOnly(True)
         self.history.setAccessibleName("Letzte Schritte")
@@ -967,7 +993,8 @@ class DesktopDock(Floating):
 
     def _layout_changed(self, _index):
         self.s.set_layout({"chatScreen": self.screen_choice.currentData(),
-                           "chatPlacement": self.placement_choice.currentData()})
+                           "chatPlacement": self.placement_choice.currentData(),
+                           "chatZoom": self.zoom_choice.currentData(), "chatInsetTop": self.top_space.value()})
 
     def _chat_drag_start(self, event):
         if event.button() == Qt.LeftButton:
@@ -992,9 +1019,21 @@ class DesktopDock(Floating):
             screen = next((s for s in sorted(screens, key=lambda s: s.geometry().width() * s.geometry().height())
                            if s != QGuiApplication.primaryScreen()), None)
         screen = screen or QGuiApplication.primaryScreen()
-        rect = screen.availableGeometry().adjusted(16, 16, -16, -16)
+        zoom = int(layout.get("chatZoom", 100))
+        font = self.chat_window.font()
+        font.setPointSizeF(12 * zoom / 100)
+        self.chat_window.setFont(font)
+        # QTextDocument can retain its own default font despite widget font
+        # inheritance. Apply the chosen size explicitly to content and controls.
+        for widget in self.chat_window.findChildren(QWidget):
+            widget.setFont(font)
+            if isinstance(widget, (QPushButton, QLineEdit, QComboBox, QSpinBox)):
+                widget.setMinimumHeight(max(36, round(24 * zoom / 100)))
+        for edit in (self.chat, self.result, self.history):
+            edit.document().setDefaultFont(font)
+        rect = screen.availableGeometry().adjusted(16, 16 + int(layout.get("chatInsetTop", 0)), -16, -16)
         placement = layout.get("chatPlacement", "floating")
-        width = min(rect.width(), max(320, rect.width() // 2 - 8)) if placement != "floating" else min(560, rect.width())
+        width = rect.width() if placement == "full" else (min(rect.width(), max(320, rect.width() // 2 - 8)) if placement != "floating" else min(round(560 * zoom / 100), rect.width()))
         height = min(700, rect.height()) if placement == "floating" else rect.height()
         self.chat_window.resize(width, height)
         x = rect.right() - width + 1 if placement == "right" else rect.left()
@@ -1013,6 +1052,10 @@ class DesktopDock(Floating):
         self.screen_choice.setCurrentIndex(max(0, self.screen_choice.findData(wanted)))
         self.screen_choice.blockSignals(False)
         self.placement_choice.setCurrentIndex(max(0, self.placement_choice.findData(placement)))
+        self.zoom_choice.setCurrentIndex(max(0, self.zoom_choice.findData(zoom)))
+        self.top_space.blockSignals(True)
+        self.top_space.setValue(int(layout.get("chatInsetTop", 0)))
+        self.top_space.blockSignals(False)
         self.chat_window.setVisible(layout.get("chatVisible", True))
         self.toggle.setText("−" if layout.get("chatVisible", True) else "+")
 
@@ -1070,7 +1113,10 @@ class DesktopDock(Floating):
         self.header.setText(a["sessionName"] + " · Ziehen zum Verschieben")
         self.pause.setEnabled(self.s.mode != "paused")
         self.resume.setEnabled(self.s.mode == "paused" and self.s.online)
+        self.chat_pause.setText("Weiter" if self.s.mode == "paused" else "Pause")
+        self.chat_pause.setEnabled(self.s.mode != "paused" or self.s.online)
         self.progress.setText(a["progress"])
+        self.progress.setVisible(bool(a["progress"]))
         if self.result.toPlainText() != a["result"]:
             self.result.setPlainText(a["result"])
         self.result.setVisible(bool(a["result"]))
@@ -2941,7 +2987,7 @@ class App(QObject):
         self.last_session = self.state.get("session") or {}
         self.activity_state = {"sessionId": "", "sessionName": "Plum", "status": "Bereit", "action": "",
                                "progress": "", "history": [], "result": "", "resultTarget": ""}
-        self.layout = {"chatScreen": "primary", "chatPlacement": "floating", "chatVisible": True,
+        self.layout = {"chatScreen": "primary", "chatPlacement": "floating", "chatVisible": True, "chatZoom": 100, "chatInsetTop": 0,
                        **self.state.get("layout", {})}
         self.chat_lines = []
         self.stream = ""
@@ -3017,9 +3063,11 @@ class App(QObject):
         self.publish_activity()
 
     def set_layout(self, changes, reposition=True):
-        for key in ("chatScreen", "chatPlacement", "chatVisible"):
+        for key in ("chatScreen", "chatPlacement", "chatVisible", "chatZoom", "chatInsetTop"):
             if key in changes:
                 self.layout[key] = changes[key]
+        self.layout["chatZoom"] = max(100, min(250, int(self.layout.get("chatZoom") or 100)))
+        self.layout["chatInsetTop"] = max(0, min(200, int(self.layout.get("chatInsetTop") or 0)))
         self.state["layout"] = self.layout
         save_state(self.state)
         if reposition:
