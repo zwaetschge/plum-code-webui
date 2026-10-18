@@ -191,14 +191,15 @@ class DeviceControlService : Service() {
             "call" -> {
                 val id = frame.optString("id")
                 scope.launch {
-                    val reply = runTool(frame).let { toolResult ->
-                        if (toolResult.startsWith("error:")) {
-                            JSONObject().put("type", "result").put("id", id)
-                                .put("ok", false).put("error", toolResult.removePrefix("error: "))
+                    val result = JSONObject().put("type", "result").put("id", id)
+                    val reply = when (val toolResult = runTool(frame)) {
+                        is JSONObject -> result.put("content", JSONArray().put(toolResult))
+                        is String -> if (toolResult.startsWith("error:")) {
+                            result.put("ok", false).put("error", toolResult.removePrefix("error:").trim())
                         } else {
-                            JSONObject().put("type", "result").put("id", id)
-                                .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", toolResult)))
+                            result.put("content", JSONArray().put(JSONObject().put("type", "text").put("text", toolResult)))
                         }
+                        else -> result.put("ok", false).put("error", "tool returned nothing")
                     }
                     webSocket.send(reply.toString())
                 }
