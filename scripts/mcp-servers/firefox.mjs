@@ -94,6 +94,8 @@ const DESKTOP_WINDOW = {
   description:
     'Window id from desktop_windows, part of its title or its app class; default the active window.',
 };
+const S = { type: 'string' };
+const obj = (properties) => ({ type: 'object', properties });
 
 const TOOLS = [
   {
@@ -529,6 +531,33 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'desktop_task',
+    description:
+      'Show a desktop task plan and real progress. Call before starting, at step changes, and on completion with a verified result and optional file/URL target. Never invent percentages or declare success before checking the result.',
+    inputSchema: obj({
+      title: S,
+      steps: { type: 'array', items: S, maxItems: 30 },
+      current: {
+        type: 'integer',
+        minimum: 0,
+        description: 'Zero-based current step; steps.length when all are complete.',
+      },
+      status: { type: 'string', enum: ['working', 'waiting', 'needs_input', 'completed', 'error'] },
+      result: S,
+      target: S,
+    }),
+  },
+  {
+    name: 'desktop_layout',
+    description:
+      'Place the standalone desktop chat on any connected screen. Screen names come from desktop_status; primary and secondary are portable choices. Left/right share a screen with other apps; floating can be dragged. Settings persist on that computer.',
+    inputSchema: obj({
+      chatScreen: S,
+      chatPlacement: { type: 'string', enum: ['floating', 'left', 'right'] },
+      chatVisible: { type: 'boolean' },
+    }),
+  },
+  {
     name: 'desktop_screenshot',
     description:
       "Screenshot of the user's whole desktop (all screens, native apps). Its pixels are the x/y of every desktop_* tool. Give x, y, width, height to zoom into a region at full resolution (coordinates stay those of the full screenshot).",
@@ -820,7 +849,7 @@ const INSTRUCTIONS = [
   '- Several browsers can be connected; Plum uses the one the user used most recently. If the user says you are in the wrong browser, call browsers and select_browser.',
   '- Tutorials: in guide mode use guide_step for one step at a time; the user clicking the mark (or "Erledigt") sends you "✓ Schritt n erledigt" – then show the next step.',
   '- Saved macros (macros, macro_run) replay demonstrations deterministically; prefer them for recurring tasks and continue by hand where one stops.',
-  '- Native desktop apps (Blender, GIMP, file manager …) through the Plum desktop companion: desktop_status, then desktop_read_ui/desktop_find for refs (most KDE, Qt and GTK apps) or desktop_screenshot (zoom a region for small text); act with desktop_click/type/press_key/scroll/drag/open/activate_window, wait with desktop_wait_for, show with desktop_point/annotate/guide_step. desktop_ocr / click text for apps without accessibility data, desktop_wait_change for renders. Saved demonstrations: desktop_macros/desktop_macro_run. Blocked apps (rules) refuse input and are blacked out; ask-apps wait for the user. If the user presses Escape, Plum Desktop pauses: stop and ask. Prefer refs; otherwise coordinates are pixels of the latest desktop_screenshot; check the result after each change. In guide mode (status) input is blocked: show, the user operates. The same confirmation rules as in the browser apply.',
+  '- Native desktop apps (Blender, GIMP, file manager …) through the Plum desktop companion: desktop_status first. Publish the task steps with desktop_task before acting, update the zero-based current step and working/waiting/needs_input state, then report completed only after verification with a concise result and optional local file/HTTP target. desktop_layout places the separate chat on primary, secondary or a named screen; never change monitor layouts without the user asking. Use desktop_read_ui/desktop_find for refs (most KDE, Qt and GTK apps) or desktop_screenshot (zoom a region for small text); act with desktop_click/type/press_key/scroll/drag/open/activate_window, wait with desktop_wait_for, show with desktop_point/annotate/guide_step. desktop_ocr / click text for apps without accessibility data, desktop_wait_change for renders. Saved demonstrations: desktop_macros/desktop_macro_run. Blocked apps (rules) refuse input and are blacked out; ask-apps wait for the user. If the user presses Escape or uses their mouse/keyboard, Plum Desktop pauses: stop acting until they explicitly resume. Never auto-resume or repeat a rejected input. Prefer refs; otherwise coordinates are pixels of the latest desktop_screenshot; check the result after each change. In guide mode (status) input is blocked: show, the user operates. The same confirmation rules as in the browser apply.',
   '- Guide mode (status shows mode "guide"): the user is learning in their own tab and does the work. Watch with screenshot/read_page, show with point, annotate and draw, explain in chat; clicking, typing, scrolling and navigating are blocked. Clear old marks before the next step.',
   '- A message titled "Vorführung aus dem Browser" is a demonstration the user recorded: numbered steps with element names, CSS paths and screenshots (red circle = click). Learn the task from it and replay it with the browser tools when asked.',
   '- Prefer read_page/find refs over coordinates; take a screenshot to check visual state. Use extract_table for tabular data and wait_for with gone/url after actions that load.',

@@ -30,6 +30,7 @@ interface GatewayApi {
     suspend fun setDesktopRules(rules: List<DesktopRule>): ApiResponse<List<DesktopRule>>
     suspend fun setDesktopMode(mode: String, connectionId: String?): ApiResponse<JsonElement>
     suspend fun desktopRecord(action: String, connectionId: String?): ApiResponse<JsonElement>
+    suspend fun desktopAction(input: DesktopActionInput): ApiResponse<JsonElement>
     suspend fun createDesktopInstall(name: String): ApiResponse<DesktopInstall>
 
     /** GET /api/browser-bridge/status — connected Firefox extensions. */
@@ -81,6 +82,9 @@ class GatewayApiImpl(private val http: ApiHttp) : GatewayApi {
 
     override suspend fun desktopRecord(action: String, connectionId: String?): ApiResponse<JsonElement> =
         http.post("/api/browser-bridge/desktop/record") { setBody(DesktopRecordInput(action, connectionId)) }
+
+    override suspend fun desktopAction(input: DesktopActionInput): ApiResponse<JsonElement> =
+        http.post("/api/browser-bridge/desktop/action") { setBody(input) }
 
     override suspend fun createDesktopInstall(name: String): ApiResponse<DesktopInstall> =
         http.post("/api/browser-bridge/desktop/install") { setBody(DesktopInstallInput(name)) }

@@ -62,7 +62,25 @@ data class BrowserConnection(
     val tabGroups: Boolean = false,
     val connectedAt: String = "",
     val lastSeenAt: String = "",
+    val desktopActivity: DesktopActivity? = null,
 )
+
+@Serializable
+data class DesktopScreen(val name: String = "", val width: Int = 0, val height: Int = 0, val primary: Boolean = false)
+
+@Serializable
+data class DesktopLayout(val chatScreen: String = "primary", val chatPlacement: String = "floating", val chatVisible: Boolean = true)
+
+@Serializable
+data class DesktopActivity(
+    val sessionId: String = "", val sessionName: String = "Plum", val status: String = "Bereit",
+    val action: String = "", val progress: String = "", val history: List<String> = emptyList(),
+    val result: String = "", val resultTarget: String = "", val chat: String = "",
+    val screens: List<DesktopScreen> = emptyList(), val layout: DesktopLayout? = null,
+)
+
+@Serializable
+data class DesktopActionInput(val connectionId: String, val action: String, val message: String? = null, val layout: DesktopLayout? = null)
 
 /** Plum Desktop per-app rule: block (no input, blacked out) or ask (confirm at the computer). */
 @Serializable

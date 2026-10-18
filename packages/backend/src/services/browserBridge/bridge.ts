@@ -1,6 +1,7 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { nanoid } from 'nanoid';
+import { z } from 'zod';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { ChatRelay } from './chatRelay.js';
 import { latestDesktopCompanion, latestExtensionVersion, versionNewer } from './package.js';
@@ -32,6 +33,37 @@ const SWITCH_AFTER_IDLE_MS = 10 * 60_000;
 /** A browser extension, or the desktop companion that shows marks over native apps. */
 export type BridgeClientKind = 'browser' | 'desktop';
 
+export const desktopActivitySchema = z.object({
+  sessionId: z.string().max(64).default(''),
+  sessionName: z.string().max(100).default('Plum'),
+  status: z.string().max(40).default('Bereit'),
+  action: z.string().max(240).default(''),
+  progress: z.string().max(240).default(''),
+  history: z.array(z.string().max(300)).max(12).default([]),
+  result: z.string().max(2000).default(''),
+  resultTarget: z.string().max(2000).default(''),
+  chat: z.string().max(4000).default(''),
+  screens: z
+    .array(
+      z.object({
+        name: z.string().max(120),
+        width: z.number(),
+        height: z.number(),
+        primary: z.boolean(),
+      })
+    )
+    .max(16)
+    .default([]),
+  layout: z
+    .object({
+      chatScreen: z.string().max(120),
+      chatPlacement: z.enum(['floating', 'left', 'right']),
+      chatVisible: z.boolean(),
+    })
+    .optional(),
+});
+export type DesktopActivity = z.infer<typeof desktopActivitySchema>;
+
 export interface BrowserClientInfo {
   kind: BridgeClientKind;
   name: string;
@@ -55,6 +87,7 @@ export interface BrowserConnectionSummary {
   lastSeenAt: string;
   /** Last time the user (not an agent) focused this browser. */
   activeAt: string;
+  desktopActivity: DesktopActivity | null;
 }
 
 export interface BrowserCallSession {
@@ -97,6 +130,7 @@ interface Connection {
   alive: boolean;
   pending: Map<string, PendingCall>;
   chat: ChatRelay | null;
+  desktopActivity: DesktopActivity | null;
 }
 
 export class BrowserBridgeError extends Error {
@@ -169,6 +203,7 @@ export class BrowserBridge {
         connectedAt: conn.connectedAt.toISOString(),
         lastSeenAt: conn.lastSeenAt.toISOString(),
         activeAt: conn.activeAt.toISOString(),
+        desktopActivity: conn.desktopActivity,
       }));
   }
 
@@ -298,7 +333,10 @@ export class BrowserBridge {
         'BROWSER_NOT_CONNECTED'
       );
     }
-    if (conn.paused && tool !== 'status' && tool !== 'peek' && tool !== 'desktop_status') {
+    if (
+      conn.paused &&
+      !['status', 'peek', 'desktop_status', 'desktop_task', 'desktop_layout'].includes(tool)
+    ) {
       throw new BrowserBridgeError(
         kind === 'desktop'
           ? 'Plum Desktop is paused (tray icon). Ask the user to resume it.'
@@ -315,6 +353,7 @@ export class BrowserBridge {
         lastCallAt: Date.now(),
       });
     const id = nanoid();
+    if (kind === 'desktop') this.chatFor(conn).watch(session.id);
     const timeoutMs = Math.min(
       Math.max(opts.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS, 1_000),
       MAX_CALL_TIMEOUT_MS
@@ -433,6 +472,7 @@ export class BrowserBridge {
       alive: true,
       pending: new Map(),
       chat: null,
+      desktopActivity: null,
     };
     this.connections.set(conn.id, conn);
     ws.send(
@@ -479,6 +519,10 @@ export class BrowserBridge {
       if (typeof frame.recording === 'boolean') conn.recording = frame.recording;
       if (typeof frame.tabGroups === 'boolean') conn.tabGroups = frame.tabGroups;
       if (frame.active === true) conn.activeAt = new Date();
+      if (conn.client.kind === 'desktop' && frame.desktopActivity) {
+        const parsed = desktopActivitySchema.safeParse(frame.desktopActivity);
+        if (parsed.success) conn.desktopActivity = parsed.data;
+      }
       return;
     }
     if (frame.type !== 'result' || typeof frame.id !== 'string') return;
@@ -502,6 +546,13 @@ export class BrowserBridge {
   }
 
   /** Session picker requests from the extension's own UI (see rpc.ts). */
+  private chatFor(conn: Connection): ChatRelay {
+    return (conn.chat ??= new ChatRelay(conn.userId, (event, payload) => {
+      if (conn.ws.readyState === WebSocket.OPEN)
+        conn.ws.send(JSON.stringify({ type: 'event', event, payload }));
+    }));
+  }
+
   private async answerRpc(
     conn: Connection,
     id: string,
@@ -528,12 +579,7 @@ export class BrowserBridge {
               this.sessionBrowser.delete(sessionId);
             }
           },
-          chat: () =>
-            (conn.chat ??= new ChatRelay(conn.userId, (event, payload) => {
-              if (conn.ws.readyState === WebSocket.OPEN) {
-                conn.ws.send(JSON.stringify({ type: 'event', event, payload }));
-              }
-            })),
+          chat: () => this.chatFor(conn),
           sessionsOnThisBrowser: () =>
             new Set(
               [...this.sessionBrowser.entries()]

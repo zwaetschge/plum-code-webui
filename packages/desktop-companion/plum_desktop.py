@@ -68,6 +68,7 @@ from PySide6.QtGui import (
     QFont,
     QFontMetrics,
     QGuiApplication,
+    QCursor,
     QIcon,
     QImage,
     QImageReader,
@@ -78,11 +79,11 @@ from PySide6.QtGui import (
     QPixmap,
     QPolygonF,
 )
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget, QPlainTextEdit, QComboBox, QScrollArea
 
 import websockets
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 CONFIG_DIR = os.path.expanduser("~/.config/plum-desktop")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
@@ -156,7 +157,7 @@ def pump(seconds):
     while True:
         QApplication.processEvents()
         if ABORT["set"]:
-            raise Stopped("Gestoppt: Der Nutzer hat Escape gedrückt. Plum Desktop ist jetzt pausiert.")
+            raise Stopped("Gestoppt: Die Desktop-Steuerung wurde pausiert oder vom Nutzer übernommen. Erst nach Weiter fortsetzen.")
         left = end - time.time()
         if left <= 0:
             return
@@ -179,6 +180,7 @@ def ease(t):
 
 class KWin(QObject):
     """Runs one-shot KWin scripts; they answer through our DBus service."""
+    desktop_action = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -193,6 +195,11 @@ class KWin(QObject):
     @Slot(str, str)
     def report(self, token, payload):
         self.replies[token] = payload
+
+    @Slot(str)
+    def desktop(self, action):
+        if action in ("toggle_chat", "show_chat", "hide_chat", "pause", "resume", "stop", "context"):
+            self.desktop_action.emit(action)
 
     def run(self, body, timeout=3.0):
         """`body` is JS that ends with `reply(value)`; returns the value."""
@@ -447,6 +454,7 @@ class Overlay(QWidget):
         self.glow_enabled = True
         self.active_until = 0.0
         self.glow_started = 0.0
+        self.focus_screen = None
         # What the agent says it is doing: (text, session name, at).
         self.note = None
         self._note_rect = QRectF()
@@ -609,6 +617,7 @@ class Overlay(QWidget):
         w = GLOW_WIDTH
         painter.setPen(Qt.NoPen)
         for r in self._screens_local():
+            screen_alpha = alpha * (1.0 if self.focus_screen is None or r.contains(self.focus_screen) else 0.22)
             bands = (
                 (QRectF(r.left(), r.top(), r.width(), w), QPointF(0, r.top()), QPointF(0, r.top() + w)),
                 (QRectF(r.left(), r.bottom() - w, r.width(), w), QPointF(0, r.bottom()), QPointF(0, r.bottom() - w)),
@@ -617,12 +626,12 @@ class Overlay(QWidget):
             )
             for rect, start, end in bands:
                 gradient = QLinearGradient(start, end)
-                gradient.setColorAt(0.0, shade(alpha * 0.85))
-                gradient.setColorAt(0.35, shade(alpha * 0.32))
+                gradient.setColorAt(0.0, shade(screen_alpha * 0.85))
+                gradient.setColorAt(0.35, shade(screen_alpha * 0.32))
                 gradient.setColorAt(1.0, shade(0.0))
                 painter.fillRect(rect, gradient)
             painter.setBrush(Qt.NoBrush)
-            painter.setPen(QPen(shade(alpha), 3))
+            painter.setPen(QPen(shade(screen_alpha), 3))
             painter.drawRect(r.adjusted(1.5, 1.5, -1.5, -1.5))
             painter.setPen(Qt.NoPen)
 
@@ -641,7 +650,9 @@ class Overlay(QWidget):
             point = self.cursor[0] + QPointF(16, 58)
             box = QRectF(point.x(), point.y(), width, height)
         else:
-            screen = QRectF(QGuiApplication.primaryScreen().geometry()).translated(
+            active_screen = (QGuiApplication.screenAt(self.global_point(self.focus_screen).toPoint())
+                             if self.focus_screen is not None else None) or QGuiApplication.primaryScreen()
+            screen = QRectF(active_screen.geometry()).translated(
                 -self.geometry().x(), -self.geometry().y()
             )
             box = QRectF(screen.right() - width - 28, screen.bottom() - height - 28, width, height)
@@ -801,6 +812,11 @@ QPushButton:hover { background: #3a6dff; }
 QPushButton#ghost { background: transparent; color: rgba(255,255,255,0.75); padding: 6px 8px; }
 QPushButton#stop { background: #ea2143; }
 QPushButton#stop:hover { background: #ff3b5c; }
+QPushButton:disabled { background: #343044; color: #8e899e; }
+QLineEdit, QComboBox, QPlainTextEdit { background: #211e33; color: #f6f4ff; border: 1px solid #4c455f; border-radius: 7px; padding: 6px; }
+QLineEdit:focus, QComboBox:focus { border: 1px solid #9b7bff; }
+QComboBox QAbstractItemView { background: #211e33; color: #f6f4ff; selection-background-color: #5137a0; }
+QScrollArea { background: transparent; border: 0; }
 """
 
 
@@ -817,6 +833,259 @@ class Floating(QWidget):
         self.card = QWidget(self)
         self.card.setObjectName("card")
         outer.addWidget(self.card)
+
+
+class DesktopDock(Floating):
+    """Movable desktop controls, live chat, task result and recent actions."""
+
+    def __init__(self, app):
+        super().__init__()
+        self.s = app
+        self.drag_origin = None
+        self.placed = False
+        self.compact = False
+        self.setFixedWidth(460)
+        layout = QVBoxLayout(self.card)
+        layout.setContentsMargins(16, 12, 16, 12)
+        self.header = QLabel("Plum Desktop · Ziehen zum Verschieben")
+        self.header.setTextFormat(Qt.PlainText)
+        self.header.setObjectName("title")
+        self.header.mousePressEvent = self._drag_start
+        self.header.mouseMoveEvent = self._drag_move
+        self.header.mouseReleaseEvent = self._drag_end
+        layout.addWidget(self.header)
+        self.status = QLabel("Bereit")
+        self.status.setTextFormat(Qt.PlainText)
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        controls = QHBoxLayout()
+        self.pause = QPushButton("Pause")
+        self.pause.clicked.connect(lambda: self.s.set_mode("paused"))
+        controls.addWidget(self.pause)
+        self.resume = QPushButton("Weiter")
+        self.resume.clicked.connect(lambda: self.s.set_mode("control"))
+        controls.addWidget(self.resume)
+        stop = QPushButton("Stoppen")
+        stop.setObjectName("stop")
+        stop.clicked.connect(self.s.stop_task)
+        controls.addWidget(stop)
+        self.toggle = QPushButton("−")
+        self.toggle.setAccessibleName("Details ein- oder ausklappen")
+        self.toggle.clicked.connect(self.toggle_compact)
+        controls.addWidget(self.toggle)
+        layout.addLayout(controls)
+        self.chat_window = Floating()
+        self.chat_window.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.chat_window.setWindowTitle("Plum Chat")
+        chat_font = self.chat_window.font()
+        chat_font.setPointSize(12)
+        self.chat_window.setFont(chat_font)
+        self.chat_window.resize(460, 600)
+        outer_chat = QVBoxLayout(self.chat_window.card)
+        outer_chat.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.details = QWidget()
+        self.details.setStyleSheet("background: transparent;")
+        scroll.setWidget(self.details)
+        outer_chat.addWidget(scroll)
+        body = QVBoxLayout(self.details)
+        body.setContentsMargins(16, 12, 16, 12)
+        chat_header = QLabel("Plum Chat · Ziehen zum Verschieben")
+        chat_header.mousePressEvent = self._chat_drag_start
+        chat_header.mouseMoveEvent = self._chat_drag_move
+        chat_header.mouseReleaseEvent = self._chat_drag_end
+        self.chat_drag = None
+        body.addWidget(chat_header)
+        hide_chat = QPushButton("Chat ausblenden")
+        hide_chat.setObjectName("ghost")
+        hide_chat.clicked.connect(lambda: self.s.set_layout({"chatVisible": False}))
+        body.addWidget(hide_chat)
+        self.layout_settings = QWidget()
+        layout_options = QVBoxLayout(self.layout_settings)
+        layout_options.setContentsMargins(0, 0, 0, 0)
+        layout_button = QPushButton("Bildschirm und Anordnung")
+        layout_button.setObjectName("ghost")
+        layout_button.clicked.connect(lambda: self.layout_settings.setVisible(not self.layout_settings.isVisible()))
+        body.addWidget(layout_button)
+        body.addWidget(self.layout_settings)
+        self.layout_settings.hide()
+        self.screen_choice = QComboBox()
+        self.screen_choice.setAccessibleName("Bildschirm für den Chat")
+        layout_options.addWidget(self.screen_choice)
+        self.placement_choice = QComboBox()
+        self.placement_choice.setAccessibleName("Chat-Anordnung")
+        for key, label in [("floating", "Frei verschiebbar"), ("left", "Linke Bildschirmhälfte"), ("right", "Rechte Bildschirmhälfte")]:
+            self.placement_choice.addItem(label, key)
+        self.screen_choice.activated.connect(self._layout_changed)
+        self.placement_choice.activated.connect(self._layout_changed)
+        layout_options.addWidget(self.placement_choice)
+        self.sessions = QComboBox()
+        self.sessions.setAccessibleName("Plum-Sitzung")
+        self.sessions.activated.connect(self._choose_session)
+        body.addWidget(self.sessions)
+        self.progress = QLabel()
+        self.progress.setTextFormat(Qt.PlainText)
+        self.progress.setWordWrap(True)
+        body.addWidget(self.progress)
+        self.chat = QPlainTextEdit()
+        self.chat.setReadOnly(True)
+        self.chat.setAccessibleName("Live-Chat")
+        self.chat.setMinimumHeight(100)
+        self.chat.setStyleSheet("background:#211e33; color:#f6f4ff; border:0; border-radius:8px; padding:8px;")
+        body.addWidget(self.chat, 1)
+        self.message = QLineEdit()
+        self.message.setPlaceholderText("Nachricht an Plum …")
+        self.message.setAccessibleName("Nachricht an Plum")
+        self.message.returnPressed.connect(self.send)
+        body.addWidget(self.message)
+        actions = QHBoxLayout()
+        for label, callback in [("Senden", self.send), ("Hier weitermachen", self.s.select_context),
+                                ("Nachbessern", lambda: self.message.setFocus())]:
+            button = QPushButton(label)
+            button.clicked.connect(callback)
+            actions.addWidget(button)
+        body.addLayout(actions)
+        self.result = QPlainTextEdit()
+        self.result.setReadOnly(True)
+        self.result.setAccessibleName("Ergebnis")
+        self.result.setFixedHeight(100)
+        body.addWidget(self.result)
+        self.open_result = QPushButton("Ergebnis öffnen")
+        self.open_result.clicked.connect(self.s.open_result)
+        body.addWidget(self.open_result)
+        self.history_button = QPushButton("Letzte Schritte anzeigen")
+        self.history_button.clicked.connect(lambda: self.history.setVisible(not self.history.isVisible()))
+        body.addWidget(self.history_button)
+        self.history = QPlainTextEdit()
+        self.history.setReadOnly(True)
+        self.history.setAccessibleName("Letzte Schritte")
+        self.history.setFixedHeight(100)
+        self.history.hide()
+        body.addWidget(self.history)
+
+    def _layout_changed(self, _index):
+        self.s.set_layout({"chatScreen": self.screen_choice.currentData(),
+                           "chatPlacement": self.placement_choice.currentData()})
+
+    def _chat_drag_start(self, event):
+        if event.button() == Qt.LeftButton:
+            self.chat_drag = event.globalPosition().toPoint() - self.chat_window.pos()
+
+    def _chat_drag_move(self, event):
+        if self.chat_drag is not None:
+            self.chat_window.move(event.globalPosition().toPoint() - self.chat_drag)
+
+    def _chat_drag_end(self, _event):
+        self.chat_drag = None
+        self.s.state["chatPosition"] = [self.chat_window.x(), self.chat_window.y()]
+        screen = QGuiApplication.screenAt(self.chat_window.geometry().center()) or QGuiApplication.primaryScreen()
+        self.s.set_layout({"chatPlacement": "floating", "chatScreen": screen.name()}, reposition=False)
+
+    def place_chat(self):
+        layout = self.s.layout
+        screens = QGuiApplication.screens()
+        wanted = layout.get("chatScreen")
+        screen = next((s for s in screens if s.name() == wanted), None)
+        if wanted == "secondary":
+            screen = next((s for s in sorted(screens, key=lambda s: s.geometry().width() * s.geometry().height())
+                           if s != QGuiApplication.primaryScreen()), None)
+        screen = screen or QGuiApplication.primaryScreen()
+        rect = screen.availableGeometry().adjusted(16, 16, -16, -16)
+        placement = layout.get("chatPlacement", "floating")
+        width = min(rect.width(), max(320, rect.width() // 2 - 8)) if placement != "floating" else min(560, rect.width())
+        height = min(700, rect.height()) if placement == "floating" else rect.height()
+        self.chat_window.resize(width, height)
+        x = rect.right() - width + 1 if placement == "right" else rect.left()
+        y = rect.top()
+        pos = self.s.state.get("chatPosition")
+        if placement == "floating" and isinstance(pos, list) and len(pos) == 2 and rect.contains(QPointF(*pos).toPoint()):
+            x, y = pos
+        self.chat_window.move(max(rect.left(), min(x, rect.right() - width + 1)),
+                              max(rect.top(), min(y, rect.bottom() - height + 1)))
+        self.screen_choice.blockSignals(True)
+        self.screen_choice.clear()
+        self.screen_choice.addItem("Hauptbildschirm", "primary")
+        self.screen_choice.addItem("Kleiner Zusatzbildschirm", "secondary")
+        for item in screens:
+            self.screen_choice.addItem(item.name(), item.name())
+        self.screen_choice.setCurrentIndex(max(0, self.screen_choice.findData(wanted)))
+        self.screen_choice.blockSignals(False)
+        self.placement_choice.setCurrentIndex(max(0, self.placement_choice.findData(placement)))
+        self.chat_window.setVisible(layout.get("chatVisible", True))
+        self.toggle.setText("−" if layout.get("chatVisible", True) else "+")
+
+    def _drag_start(self, event):
+        if event.button() == Qt.LeftButton:
+            self.drag_origin = event.globalPosition().toPoint() - self.pos()
+
+    def _drag_move(self, event):
+        if self.drag_origin is not None:
+            self.move(event.globalPosition().toPoint() - self.drag_origin)
+
+    def _drag_end(self, _event):
+        self.drag_origin = None
+        self.clamp()
+        self.s.state["dockPosition"] = [self.x(), self.y()]
+        save_state(self.s.state)
+
+    def clamp(self):
+        screen = QGuiApplication.screenAt(self.geometry().center()) or QGuiApplication.primaryScreen()
+        rect = screen.availableGeometry()
+        self.move(max(rect.left(), min(self.x(), rect.right() - self.width() + 1)),
+                  max(rect.top(), min(self.y(), rect.bottom() - self.height() + 1)))
+
+    def present(self):
+        if not self.placed:
+            self.adjustSize()
+            rect = QGuiApplication.primaryScreen().availableGeometry()
+            pos = self.s.state.get("dockPosition")
+            self.move(*(pos if isinstance(pos, list) and len(pos) == 2 else [rect.right() - self.width() - 24, rect.top() + 40]))
+            self.placed = True
+        self.clamp()
+        self.show()
+        self.raise_()
+
+    def toggle_compact(self):
+        visible = not self.chat_window.isVisible()
+        self.s.set_layout({"chatVisible": visible})
+        self.toggle.setText("−" if visible else "+")
+
+    def _choose_session(self, index):
+        session_id = self.sessions.itemData(index)
+        name = self.sessions.itemText(index)
+        if session_id:
+            self.s.attach_session({"id": session_id, "name": name})
+
+    def send(self):
+        text = self.message.text().strip()
+        if text and self.s.send_message(text):
+            self.message.clear()
+
+    def render(self):
+        a = self.s.activity_state
+        self.status.setText(("● " if self.s.online else "○ Offline · ") + a["status"] +
+                            (" · " + a["action"] if a["action"] else ""))
+        self.header.setText(a["sessionName"] + " · Ziehen zum Verschieben")
+        self.pause.setEnabled(self.s.mode != "paused")
+        self.resume.setEnabled(self.s.mode == "paused" and self.s.online)
+        self.progress.setText(a["progress"])
+        if self.result.toPlainText() != a["result"]:
+            self.result.setPlainText(a["result"])
+        self.result.setVisible(bool(a["result"]))
+        self.open_result.setVisible(bool(a["resultTarget"]))
+        content = "\n\n".join(self.s.chat_lines[-16:])
+        if self.s.stream:
+            content += "\n\nPlum: " + self.s.stream[-6000:]
+        if self.chat.toPlainText() != content:
+            bar = self.chat.verticalScrollBar()
+            follow = bar.value() >= bar.maximum() - 12
+            old = bar.value()
+            self.chat.setPlainText(content)
+            bar.setValue(bar.maximum() if follow else old)
+        history = "\n".join(a["history"])
+        if self.history.toPlainText() != history:
+            self.history.setPlainText(history)
 
 
 class Pill(Floating):
@@ -1062,7 +1331,7 @@ class Tools(QObject):
             handler = getattr(self, tool, None)
             if not tool.startswith("desktop_") or handler is None:
                 raise RuntimeError(f"Unbekanntes Desktop-Werkzeug: {tool} (Plum Desktop {VERSION})")
-            if self.s.mode == "paused" and tool != "desktop_status":
+            if self.s.mode == "paused" and tool not in ("desktop_status", "desktop_task", "desktop_layout"):
                 raise RuntimeError("Plum Desktop ist pausiert. Bitte den Nutzer, es im Tray-Symbol fortzusetzen.")
             if self.s.mode == "guide" and tool in INPUT_TOOLS:
                 raise RuntimeError(
@@ -1070,6 +1339,7 @@ class Tools(QObject):
                     "Zeige mit desktop_point, desktop_annotate oder desktop_guide_step, der Nutzer bedient selbst."
                 )
             self.session = session or {}
+            self.s.attach_session(self.session)
             # Light the screen edges and show what the agent says it is doing.
             self.overlay.activity(GLOW_LINGER_S + 2)
             note = str(self.session.get("note") or "").strip()
@@ -1082,13 +1352,19 @@ class Tools(QObject):
             ABORT["set"] = False
             if tool in INPUT_TOOLS:
                 self.s.last_action = time.time()
+                self.s.preview(tool, args or {})
             content = handler(args or {})
-            self.overlay.activity(GLOW_LINGER_S)
+            if tool != "desktop_status":
+                self.s.record_step(self.s.describe_action(tool, args or {}))
+            if not (tool == "desktop_task" and (args or {}).get("status") in ("completed", "error")):
+                self.overlay.activity(GLOW_LINGER_S)
             self.s.bridge.send({"type": "result", "id": call_id, "ok": True, "content": content})
         except Stopped as error:
             self.s.input.release_all()
             self.s.bridge.send({"type": "result", "id": call_id, "ok": False, "error": str(error)})
         except Exception as error:  # noqa: BLE001 - every failure goes back to the agent
+            self.s.activity_state.update(status="Braucht deine Antwort", action=str(error)[:240])
+            self.s.publish_activity()
             self.s.bridge.send({"type": "result", "id": call_id, "ok": False, "error": str(error)})
 
     # ---- helpers
@@ -1132,6 +1408,7 @@ class Tools(QObject):
         rule = self._rule(match)
         if rule and rule["mode"] == "block":
             raise RuntimeError(f"„{match['caption']}“ ist für Plum gesperrt (Regel „{rule['match']}“)")
+        self.overlay.focus_screen = self.overlay.local_point(QPointF(match["x"] + match["width"] / 2, match["y"] + 40))
         return match
 
     def _ref_center(self, ref):
@@ -1173,6 +1450,12 @@ class Tools(QObject):
 
     def _acting(self, local, what):
         self.s.last_action = time.time()
+        previous = self.overlay.focus_screen
+        self.overlay.focus_screen = local
+        if previous is not None and self._screen_of(previous) != self._screen_of(local):
+            self.overlay.set_note("Wechsle auf diesen Bildschirm", self._label())
+            self.overlay.set_cursor(local, self._label())
+            pump(0.35)
         self.s.pill.flash(self._screen_of(local), f"Plum steuert · {what} · Esc stoppt")
 
     def _label(self):
@@ -1266,10 +1549,48 @@ class Tools(QObject):
             f"Plum Desktop {VERSION} · Modus {MODE_LABELS[self.s.mode]} ({self.s.mode})",
             "Bildschirme in Screenshot-Pixeln: " + "; ".join(screens),
             f"Aktives Fenster: {active.get('caption', '?')} ({active.get('cls', '?')})",
+            "Aktivität: " + json.dumps(self.s.activity_state, ensure_ascii=False),
+            "Chat-Anordnung: " + json.dumps({"layout": self.s.layout, "screens": self.s.screen_info()}, ensure_ascii=False),
         ]
         if self.s.mode == "guide":
             lines.append("Nur zeigen: Eingabe-Werkzeuge sind gesperrt.")
         return [self._text("\n".join(lines))]
+
+    def desktop_task(self, args):
+        """Explicit task progress and verified result supplied by the agent."""
+        title = str(args.get("title") or "")[:160]
+        steps = [str(step)[:160] for step in (args.get("steps") or [])[:30]]
+        if steps:
+            self.s.task_steps = steps
+        steps = getattr(self.s, "task_steps", [])
+        current = max(0, min(int(args.get("current") or 0), len(steps)))
+        status = args.get("status", "working")
+        labels = {"working": "Arbeitet", "waiting": "Wartet", "needs_input": "Braucht deine Antwort",
+                  "completed": "Abgeschlossen", "error": "Fehler"}
+        if status not in labels:
+            raise RuntimeError("status: working, waiting, needs_input, completed oder error")
+        if status == "completed":
+            current = len(steps)
+        progress = (f"{current + 1} von {len(steps)} · {steps[current]}" if current < len(steps) else "Alle Schritte erledigt") if steps else title
+        self.s.activity_state.update(status=labels[status], action=title, progress=progress[:240])
+        if args.get("result"):
+            self.s.activity_state["result"] = str(args["result"])[:2000]
+        if args.get("target"):
+            target = str(args["target"])[:2000]
+            if not target.startswith(("https://", "http://", "/", "file:///")):
+                raise RuntimeError("Ergebnisziel muss eine Datei oder HTTP(S)-Adresse sein")
+            self.s.activity_state["resultTarget"] = target
+        if status in ("completed", "error"):
+            self.s.turn_active = False
+            self.overlay.stop_activity()
+        self.s.dock.present()
+        self.s.publish_activity()
+        return [self._text(json.dumps(self.s.activity_state, ensure_ascii=False))]
+
+    def desktop_layout(self, args):
+        self.s.set_layout(args)
+        self.s.dock.present()
+        return [self._text(json.dumps({"layout": self.s.layout, "screens": self.s.screen_info()}, ensure_ascii=False))]
 
     def desktop_screenshot(self, args):
         # The Plum cursor and the pill would cover what the agent needs to see.
@@ -1769,6 +2090,10 @@ class Tools(QObject):
         direction = str(args.get("direction") or "down")
         amount = max(1, min(int(float(args.get("amount") or 3)), 30))
         dx, dy = {"down": (0, -1), "up": (0, 1), "left": (-1, 0), "right": (1, 0)}.get(direction, (0, -1))
+        point = self.overlay.cursor[0] if self.overlay.cursor else self.overlay.local_point(self.s.kwin.cursor())
+        symbol = {"down": "↓", "up": "↑", "left": "←", "right": "→"}.get(direction, "↓")
+        self.overlay.set_cursor(point, f"{symbol} Scrollen")
+        self.overlay.ripple(point, COLORS["blue"])
         for _ in range(amount):
             self.s.input.wheel(dx, dy)
             pump(0.03)
@@ -2000,6 +2325,8 @@ class Bridge(threading.Thread):
 
     def send_state(self):
         self.send({"type": "state", "paused": self.s.mode == "paused", "mode": self.s.mode,
+                   "desktopActivity": {**self.s.activity_state, "layout": self.s.layout, "screens": self.s.screen_info(),
+                                       "chat": (self.s.stream or "\n\n".join(self.s.chat_lines[-2:]))[-4000:]},
                    "recording": bool(getattr(self.s, "recorder", None) and self.s.recorder.active)})
 
     def run(self):
@@ -2015,6 +2342,9 @@ class Bridge(threading.Thread):
                     delay = 2
                 except Exception as error:  # noqa: BLE001
                     log("connection failed:", url, error)
+                finally:
+                    self.socket = None
+                    self.s.connected.emit(False)
             await asyncio.sleep(delay)
             delay = min(delay * 2, 60)
 
@@ -2049,6 +2379,10 @@ class Bridge(threading.Thread):
                     self.s.update.emit(frame)
                 elif frame.get("type") == "rules":
                     self.s.rules_changed.emit(frame.get("rules") or [])
+                elif frame.get("type") == "event":
+                    self.s.chat_event.emit(frame)
+                elif frame.get("type") == "control" and frame.get("action"):
+                    self.s.remote_action.emit(frame)
                 elif frame.get("type") == "control" and frame.get("mode") in MODE_LABELS:
                     self.s.remote_mode.emit(frame["mode"])
                 elif frame.get("type") == "control" and frame.get("record") in ("start", "stop", "cancel"):
@@ -2213,6 +2547,8 @@ class InputWatcher(QObject):
     escape = Signal()
     clicked = Signal(str)  # button
     key = Signal(int, str, object)  # code, name, held modifiers
+    human = Signal(bool)
+    context_click = Signal()
 
     def __init__(self):
         super().__init__()
@@ -2257,6 +2593,7 @@ class InputWatcher(QObject):
             from evdev import list_devices
             known = sorted(list_devices())
             rescan = time.time() + 5
+            last_human = 0.0
             try:
                 while self.running:
                     # Keyboards plugged in later (Bluetooth, docks) join after a few seconds.
@@ -2266,6 +2603,10 @@ class InputWatcher(QObject):
                             break
                     for key, _mask in selector.select(timeout=2):
                         for event in key.fileobj.read():
+                            if ((event.type == e.EV_KEY and event.value == 1) or
+                                    event.type in (e.EV_REL, e.EV_ABS)) and time.time() - last_human > 0.15:
+                                last_human = time.time()
+                                self.human.emit(event.type == e.EV_KEY and event.code < e.BTN_MISC)
                             if event.type != e.EV_KEY:
                                 continue
                             name = e.KEY.get(event.code) or e.BTN.get(event.code)
@@ -2279,6 +2620,8 @@ class InputWatcher(QObject):
                                 continue
                             if name == "KEY_ESC" and not held:
                                 self.escape.emit()
+                            if name == "BTN_LEFT":
+                                self.context_click.emit()
                             if not self.recording:
                                 continue
                             if name in ("BTN_LEFT", "BTN_RIGHT", "BTN_MIDDLE"):
@@ -2466,6 +2809,8 @@ class App(QObject):
     rules_changed = Signal(object)
     remote_mode = Signal(str)
     remote_record = Signal(str)
+    chat_event = Signal(object)
+    remote_action = Signal(object)
 
     def __init__(self, config):
         super().__init__()
@@ -2487,6 +2832,16 @@ class App(QObject):
         self.allowed_until = {}
         self.last_action = 0.0
         self.last_session = self.state.get("session") or {}
+        self.activity_state = {"sessionId": "", "sessionName": "Plum", "status": "Bereit", "action": "",
+                               "progress": "", "history": [], "result": "", "resultTarget": ""}
+        self.layout = {"chatScreen": "primary", "chatPlacement": "floating", "chatVisible": True,
+                       **self.state.get("layout", {})}
+        self.chat_lines = []
+        self.stream = ""
+        self.turn_active = False
+        self.selection_pending = False
+        self.pending_context = None
+        self.dock = DesktopDock(self)
         self.confirm = ConfirmCard()
         self.text_card = TextCard()
         self.record_pill = RecordPill(self.stop_recording, self.cancel_recording)
@@ -2495,10 +2850,309 @@ class App(QObject):
         self.watcher.escape.connect(self._escape)
         self.watcher.clicked.connect(self.recorder.on_click)
         self.watcher.key.connect(self.recorder.on_key)
+        self.watcher.human.connect(self._human_input)
+        self.watcher.context_click.connect(self._context_click)
         self.rules_changed.connect(self._set_rules)
         self.remote_mode.connect(self.set_mode)
         self.remote_record.connect(self._remote_record)
+        self.remote_action.connect(self._remote_action)
+        self.kwin.desktop_action.connect(lambda action: self._remote_action({"action": action}))
+        self.chat_event.connect(self._chat_event)
         self._tray()
+        self._install_chat_launcher()
+        self.render_timer = QTimer(self)
+        self.activity_dirty = False
+        self.render_timer.timeout.connect(self._flush_activity)
+        self.render_timer.start(250)
+        QGuiApplication.instance().screenAdded.connect(lambda _screen: self._screens_changed())
+        QGuiApplication.instance().screenRemoved.connect(lambda _screen: QTimer.singleShot(100, self._screens_changed))
+
+    def publish_activity(self):
+        self.dock.render()
+        self.activity_dirty = True
+
+    def _flush_activity(self):
+        self.dock.render()
+        if self.activity_dirty:
+            self.activity_dirty = False
+            self.bridge.send_state()
+
+    @staticmethod
+    def screen_info():
+        return [{"name": s.name(), "width": s.geometry().width(), "height": s.geometry().height(),
+                 "primary": s == QGuiApplication.primaryScreen()} for s in QGuiApplication.screens()]
+
+    @staticmethod
+    def _install_chat_launcher():
+        directory = os.path.expanduser("~/.local/share/applications")
+        try:
+            os.makedirs(directory, exist_ok=True)
+            with open(os.path.join(directory, "ch.zwaetschge.plum-chat.desktop"), "w", encoding="utf-8") as handle:
+                handle.write("[Desktop Entry]\nType=Application\nName=Plum Chat\nComment=Desktop-Chat ein- oder ausblenden\n"
+                             "Icon=system-users\nExec=gdbus call --session --dest ch.zwaetschge.PlumDesktop --object-path / "
+                             "--method ch.zwaetschge.PlumDesktop.desktop toggle_chat\nCategories=Utility;\n")
+        except OSError as error:
+            log("chat launcher not saved:", error)
+
+    def _screens_changed(self):
+        geometry = QGuiApplication.primaryScreen().virtualGeometry()
+        if self.overlay.geometry() != geometry:
+            self.set_mode("paused")
+            self.overlay.setGeometry(geometry)
+            self.input.area = geometry
+            self.overlay.factor = min(1.0, SHOT_MAX_EDGE / max(geometry.width(), geometry.height()))
+            self.overlay.clear()
+            self.overlay.focus_screen = None
+            self.tools.refs.clear()
+            self.activity_state.update(status="Pausiert", action="Bildschirmaufteilung geändert · Weiter setzt fort")
+        self.dock.place_chat()
+        self.dock.clamp()
+        self.publish_activity()
+
+    def set_layout(self, changes, reposition=True):
+        for key in ("chatScreen", "chatPlacement", "chatVisible"):
+            if key in changes:
+                self.layout[key] = changes[key]
+        self.state["layout"] = self.layout
+        save_state(self.state)
+        if reposition:
+            self.dock.place_chat()
+        self.publish_activity()
+
+    def attach_session(self, session):
+        session_id = session.get("id")
+        if not session_id or session_id == self.activity_state["sessionId"]:
+            return
+        old = self.activity_state["sessionId"]
+        self.last_session = {"id": session_id, "name": str(session.get("name") or "Plum")[:100]}
+        self.state["session"] = self.last_session
+        save_state(self.state)
+        self.activity_state.update(sessionId=session_id, sessionName=self.last_session["name"],
+                                   status="Verbinde Chat", action="", progress="", history=[], result="", resultTarget="")
+        self.chat_lines = []
+        self.stream = ""
+        self.turn_active = False
+        self.dock.present()
+        self.dock.place_chat()
+        QTimer.singleShot(0, lambda: self._load_chat(session_id, old))
+
+    def _load_chat(self, session_id, old=""):
+        try:
+            if old:
+                self.bridge.rpc("chat.close", {"sessionId": old})
+            data = self.bridge.rpc("chat.open", {"sessionId": session_id, "limit": 16}) or {}
+            if self.activity_state["sessionId"] != session_id:
+                return
+            history = [f"{'Du' if m.get('role') == 'user' else 'Plum'}: {str(m.get('content') or '')[-4000:]}"
+                       for m in data.get("messages", []) if m.get("role") in ("user", "assistant")]
+            self.chat_lines = (history + self.chat_lines)[-16:]
+            self.turn_active = bool(data.get("session", {}).get("busy"))
+            self.activity_state["status"] = "Arbeitet" if self.turn_active else "Bereit"
+            sessions = self.bridge.rpc("sessions.list", {}) or []
+            self.dock.sessions.clear()
+            for item in sessions:
+                self.dock.sessions.addItem(str(item.get("name") or item["id"]), item["id"])
+            self.dock.sessions.setCurrentIndex(max(0, self.dock.sessions.findData(session_id)))
+        except RuntimeError as error:
+            self.activity_state.update(status="Chat nicht verbunden", action=str(error)[:240])
+        self.publish_activity()
+
+    def record_step(self, text):
+        self.activity_state["history"] = (self.activity_state["history"] +
+            [time.strftime("%H:%M:%S") + " · " + str(text)[:280]])[-12:]
+        self.publish_activity()
+
+    @staticmethod
+    def describe_action(tool, args):
+        labels = {"desktop_click": "Klicke", "desktop_type": f"Gebe {len(str(args.get('text', '')))} Zeichen ein",
+                  "desktop_press_key": "Drücke Tasten", "desktop_scroll": "Scrolle", "desktop_hover": "Bewege Zeiger",
+                  "desktop_drag": "Ziehe Element", "desktop_activate_window": "Öffne Fenster",
+                  "desktop_open": "Öffne Programm oder Datei", "desktop_screenshot": "Schaue auf den Bildschirm",
+                  "desktop_read_ui": "Lese Fensterelemente", "desktop_find": "Suche Element", "desktop_wait": "Warte",
+                  "desktop_macro_run": "Führe Vorführung aus"}
+        text = labels.get(tool, "Prüfe Desktop")
+        # Never echo typed text, clipboard contents or full URL query parameters.
+        target = args.get("window") or args.get("ref")
+        return (text + (" · " + str(target)[:100] if target else ""))[:240]
+
+    def preview(self, tool, args):
+        text = self.describe_action(tool, args)
+        self.activity_state.update(status="Arbeitet", action=text, result="", resultTarget="")
+        self.turn_active = True
+        self.overlay.set_note(text, self.activity_state["sessionName"])
+        self.dock.present()
+        self.publish_activity()
+        pump(0.5)
+
+    def _chat_event(self, frame):
+        data = frame.get("payload") or {}
+        if data.get("sessionId") != self.activity_state["sessionId"]:
+            return
+        event = frame.get("event")
+        if event == "session:output" and isinstance(data.get("content"), str):
+            self.stream = (self.stream + data["content"])[-12000:]
+            if self.mode != "paused":
+                self.overlay.set_note(self.stream[-220:], self.activity_state["sessionName"])
+            self.turn_active = True
+            if self.mode != "paused":
+                self.activity_state["status"] = "Arbeitet"
+        elif event == "session:message":
+            role, content = data.get("role"), data.get("content")
+            if role in ("user", "assistant") and isinstance(content, str) and content:
+                self.chat_lines = (self.chat_lines + [f"{'Du' if role == 'user' else 'Plum'}: {content[-6000:]}"])[-16:]
+                if role == "assistant":
+                    self.stream = ""
+                    self.overlay.set_note(content[-220:], self.activity_state["sessionName"])
+        elif event == "session:tool_use":
+            summary = str(data.get("actionSummary") or data.get("toolName") or "Arbeitet")[:240]
+            if data.get("status") in ("completed", "error"):
+                self.record_step(("Fehler: " if data.get("status") == "error" else "") + summary)
+            elif self.mode != "paused":
+                self.activity_state.update(status="Arbeitet", action=summary)
+            self.turn_active = True
+        elif event in ("session:permission_request", "session:question_request"):
+            self.activity_state.update(status="Braucht deine Antwort", action="Bitte im Chat antworten")
+        elif event == "session:error":
+            self.activity_state.update(status="Fehler", result=str(data.get("error") or "Auftrag unterbrochen")[:2000])
+            self.turn_active = False
+        elif event == "session:lifecycle":
+            if data.get("busy"):
+                self.turn_active = True
+                if self.mode != "paused":
+                    self.activity_state["status"] = "Arbeitet"
+            elif self.turn_active:
+                self._finish_turn()
+        elif event == "session:status" and data.get("status") not in (None, "running") and self.turn_active:
+            self._finish_turn()
+        elif event == "session:thinking" and data.get("isThinking") and self.mode != "paused":
+            self.activity_state.update(status="Arbeitet", action="Überlegt den nächsten Schritt")
+        self.publish_activity()
+
+    def _finish_turn(self):
+        self.turn_active = False
+        if self.stream:
+            self.chat_lines = (self.chat_lines + ["Plum: " + self.stream])[-16:]
+            self.stream = ""
+        result = next((line[6:] for line in reversed(self.chat_lines) if line.startswith("Plum: ")), "Turn beendet")
+        if self.activity_state["status"] not in ("Gestoppt", "Fehler", "Du übernimmst gerade", "Braucht deine Antwort"):
+            self.activity_state.update(status="Abgeschlossen", action="", result=self.activity_state["result"] or result[-2000:])
+        self.overlay.stop_activity()
+
+    def send_message(self, text):
+        try:
+            session_id = self._session_id()
+            self.attach_session({"id": session_id, "name": self.last_session.get("name")})
+            params = {"sessionId": session_id, "message": text, "activeFollowupMode": "steer",
+                      "clientMessageId": f"desktop-{uuid.uuid4().hex}"}
+            if self.pending_context:
+                params["message"] = self.pending_context["description"] + "\n\n" + text
+                params["images"] = self.pending_context["images"]
+            reply = self.bridge.rpc("chat.send", params)
+            if isinstance(reply, dict) and (reply.get("success") is False or reply.get("error")):
+                raise RuntimeError(str(reply.get("error") or "Senden fehlgeschlagen"))
+            self.pending_context = None
+            self.turn_active = True
+            self.activity_state.update(status="Arbeitet" if self.mode != "paused" else "Pausiert", result="", resultTarget="")
+            self.publish_activity()
+            return True
+        except RuntimeError as error:
+            self.activity_state.update(status="Senden fehlgeschlagen", action=str(error)[:240])
+            self.publish_activity()
+            return False
+
+    def stop_task(self):
+        self.set_mode("paused")
+        self.turn_active = False
+        self.activity_state.update(status="Gestoppt", action="", result="Auftrag gestoppt. Mit einer Nachricht neu ansetzen.")
+        self.selection_pending = False
+        try:
+            if self.activity_state["sessionId"]:
+                self.bridge.rpc("chat.interrupt", {"sessionId": self.activity_state["sessionId"]})
+        except RuntimeError as error:
+            self.activity_state["result"] = f"Desktop gestoppt; Chat-Stopp fehlgeschlagen: {error}"[:2000]
+        self.publish_activity()
+
+    def _human_input(self, keyboard=False):
+        if self.mode == "paused" or self.recorder.active or self.selection_pending:
+            return
+        # Typing into Plum's own chat must remain possible during agent work.
+        if keyboard:
+            focus = QApplication.focusWidget()
+            if focus and (self.dock.chat_window.isAncestorOf(focus) or self.text_card.isAncestorOf(focus)):
+                return
+        point = QCursor.pos()
+        if any(w.isVisible() and w.geometry().contains(point) for w in
+               (self.dock, self.dock.chat_window, self.confirm, self.text_card)):
+            return
+        if self.tools.busy or self.turn_active:
+            self.set_mode("paused")
+            self.activity_state.update(status="Du übernimmst gerade", action="Mit Weiter die Desktop-Steuerung zurückgeben")
+            self.publish_activity()
+
+    def select_context(self):
+        self.set_mode("paused")
+        self.selection_pending = True
+        self.activity_state.update(status="Wähle eine Stelle", action="Klicke in das gewünschte Fenster · Esc bricht ab")
+        self.publish_activity()
+
+    def _context_click(self):
+        if not self.selection_pending:
+            return
+        QTimer.singleShot(120, self._capture_context)
+
+    def _capture_context(self):
+        if not self.selection_pending:
+            return
+        try:
+            point = self.kwin.cursor()
+            if any(w.isVisible() and w.geometry().contains(point.toPoint()) for w in (self.dock, self.dock.chat_window)):
+                return
+            self.selection_pending = False
+            local = self.overlay.local_point(point)
+            windows = self.kwin.windows()
+            window = self.tools._window_at(windows, local) or {}
+            if (self.tools._rule(window) or {}).get("mode") == "block":
+                raise RuntimeError("Dieses Fenster ist für Plum gesperrt")
+            x, y = self.overlay.to_shot(local)
+            self.pending_context = {"description": f"Hier weitermachen: Fenster {window.get('caption', '?')}, Stelle {x},{y} in Screenshot-Pixeln.",
+                                    "images": []}
+            image = self.tools._capture()
+            image = image.scaledToWidth(min(1568, image.width()), Qt.SmoothTransformation)
+            raw = QByteArray()
+            buffer = QBuffer(raw)
+            buffer.open(QIODevice.WriteOnly)
+            image.save(buffer, "JPEG", 75)
+            self.pending_context["images"] = [{"data": base64.b64encode(bytes(raw)).decode(),
+                "mimeType": "image/jpeg", "filename": "desktop-context.jpg"}]
+            self.overlay.ripple(local)
+            self.activity_state.update(status="Stelle ausgewählt", action="Beschreibe im Plum-Chat, was hier passieren soll")
+            self.set_layout({"chatVisible": True})
+            self.dock.message.setFocus()
+        except Exception as error:
+            self.activity_state.update(status="Auswahl fehlgeschlagen", action=str(error)[:240])
+        self.publish_activity()
+
+    def open_result(self):
+        target = self.activity_state["resultTarget"]
+        if target:
+            subprocess.Popen(["xdg-open", target], env=CHILD_ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _remote_action(self, frame):
+        action = frame.get("action")
+        if action == "stop":
+            self.stop_task()
+        elif action == "message":
+            self.send_message(str(frame.get("message") or "")[:4000])
+        elif action == "context":
+            self.select_context()
+        elif action == "open_result":
+            self.open_result()
+        elif action == "layout":
+            self.set_layout(frame.get("layout") or {})
+        elif action in ("toggle_chat", "show_chat", "hide_chat"):
+            self.set_layout({"chatVisible": not self.layout.get("chatVisible", True) if action == "toggle_chat" else action == "show_chat"})
+        elif action in ("pause", "resume"):
+            self.set_mode("paused" if action == "pause" else "control")
 
     def _tray(self):
         self.tray = QSystemTrayIcon(plum_icon("#7a4cff"))
@@ -2557,15 +3211,35 @@ class App(QObject):
     def _on_connected(self, online):
         self.online = online
         self._refresh_tray()
+        if online:
+            self.dock.present()
+            self.dock.place_chat()
+            if self.activity_state["sessionId"]:
+                QTimer.singleShot(0, lambda: self._load_chat(self.activity_state["sessionId"]))
+            elif self.last_session.get("id"):
+                self.attach_session(self.last_session)
+        else:
+            ABORT["set"] = True
+            self.input.release_all()
+            self.overlay.stop_activity()
+            self.activity_state.update(status="Verbindung unterbrochen", action="Verbinde erneut …")
+        self.dock.render()
 
     def set_mode(self, mode):
         self.mode = mode
         self.state["mode"] = mode
         save_state(self.state)
         if mode == "paused":
+            ABORT["set"] = True
+            self.input.release_all()
+            self.confirm.answer = "deny"
             self.pill.hide()
             self.overlay.cursor = None
             self.overlay.stop_activity()
+        else:
+            ABORT["set"] = False
+        self.activity_state.update(status="Pausiert" if mode == "paused" else ("Arbeitet" if self.turn_active else "Bereit"), action="")
+        self.dock.present()
         self.bridge.send_state()
         self._refresh_tray()
         log("mode:", mode)
@@ -2578,6 +3252,11 @@ class App(QObject):
 
     def _escape(self):
         """Escape on the real keyboard stops Plum while it acts."""
+        if self.selection_pending:
+            self.selection_pending = False
+            self.activity_state.update(status="Pausiert", action="Auswahl abgebrochen")
+            self.publish_activity()
+            return
         acting = self.tools.busy or time.time() - self.last_action < 4 or self.confirm.isVisible()
         if not acting or self.mode == "paused":
             return
@@ -2657,8 +3336,7 @@ class App(QObject):
     def message_prompt(self):
         def send(text):
             try:
-                self.bridge.rpc("chat.send", {"sessionId": self._session_id(), "message": text,
-                                              "clientMessageId": f"desktop-msg-{int(time.time() * 1000)}"})
+                self.send_message(text)
             except RuntimeError as error:
                 self.tray.showMessage("Plum Desktop", f"Senden fehlgeschlagen: {error}")
         self.text_card.prompt("Nachricht an Plum (an die zuletzt aktive Sitzung)", "Senden", send)

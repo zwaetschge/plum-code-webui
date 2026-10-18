@@ -42,4 +42,20 @@
     <string name="assistant_memory_model_choice">Memory model</string>
     <string name="assistant_automatic">Automatic</string>
     <string name="assistant_surface_move_failed">Could not update the area for %1$d sessions.</string>
+
+    <!-- Desktop live controls -->
+    <string name="desktop_recent_steps">Recent steps</string>
+    <string name="desktop_stop_task">Stop task</string>
+    <string name="desktop_select_context">Select a location on the PC</string>
+    <string name="desktop_open_result">Open result on the PC</string>
+    <string name="desktop_message">Message or revision</string>
+    <string name="desktop_send">Send</string>
+    <string name="desktop_chat_screen">Desktop chat screen</string>
+    <string name="desktop_screen_primary">Primary screen</string>
+    <string name="desktop_screen_secondary">Small secondary screen</string>
+    <string name="desktop_layout_floating">Free floating</string>
+    <string name="desktop_layout_left">Left half of screen</string>
+    <string name="desktop_layout_right">Right half of screen</string>
+    <string name="desktop_chat_hide">Hide chat on PC</string>
+    <string name="desktop_chat_show">Show chat on PC</string>
 </resources>

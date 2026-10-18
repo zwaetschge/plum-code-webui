@@ -38,4 +38,20 @@
     <string name="assistant_memory_model_choice">Modell für das Gedächtnis</string>
     <string name="assistant_automatic">Automatisch</string>
     <string name="assistant_surface_move_failed">Die Zuordnung konnte für %1$d Sessions nicht gespeichert werden.</string>
+
+    <!-- Desktop live controls -->
+    <string name="desktop_recent_steps">Letzte Schritte</string>
+    <string name="desktop_stop_task">Auftrag stoppen</string>
+    <string name="desktop_select_context">Stelle am PC auswählen</string>
+    <string name="desktop_open_result">Ergebnis am PC öffnen</string>
+    <string name="desktop_message">Nachricht oder Nachbesserung</string>
+    <string name="desktop_send">Senden</string>
+    <string name="desktop_chat_screen">Bildschirm für den Desktop-Chat</string>
+    <string name="desktop_screen_primary">Hauptbildschirm</string>
+    <string name="desktop_screen_secondary">Kleiner Zusatzbildschirm</string>
+    <string name="desktop_layout_floating">Frei verschiebbar</string>
+    <string name="desktop_layout_left">Linke Bildschirmhälfte</string>
+    <string name="desktop_layout_right">Rechte Bildschirmhälfte</string>
+    <string name="desktop_chat_hide">Chat am PC ausblenden</string>
+    <string name="desktop_chat_show">Chat am PC einblenden</string>
 </resources>

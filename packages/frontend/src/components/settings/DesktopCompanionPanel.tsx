@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { api } from '@/services/api';
 import { cn } from '@/lib/utils';
+import { DesktopActivityCard, type DesktopActivity } from './DesktopActivityCard';
 
 interface DesktopConnection {
   id: string;
@@ -14,6 +15,7 @@ interface DesktopConnection {
   mode?: string | null;
   recording?: boolean;
   lastSeenAt: string;
+  desktopActivity?: DesktopActivity | null;
 }
 
 interface DesktopRule {
@@ -50,7 +52,7 @@ export function DesktopCompanionPanel() {
           '/api/browser-bridge/status'
         )
       ).data.data ?? { connections: [] },
-    refetchInterval: 10_000,
+    refetchInterval: 2_000,
   });
   const desktops = (status.data?.connections ?? []).filter((c) => c.client.kind === 'desktop');
 
@@ -173,6 +175,7 @@ export function DesktopCompanionPanel() {
                     ))}
                   </div>
                 </div>
+                <DesktopActivityCard connectionId={desktop.id} activity={desktop.desktopActivity} />
                 <div className="flex flex-wrap items-center gap-2">
                   {desktop.recording ? (
                     <>

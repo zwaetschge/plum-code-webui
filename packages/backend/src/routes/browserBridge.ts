@@ -233,6 +233,34 @@ router.post('/desktop/record', requireAuth, (req: Request, res: Response) => {
   res.json({ success: true, data: { action: parsed.data.action, reached } });
 });
 
+router.post('/desktop/action', requireAuth, (req: Request, res: Response) => {
+  const parsed = z
+    .object({
+      connectionId: z.string().min(1).max(40),
+      action: z.enum(['stop', 'message', 'context', 'open_result', 'layout']),
+      message: z.string().trim().max(4000).optional(),
+      layout: z
+        .object({
+          chatScreen: z.string().max(120).optional(),
+          chatPlacement: z.enum(['floating', 'left', 'right']).optional(),
+          chatVisible: z.boolean().optional(),
+        })
+        .optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) throw new AppError('Ungültige Desktop-Aktion', 400, 'VALIDATION_ERROR');
+  const body = parsed.data;
+  if (body.action === 'message' && !body.message)
+    throw new AppError('Eine Nachricht ist erforderlich', 400, 'VALIDATION_ERROR');
+  const reached = browserBridge.sendDesktop(
+    (req as AuthenticatedRequest).userId,
+    { type: 'control', action: body.action, message: body.message, layout: body.layout },
+    body.connectionId
+  );
+  if (!reached) throw new AppError('Computer ist nicht verbunden', 409, 'DESKTOP_NOT_CONNECTED');
+  res.json({ success: true, data: { reached, status: 'dispatched' } });
+});
+
 /** Origin the caller reached Plum on; the installer and the companion use it. */
 function publicOrigin(req: Request): string {
   const proto = (req.get('x-forwarded-proto') || req.protocol).split(',')[0]!.trim();
@@ -290,7 +318,10 @@ async function latestAgentNote(sessionId: string): Promise<string | undefined> {
     const stamp = String(row?.created_at || '');
     const at = Date.parse(stamp.includes('T') ? stamp : `${stamp.replace(' ', 'T')}Z`);
     if (Number.isFinite(at) && Date.now() - at > 10 * 60 * 1000) return undefined;
-    const paragraphs = raw.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
+    const paragraphs = raw
+      .split(/\n\s*\n/)
+      .map((part) => part.trim())
+      .filter(Boolean);
     const last = paragraphs[paragraphs.length - 1] || raw;
     const flat = last
       .replace(/```[\s\S]*?```/g, ' ')

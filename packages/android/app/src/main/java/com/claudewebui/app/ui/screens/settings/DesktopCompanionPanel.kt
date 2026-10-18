@@ -71,6 +71,7 @@ fun DesktopCompanionPanel(api: ApiClient = koinInject()) {
     var match by remember { mutableStateOf("") }
     var computer by remember { mutableStateOf("") }
     var command by remember { mutableStateOf<String?>(null) }
+    var actionBusy by remember { mutableStateOf(false) }
 
     fun run(block: suspend () -> Unit) {
         scope.launch {
@@ -92,7 +93,7 @@ fun DesktopCompanionPanel(api: ApiClient = koinInject()) {
                 desktops = api.getBrowserBridgeStatus().data?.connections.orEmpty().filter { it.client.kind == "desktop" }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {}
-            delay(10_000)
+            delay(2_000)
         }
     }
 
@@ -113,6 +114,13 @@ fun DesktopCompanionPanel(api: ApiClient = koinInject()) {
                             FilterChip(selected = mode == id, onClick = {
                                 run { api.setDesktopMode(id, desktop.id); delay(600); refresh++ }
                             }, label = { Text(stringResource(label)) })
+                        }
+                    }
+                    DesktopActivityCard(desktop.id, desktop.desktopActivity, actionBusy) { input ->
+                        run {
+                            actionBusy = true
+                            try { api.desktopAction(input); delay(600); refresh++ }
+                            finally { actionBusy = false }
                         }
                     }
                     if (desktop.recording) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
