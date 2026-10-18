@@ -56,4 +56,8 @@ Andere Aktionen: `show_chat`, `hide_chat`, `pause`, `resume`, `stop`, `context`.
 
 ## Separate Steuerleiste – Nutzerkorrektur
 
-0.6.3 blendet das zusätzliche schwebende Steuerfenster standardmässig aus, auch bei Sitzungswechsel, Verbindung und Werkzeug-Aufrufen. Im Tray kann „Separate Steuerleiste anzeigen“ bei Bedarf aktiviert werden; die Auswahl wird lokal gespeichert. Pause/Weiter/Stoppen bleiben im Chat sowie die Moduswahl im Tray. Keine Änderung der WebUI-/Android-Bedienung erforderlich. Syntaxprüfung und zehn Desktop-Verhaltenstests grün; Auslieferung wird geprüft.
+0.6.3 blendet das zusätzliche schwebende Steuerfenster standardmässig aus, auch bei Sitzungswechsel, Verbindung und Werkzeug-Aufrufen. Im Tray kann „Separate Steuerleiste anzeigen“ bei Bedarf aktiviert werden; die Auswahl wird lokal gespeichert. Pause/Weiter/Stoppen bleiben im Chat sowie die Moduswahl im Tray. Keine Änderung der WebUI-/Android-Bedienung erforderlich. Syntaxprüfung und zehn Desktop-Verhaltenstests grün. Diese Zwischenlösung wird mit 0.6.4 durch ein einziges gemeinsames Fenster ersetzt (siehe unten).
+
+## Ein gemeinsames Fenster – Nutzerkorrektur
+
+0.6.4 erstellt nur noch ein Desktop-Fenster: Chat, Status, Ergebnis und Bedienung sind darin zusammengefasst. Die zusätzliche Steuerleiste und ihre Tray-Option entfallen vollständig. Das Fenster hat normale Fenstermanager-Dekoration, erscheint als normales Fenster und lässt sich gemeinsam verschieben, minimieren und schliessen. Schliessen blendet den Chat aus; Companion/Tray bleiben verbunden. Pause/Weiter, Stoppen und Verlauf stehen in einer festen Fussleiste ausserhalb des Scrollbereichs. Auch „Nachricht an Plum“ im Tray fokussiert dieses Fenster statt eines zusätzlichen Eingabedialogs. Schriftgrösse, Monitorwahl und Platz fürs Deck bleiben erhalten. Syntaxprüfung und zehn Verhaltenstests grün; echte Sichtprüfung nach Auslieferung steht aus.

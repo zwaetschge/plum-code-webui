@@ -84,7 +84,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QMen
 
 import websockets
 
-VERSION = "0.6.3"
+VERSION = "0.6.4"
 CONFIG_DIR = os.path.expanduser("~/.config/plum-desktop")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
@@ -837,46 +837,15 @@ class Floating(QWidget):
 
 
 class DesktopDock(Floating):
-    """Movable desktop controls, live chat, task result and recent actions."""
+    """One desktop window for chat, controls, task result and recent actions."""
 
     def __init__(self, app):
         super().__init__()
         self.s = app
-        self.drag_origin = None
-        self.placed = False
-        self.compact = False
-        self.setFixedWidth(460)
-        layout = QVBoxLayout(self.card)
-        layout.setContentsMargins(16, 12, 16, 12)
-        self.header = QLabel("Plum Desktop · Ziehen zum Verschieben")
-        self.header.setTextFormat(Qt.PlainText)
-        self.header.setObjectName("title")
-        self.header.mousePressEvent = self._drag_start
-        self.header.mouseMoveEvent = self._drag_move
-        self.header.mouseReleaseEvent = self._drag_end
-        layout.addWidget(self.header)
-        self.status = QLabel("Bereit")
-        self.status.setTextFormat(Qt.PlainText)
-        self.status.setWordWrap(True)
-        layout.addWidget(self.status)
-        controls = QHBoxLayout()
-        self.pause = QPushButton("Pause")
-        self.pause.clicked.connect(lambda: self.s.set_mode("paused"))
-        controls.addWidget(self.pause)
-        self.resume = QPushButton("Weiter")
-        self.resume.clicked.connect(lambda: self.s.set_mode("control"))
-        controls.addWidget(self.resume)
-        stop = QPushButton("Stoppen")
-        stop.setObjectName("stop")
-        stop.clicked.connect(self.s.stop_task)
-        controls.addWidget(stop)
-        self.toggle = QPushButton("−")
-        self.toggle.setAccessibleName("Details ein- oder ausklappen")
-        self.toggle.clicked.connect(self.toggle_compact)
-        controls.addWidget(self.toggle)
-        layout.addLayout(controls)
-        self.chat_window = Floating()
-        self.chat_window.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        # Chat and controls share this single native window. No extra floating
+        # control bar is created, even when sessions or connection state change.
+        self.chat_window = self
+        self.setWindowFlags(Qt.Window)
         self.chat_window.setWindowTitle("Plum Chat")
         chat_font = self.chat_window.font()
         chat_font.setPointSize(12)
@@ -983,7 +952,9 @@ class DesktopDock(Floating):
         chat_stop.clicked.connect(self.s.stop_task)
         chat_controls.addWidget(chat_stop)
         chat_controls.addWidget(self.history_button)
-        body.addLayout(chat_controls)
+        # Keep safety controls visible while chat/results scroll above them.
+        chat_controls.setContentsMargins(12, 0, 12, 12)
+        outer_chat.addLayout(chat_controls)
         self.history = QPlainTextEdit()
         self.history.setReadOnly(True)
         self.history.setAccessibleName("Letzte Schritte")
@@ -1031,7 +1002,8 @@ class DesktopDock(Floating):
                 widget.setMinimumHeight(max(36, round(24 * zoom / 100)))
         for edit in (self.chat, self.result, self.history):
             edit.document().setDefaultFont(font)
-        rect = screen.availableGeometry().adjusted(16, 16 + int(layout.get("chatInsetTop", 0)), -16, -16)
+        # Leave room for the native title bar as well as the user's dock.
+        rect = screen.availableGeometry().adjusted(16, 16 + int(layout.get("chatInsetTop", 0)), -16, -48)
         placement = layout.get("chatPlacement", "floating")
         width = rect.width() if placement == "full" else (min(rect.width(), max(320, rect.width() // 2 - 8)) if placement != "floating" else min(round(560 * zoom / 100), rect.width()))
         height = min(700, rect.height()) if placement == "floating" else rect.height()
@@ -1057,22 +1029,6 @@ class DesktopDock(Floating):
         self.top_space.setValue(int(layout.get("chatInsetTop", 0)))
         self.top_space.blockSignals(False)
         self.chat_window.setVisible(layout.get("chatVisible", True))
-        self.toggle.setText("−" if layout.get("chatVisible", True) else "+")
-
-    def _drag_start(self, event):
-        if event.button() == Qt.LeftButton:
-            self.drag_origin = event.globalPosition().toPoint() - self.pos()
-
-    def _drag_move(self, event):
-        if self.drag_origin is not None:
-            self.move(event.globalPosition().toPoint() - self.drag_origin)
-
-    def _drag_end(self, _event):
-        self.drag_origin = None
-        self.clamp()
-        self.s.state["dockPosition"] = [self.x(), self.y()]
-        save_state(self.s.state)
-
     def clamp(self):
         screen = QGuiApplication.screenAt(self.geometry().center()) or QGuiApplication.primaryScreen()
         rect = screen.availableGeometry()
@@ -1080,23 +1036,12 @@ class DesktopDock(Floating):
                   max(rect.top(), min(self.y(), rect.bottom() - self.height() + 1)))
 
     def present(self):
-        if self.s.state.get("showControlBar") is not True:
-            self.hide()
-            return
-        if not self.placed:
-            self.adjustSize()
-            rect = QGuiApplication.primaryScreen().availableGeometry()
-            pos = self.s.state.get("dockPosition")
-            self.move(*(pos if isinstance(pos, list) and len(pos) == 2 else [rect.right() - self.width() - 24, rect.top() + 40]))
-            self.placed = True
-        self.clamp()
-        self.show()
-        self.raise_()
+        self.setVisible(self.s.layout.get("chatVisible", True))
 
-    def toggle_compact(self):
-        visible = not self.chat_window.isVisible()
-        self.s.set_layout({"chatVisible": visible})
-        self.toggle.setText("−" if visible else "+")
+    def closeEvent(self, event):
+        # Closing the chat hides the whole window; the tray/desktop bridge stays.
+        event.ignore()
+        self.s.set_layout({"chatVisible": False})
 
     def _choose_session(self, index):
         session_id = self.sessions.itemData(index)
@@ -1111,15 +1056,12 @@ class DesktopDock(Floating):
 
     def render(self):
         a = self.s.activity_state
-        self.status.setText(("● " if self.s.online else "○ Offline · ") + a["status"] +
-                            (" · " + a["action"] if a["action"] else ""))
-        self.header.setText(a["sessionName"] + " · Ziehen zum Verschieben")
-        self.pause.setEnabled(self.s.mode != "paused")
-        self.resume.setEnabled(self.s.mode == "paused" and self.s.online)
         self.chat_pause.setText("Weiter" if self.s.mode == "paused" else "Pause")
         self.chat_pause.setEnabled(self.s.mode != "paused" or self.s.online)
-        self.progress.setText(a["progress"])
-        self.progress.setVisible(bool(a["progress"]))
+        status = "Pausiert" if self.s.mode == "paused" else a["status"]
+        if not self.s.online:
+            status = "Offline · " + status
+        self.progress.setText(" · ".join(filter(None, (status, a["progress"]))))
         if self.result.toPlainText() != a["result"]:
             self.result.setPlainText(a["result"])
         self.result.setVisible(bool(a["result"]))
@@ -3329,10 +3271,6 @@ class App(QObject):
             menu.addAction(action)
             self.mode_actions[mode] = action
         menu.addSeparator()
-        control_bar = QAction("Separate Steuerleiste anzeigen", menu, checkable=True)
-        control_bar.setChecked(self.state.get("showControlBar") is True)
-        control_bar.triggered.connect(self._toggle_control_bar)
-        menu.addAction(control_bar)
         self.record_action = QAction("Vorführung aufnehmen", menu)
         self.record_action.triggered.connect(self.toggle_recording)
         menu.addAction(self.record_action)
@@ -3354,11 +3292,6 @@ class App(QObject):
         self.menu = menu
         self._refresh_tray()
         self.tray.show()
-
-    def _toggle_control_bar(self, checked):
-        self.state["showControlBar"] = bool(checked)
-        save_state(self.state)
-        self.dock.present()
 
     def _toggle_glow(self, checked):
         self.overlay.glow_enabled = bool(checked)
@@ -3501,12 +3434,11 @@ class App(QObject):
         self.tray.showMessage("Plum Desktop", f"Makro „{name}“ gespeichert ({len(steps)} Schritte)")
 
     def message_prompt(self):
-        def send(text):
-            try:
-                self.send_message(text)
-            except RuntimeError as error:
-                self.tray.showMessage("Plum Desktop", f"Senden fehlgeschlagen: {error}")
-        self.text_card.prompt("Nachricht an Plum (an die zuletzt aktive Sitzung)", "Senden", send)
+        self.set_layout({"chatVisible": True})
+        self.dock.showNormal()
+        self.dock.raise_()
+        self.dock.activateWindow()
+        self.dock.message.setFocus()
 
     def _self_update(self, frame):
         """Plum pushes its shipped companion to older ones; replace and restart."""
