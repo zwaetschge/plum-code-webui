@@ -568,7 +568,7 @@ export function extractDynamicUi(
       text,
       ui: result.spec,
       error: result.warnings.length
-        ? `Einzelne Teile konnten nicht dargestellt werden (${result.warnings.join('; ')}).`
+        ? 'Einige Teile der interaktiven Ansicht konnten nicht dargestellt werden. Die übrige Ansicht bleibt nutzbar.'
         : null,
       pending,
     };

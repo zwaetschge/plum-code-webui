@@ -256,6 +256,22 @@ test('one broken chart or forbidden action leaves valid siblings usable', () => 
   assert.ok(validateDynamicUi(result.spec).ok);
   assert.match(JSON.stringify(result.spec), /Bleibt sichtbar/);
   assert.doesNotMatch(JSON.stringify(result.spec), /https:|fetch|evil/);
+  const publicResult = extractDynamicUi(
+    'Antwort.\n```plum-ui\n' +
+      JSON.stringify({
+        version: 1,
+        root: {
+          type: 'stack',
+          children: [
+            { type: 'text', text: 'Gut' },
+            { type: 'chart', kind: 'internal-detail' },
+          ],
+        },
+      }) +
+      '\n```'
+  );
+  assert.ok(publicResult.ui);
+  assert.doesNotMatch(publicResult.error ?? '', /root\.|internal-detail/);
   assert.equal(
     recoverDynamicUi({ version: 1, computed: { bad: 'eval(1)' }, root: { type: 'divider' } }).ok,
     false
