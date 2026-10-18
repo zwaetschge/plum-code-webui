@@ -28,6 +28,10 @@ def production_class(name, methods):
 
 App = production_class("App", {"_chat_event", "_finish_turn", "record_step", "describe_action", "_human_input", "set_mode", "_remote_action", "stop_task"})
 Tools = production_class("Tools", {"desktop_task", "_text"})
+layout_node = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == "screenshot_layout")
+layout_scope = {}
+exec(compile(ast.fix_missing_locations(ast.Module(body=[layout_node], type_ignores=[])), str(SOURCE), "exec"), layout_scope)
+screenshot_layout = layout_scope["screenshot_layout"]
 
 
 def fixture():
@@ -58,6 +62,22 @@ def fixture():
 
 
 class DesktopControlTests(unittest.TestCase):
+    def test_screenshot_origins_match_input_coordinates_at_different_monitor_scales(self):
+        size, targets = screenshot_layout([(0, 0, 3440, 1440), (1688, 1440, 1280, 720)], [(6880, 2880), (2560, 1440)])
+        self.assertEqual(size, (6880, 4320))
+        self.assertEqual(targets[1], (3376, 2880, 2560, 1440))
+        # The old exported collage put this monitor at (2252,1920), causing
+        # visible positions to differ from input even outside the JPEG bounds.
+        tool_factor = 1568 / 3440
+        screenshot_factor = 1568 / size[0]
+        self.assertAlmostEqual(1688 * tool_factor, targets[1][0] * screenshot_factor)
+        self.assertAlmostEqual(1440 * tool_factor, targets[1][1] * screenshot_factor)
+
+    def test_capture_layout_handles_negative_origins_and_mixed_native_sizes(self):
+        size, targets = screenshot_layout([(0, 0, 3440, 1440), (-1280, 200, 1280, 720)], [(6880, 2880), (1280, 720)])
+        self.assertEqual(size, (9440, 2880))
+        self.assertEqual(targets, [(2560, 0, 6880, 2880), (0, 400, 2560, 1440)])
+
     def test_live_chat_is_isolated_and_stream_becomes_final_once(self):
         app = fixture()
         app._chat_event({"event": "session:output", "payload": {"sessionId": "other", "content": "private"}})

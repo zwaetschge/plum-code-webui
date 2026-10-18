@@ -44,6 +44,7 @@ import json
 import math
 import os
 import platform
+import select
 import shutil
 import subprocess
 import sys
@@ -83,7 +84,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QMen
 
 import websockets
 
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 CONFIG_DIR = os.path.expanduser("~/.config/plum-desktop")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
@@ -1274,7 +1275,113 @@ def a11y_walk(root, interactive_only):
 # --------------------------------------------------------------------------- tools
 
 
+def screenshot_layout(rectangles, sizes):
+    """One uniform pixel scale, including monitor origins and negative positions."""
+    left = min(r[0] for r in rectangles)
+    top = min(r[1] for r in rectangles)
+    right = max(r[0] + r[2] for r in rectangles)
+    bottom = max(r[1] + r[3] for r in rectangles)
+    scale = max(max(w / r[2], h / r[3]) for r, (w, h) in zip(rectangles, sizes))
+    targets = [(round((x - left) * scale), round((y - top) * scale), round(w * scale), round(h * scale))
+               for x, y, w, h in rectangles]
+    return (round((right - left) * scale), round((bottom - top) * scale)), targets
+
+
+def screenshot_helper():
+    """Grant only this private busctl copy the same capture API as Spectacle."""
+    busctl = shutil.which("busctl")
+    if not busctl:
+        raise RuntimeError("busctl fehlt für die Bildschirmaufnahme")
+    helper = os.path.expanduser("~/.local/libexec/plum-desktop/plum-screencap")
+    desktop_dir = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "applications")
+    entry = os.path.join(desktop_dir, "ch.zwaetschge.plum-screencap.desktop")
+    content = ("[Desktop Entry]\nType=Application\nName=Plum Desktop Bildschirmaufnahme\n"
+               f"Exec={helper}\nNoDisplay=true\nX-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2\n")
+    changed = False
+    if not os.path.exists(helper) or os.path.getsize(helper) != os.path.getsize(busctl):
+        os.makedirs(os.path.dirname(helper), exist_ok=True)
+        shutil.copy2(busctl, helper)
+        changed = True
+    old = ""
+    if os.path.exists(entry):
+        with open(entry, encoding="utf-8") as handle:
+            old = handle.read()
+    if old != content:
+        os.makedirs(desktop_dir, exist_ok=True)
+        with open(entry, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        changed = True
+    if changed:
+        tool = shutil.which("kbuildsycoca6") or shutil.which("kbuildsycoca5")
+        if tool:
+            subprocess.run([tool], capture_output=True, timeout=20, check=True, env=CHILD_ENV)
+    return helper
+
+
+def capture_screen(helper, name):
+    read_fd, write_fd = os.pipe()
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            [helper, "--user", "--json=short", "call", "org.kde.KWin", "/org/kde/KWin/ScreenShot2",
+             "org.kde.KWin.ScreenShot2", "CaptureScreen", "sa{sv}h", name,
+             "1", "native-resolution", "b", "true", str(write_fd)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+            pass_fds=(write_fd,), env=CHILD_ENV)
+        os.close(write_fd)
+        write_fd = None
+        chunks, deadline = [], time.monotonic() + 15
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([read_fd], [], [], 0.1)
+            if not ready:
+                if proc.poll() is not None and proc.returncode != 0:
+                    break
+                continue
+            data = os.read(read_fd, 1 << 20)
+            if not data:
+                break
+            chunks.append(data)
+        else:
+            raise RuntimeError(f"Bildschirmaufnahme von {name} dauert zu lange")
+        out, err = proc.communicate(timeout=3)
+        if proc.returncode:
+            raise RuntimeError(f"Bildschirmaufnahme von {name} fehlgeschlagen: {err.decode(errors='replace')[:300]}")
+        meta = {key: value["data"] for key, value in json.loads(out)["data"][0].items()}
+        width, height, stride, fmt = (int(meta[key]) for key in ("width", "height", "stride", "format"))
+        raw = b"".join(chunks)
+        if width <= 0 or height <= 0 or stride <= 0 or len(raw) < stride * height:
+            raise RuntimeError(f"Unvollständige Bildschirmaufnahme von {name}")
+        return QImage(raw, width, height, stride, QImage.Format(fmt)).copy()
+    finally:
+        os.close(read_fd)
+        if write_fd is not None:
+            os.close(write_fd)
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+
+
+def capture_desktop():
+    helper = screenshot_helper()
+    screens = QGuiApplication.screens()
+    images = [capture_screen(helper, screen.name()) for screen in screens]
+    rectangles = [(s.geometry().x(), s.geometry().y(), s.geometry().width(), s.geometry().height()) for s in screens]
+    size, targets = screenshot_layout(rectangles, [(i.width(), i.height()) for i in images])
+    image = QImage(size[0], size[1], QImage.Format_ARGB32_Premultiplied)
+    image.fill(Qt.black)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform)
+    for shot, target in zip(images, targets):
+        painter.drawImage(QRect(*target), shot)
+    painter.end()
+    return image
+
+
 def take_screenshot(path):
+    # Spectacle's exported collage can mix native pixels and logical origins.
+    # Capture each named output and compose it in our actual input coordinates.
+    if QDBusInterface("org.kde.KWin", "/KWin", "org.kde.KWin").isValid():
+        return capture_desktop()
     if shutil.which("spectacle"):
         subprocess.run(["spectacle", "-b", "-n", "-f", "-o", path], check=True, timeout=20, env=CHILD_ENV)
     elif shutil.which("grim"):

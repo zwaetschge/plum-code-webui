@@ -14,12 +14,16 @@ Ziel: alle zehn gewünschten Verbesserungen im Desktop-Companion, WebUI und Andr
 - [x] Monitorwechsel und Status beim bearbeiteten Fenster implementiert.
 - [x] Abschluss mit Ergebnis, Öffnen und Nachbessern implementiert.
 - [x] WebUI und Android: Live-Aktivität, Steuerung, Nachrichten, Monitor-/Layout-Einstellungen implementiert und bestehende Settings-Einstiegspunkte geprüft.
-- [ ] Verhaltenstests und Typechecks; Android über android-builder bauen, APK kopieren und SHA-256 prüfen.
+- [x] Verhaltenstests und Typechecks; Android über android-builder bauen, APK kopieren und SHA-256 prüfen.
 - [ ] Über repair-bot ausliefern; Desktop-Autoupdate und echte Oberfläche/Interaktionen prüfen.
 
-Stand: Version 0.6.0 in Commit `4ed9ec6`; repair-bot baut seit 10:39 UTC. Backend- und Frontend-Typecheck, ESLint, acht Python-Verhaltenstests und zwei Backend-Tests grün. Echte Qt-Widgets mit simulierten Daten sowie WebUI bei 1440/390 Pixeln geprüft; Bedienaktionen und Layout passen. Danach echte Geekom-Prüfung. Fremde Änderungen in AGENTS.md und piConfig.ts bestehen bereits.
+Stand: Version 0.6.0 in Commit `4ed9ec6`; repair-bot hat am 18.10.2026 um 10:45 UTC erfolgreich ausgeliefert, /health/ready bestätigt. Backend- und Frontend-Typecheck, ESLint, acht Python-Verhaltenstests und zwei Backend-Tests grün. Echte Qt-Widgets mit simulierten Daten sowie WebUI bei 1440/390 Pixeln geprüft; Bedienaktionen und Layout passen. Echte Geekom-Prüfung läuft: Companion meldet 0.6.0, Chat ist auf secondary/right/visible eingestellt und im Screenshot auf dem kleinen DP-1 zu sehen. Fremde Änderungen in AGENTS.md und piConfig.ts bestehen bereits.
 
-Android: erster Build inkl. Unit-Tests erfolgreich, APK kopiert/Hash geprüft (`b20f5a…`). Beim abschliessenden Vertragscheck gefunden: `encodeDefaults=false` liess Layoutwerte primary/floating/true aus. DesktopLayout-Felder haben jetzt keine Konstruktor-Defaults mehr, damit explizite Änderungen vollständig übertragen werden. Regressionstest ergänzt; finale APK baut erneut. Nicht installiert.
+Android: finaler Build (Commit `11680c9`) erfolgreich, inklusive DesktopLayoutSerializationTest (1 Test, 0 Fehler). `encodeDefaults=false` liess zunächst Layoutwerte primary/floating/true aus; DesktopLayout-Felder haben jetzt keine Konstruktor-Defaults mehr, damit explizite Änderungen vollständig übertragen werden. Finale APK nach `/mnt/user/Zwischenspeicher/plum-code-android-app-debug.apk` kopiert, SHA-256 Original/Kopie identisch: `5309661bef01f0e124905b4c7347dfb3ed6d5372d53d7711fae7febed8e67b73`. Nicht installiert.
+
+Live-API geprüft: ohne Anmeldung 401, ungültige Anordnung 400, unbekannter Computer 409. Status liefert die Monitorwahl des richtigen verbundenen Companions.
+
+Realer Geekom-Test: Chat rechts auf DP-1, Retroid/Taskleiste bleiben erreichbar. Entwurf in natives Eingabefeld getippt und gelöscht, nicht gesendet; Ausblenden gibt das Panel frei; Endzustand pausiert, Chat sekundär/rechts/sichtbar. Dabei vorhandenen Skalierungsfehler bestätigt: Spectacle lieferte 6880×3360 mit DP-1 an einer anderen Pixelposition als die Qt-Eingabegeometrie. 0.6.1 nimmt deshalb jeden Ausgang über KWins CaptureScreen auf und setzt alle Ausgänge mit einer gemeinsamen Pixel-Skalierung anhand ihrer echten Qt-Positionen zusammen. Zehn Python-Tests grün, inklusive Geekom-Geometrie und Monitor links vom Ursprung. Zweite Auslieferung und Nachtest der Screenshot-Klickkoordinaten stehen noch aus.
 
 ## Integration mit „oled control“
 
