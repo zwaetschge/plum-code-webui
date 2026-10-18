@@ -29,7 +29,6 @@ type SetupKind = 'cli-login' | 'provider-keys' | 'endpoint';
 const SETUP_KIND: Record<CLIProvider, SetupKind> = {
   codex: 'cli-login',
   claude: 'cli-login',
-  kimi: 'cli-login',
   vibe: 'cli-login',
   opencode: 'provider-keys',
   pi: 'provider-keys',

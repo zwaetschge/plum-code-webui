@@ -482,6 +482,7 @@ CREATE TABLE IF NOT EXISTS "sessions" (
   "design_style_skill" TEXT DEFAULT NULL,
   "writing_style_skill" TEXT DEFAULT NULL,
   "cli_model" TEXT DEFAULT NULL,
+  "context_handoff_json" TEXT DEFAULT NULL,
   "cli_reasoning" TEXT DEFAULT NULL,
   "cli_service_tier" TEXT DEFAULT NULL,
   "subagent_model" TEXT DEFAULT NULL,

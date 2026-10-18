@@ -47,7 +47,7 @@ interface SetupStatus {
   antigravity: { available: boolean; authenticated: boolean };
 }
 
-const DEVICE_LOGIN = new Set(['codex', 'claude', 'kimi', 'vibe']);
+const DEVICE_LOGIN = new Set(['codex', 'claude', 'vibe']);
 
 /**
  * Every way into a provider, in one place.
@@ -101,7 +101,7 @@ export function ProviderLoginsPanel() {
                 <HarnessSummary harness={harness} />
                 {DEVICE_LOGIN.has(harness.id) && (
                   <CliDeviceLoginDialog
-                    provider={harness.id as 'codex' | 'claude' | 'kimi' | 'vibe'}
+                    provider={harness.id as 'codex' | 'claude' | 'vibe'}
                     authenticated={harness.credentials}
                     onCompleted={refresh}
                   />

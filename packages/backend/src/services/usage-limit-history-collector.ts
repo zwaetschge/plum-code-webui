@@ -5,7 +5,7 @@ import { config } from '../config.js';
 
 const DEFAULT_POLL_MS = 15 * 60 * 1000;
 const MIN_POLL_MS = 60 * 1000;
-const PROVIDERS = ['codex', 'claude', 'zai', 'kimi'] as const;
+const PROVIDERS = ['codex', 'claude', 'zai'] as const;
 
 let initialized = false;
 let collectionRunning = false;

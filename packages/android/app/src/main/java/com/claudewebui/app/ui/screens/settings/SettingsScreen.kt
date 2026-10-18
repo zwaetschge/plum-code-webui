@@ -391,7 +391,7 @@ private fun settingsSearchEntries(state: SettingsUiState, push: (List<String>) -
         add(SettingsSearchEntry(stringResource(R.string.assistant_custom_instructions), "$assistant › $personal", "anweisungen instructions prompt", Icons.Outlined.AutoAwesome, TileTone.Teal, path(AssistantPages.PERSONAL, AssistantPages.INSTRUCTIONS)))
         add(SettingsSearchEntry(stringResource(R.string.preset_default_design), "$assistant › $personal", "design vorgabe preset", Icons.Outlined.Palette, TileTone.Pink, path(AssistantPages.PERSONAL)))
         add(SettingsSearchEntry(stringResource(R.string.settings_hub_memory), assistant, "gedächtnis memory erinnerungen verlauf history", Icons.Outlined.Psychology, TileTone.Indigo, path(AssistantPages.MEMORY)))
-        add(SettingsSearchEntry(providers, models, "anbieter provider codex opencode claude pi kimi vibe login api modell model", Icons.Outlined.Hub, TileTone.Accent, path(SettingsPages.PROVIDERS)))
+        add(SettingsSearchEntry(providers, models, "anbieter provider codex opencode claude pi vibe login api modell model", Icons.Outlined.Hub, TileTone.Accent, path(SettingsPages.PROVIDERS)))
         CLIProvider.active.forEach { provider ->
             add(SettingsSearchEntry(provider.displayName, "$models › $providers", "provider anbieter ${provider.name.lowercase()}", Icons.Outlined.Terminal, TileTone.Accent) { routes.cliProvider(provider.name.lowercase()) })
         }

@@ -24,7 +24,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from '@/hooks/use-toast';
 import { api } from '@/services/api';
 
-type CliLoginProvider = 'claude' | 'codex' | 'kimi' | 'pi' | 'vibe';
+type CliLoginProvider = 'claude' | 'codex' | 'pi' | 'vibe';
 type CliLoginStatus = 'starting' | 'awaiting_code' | 'completed' | 'error';
 
 interface CliLoginData {
@@ -68,12 +68,6 @@ const PROVIDER_COPY = {
     account: 'Google',
     description:
       'Plum drives Pi’s login for you. Sign in with Google; the browser then lands on a localhost page that does not load. Copy that page’s full address and paste it below.',
-  },
-  kimi: {
-    name: 'Kimi Code',
-    account: 'Kimi account',
-    description:
-      'Start Kimi device authorization in Plum, open the verification URL in your browser, and approve it. Kimi polls automatically — no code entry needed.',
   },
   vibe: {
     name: 'Mistral Vibe',

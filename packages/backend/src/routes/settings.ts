@@ -25,7 +25,6 @@ import type {
 } from '@plum-code-webui/shared';
 import { DEFAULT_ANALYTICS_HIDDEN_LIMIT_METRICS, estimateModelCost } from '@plum-code-webui/shared';
 import { parseOracleBrowserSettings } from '../utils/oracleSettings.js';
-import { KIMI_CODING_MODELS, hasKimiCodingCredentials } from '../utils/kimiUsage.js';
 import {
   ensureOpenCodeTenantDirectories,
   resolveOpenCodeTenantPaths,
@@ -57,7 +56,6 @@ export const DEFAULT_ENABLED_CLI_PROVIDERS: CLIProvider[] = [
   'zai',
   'opencode',
   'pi',
-  'kimi',
   'vibe',
 ];
 
@@ -141,14 +139,14 @@ export const updateSettingsSchema = z.object({
   allowedTools: z.array(z.string()).optional(),
   customSystemPrompt: z.string().nullable().optional(),
   uiProvider: z
-    .enum(['plum', 'claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe'])
+    .enum(['plum', 'claude', 'zai', 'codex', 'opencode', 'pi', 'vibe'])
     .optional(),
   backgroundAnimation: z.enum(['glass', 'aurora', 'ribbons', 'still']).optional(),
   defaultCliProvider: z
-    .enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe'])
+    .enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'vibe'])
     .optional(),
   enabledCliProviders: z
-    .array(z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe']))
+    .array(z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'vibe']))
     .min(1)
     .optional(),
   cliProviderModels: z
@@ -158,7 +156,6 @@ export const updateSettingsSchema = z.object({
       codex: z.string().optional(),
       opencode: z.string().optional(),
       pi: z.string().optional(),
-      kimi: z.string().optional(),
       vibe: z.string().optional(),
     })
     .partial()
@@ -170,7 +167,6 @@ export const updateSettingsSchema = z.object({
       codex: z.array(z.string()).optional(),
       opencode: z.array(z.string()).optional(),
       pi: z.array(z.string()).optional(),
-      kimi: z.array(z.string()).optional(),
       vibe: z.array(z.string()).optional(),
     })
     .partial()
@@ -182,7 +178,6 @@ export const updateSettingsSchema = z.object({
       codex: z.string().optional(),
       opencode: z.string().optional(),
       pi: z.string().optional(),
-      kimi: z.string().optional(),
       vibe: z.string().optional(),
     })
     .partial()
@@ -216,10 +211,6 @@ export const updateSettingsSchema = z.object({
         .object({ dailyUsd: z.number().min(0).optional(), weeklyUsd: z.number().min(0).optional() })
         .partial()
         .optional(),
-      kimi: z
-        .object({ dailyUsd: z.number().min(0).optional(), weeklyUsd: z.number().min(0).optional() })
-        .partial()
-        .optional(),
     })
     .partial()
     .optional(),
@@ -239,7 +230,6 @@ export const updateSettingsSchema = z.object({
       hiddenLimitMetrics: z
         .object({
           codex: z.array(z.string().max(160)).optional(),
-          kimi: z.array(z.string().max(160)).optional(),
           claude: z.array(z.string().max(160)).optional(),
           zai: z.array(z.string().max(160)).optional(),
         })
@@ -282,7 +272,6 @@ function parseUiProvider(value: unknown): UiProvider {
     value === 'codex' ||
     value === 'opencode' ||
     value === 'pi' ||
-    value === 'kimi' ||
     value === 'vibe'
     ? value
     : 'plum';
@@ -294,7 +283,6 @@ function parseCliProvider(value: unknown): CLIProvider {
     value === 'codex' ||
     value === 'opencode' ||
     value === 'pi' ||
-    value === 'kimi' ||
     value === 'vibe'
     ? value
     : 'codex';
@@ -497,7 +485,7 @@ export function parseAnalyticsSettings(value: unknown): AnalyticsSettings {
     return { hiddenLimitMetrics: {} };
   }
   const hiddenLimitMetrics: NonNullable<AnalyticsSettings['hiddenLimitMetrics']> = {};
-  for (const provider of ['codex', 'kimi', 'claude', 'zai'] as const) {
+  for (const provider of ['codex', 'claude', 'zai'] as const) {
     const metrics = (parsed.hiddenLimitMetrics as Record<string, unknown>)[provider];
     if (!Array.isArray(metrics)) continue;
     hiddenLimitMetrics[provider] = [
@@ -1136,11 +1124,6 @@ router.get('/subagent-models', requireAuth, async (req, res) => {
       models: models.length > 0 ? models : ['glm-5.3', 'glm-5.1', 'glm-4.7'],
     });
   }
-  // The shared Kimi Code login doubles as an Anthropic-compatible upstream
-  // (api.kimi.com/coding), so an existing `kimi login` is all it takes.
-  if (await hasKimiCodingCredentials()) {
-    groups.push({ group: 'Kimi (Coding subscription)', models: [...KIMI_CODING_MODELS] });
-  }
   for (const upstream of await getSubagentUpstreamsForUser(userId)) {
     const models = upstream.models.filter((model) => !model.endsWith('*'));
     if (models.length) groups.push({ group: upstream.label, models });
@@ -1396,7 +1379,7 @@ router.post('/internal/cli-subagents/activity', requireHookSecret, async (req, r
   const input = z
     .object({
       id: z.string().min(1).max(200),
-      provider: z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe']),
+      provider: z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'vibe']),
       model: z.string().max(200).optional(),
       description: z.string().max(2000).optional(),
       status: z.enum(['started', 'completed', 'error']),

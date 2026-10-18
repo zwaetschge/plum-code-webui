@@ -456,26 +456,6 @@ router.get('/pi', async (req, res) => {
   }
 });
 
-// Kimi Code CLI credentials login (uses ~/.kimi-code OAuth presence).
-router.get('/kimi', async (req, res) => {
-  try {
-    const user = await getAuthenticatedCliLinkUser(req);
-    if (!user) return redirectCliIdentityRequired(res);
-
-    const available = await isProviderAvailable('kimi');
-    if (!available) {
-      return res.redirect(`${config.frontendUrl}/connect?error=kimi_not_logged_in`);
-    }
-
-    await stampLogin(user.id, 'kimi', req);
-    const token = generateUserToken(user.id);
-    res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
-  } catch (error) {
-    console.error('Kimi auth error:', error);
-    res.redirect(`${config.frontendUrl}/connect?error=kimi`);
-  }
-});
-
 // Mistral Vibe credentials login (browser sign-in writes $VIBE_HOME/.env).
 router.get('/vibe', async (req, res) => {
   try {
@@ -675,16 +655,15 @@ router.get('/providers', async (req, res) => {
   } catch {
     cliLinkAuthorized = false;
   }
-  const [codexAvailable, opencodeAvailable, piAvailable, kimiAvailable, vibeAvailable] =
+  const [codexAvailable, opencodeAvailable, piAvailable, vibeAvailable] =
     cliLinkAuthorized
       ? await Promise.all([
           isProviderAvailable('codex'),
           isProviderAvailable('opencode'),
           isProviderAvailable('pi'),
-          isProviderAvailable('kimi'),
           isProviderAvailable('vibe'),
         ])
-      : [false, false, false, false, false];
+      : [false, false, false, false];
   res.json({
     success: true,
     data: {
@@ -694,7 +673,6 @@ router.get('/providers', async (req, res) => {
       codex: codexAvailable && cliLinkAuthorized,
       opencode: opencodeAvailable && cliLinkAuthorized,
       pi: piAvailable && cliLinkAuthorized,
-      kimi: kimiAvailable && cliLinkAuthorized,
       vibe: vibeAvailable && cliLinkAuthorized,
       proxy: config.proxyAuth.enabled,
     },

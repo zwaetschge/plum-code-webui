@@ -115,7 +115,7 @@ enum class UsageLimitProvider(val id: String, val label: String) {
     CODEX("codex", "Codex"),
     CLAUDE("claude", "Claude"),
     ZAI("zai", "Z.AI"),
-    KIMI("kimi", "Kimi"),
+
     /** Mistral Vibe: the plan's Vibe Code allowance, tracked apart from `mistral`. */
     VIBE("vibe", "Vibe"),
     ALIBABA("alibaba", "Alibaba"),

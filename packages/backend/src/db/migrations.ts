@@ -1,3 +1,4 @@
+import { DEFAULT_CODEX_MODEL } from '@plum-code-webui/shared';
 import { MEMORY_SCHEMA, MEMORY_COMPLETION_SCHEMA } from '../services/assistant/memorySchema.js';
 import { all as pgAll, get as pgGet, transaction as pgTransaction } from './pg.js';
 import type { TransactionScope } from './pg.js';
@@ -196,6 +197,16 @@ const MIGRATIONS: Migration[] = [
  PRIMARY KEY (session_id, connection_id)
 )`,
       `CREATE INDEX IF NOT EXISTS idx_session_connections_connection ON session_connections(connection_id)`,
+    ],
+  },
+  {
+    id: '016-context-handoff',
+    statements: [`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS context_handoff_json TEXT DEFAULT NULL`],
+  },
+  {
+    id: '017-retire-kimi-code',
+    statements: [
+      `UPDATE sessions SET cli_provider='codex',cli_model='${DEFAULT_CODEX_MODEL}',claude_session_id=NULL,status='stopped' WHERE cli_provider='kimi'`,
     ],
   },
 ];

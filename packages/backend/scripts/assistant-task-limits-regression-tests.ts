@@ -81,8 +81,7 @@ if (!(await databaseReachable())) {
     for (const [provider, method, field, idle] of [
       ['claude', 'drainClaudeQueuedTurns', 'claudeQueuedTurns', 'claudeIdle'],
       ['codex', 'drainCodexQueuedTurn', 'codexQueuedTurns', 'codexIdle'],
-      ['kimi', 'drainKimiQueuedTurns', 'kimiQueuedTurns', 'kimiIdle'],
-      ['vibe', 'drainKimiQueuedTurns', 'kimiQueuedTurns', 'kimiIdle'],
+      ['vibe', 'drainAcpQueuedTurns', 'acpQueuedTurns', 'acpIdle'],
       ['opencode', 'drainOpenCodeQueuedTurns', 'opencodeQueuedTurns', 'opencodeIdle'],
     ]) {
       const manager = Object.create(ClaudeProcessManager.prototype) as Record<string, unknown>;
@@ -96,7 +95,7 @@ if (!(await databaseReachable())) {
       for (const name of [
         'dispatchClaudeTurn',
         'dispatchCodexTurn',
-        'dispatchKimiAcpTurn',
+        'dispatchAcpTurn',
         'dispatchOpenCodeTurn',
       ])
         manager[name] = () => {

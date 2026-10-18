@@ -115,7 +115,6 @@ class MistralPlanAllowanceTest {
     fun onlyThePlanLedgersReportAMonthlyWindow() {
         assertTrue(UsageLimitProvider.VIBE.isMonthlyPlan)
         assertTrue(UsageLimitProvider.MISTRAL.isMonthlyPlan)
-        assertFalse(UsageLimitProvider.KIMI.isMonthlyPlan)
         assertFalse(UsageLimitProvider.CODEX.isMonthlyPlan)
         // The widget and the analytics screen iterate this enum for their quota
         // rows, so Vibe has to be part of the fetch list to be tracked at all.

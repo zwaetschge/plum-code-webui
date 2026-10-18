@@ -1,7 +1,7 @@
 import type { CLIProvider, CodexServiceTier } from './session.js';
 
 export type Theme = 'dark' | 'light' | 'system' | 'eink';
-export type UiProvider = 'plum' | 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi' | 'vibe';
+export type UiProvider = 'plum' | 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'vibe';
 export type BackgroundAnimation = 'glass' | 'aurora' | 'ribbons' | 'still';
 export type CodexWebSearchMode = 'auto' | 'cached' | 'live' | 'disabled';
 export type OracleBrowserMode = 'profile' | 'manual' | 'remote';
@@ -11,13 +11,12 @@ export interface LocalUsageBudget {
   weeklyUsd?: number;
 }
 
-export type AnalyticsLimitProvider = 'codex' | 'kimi' | 'claude' | 'zai';
+export type AnalyticsLimitProvider = 'codex' | 'claude' | 'zai';
 
 export const DEFAULT_ANALYTICS_HIDDEN_LIMIT_METRICS: Partial<
   Record<AnalyticsLimitProvider, string[]>
 > = {
   codex: ['additional_gpt_5_3_codex_spark'],
-  kimi: ['additional_parallel_sessions'],
   zai: ['additional_web_search'],
 };
 

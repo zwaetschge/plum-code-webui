@@ -27,7 +27,6 @@ enum class UiProvider {
     @SerialName("codex") CODEX,
     @SerialName("opencode") OPENCODE,
     @SerialName("pi") PI,
-    @SerialName("kimi") KIMI,
     @SerialName("vibe") VIBE
 }
 

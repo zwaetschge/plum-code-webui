@@ -1,7 +1,7 @@
 export type SessionStatus = 'running' | 'stopped' | 'error';
 export type SessionSurface = 'chat' | 'code' | 'task';
 
-export type CLIProvider = 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi' | 'vibe';
+export type CLIProvider = 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'vibe';
 export type CodexServiceTier = 'fast';
 export type SessionIconSource = 'upload' | 'project' | 'generated';
 

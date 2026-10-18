@@ -1,10 +1,9 @@
 /**
  * Mistral Vibe provider regression tests.
  *
- * Vibe is the second persistent ACP harness next to Kimi Code, so its risk sits
- * in two opposite places: where it must differ from Kimi (ACP mode ids, thinking
- * levels, credential home, the separate Mistral allowance) and where it must not
- * (the spawn/queue/recovery plumbing that is keyed on `isAcpProvider`).
+ * Vibe uses persistent ACP sessions with its own mode ids, thinking levels,
+ * credential home and separate Mistral allowance. Its spawn/queue/recovery
+ * plumbing must continue working after retiring the Kimi Code harness.
  *
  * Everything here runs offline. No `vibe-acp` child is started, no Mistral
  * endpoint is called, and credential fixtures live in a temporary VIBE_HOME with
@@ -45,8 +44,7 @@ const {
   acpModeForSessionMode,
   acpProviderLabel,
   appliesModeOnNextTurnWithoutRestart,
-  kimiAcpModeForSessionMode,
-  shouldRecoverInterruptedKimiTurn,
+  shouldRecoverInterruptedAcpTurn,
 } = await import('../src/services/claude/ClaudeProcessManager.js');
 const { clearVibeApiKey, readVibeAuthState, writeVibeApiKey } =
   await import('../src/services/vibe/vibeAuth.js');
@@ -110,28 +108,27 @@ function envFileKeyLines(home: string): string[] {
 }
 
 function testAcpProviderClassification() {
-  // Vibe shares Kimi's persistent stdio harness; the other five do not.
+  // Vibe is the active persistent ACP harness.
   assert.equal(isAcpProvider('vibe'), true);
-  assert.equal(isAcpProvider('kimi'), true);
+  assert.equal(isAcpProvider('kimi'), false);
   for (const provider of ['codex', 'opencode', 'pi', 'claude', 'zai'] as const) {
     assert.equal(isAcpProvider(provider), false, `${provider} is not an ACP harness`);
   }
   assert.equal(isAcpProvider(null), false);
   assert.equal(isAcpProvider(undefined), false);
 
-  // The plumbing keyed on isAcpProvider must treat Vibe like Kimi: mode changes
-  // ride along on the next turn instead of respawning the child, and a stopped
+  // Mode changes ride along on the next turn instead of respawning the child.
+  // A stopped
   // session whose last message is a user turn is an interrupted ACP turn.
   assert.equal(appliesModeOnNextTurnWithoutRestart('vibe'), true);
-  assert.equal(appliesModeOnNextTurnWithoutRestart('kimi'), true);
+  assert.equal(appliesModeOnNextTurnWithoutRestart('kimi'), false);
   assert.equal(appliesModeOnNextTurnWithoutRestart('opencode'), false);
-  assert.equal(shouldRecoverInterruptedKimiTurn('vibe', 'stopped', 'user'), true);
-  assert.equal(shouldRecoverInterruptedKimiTurn('vibe', 'stopped', 'assistant'), false);
-  assert.equal(shouldRecoverInterruptedKimiTurn('vibe', 'running', 'user'), false);
+  assert.equal(shouldRecoverInterruptedAcpTurn('vibe', 'stopped', 'user'), true);
+  assert.equal(shouldRecoverInterruptedAcpTurn('vibe', 'stopped', 'assistant'), false);
+  assert.equal(shouldRecoverInterruptedAcpTurn('vibe', 'running', 'user'), false);
 
   assert.equal(acpProviderLabel('vibe'), 'Vibe');
-  assert.equal(acpProviderLabel('kimi'), 'Kimi');
-  assert.equal(acpProviderLabel(null), 'Kimi');
+  assert.equal(acpProviderLabel(null), 'Vibe');
 }
 
 function testAcpModeMapping() {
@@ -141,18 +138,7 @@ function testAcpModeMapping() {
   assert.equal(acpModeForSessionMode('vibe', 'manual'), 'ask');
   assert.equal(acpModeForSessionMode('vibe', 'auto-accept'), 'accept-edits');
 
-  // Kimi keeps its own vocabulary: sending Vibe's ids to Kimi (or the reverse)
-  // makes the harness reject the session config option.
-  assert.equal(acpModeForSessionMode('kimi', 'planning'), 'plan');
-  assert.equal(acpModeForSessionMode('kimi', 'danger'), 'yolo');
-  assert.equal(acpModeForSessionMode('kimi', 'manual'), 'default');
-  assert.equal(acpModeForSessionMode('kimi', 'auto-accept'), 'auto');
-  assert.deepEqual(
-    (['planning', 'danger', 'manual', 'auto-accept'] as const).map((mode) =>
-      kimiAcpModeForSessionMode(mode)
-    ),
-    ['plan', 'yolo', 'default', 'auto']
-  );
+
 }
 
 function testVibeProviderConfig() {
@@ -366,9 +352,6 @@ function testVibeReasoningLevels() {
 
   // The neighbouring providers keep their own sets: Kimi has no off/max, Codex
   // still accepts ultra.
-  assert.equal(normalizeReasoningLevel('kimi', 'max'), null);
-  assert.equal(normalizeReasoningLevel('kimi', 'off'), null);
-  assert.equal(normalizeReasoningLevel('kimi', 'minimal'), 'minimal');
   assert.equal(normalizeReasoningLevel('codex', 'ultra'), 'ultra');
   assert.equal(normalizeReasoningLevel('codex', 'off'), null);
   assert.equal(normalizeReasoningLevel('codex', 'none'), 'none');

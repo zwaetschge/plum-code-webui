@@ -467,11 +467,6 @@ router.post('/:provider/start', requireAuth, async (req, res) => {
       env.PI_CODING_AGENT_DIR = agentDir;
       env.PI_TELEMETRY = '0';
       env.PI_SKIP_VERSION_CHECK = '1';
-    } else if (provider === 'kimi') {
-      // Kimi Code CLI keeps OAuth + provider state under ~/.kimi-code by
-      // default. The device-code login prints the verification URL + user code
-      // to the TTY (merged stdout/stderr) and self-polls until the browser
-      // authorization completes; no manual code entry is required.
     }
 
     const loginArgs = [...invocationArgs];

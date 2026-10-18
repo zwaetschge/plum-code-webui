@@ -424,11 +424,11 @@ export function setupWebSocket(httpServer: HttpServer): Server {
       await socket.join(`session:${sessionId}`);
       console.log(`Socket ${socket.id} subscribed to session ${sessionId}`);
       try {
-        await processManager.recoverInterruptedKimiTurn(sessionId, socket.data.userId);
+        await processManager.recoverInterruptedAcpTurn(sessionId, socket.data.userId);
       } catch (err) {
         socket.emit('session:error', {
           sessionId,
-          error: logError('session:subscribe-recovery', sessionId, err) || 'Failed to recover Kimi',
+          error: logError('session:subscribe-recovery', sessionId, err) || 'Failed to recover ACP session',
         });
       }
     });
@@ -438,7 +438,7 @@ export function setupWebSocket(httpServer: HttpServer): Server {
      *
      * A client that supervises the whole account used to emit
      * `session:subscribe` once per session: N ownership queries and, worse, N
-     * `recoverInterruptedKimiTurn` calls fanned out on every reconnect. This
+     * `recoverInterruptedAcpTurn` calls fanned out on every reconnect. This
      * resolves ownership with a single query and joins the rooms directly.
      * Recovery stays on the per-session path, because it belongs to opening a
      * conversation, not to watching one.
@@ -935,15 +935,15 @@ export function setupWebSocket(httpServer: HttpServer): Server {
       await socket.join(`session:${sessionId}`);
       console.log(`Socket ${socket.id} joined session room ${sessionId}`);
 
-      // Kimi ACP requests cannot survive a container replacement. If the
+      // ACP requests cannot survive a container replacement. If the
       // persisted transcript ends with an unanswered user message, reopening
       // the chat resumes the native session and continues it automatically.
       try {
-        await processManager.recoverInterruptedKimiTurn(sessionId, socket.data.userId);
+        await processManager.recoverInterruptedAcpTurn(sessionId, socket.data.userId);
       } catch (err) {
         socket.emit('session:error', {
           sessionId,
-          error: logError('session:reconnect-recovery', sessionId, err) || 'Failed to recover Kimi',
+          error: logError('session:reconnect-recovery', sessionId, err) || 'Failed to recover ACP session',
         });
       }
 

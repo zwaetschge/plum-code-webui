@@ -13,7 +13,7 @@ Plum Code WebUI: pnpm monorepo (`packages/backend|frontend|shared|android|deskto
 
 ## Providers (one line each)
 
-Codex (`~/.codex`, per-turn `codex exec --json`), OpenCode (per-user HTTP/SSE, routes GLM/Kimi), Pi (JSONL RPC, Antigravity extension), Kimi Code and Mistral Vibe (persistent ACP stdio — never regress Kimi to `kimi -p`), Claude Code (legacy, stream-json; `ultrathink`/`ultracode` via `claudeEffortLaunch`). Usage is written only by `ClaudeProcessManager.saveUsageToDatabase`; label with `getProviderLabelForUsage`. Details: history file.
+Codex (`~/.codex`, per-turn `codex exec --json`), OpenCode (per-user HTTP/SSE, routes GLM/Kimi), Pi (JSONL RPC, Antigravity extension), Mistral Vibe (persistent ACP stdio), Claude Code (legacy, stream-json; `ultrathink`/`ultracode` via `claudeEffortLaunch`). Usage is written only by `ClaudeProcessManager.saveUsageToDatabase`; label with `getProviderLabelForUsage`. Details: history file.
 
 ## Rebuild / redeploy (MANDATORY)
 
@@ -34,7 +34,7 @@ It triggers `repair-bot` (sidecar in `docker-compose.override.yml`), which build
 
 ## Removed — do not reintroduce
 
-Gemini provider and image service (old API-key one), top-level GLM provider, orchestration manager / task router / worker pool, Ralph loop, Superpowers integration, watchdog/Telegram alerts, main-container self-rebuild API, `/api/automation|tasks|devices|claude-settings`. `repair-bot` is the only rebuild path.
+Kimi Code as a standalone CLI provider (historical usage and general Kimi models remain), Gemini provider and image service (old API-key one), top-level GLM provider, orchestration manager / task router / worker pool, Ralph loop, Superpowers integration, watchdog/Telegram alerts, main-container self-rebuild API, `/api/automation|tasks|devices|claude-settings`. `repair-bot` is the only rebuild path.
 
 ## Where things are
 

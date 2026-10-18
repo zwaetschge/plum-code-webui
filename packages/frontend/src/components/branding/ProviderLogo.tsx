@@ -63,12 +63,7 @@ export function ProviderLogo({ provider, className, alt }: ProviderLogoProps) {
     );
   }
 
-  if (provider === 'kimi') {
-    const resolvedAlt = alt === undefined ? 'Kimi' : alt;
-    return (
-      <img src="/logos/kimi.png" alt={resolvedAlt} className={cn('object-contain', className)} />
-    );
-  }
+
 
   if (provider === 'vibe') {
     // No shipped asset for Mistral Vibe, so the badge is drawn inline like the

@@ -303,7 +303,7 @@ try {
     'a finished workflow leaves no agent running'
   );
   assert.equal(proc.subagentRuns.get('wf').status, 'completed');
-  manager.trackKimiSubagent(
+  manager.trackAcpSubagent(
     'agents-test',
     proc,
     'kimi',
@@ -311,7 +311,7 @@ try {
     { prompt: 'review', subagent_type: 'coder' },
     'in_progress'
   );
-  manager.trackKimiSubagent(
+  manager.trackAcpSubagent(
     'agents-test',
     proc,
     'kimi',

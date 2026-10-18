@@ -16,7 +16,7 @@ import { proposeSourceTasks } from './sourceEvents.js';
 import { indexSource } from './sourceChunks.js';
 import { AppError } from '../../middleware/errorHandler.js';
 
-const provider = z.enum(['codex', 'opencode', 'pi', 'kimi', 'vibe', 'claude', 'zai']);
+const provider = z.enum(['codex', 'opencode', 'pi', 'vibe', 'claude', 'zai']);
 const text = z.string().trim().min(1).max(50000);
 const optionalId = z.string().min(1).max(200).optional();
 const date = z.string().datetime().optional();

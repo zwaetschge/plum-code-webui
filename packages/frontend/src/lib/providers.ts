@@ -3,12 +3,11 @@ import type { CLIProvider as CLIProviderType } from '@plum-code-webui/shared';
 export type { CLIProvider } from '@plum-code-webui/shared';
 type CLIProvider = CLIProviderType;
 
-export type UiProvider = 'plum' | 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi' | 'vibe';
+export type UiProvider = 'plum' | 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'vibe';
 export const ACCOUNT_USAGE_LIMIT_PROVIDERS = [
   'codex',
   'claude',
   'zai',
-  'kimi',
   'alibaba',
   'mistral',
   // Vibe is the second allowance of the same Mistral plan, tracked on its own
@@ -80,14 +79,6 @@ export const UI_PROVIDER_META: Record<
     loginCta: 'Continue with Pi',
     description: 'Pi agent harness using the same provider connections as OpenCode.',
   },
-  kimi: {
-    id: 'kimi',
-    label: 'Kimi',
-    productName: 'Kimi Code',
-    tagline: 'Coding Plan',
-    loginCta: 'Continue with Kimi',
-    description: 'Kimi Code CLI with native persistent ACP chat sessions.',
-  },
   vibe: {
     id: 'vibe',
     label: 'Mistral Vibe',
@@ -105,7 +96,6 @@ export const CLI_PROVIDER_LABEL: Record<CLIProvider, string> = {
   codex: 'Codex',
   opencode: 'OpenCode',
   pi: 'Pi',
-  kimi: 'Kimi Code',
   vibe: 'Mistral Vibe',
 };
 
@@ -115,7 +105,6 @@ export const CLI_PROVIDER_ICON: Record<CLIProvider, string> = {
   codex: 'O',
   opencode: '⚡',
   pi: 'π',
-  kimi: '🌙',
   vibe: '🧡',
 };
 
@@ -125,7 +114,6 @@ export const CLI_PROVIDER_DEFAULT_MODEL: Record<CLIProvider, string> = {
   codex: 'gpt-5.5',
   opencode: 'z-ai/glm-5.1',
   pi: 'z-ai/glm-5.1',
-  kimi: 'kimi-code/kimi-for-coding',
   // `mistral-medium-3.5` is the alias of mistral-vibe-cli-latest, the model the
   // plan's Vibe Code allowance pays for.
   vibe: 'mistral-medium-3.5',
@@ -138,7 +126,6 @@ export const UI_PROVIDER_THEME_COLOR: Record<UiProvider, string> = {
   codex: '#000000',
   opencode: '#160d2b',
   pi: '#0e1716',
-  kimi: '#2582ed',
   vibe: '#ff7000',
 };
 
@@ -146,7 +133,6 @@ export const USAGE_PROVIDER_LABEL: Record<UsageLimitProvider, string> = {
   claude: CLI_PROVIDER_LABEL.claude,
   zai: CLI_PROVIDER_LABEL.zai,
   codex: CLI_PROVIDER_LABEL.codex,
-  kimi: CLI_PROVIDER_LABEL.kimi,
   alibaba: 'Alibaba Token Plan',
   mistral: 'Mistral',
   vibe: CLI_PROVIDER_LABEL.vibe,
@@ -158,7 +144,6 @@ export const USAGE_PROVIDER_SHORT_LABEL: Record<UsageLimitProvider, string> = {
   claude: 'Claude',
   zai: 'Z.AI',
   codex: 'Codex',
-  kimi: 'Kimi',
   alibaba: 'Token Plan',
   mistral: 'Mistral',
   vibe: 'Vibe',
@@ -192,10 +177,6 @@ export const CLI_PROVIDER_LIMIT_LABELS: Record<
     session: { title: '5h', subtitle: 'Session' },
     weeklyAll: { title: 'Weekly', subtitle: 'Total' },
   },
-  kimi: {
-    session: { title: '5h', subtitle: 'Coding Plan' },
-    weeklyAll: { title: 'Weekly', subtitle: 'Coding Plan' },
-  },
   alibaba: {
     // A prepaid token allotment has no short rolling window — only the plan
     // period, which is reported through the weekly slot.
@@ -222,7 +203,6 @@ const CLI_TO_UI: Record<CLIProvider, UiProvider> = {
   codex: 'codex',
   opencode: 'opencode',
   pi: 'pi',
-  kimi: 'kimi',
   vibe: 'vibe',
 };
 
@@ -233,7 +213,6 @@ const UI_TO_CLI: Record<UiProvider, CLIProvider> = {
   codex: 'codex',
   opencode: 'opencode',
   pi: 'pi',
-  kimi: 'kimi',
   vibe: 'vibe',
 };
 
@@ -244,7 +223,6 @@ export function normalizeUiProvider(value?: string | null): UiProvider {
   if (key === 'zai' || key === 'z-ai') return 'zai';
   if (key === 'opencode') return 'opencode';
   if (key === 'pi') return 'pi';
-  if (key === 'kimi') return 'kimi';
   if (key === 'vibe') return 'vibe';
   return 'plum';
 }
@@ -264,7 +242,6 @@ export function getUsageLimitProviderForModel(
   model?: string | null
 ): AccountUsageLimitProvider | null {
   const value = (model || '').trim().toLowerCase();
-  if (cliProvider === 'kimi') return 'kimi';
   // Vibe turns carry a bare `mistral-*` model id, so attribution must come from
   // the harness: they spend the plan's Vibe allowance, not the API allowance.
   if (cliProvider === 'vibe') return 'vibe';
@@ -351,8 +328,6 @@ export function getConversationReasoningOptions(provider: CLIProvider, model?: s
   const levels =
     provider === 'vibe'
       ? ['off', 'low', 'medium', 'high', 'max', 'ultracode']
-      : provider === 'kimi'
-        ? ['minimal', 'low', 'medium', 'high']
         : provider === 'pi'
           ? ['minimal', 'low', 'medium', 'high', 'max', 'ultracode']
           : provider === 'opencode'

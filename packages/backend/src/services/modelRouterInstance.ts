@@ -8,12 +8,6 @@ import {
 } from '../routes/settings.js';
 import { createLogger } from '../utils/logger.js';
 import {
-  KIMI_CODING_BASE_URL,
-  getKimiCodingAccessToken,
-  hasKimiCodingCredentials,
-  isKimiCodingModel,
-} from '../utils/kimiUsage.js';
-import {
   createModelRouter,
   isZaiModel,
   matchUpstreamModel,
@@ -100,15 +94,6 @@ export async function resolveSubagentUpstream(
     };
   }
 
-  // Built-in Kimi fallback, same shape as the Z.AI one: the shared Kimi Code
-  // login is the credential, refreshed through the CLI's own token file. The
-  // token is fetched per request because it only lives 15 minutes.
-  if (isKimiCodingModel(model)) {
-    const authToken = await getKimiCodingAccessToken();
-    if (authToken) {
-      return { baseUrl: KIMI_CODING_BASE_URL, authToken, model, provider: 'kimi' };
-    }
-  }
 
   return null;
 }
@@ -117,7 +102,7 @@ export async function resolveSubagentUpstream(
 export async function userHasSubagentRouting(userId: string): Promise<boolean> {
   const routing = await loadUserRouting(userId);
   if (routing.zai !== null || routing.upstreams.length > 0) return true;
-  return hasKimiCodingCredentials();
+  return false;
 }
 
 export const modelRouter = createModelRouter({

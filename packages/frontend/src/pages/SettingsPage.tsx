@@ -192,11 +192,10 @@ interface AnalyticsLimitHistoryData {
   points: AnalyticsLimitHistoryPoint[];
 }
 
-const ANALYTICS_LIMIT_PROVIDER_ORDER: AnalyticsLimitProvider[] = ['codex', 'kimi', 'claude', 'zai'];
+const ANALYTICS_LIMIT_PROVIDER_ORDER: AnalyticsLimitProvider[] = ['codex', 'claude', 'zai'];
 
 const ANALYTICS_LIMIT_PROVIDER_LABEL: Record<AnalyticsLimitProvider, string> = {
   codex: 'Codex',
-  kimi: 'Kimi',
   claude: 'Claude',
   zai: 'Z.AI',
 };
@@ -266,7 +265,6 @@ const ACTIVATABLE_CLI_PROVIDERS: Array<{
   { id: 'zai', description: 'Z.AI GLM Coding Plan via Claude Code' },
   { id: 'opencode', description: 'OpenCode multi-provider harness' },
   { id: 'pi', description: 'Pi harness with OpenCode connections' },
-  { id: 'kimi', description: 'Moonshot Kimi Code CLI (browser login)' },
   { id: 'vibe', description: 'Mistral Vibe CLI (persistent ACP session)' },
 ];
 
@@ -496,14 +494,14 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
     label: 'Providers & models',
     description: 'Accounts, credentials and runtime options',
     icon: Bot,
-    keywords: ['login', 'api key', 'authentication', 'kimi', 'vibe', 'mistral'],
+    keywords: ['login', 'api key', 'authentication', 'vibe', 'mistral'],
     sections: [
       { id: 'active-providers', label: 'Available providers', generalTab: 'logins' },
       {
         id: 'provider-logins',
         label: 'Provider accounts',
         generalTab: 'logins',
-        keywords: ['opencode api keys', 'kimi login', 'vibe login', 'mistral api key'],
+        keywords: ['opencode api keys', 'vibe login', 'mistral api key'],
       },
       { id: 'codex-cli', label: 'Codex', generalTab: 'codex' },
       { id: 'claude-cli', label: 'Claude Code', generalTab: 'claude' },
@@ -883,7 +881,7 @@ export function SettingsPage() {
     queryKey: ['usage-limit-history', '90d', 'settings'],
     queryFn: async () => {
       const response = await api.get<ApiResponse<AnalyticsLimitHistoryData>>(
-        '/api/usage/limit-history?range=90d&providers=codex,kimi,claude,zai'
+        '/api/usage/limit-history?range=90d&providers=codex,claude,zai'
       );
       return response.data.data;
     },
@@ -2440,12 +2438,6 @@ export function SettingsPage() {
                                       {provider.description}
                                     </p>
                                   </div>
-                                  {provider.id === 'kimi' && (
-                                    <CliDeviceLoginDialog
-                                      provider="kimi"
-                                      triggerClassName="h-8 px-3 text-xs"
-                                    />
-                                  )}
                                   <Switch
                                     checked={enabled}
                                     disabled={lastEnabled || updateSettingsMutation.isPending}

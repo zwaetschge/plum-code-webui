@@ -20,7 +20,7 @@ const LOGO_BY_PROVIDER: Record<string, UiProvider> = {
   Claude: 'claude',
   Codex: 'codex',
   'Z.AI': 'zai',
-  Kimi: 'kimi',
+  Kimi: 'plum',
   Pi: 'pi',
   OpenCode: 'opencode',
   Vibe: 'vibe',

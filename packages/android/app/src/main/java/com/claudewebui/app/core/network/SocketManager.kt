@@ -367,7 +367,7 @@ class SocketManager {
      *
      * Only emitted when the room is not already joined: the server answers a
      * subscribe by recovering an interrupted turn of the persistent ACP
-     * harnesses (`recoverInterruptedKimiTurn`, which Vibe shares), so a
+     * harnesses (`recoverInterruptedAcpTurn`, which Vibe shares), so a
      * redundant call is a database query, not a no-op.
      */
     fun subscribeToSession(sessionId: String) {

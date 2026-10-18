@@ -123,7 +123,6 @@ function HarnessCard({ harness, onChanged }: { harness: SetupHarness; onChanged:
           {harness.kind === 'cli-login' &&
             (harness.id === 'codex' ||
               harness.id === 'claude' ||
-              harness.id === 'kimi' ||
               harness.id === 'vibe') && (
               <CliDeviceLoginDialog
                 provider={harness.id}

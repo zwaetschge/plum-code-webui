@@ -16,7 +16,7 @@ import { config } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-import { backfillKimiUsageHistory, initDatabase } from './db/index.js';
+import { initDatabase } from './db/index.js';
 import { refreshOpenCodeModelsCache } from './utils/opencodeCatalog.js';
 import { setupPassport } from './auth/passport.js';
 import { setupWebSocket } from './websocket/index.js';
@@ -210,14 +210,6 @@ async function main() {
     );
     process.exit(1);
   }
-  // Deliberately not awaited and deliberately not inside initDatabase(): this
-  // is a catch-up pass over native Kimi ledgers on disk, and nothing the server
-  // serves depends on it. Boot — and with it the readiness probe the rebuild
-  // robot waits on — used to sit through the whole scan.
-  void backfillKimiUsageHistory().catch((error) =>
-    console.warn('[DB] Kimi usage backfill failed:', error)
-  );
-
   try {
     const removedUploads = await cleanupExpiredChatUploads();
     if (removedUploads > 0) {

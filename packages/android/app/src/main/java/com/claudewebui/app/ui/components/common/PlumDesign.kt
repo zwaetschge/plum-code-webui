@@ -885,7 +885,7 @@ fun providerColor(provider: CLIProvider): Color = when (provider) {
     CLIProvider.CODEX -> PlumGreen
     CLIProvider.OPENCODE -> PlumAccent
     CLIProvider.PI -> PlumBlue
-    CLIProvider.KIMI -> Color(0xFF2582ED)
+
     CLIProvider.VIBE -> VibeColor
     CLIProvider.ZAI -> Color(0xFF7ED957)
     CLIProvider.CLAUDE -> PlumAmber
@@ -895,7 +895,7 @@ fun providerLabel(provider: CLIProvider): String = when (provider) {
     CLIProvider.CODEX -> "CODEX"
     CLIProvider.OPENCODE -> "OPENCODE"
     CLIProvider.PI -> "PI"
-    CLIProvider.KIMI -> "KIMI"
+
     CLIProvider.VIBE -> "VIBE"
     CLIProvider.ZAI -> "Z.AI"
     CLIProvider.CLAUDE -> "CLAUDE"
@@ -905,7 +905,7 @@ fun providerModel(provider: CLIProvider): String = when (provider) {
     CLIProvider.CODEX -> "gpt-5.5"
     CLIProvider.OPENCODE -> "glm-5.1"
     CLIProvider.PI -> "glm-5.1"
-    CLIProvider.KIMI -> "kimi-for-coding"
+
     // Vibe ships one hosted model: the alias of mistral-vibe-cli-latest that the
     // plan's Vibe Code allowance pays for.
     CLIProvider.VIBE -> "mistral-medium-3.5"

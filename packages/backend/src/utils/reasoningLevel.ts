@@ -27,7 +27,6 @@ const REASONING_LEVELS_BY_PROVIDER: Record<CLIProvider, Set<string>> = {
     'max',
     'ultracode',
   ]),
-  kimi: new Set(['minimal', 'low', 'medium', 'high']),
   // Vibe's ultracode runs workflows at `high` thinking (scripts/mcp-servers/vibe-ultracode.mjs).
   vibe: new Set(['off', 'low', 'medium', 'high', 'max', 'ultracode']),
 };

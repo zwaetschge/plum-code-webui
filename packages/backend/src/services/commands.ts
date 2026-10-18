@@ -188,7 +188,6 @@ const PROVIDER_LABELS: Record<CLIProvider, string> = {
   codex: 'Codex',
   opencode: 'OpenCode',
   pi: 'Pi',
-  kimi: 'Kimi Code',
   vibe: 'Mistral Vibe',
 };
 

@@ -117,12 +117,6 @@ import {
   lookupContextWindow,
   resolveContextWindow,
 } from '../src/utils/contextWindow.js';
-import { mapKimiUsage } from '../src/utils/kimiUsage.js';
-import {
-  captureKimiUsageCursor,
-  readKimiRootPrompts,
-  readKimiUsageSince,
-} from '../src/utils/kimiTurnUsage.js';
 import {
   hasExactManagedPlaceholderSequence,
   resolveMemoryOptimizerMemoryDir,
@@ -140,11 +134,9 @@ import {
   findCodexExecRootThreadId,
   readCodexDescendantUsageDetail,
   formatCodexSharedContextForTest,
-  formatKimiExitMessage,
-  isKimiSessionNotFoundError,
-  kimiAcpModeForSessionMode,
+  acpModeForSessionMode,
   resolveSessionStartMode,
-  shouldRecoverInterruptedKimiTurn,
+  shouldRecoverInterruptedAcpTurn,
   isCodexNativeSlashCommand,
   readCodexDescendantUsage,
   readCodexRolloutTail,
@@ -245,11 +237,11 @@ type CodexQueueProcessStub = {
   codexPreemptingForSteer: boolean;
 };
 
-type KimiQueueProcessStub = {
-  cliProvider: 'kimi';
-  kimiIdle: boolean;
-  kimiQueueDraining: boolean;
-  kimiQueuedTurns: CodexQueueTurnStub[];
+type AcpQueueProcessStub = {
+  cliProvider: 'vibe';
+  acpIdle: boolean;
+  acpQueueDraining: boolean;
+  acpQueuedTurns: CodexQueueTurnStub[];
 };
 
 type OpenCodeMcpEntry = {
@@ -2611,21 +2603,13 @@ async function testCodexModelsCacheChangeInvalidatesDiscovery() {
 
 async function testCodexReasoningUiListsExposeFullEffortRange() {
   const expected = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
-  const files = [
-    path.join(repoRoot, 'packages/frontend/src/pages/SessionPage.tsx'),
-    path.join(repoRoot, 'packages/frontend/src/pages/DashboardPage.tsx'),
-  ];
-
-  for (const file of files) {
-    const content = await fs.readFile(file, 'utf8');
-    for (const value of expected) {
-      assert.match(
-        content,
-        new RegExp(`value: '${value}'`),
-        `${path.basename(file)} lacks ${value}`
-      );
-    }
-  }
+  const { getConversationReasoningOptions } = await import('../../frontend/src/lib/providers.js');
+  const actual = getConversationReasoningOptions('codex').map(option => option.value);
+  for (const value of expected) assert(actual.includes(value), `Codex picker lacks ${value}`);
+  const sessionPage = await fs.readFile(path.join(repoRoot, 'packages/frontend/src/pages/SessionPage.tsx'), 'utf8');
+  assert.match(sessionPage, /getConversationReasoningOptions\(/);
+  const dashboard = await fs.readFile(path.join(repoRoot, 'packages/frontend/src/pages/DashboardPage.tsx'), 'utf8');
+  for (const value of expected) assert.match(dashboard, new RegExp(`value: '${value}'`));
 }
 
 function testOpenCodeConfiguredModelAllowList() {
@@ -3671,70 +3655,25 @@ function testVibeProviderIsRegistered() {
   assert.equal(CLI_PROVIDERS.pi.defaultModel, CLI_PROVIDERS.opencode.defaultModel);
 }
 
-function testKimiCliArgsMatchInstalledContract() {
-  const firstTurn = getCLIArgs('kimi', { model: 'kimi-for-coding' });
-  assert.deepEqual(firstTurn, [
-    '--output-format',
-    'stream-json',
-    '-m',
-    'kimi-code/kimi-for-coding',
-  ]);
-  assert.equal(firstTurn.includes('--session'), false);
-  assert.equal(firstTurn.includes('--session-id'), false);
-
-  const resumedTurn = getCLIArgs('kimi', {
-    model: 'kimi-code/k3',
-    resumeSessionId: 'session_native-kimi-id',
-  });
-  assert.deepEqual(resumedTurn, [
-    '--output-format',
-    'stream-json',
-    '-m',
-    'kimi-code/k3',
-    '--session',
-    'session_native-kimi-id',
-  ]);
-}
-
-function testSessionSchemasAcceptKimi() {
+function testSessionSchemasAcceptVibe() {
   const created = createSessionSchema.safeParse({
-    name: 'Kimi session',
+    name: 'Vibe session',
     workingDirectory: '/workspace/project',
-    cliProvider: 'kimi',
-    cliModel: 'kimi-code/kimi-for-coding',
+    cliProvider: 'vibe',
+    cliModel: 'mistral-medium-3.5',
     mode: 'auto-accept',
     surface: 'code',
     initialMessage: 'Reply only OK',
   });
   assert.equal(created.success, true);
-  assert.equal(updateProviderSchema.safeParse({ cliProvider: 'kimi' }).success, true);
+  assert.equal(updateProviderSchema.safeParse({ cliProvider: 'vibe' }).success, true);
 }
 
-function testKimiMissingSessionRecoveryClassification() {
-  const missing = 'error: failed to run prompt: Session "session_old-id" not found.';
-  assert.equal(isKimiSessionNotFoundError(missing), true);
-  assert.equal(isKimiSessionNotFoundError('ACP error: session_old-id does not exist'), true);
-  assert.equal(isKimiSessionNotFoundError('error: request timed out'), false);
-  assert.match(formatKimiExitMessage(1, missing), /Session "session_old-id" not found/);
-  assert.match(
-    formatKimiExitMessage(1, 'Authentication credentials are missing'),
-    /Settings → Kimi → Connect/
-  );
-  assert.doesNotMatch(formatKimiExitMessage(1, 'request timed out'), /logged in|Connect/);
-}
-
-function testKimiAcpModeMapping() {
-  assert.equal(kimiAcpModeForSessionMode('planning'), 'plan');
-  assert.equal(kimiAcpModeForSessionMode('manual'), 'default');
-  assert.equal(kimiAcpModeForSessionMode('auto-accept'), 'auto');
-  assert.equal(kimiAcpModeForSessionMode('danger'), 'yolo');
-}
-
-function testKimiRestartRecoveryContract() {
-  assert.equal(shouldRecoverInterruptedKimiTurn('kimi', 'stopped', 'user'), true);
-  assert.equal(shouldRecoverInterruptedKimiTurn('kimi', 'stopped', 'assistant'), false);
-  assert.equal(shouldRecoverInterruptedKimiTurn('kimi', 'running', 'user'), false);
-  assert.equal(shouldRecoverInterruptedKimiTurn('codex', 'stopped', 'user'), false);
+function testAcpRestartRecoveryContract() {
+  assert.equal(shouldRecoverInterruptedAcpTurn('vibe', 'stopped', 'user'), true);
+  assert.equal(shouldRecoverInterruptedAcpTurn('vibe', 'stopped', 'assistant'), false);
+  assert.equal(shouldRecoverInterruptedAcpTurn('vibe', 'running', 'user'), false);
+  assert.equal(shouldRecoverInterruptedAcpTurn('codex', 'stopped', 'user'), false);
 
   assert.equal(resolveSessionStartMode(undefined, undefined, 'danger'), 'danger');
   assert.equal(resolveSessionStartMode(undefined, 'manual', 'danger'), 'manual');
@@ -3742,99 +3681,8 @@ function testKimiRestartRecoveryContract() {
   assert.equal(resolveSessionStartMode(), 'auto-accept');
 }
 
-function testKimiUsageMapping() {
-  const mapped = mapKimiUsage({
-    usage: { limit: '100', used: '18', remaining: '82', resetTime: '2026-08-06T07:52:24.988Z' },
-    limits: [
-      {
-        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
-        detail: {
-          limit: '100',
-          used: '28',
-          remaining: '72',
-          resetTime: '2026-08-01T14:52:24.988Z',
-        },
-      },
-    ],
-    parallel: { limit: '20', details: ['active-session'] },
-    subType: 'TYPE_PURCHASE',
-  });
-  assert.equal(mapped.fiveHour?.utilization, 28);
-  assert.equal(mapped.fiveHour?.windowSeconds, 18_000);
-  assert.equal(mapped.sevenDay?.utilization, 18);
-  assert.equal(mapped.sevenDay?.remaining, 82);
-  assert.equal(mapped.additional[0]?.name, 'Parallel sessions');
-  assert.equal(mapped.additional[0]?.used, 1);
-  assert.equal(mapped.additional[0]?.limit, 20);
-}
-
-async function testKimiNativeTurnUsageLedger() {
-  const kimiHome = await fs.mkdtemp(path.join(os.tmpdir(), 'kimi-usage-fixture-'));
-  const nativeSessionId = 'session_native-usage-test';
-  const mainDirectory = path.join(
-    kimiHome,
-    'sessions',
-    'wd_fixture',
-    nativeSessionId,
-    'agents',
-    'main'
-  );
-  const childDirectory = path.join(
-    kimiHome,
-    'sessions',
-    'wd_fixture',
-    nativeSessionId,
-    'agents',
-    'agent-1'
-  );
-  await fs.mkdir(mainDirectory, { recursive: true });
-  const mainWire = path.join(mainDirectory, 'wire.jsonl');
-  await fs.writeFile(
-    mainWire,
-    `${JSON.stringify({ type: 'turn.prompt', input: [{ type: 'text', text: 'first' }], time: 1000 })}\n` +
-      `${JSON.stringify({ type: 'usage.record', model: 'kimi-code/k3', usageScope: 'turn', usage: { inputOther: 9, output: 1, inputCacheRead: 20, inputCacheCreation: 0 }, time: 1100 })}\n`
-  );
-
-  const cursor = captureKimiUsageCursor(kimiHome, nativeSessionId);
-  await fs.appendFile(
-    mainWire,
-    `${JSON.stringify({ type: 'turn.prompt', input: [{ type: 'text', text: 'second' }], time: 2000 })}\n` +
-      `${JSON.stringify({ type: 'context.append_loop_event', event: { type: 'step.end', usage: { inputOther: 999 } }, time: 2100 })}\n` +
-      `${JSON.stringify({ type: 'usage.record', model: 'kimi-code/k3', usageScope: 'turn', usage: { inputOther: 10, output: 3, inputCacheRead: 40, inputCacheCreation: 2 }, time: 2100 })}\n`
-  );
-  await fs.mkdir(childDirectory, { recursive: true });
-  await fs.writeFile(
-    path.join(childDirectory, 'wire.jsonl'),
-    `${JSON.stringify({ type: 'usage.record', model: 'kimi-code/k3', usageScope: 'turn', usage: { inputOther: 5, output: 7, inputCacheRead: 30, inputCacheCreation: 0 }, time: 2200 })}\n`
-  );
-
-  const usage = readKimiUsageSince(cursor);
-  assert.deepEqual(
-    {
-      input: usage.inputTokens,
-      output: usage.outputTokens,
-      cacheRead: usage.cacheReadTokens,
-      cacheCreate: usage.cacheCreationTokens,
-      total: usage.totalTokens,
-    },
-    { input: 15, output: 10, cacheRead: 70, cacheCreate: 2, total: 97 }
-  );
-  assert.equal(usage.models['kimi-code/k3'], 97);
-  assert.deepEqual(
-    readKimiRootPrompts(kimiHome, nativeSessionId).map((prompt) => ({
-      recordedAt: prompt.recordedAt,
-      text: prompt.text,
-    })),
-    [
-      { recordedAt: 1000, text: 'first' },
-      { recordedAt: 2000, text: 'second' },
-    ]
-  );
-  await fs.rm(kimiHome, { recursive: true, force: true });
-}
-
 function testPerTurnModeChangesDoNotRestartActiveChildren() {
-  assert.equal(appliesModeOnNextTurnWithoutRestart('kimi'), true);
+  assert.equal(appliesModeOnNextTurnWithoutRestart('vibe'), true);
   assert.equal(appliesModeOnNextTurnWithoutRestart('codex'), true);
   assert.equal(appliesModeOnNextTurnWithoutRestart('claude'), false);
   assert.equal(appliesModeOnNextTurnWithoutRestart('opencode'), false);
@@ -3859,6 +3707,7 @@ function testClaudeApiEnvironmentMapping() {
       ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-4.5-air',
       API_TIMEOUT_MS: '3000000',
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      ENABLE_TOOL_SEARCH: 'true',
     }
   );
   assert.deepEqual(buildClaudeApiEnv(null), {});
@@ -4743,39 +4592,39 @@ function testCodexQueueModeIsFifoAndSteeringPreservesAcceptedTurns() {
   );
 }
 
-async function testKimiQueueDrainsEveryWaitingFollowup() {
+async function testAcpQueueDrainsEveryWaitingFollowup() {
   const ioStub = { to: () => ({ emit: () => undefined }) };
   const manager = new ClaudeProcessManager(
     ioStub as unknown as ClaudeProcessManagerIo,
     createTestEventSequenceAllocator()
   );
   const queueHarness = manager as unknown as {
-    drainKimiQueuedTurns: (sessionId: string, proc: KimiQueueProcessStub) => Promise<void>;
-    dispatchKimiAcpTurn: (
+    drainAcpQueuedTurns: (sessionId: string, proc: AcpQueueProcessStub) => Promise<void>;
+    dispatchAcpTurn: (
       sessionId: string,
-      proc: KimiQueueProcessStub,
+      proc: AcpQueueProcessStub,
       turn: CodexQueueTurnStub
     ) => Promise<void>;
   };
-  const proc: KimiQueueProcessStub = {
-    cliProvider: 'kimi',
-    kimiIdle: true,
-    kimiQueueDraining: false,
-    kimiQueuedTurns: [queuedTurn('kimi-1'), queuedTurn('kimi-2'), queuedTurn('kimi-3')],
+  const proc: AcpQueueProcessStub = {
+    cliProvider: 'vibe',
+    acpIdle: true,
+    acpQueueDraining: false,
+    acpQueuedTurns: [queuedTurn('vibe-1'), queuedTurn('vibe-2'), queuedTurn('vibe-3')],
   };
   const dispatched: string[] = [];
-  queueHarness.dispatchKimiAcpTurn = async (_sessionId, current, turn) => {
-    current.kimiIdle = false;
+  queueHarness.dispatchAcpTurn = async (_sessionId, current, turn) => {
+    current.acpIdle = false;
     await Promise.resolve();
     dispatched.push(turn.queueId);
-    current.kimiIdle = true;
+    current.acpIdle = true;
   };
 
-  await queueHarness.drainKimiQueuedTurns('kimi-queue-session', proc);
+  await queueHarness.drainAcpQueuedTurns('vibe-queue-session', proc);
 
-  assert.deepEqual(dispatched, ['kimi-1', 'kimi-2', 'kimi-3']);
-  assert.equal(proc.kimiQueuedTurns.length, 0);
-  assert.equal(proc.kimiQueueDraining, false);
+  assert.deepEqual(dispatched, ['vibe-1', 'vibe-2', 'vibe-3']);
+  assert.equal(proc.acpQueuedTurns.length, 0);
+  assert.equal(proc.acpQueueDraining, false);
 }
 
 function testMemoryOptimizerUsesConfigHomeAndStrictManagedPlaceholders() {
@@ -4937,7 +4786,7 @@ async function testDefaultMcpServerSeeding() {
       env?: Record<string, string>;
     };
 
-    assert.deepEqual(first.added, ['blender', 'subagents', 'firefox', 'rea']);
+    assert.deepEqual(first.added, ['assistant', 'blender', 'subagents', 'firefox', 'rea']);
     assert.equal(parsed.mcpServers.godot.command, 'custom-godot-wrapper');
     assert.deepEqual(parsed.mcpServers.godot.args, ['--keep-me']);
     assert.equal(parsed.mcpServers.blender.command, 'node');
@@ -5858,13 +5707,8 @@ await testOpenCodeQueuedProviderTurnCancellationDoesNotHang();
 await testOpenCodeProviderTurnGateShutdownCancelsAllWaiters();
 testSettingsThemeSchemaAcceptsEink();
 testVibeProviderIsRegistered();
-testKimiCliArgsMatchInstalledContract();
-testSessionSchemasAcceptKimi();
-testKimiMissingSessionRecoveryClassification();
-testKimiAcpModeMapping();
-testKimiRestartRecoveryContract();
-testKimiUsageMapping();
-await testKimiNativeTurnUsageLedger();
+testSessionSchemasAcceptVibe();
+testAcpRestartRecoveryContract();
 testPerTurnModeChangesDoNotRestartActiveChildren();
 testClaudeApiEnvironmentMapping();
 testClaudeAndZaiProcessEnvironmentsAreIsolated();
@@ -5894,7 +5738,7 @@ testDisconnectedSessionStaysRunning();
 await testOpenCodeRestartCleanupAbortsAndUnsubscribesRemoteTurn();
 testOpenCodeQueueStateAndRuntime();
 testCodexQueueModeIsFifoAndSteeringPreservesAcceptedTurns();
-await testKimiQueueDrainsEveryWaitingFollowup();
+await testAcpQueueDrainsEveryWaitingFollowup();
 testMemoryOptimizerUsesConfigHomeAndStrictManagedPlaceholders();
 await testLatestContextSnapshotOrdering();
 await testCodexConfigSyncIdempotence();
@@ -5909,6 +5753,10 @@ testCodexCliUpdaterTracksLatest();
 testClaudeCliUpdaterPromotesAndExecutesNativeBinary();
 testPiUpdaterIncludesHarnessAndMcpBridge();
 testPricingTable();
+
+assert.equal(Object.hasOwn(CLI_PROVIDERS, 'kimi'), false, 'retired Kimi Code must not be spawnable');
+assert.equal(createSessionSchema.safeParse({ name: 'retired', workingDirectory: '/tmp', cliProvider: 'kimi' }).success, false);
+assert.equal(updateProviderSchema.safeParse({ cliProvider: 'kimi' }).success, false);
 
 await dropTestSchema();
 

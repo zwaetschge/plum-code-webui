@@ -82,7 +82,6 @@ export const USAGE_PROVIDER_COLORS: Record<AccountUsageLimitProvider, string> = 
   claude: '#f97316',
   zai: '#14b8a6',
   codex: '#22c55e',
-  kimi: '#2582ed',
   alibaba: '#f59e0b',
   mistral: '#fa520f',
   vibe: '#ff7000',
@@ -90,7 +89,6 @@ export const USAGE_PROVIDER_COLORS: Record<AccountUsageLimitProvider, string> = 
 
 export const USAGE_PROVIDER_LIMIT_COLORS: Record<AccountUsageLimitProvider, readonly string[]> = {
   codex: ['#22c55e', '#86efac', '#15803d', '#4ade80'],
-  kimi: ['#2582ed', '#7db5ff', '#1d4ed8', '#60a5fa'],
   claude: ['#f97316', '#fdba74', '#c2410c', '#fb923c'],
   zai: ['#14b8a6', '#5eead4', '#0f766e', '#2dd4bf'],
   alibaba: ['#f59e0b', '#fcd34d', '#b45309', '#fbbf24'],
@@ -100,7 +98,6 @@ export const USAGE_PROVIDER_LIMIT_COLORS: Record<AccountUsageLimitProvider, read
 
 export const USAGE_PROVIDER_LABELS: Record<AccountUsageLimitProvider, string> = {
   codex: CLI_PROVIDER_LABEL.codex,
-  kimi: CLI_PROVIDER_LABEL.kimi,
   claude: CLI_PROVIDER_LABEL.claude,
   zai: CLI_PROVIDER_LABEL.zai,
   alibaba: 'Alibaba Token Plan',
@@ -110,7 +107,6 @@ export const USAGE_PROVIDER_LABELS: Record<AccountUsageLimitProvider, string> = 
 
 export const USAGE_TRACKER_LABELS: Record<UsageLimitTracker, string> = {
   codex: 'Codex',
-  kimi: 'Kimi',
   claude: 'Claude',
   zai: 'Z.AI',
   alibaba: 'Token Plan',
@@ -121,7 +117,6 @@ export const USAGE_TRACKER_LABELS: Record<UsageLimitTracker, string> = {
 /** The analytics provider label each quota belongs to (for the provider filter). */
 export const USAGE_TRACKER_ANALYTICS_LABEL: Record<UsageLimitTracker, string> = {
   codex: 'Codex',
-  kimi: 'Kimi',
   claude: 'Claude',
   zai: 'Z.AI',
   alibaba: 'Other',
@@ -135,7 +130,6 @@ export const USAGE_PROVIDER_LOGO: Record<AccountUsageLimitProvider, UiProvider> 
   claude: 'claude',
   zai: 'zai',
   codex: 'codex',
-  kimi: 'kimi',
   // No dedicated brand mark yet; the neutral Plum badge keeps the row readable.
   alibaba: 'plum',
   mistral: 'plum',
@@ -191,10 +185,10 @@ export function loadUsageLimitTrackers(): UsageLimitTracker[] {
       window.localStorage.getItem(LEGACY_USAGE_TRACKERS_STORAGE_KEY) || 'null'
     );
     if (!Array.isArray(legacy)) return [...USAGE_PROVIDERS];
-    // Kimi was added after the v2 preference was stored on existing devices, and
-    // so were the plan-budget trackers. Preserve their choices for older
+    // Plan-budget trackers were added after the v2 preference. Preserve
+    // choices for older
     // providers while making every newer one visible once by default.
-    const migrated = migrateStoredTrackers(legacy, ['kimi', ...ADDED_SINCE_V3]);
+    const migrated = migrateStoredTrackers(legacy, [...ADDED_SINCE_V3]);
     window.localStorage.setItem(USAGE_TRACKERS_STORAGE_KEY, JSON.stringify(migrated));
     return migrated;
   } catch {

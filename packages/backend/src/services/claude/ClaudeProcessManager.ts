@@ -1,3 +1,4 @@
+import { buildContinuationHandoff, CONTEXT_CONTINUATION_PROMPT } from '../../utils/contextHandoff.js';
 import { assertTaskTurnAllowed } from '../assistant/taskLimits.js';
 import { persistSubagentRun } from '../subagentHistory.js';
 import { subagentWaitOutcomes } from '../../utils/subagentStatus.js';
@@ -152,7 +153,6 @@ import {
   spawnManagedProcess,
   terminateManagedProcess,
 } from './processLifecycle.js';
-import { captureKimiUsageCursor, readKimiUsageSince } from '../../utils/kimiTurnUsage.js';
 import {
   getSessionSyncState,
   captureSessionSnapshotWatermark,
@@ -2474,30 +2474,13 @@ export function appliesModeOnNextTurnWithoutRestart(provider: CLIProvider): bool
   return provider === 'codex' || isAcpProvider(provider);
 }
 
-export function kimiAcpModeForSessionMode(mode: SessionMode): string {
+/** ACP is currently supplied by Mistral Vibe. */
+export function acpProviderLabel(_provider: CLIProvider | null | undefined): string { return 'Vibe'; }
+export function acpModeForSessionMode(_provider: CLIProvider, mode: SessionMode): string {
   if (mode === 'planning') return 'plan';
-  if (mode === 'danger') return 'yolo';
-  if (mode === 'manual') return 'default';
-  return 'auto';
-}
-
-/** Short provider name for ACP log lines and user-visible errors. */
-export function acpProviderLabel(provider: CLIProvider | null | undefined): string {
-  return provider === 'vibe' ? 'Vibe' : 'Kimi';
-}
-
-/**
- * Map a Plum session mode onto the ACP mode id the harness actually offers.
- * Kimi: default/auto/plan/yolo. Vibe: ask/accept-edits/plan/auto-approve.
- */
-export function acpModeForSessionMode(provider: CLIProvider, mode: SessionMode): string {
-  if (provider === 'vibe') {
-    if (mode === 'planning') return 'plan';
-    if (mode === 'danger') return 'auto-approve';
-    if (mode === 'manual') return 'ask';
-    return 'accept-edits';
-  }
-  return kimiAcpModeForSessionMode(mode);
+  if (mode === 'danger') return 'auto-approve';
+  if (mode === 'manual') return 'ask';
+  return 'accept-edits';
 }
 
 export function resolveSessionStartMode(
@@ -2508,7 +2491,11 @@ export function resolveSessionStartMode(
   return explicitMode ?? pendingMode ?? persistedMode ?? 'auto-accept';
 }
 
-export function shouldRecoverInterruptedKimiTurn(
+export function isAcpSessionNotFoundError(text: string): boolean {
+  return /session[^\n]*(?:not found|does not exist)|(?:unknown|missing|no such) session/i.test(text);
+}
+
+export function shouldRecoverInterruptedAcpTurn(
   provider: CLIProvider | null,
   status: string | null,
   latestRole?: string
@@ -2516,7 +2503,7 @@ export function shouldRecoverInterruptedKimiTurn(
   return isAcpProvider(provider) && status === 'stopped' && latestRole === 'user';
 }
 
-function kimiAcpConfigSupports(
+function acpConfigSupports(
   options: AcpSessionConfigOption[] | null | undefined,
   configId: string,
   value: string
@@ -2529,7 +2516,7 @@ function kimiAcpConfigSupports(
   });
 }
 
-function kimiAcpToolResultText(
+function acpToolResultText(
   update: Extract<AcpSessionUpdate, { sessionUpdate: 'tool_call_update' }>
 ): string {
   if (typeof update.rawOutput === 'string') return update.rawOutput;
@@ -2547,32 +2534,6 @@ function kimiAcpToolResultText(
     })
     .filter(Boolean)
     .join('\n');
-}
-
-export function isKimiSessionNotFoundError(stderr: string): boolean {
-  return (
-    /session\s+["'][^"']+["']\s+not found/i.test(stderr) ||
-    /session[^\r\n]{0,200}(?:not found|does not exist|unknown)/i.test(stderr)
-  );
-}
-
-export function formatKimiExitMessage(exitCode: number | null, stderr: string): string {
-  const detail = stderr
-    .replace(/\u001b\[[0-9;]*m/g, '')
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 500);
-  const needsLogin =
-    /not logged in|unauthenticated|authentication|credentials?|login required/i.test(detail);
-
-  if (needsLogin) {
-    return `\n⚠️ Kimi authentication failed. Reconnect via Settings → Kimi → Connect.\n`;
-  }
-  if (detail) {
-    return `\n⚠️ Kimi exited (code ${exitCode ?? 'unknown'}): ${detail}\n`;
-  }
-  return `\n⚠️ Kimi exited (code ${exitCode ?? 'unknown'}). Check the server logs for details.\n`;
 }
 
 type OpenCodeSlashCommand =
@@ -2814,6 +2775,8 @@ interface ClaudeProcess {
   sshContextInjected?: string | null;
   discordGatewayContextInjected?: string | null;
   lastContextLimitAt?: number;
+  contextRecoveryPending?: boolean;
+  contextRecoveryVersion?: number;
   codexIdle?: boolean; // True when codex process exited after turn.completed, awaiting respawn
   // Codex CLI 0.130+ persists sessions at ~/.codex/sessions/<uuid>.jsonl. Once captured
   // from the first `session_meta` (or older `thread.started`) event, we use
@@ -2869,17 +2832,16 @@ interface ClaudeProcess {
   codexLastObservedContextWindow?: number;
   codexTotalTokenUsage?: CodexUsageCounters;
   codexDescendantUsageBaseline?: CodexUsageCounters;
-  // Kimi runs as a persistent ACP agent. Unlike `kimi -p`, ACP emits token
-  // chunks and tool lifecycle updates while keeping one native chat session
-  // alive across WebUI turns.
-  kimiAcpConnection?: ClientSideConnection;
-  kimiAcpSessionId?: string;
-  kimiAcpConfigOptions?: AcpSessionConfigOption[];
-  kimiIdle?: boolean;
-  kimiQueuedTurns?: CodexPreparedTurn[];
-  kimiQueueDraining?: boolean;
-  kimiCompletedTools?: Set<string>;
-  kimiThinkingText?: string;
+  // Persistent ACP streams token chunks and tool lifecycle updates while
+  // keeping one native chat session alive across WebUI turns.
+  acpConnection?: ClientSideConnection;
+  acpSessionId?: string;
+  acpConfigOptions?: AcpSessionConfigOption[];
+  acpIdle?: boolean;
+  acpQueuedTurns?: CodexPreparedTurn[];
+  acpQueueDraining?: boolean;
+  acpCompletedTools?: Set<string>;
+  acpThinkingText?: string;
   /** Vibe: running usage totals at the last booked turn (Vibe reports totals). */
   vibeUsageBaseline?: VibeSessionStats | null;
   /** Vibe: canonical tool name per toolCallId (the name only arrives once). */
@@ -2902,8 +2864,7 @@ interface ClaudeProcess {
     }
   >;
   /** Reasoning/thinking choice for ACP harnesses that expose it as a config
-   * option (Vibe: off/low/medium/high/max). Kimi encodes effort in the model
-   * alias instead, so this stays unset there. */
+   * option (Vibe: off/low/medium/high/max). */
   acpThinking?: string | null;
   /** Claude/Z.AI `ultrathink` effort: every prompt carries the keyword. */
   claudeUltrathink?: boolean;
@@ -3120,6 +3081,8 @@ function withUltrathink(proc: { claudeUltrathink?: boolean }, message: string): 
 export class ClaudeProcessManager {
   private processes: Map<string, ClaudeProcess> = new Map();
   private pendingModes: Map<string, SessionMode> = new Map(); // Store modes for sessions not yet started
+  private contextContinuations = new Map<string, { userId: string; chatId: string | null; attempts: number }>();
+
   private pendingContextReminders: Map<
     string,
     { summary: string; reason: 'mode-change' | 'provider-switch' | 'context-limit' }
@@ -3606,7 +3569,7 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
     ];
   }
 
-  private trackKimiSubagent(
+  private trackAcpSubagent(
     sessionId: string,
     proc: ClaudeProcess,
     toolId: string,
@@ -4901,12 +4864,12 @@ Discord Main Gateway:
 
   /**
    * A container restart cannot keep the in-flight ACP request alive. When a
-   * Kimi or Vibe chat is opened again and its persisted transcript ends with a
+   * Vibe chat is opened again and its persisted transcript ends with a
    * user turn, resume the native ACP session and continue that interrupted turn
    * once. The recovery hint is transport-only and must not create a duplicate
    * chat row.
    */
-  async recoverInterruptedKimiTurn(sessionId: string, userId: string): Promise<boolean> {
+  async recoverInterruptedAcpTurn(sessionId: string, userId: string): Promise<boolean> {
     if (this.processes.has(sessionId)) return false;
 
     const session = (await pgGet(
@@ -4928,7 +4891,7 @@ Discord Main Gateway:
       sessionId,
       sessionId
     )) as unknown as { role: string } | undefined;
-    if (!shouldRecoverInterruptedKimiTurn(session.cli_provider, session.status, latest?.role)) {
+    if (!shouldRecoverInterruptedAcpTurn(session.cli_provider, session.status, latest?.role)) {
       return false;
     }
 
@@ -4987,6 +4950,7 @@ Discord Main Gateway:
           cli_provider: CLIProvider | null;
           mode: SessionMode | null;
           last_message: string | null;
+          context_handoff_json: string | null;
         }
       | undefined;
 
@@ -5052,6 +5016,14 @@ Discord Main Gateway:
           error: session.last_message,
         });
       }
+    }
+    if (isClaudeTransportProvider(cliProvider) && session.context_handoff_json) {
+      try {
+        const checkpoint = JSON.parse(session.context_handoff_json);
+        if (checkpoint.provider === cliProvider && typeof checkpoint.summary === 'string' && checkpoint.chatId === session.active_chat_id) {
+          this.pendingContextReminders.set(sessionId, { summary: checkpoint.summary, reason: 'context-limit' });
+        }
+      } catch { /* A malformed legacy checkpoint cannot override the current prompt. */ }
     }
     const configHome = resolveConfigHome(cliProvider);
     if (isClaudeTransportProvider(cliProvider)) {
@@ -5223,9 +5195,9 @@ Discord Main Gateway:
         ...(await buildIntegrationEnv()),
         ...(await buildSessionConnectionEnv(sessionId, userId)),
       };
-      // Kimi exposes its ACP agent as a subcommand (`kimi acp`); Vibe ships a
+      // Vibe ships a
       // dedicated `vibe-acp` entry point that takes no arguments.
-      const acpArgs = cliProvider === 'kimi' ? ['acp'] : [];
+      const acpArgs: string[] = [];
       const vibeEnv = cliProvider === 'vibe' ? buildVibeEnv() : {};
       // Ultracode for Vibe: the workflow server (scripts/mcp-servers/vibe-ultracode.mjs).
       const vibeUltracodeEnv =
@@ -5258,7 +5230,7 @@ Discord Main Gateway:
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       // Vibe gets Plum's MCP servers (browser, images, Android, subagents …)
-      // through ACP; Kimi keeps its own configuration.
+      // through ACP.
       const acpMcpServers =
         cliProvider === 'vibe'
           ? buildVibeMcpServers(sessionId, {
@@ -5320,10 +5292,10 @@ Discord Main Gateway:
         sharedContextInjected: !shouldInjectStaticBootstrap,
         modePromptInjected: null,
         lastContextLimitAt: undefined,
-        kimiIdle: true,
-        kimiQueuedTurns: [],
-        kimiQueueDraining: false,
-        kimiCompletedTools: new Set(),
+        acpIdle: true,
+        acpQueuedTurns: [],
+        acpQueueDraining: false,
+        acpCompletedTools: new Set(),
         acpThinking:
           cliProvider === 'vibe' && selectedReasoning
             ? vibeThinkingLevel(selectedReasoning)
@@ -5371,9 +5343,9 @@ Discord Main Gateway:
 
       const acpClient: AcpClient = {
         requestPermission: async (params) =>
-          await this.handleKimiAcpPermission(sessionId, claudeProcess, params),
+          await this.handleAcpPermission(sessionId, claudeProcess, params),
         sessionUpdate: async (params) =>
-          await this.handleKimiAcpUpdate(sessionId, claudeProcess, params),
+          await this.handleAcpUpdate(sessionId, claudeProcess, params),
         // Vibe's ask_user_question (and leaving plan mode) needs form elicitation.
         ...(cliProvider === 'vibe'
           ? {
@@ -5386,7 +5358,7 @@ Discord Main Gateway:
         () => acpClient,
         ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout))
       );
-      claudeProcess.kimiAcpConnection = connection;
+      claudeProcess.acpConnection = connection;
 
       try {
         const initialized = await connection.initialize({
@@ -5414,7 +5386,7 @@ Discord Main Gateway:
             });
             configOptions = resumed.configOptions;
           } catch (error) {
-            if (!isKimiSessionNotFoundError(String(error))) throw error;
+            if (!isAcpSessionNotFoundError(String(error))) throw error;
             console.warn(
               `[${acpLabel.toUpperCase()} ACP] Native session ${nativeSessionId} is missing; creating a fresh session [${sessionId}]`
             );
@@ -5432,7 +5404,7 @@ Discord Main Gateway:
           configOptions = created.configOptions;
         }
 
-        claudeProcess.kimiAcpSessionId = nativeSessionId;
+        claudeProcess.acpSessionId = nativeSessionId;
         claudeProcess.claudeSessionId = nativeSessionId;
         if (cliProvider === 'vibe') {
           // A resumed session's running totals are the baseline for its next turn.
@@ -5445,8 +5417,8 @@ Discord Main Gateway:
           claudeProcess.acpPendingPermissions = new Map();
           claudeProcess.acpPendingQuestions = new Map();
         }
-        claudeProcess.kimiAcpConfigOptions = configOptions || [];
-        await this.configureKimiAcpSession(claudeProcess);
+        claudeProcess.acpConfigOptions = configOptions || [];
+        await this.configureAcpSession(claudeProcess);
 
         await pgRun(
           'UPDATE sessions SET claude_session_id = ? WHERE id = ?',
@@ -5870,7 +5842,10 @@ Discord Main Gateway:
     child.stdout.on('data', (chunk: string) => {
       onChunk?.();
       chain = chain
-        .then(() => this.handleJsonOutput(sessionId, chunk))
+        .then(() => {
+          if (this.processes.get(sessionId)?.process !== child) return;
+          return this.handleJsonOutput(sessionId, chunk);
+        })
         .catch((error) => {
           console.error(`[${sessionId}] Failed to process CLI output:`, error);
         });
@@ -5953,10 +5928,6 @@ Discord Main Gateway:
           } else if (translated) {
             await this.processStreamMessage(sessionId, translated);
           }
-          continue;
-        }
-        if (isAcpProvider(proc.cliProvider)) {
-          await this.processKimiLine(sessionId, proc, raw);
           continue;
         }
         await this.processStreamMessage(sessionId, raw as StreamJsonMessage);
@@ -8626,16 +8597,23 @@ Discord Main Gateway:
     }
     proc.lastContextLimitAt = now;
 
-    const summary = await this.buildContextSummary(
-      sessionId,
-      HANDOFF_CONTEXT_MAX_MESSAGES,
-      HANDOFF_CONTEXT_MAX_CHARS,
-      proc.currentChatId
-    );
-    if (summary) {
-      this.pendingContextReminders.set(sessionId, { summary, reason: 'context-limit' });
+    if (proc.contextRecoveryPending) return;
+    const recoveryVersion = proc.contextRecoveryVersion || 0;
+    const stillCurrent = () => this.processes.get(sessionId) === proc && (proc.contextRecoveryVersion || 0) === recoveryVersion;
+    const summary = await this.buildContextSummary(sessionId, HANDOFF_CONTEXT_MAX_MESSAGES, HANDOFF_CONTEXT_MAX_CHARS, proc.currentChatId);
+    const saved = await pgGet('SELECT context_handoff_json FROM sessions WHERE id=? AND user_id=?', sessionId, proc.userId);
+    if (!stillCurrent()) return;
+    let attempts = 1;
+    try { attempts += Number(JSON.parse(String(saved?.context_handoff_json)).attempts) || 0; } catch { /* first recovery */ }
+    if (isClaudeTransportProvider(proc.cliProvider)) {
+      await pgRun('UPDATE sessions SET claude_session_id=NULL,context_handoff_json=? WHERE id=? AND user_id=?',
+        JSON.stringify({ summary, chatId: proc.currentChatId, provider: proc.cliProvider, attempts }), sessionId, proc.userId);
+      if (!stillCurrent()) return;
+      if (summary && attempts <= 3) this.contextContinuations.set(sessionId, { userId: proc.userId, chatId: proc.currentChatId, attempts });
     }
 
+    if (summary) this.pendingContextReminders.set(sessionId, { summary, reason: 'context-limit' });
+    proc.contextRecoveryPending = true;
     proc.totalInputTokens = 0;
     proc.totalOutputTokens = 0;
     proc.cacheReadTokens = 0;
@@ -8670,7 +8648,9 @@ Discord Main Gateway:
 
     await this.emitCompact(sessionId, {
       sessionId,
-      message: `Context limit reached. Auto-compacting context to continue.`,
+      message: this.contextContinuations.has(sessionId)
+        ? 'Kontextgrenze erreicht. Die Arbeit wird mit gesicherter Übergabe fortgesetzt.'
+        : 'Kontextgrenze wiederholt erreicht. Übergabe gesichert; bitte Modell oder Auftrag prüfen.',
       summary: summary || undefined,
       clear: true,
       reason: 'context-limit',
@@ -8679,9 +8659,26 @@ Discord Main Gateway:
     await this.emitUsage(sessionId, proc);
   }
 
+  private async resumeAfterContextLimit(sessionId: string): Promise<void> {
+    const pending = this.contextContinuations.get(sessionId);
+    if (!pending) return;
+    try {
+      await this.startSession(sessionId, pending.userId);
+      if (this.contextContinuations.get(sessionId) !== pending) return;
+      await this.sendMessage(sessionId, pending.userId, CONTEXT_CONTINUATION_PROMPT, undefined, {
+        chatId: pending.chatId, recordMessage: false, updateLastMessage: false, contextContinuation: true,
+      });
+    } catch (error) {
+      if (this.contextContinuations.get(sessionId) === pending) this.io.to(`session:${sessionId}`).emit('session:error', { sessionId, error: 'Die automatische Fortsetzung ist fehlgeschlagen. Die Übergabe bleibt gespeichert.' });
+      console.warn('[CONTEXT-LIMIT] Continuation failed', sessionId, error);
+    } finally {
+      if (this.contextContinuations.get(sessionId) === pending) this.contextContinuations.delete(sessionId);
+    }
+  }
+
   private async processStreamMessage(sessionId: string, msg: StreamJsonMessage): Promise<void> {
     const proc = this.processes.get(sessionId);
-    if (!proc) return;
+    if (!proc || proc.contextRecoveryPending) return;
 
     const native = msg as unknown as {
       parent_tool_use_id?: string;
@@ -9137,6 +9134,8 @@ The planning phase is complete. You are now in Auto-Accept mode.
         });
       }
 
+      if (proc.contextRecoveryPending) return;
+
       // Clear any active agent on result (safety net)
       this.completeActiveSubagents(sessionId, proc);
 
@@ -9375,12 +9374,15 @@ The planning phase is complete. You are now in Auto-Accept mode.
 
     // Handle result/completion
     if (msg.type === 'result' || (msg.type === 'system' && msg.subtype === 'turn_end')) {
+      if (proc.contextRecoveryPending) return;
       // Save any remaining streaming content
       if (proc.streamingText.trim().length > 0) {
         await this.saveAssistantMessage(sessionId, proc.streamingText.trim());
         proc.streamingText = '';
         proc.isStreaming = false;
       }
+      if (proc.contextRecoveryPending) return;
+      if (isClaudeTransportProvider(proc.cliProvider)) await pgRun('UPDATE sessions SET context_handoff_json=NULL WHERE id=? AND user_id=?', sessionId, proc.userId);
       // Stop thinking indicator
       this.io.to(`session:${sessionId}`).emit('session:thinking', {
         sessionId,
@@ -9607,7 +9609,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
       return proc.opencodeQueuedTurns ?? [];
     }
     if (isAcpProvider(proc.cliProvider)) {
-      return proc.kimiQueuedTurns ?? [];
+      return proc.acpQueuedTurns ?? [];
     }
     if (isClaudeTransportProvider(proc.cliProvider)) {
       return proc.claudeQueuedTurns ?? [];
@@ -9630,7 +9632,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
       (proc.codexQueuedTurns?.length ?? 0) +
       (proc.opencodeQueuedTurns?.length ?? 0) +
       (proc.claudeQueuedTurns?.length ?? 0) +
-      (proc.kimiQueuedTurns?.length ?? 0);
+      (proc.acpQueuedTurns?.length ?? 0);
     proc.codexQueuedTurns = [];
     proc.codexSteerDraining = false;
     proc.codexPreemptingForSteer = false;
@@ -9640,9 +9642,9 @@ The planning phase is complete. You are now in Auto-Accept mode.
     proc.claudeQueuedTurns = [];
     proc.claudeQueueDraining = false;
     proc.claudeIdle = true;
-    proc.kimiQueuedTurns = [];
-    proc.kimiQueueDraining = false;
-    proc.kimiIdle = true;
+    proc.acpQueuedTurns = [];
+    proc.acpQueueDraining = false;
+    proc.acpIdle = true;
     this.emitQueueState(sessionId, proc);
     if (discarded > 0) {
       console.log(`[SESSION] Discarded ${discarded} queued turn(s) [${sessionId}]`);
@@ -9671,7 +9673,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
             : isClaudeTransportProvider(proc.cliProvider)
               ? proc.claudeIdle === false || items.length > 0
               : isAcpProvider(proc.cliProvider)
-                ? proc.kimiIdle === false || items.length > 0
+                ? proc.acpIdle === false || items.length > 0
                 : proc.isStreaming || !!proc.currentToolName,
       preempting: !!proc.codexPreemptingForSteer,
     });
@@ -9775,7 +9777,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     if (hasActiveSubagents) return false;
     if (proc.cliProvider === 'codex') return proc.codexIdle !== false;
     if (proc.cliProvider === 'opencode') return proc.opencodeIdle !== false;
-    if (isAcpProvider(proc.cliProvider)) return proc.kimiIdle !== false;
+    if (isAcpProvider(proc.cliProvider)) return proc.acpIdle !== false;
     if (isClaudeTransportProvider(proc.cliProvider)) return proc.claudeIdle !== false;
     return !proc.isStreaming && !proc.currentToolName;
   }
@@ -9881,9 +9883,9 @@ The planning phase is complete. You are now in Auto-Accept mode.
     }, 5000);
   }
 
-  private async configureKimiAcpSession(proc: ClaudeProcess): Promise<void> {
-    const connection = proc.kimiAcpConnection;
-    const nativeSessionId = proc.kimiAcpSessionId;
+  private async configureAcpSession(proc: ClaudeProcess): Promise<void> {
+    const connection = proc.acpConnection;
+    const nativeSessionId = proc.acpSessionId;
     if (!connection || !nativeSessionId) return;
 
     const applyOption = async (configId: string, value: string | null | undefined) => {
@@ -9891,15 +9893,15 @@ The planning phase is complete. You are now in Auto-Accept mode.
       // Advertised options are authoritative. Vibe answers a resumed session
       // without configOptions, so an unadvertised value is probed instead of
       // skipped; a rejection just leaves the harness default in place.
-      const options = proc.kimiAcpConfigOptions;
-      if (options?.length && !kimiAcpConfigSupports(options, configId, value)) return;
+      const options = proc.acpConfigOptions;
+      if (options?.length && !acpConfigSupports(options, configId, value)) return;
       try {
         const result = await connection.setSessionConfigOption({
           sessionId: nativeSessionId,
           configId,
           value,
         });
-        proc.kimiAcpConfigOptions = result.configOptions;
+        proc.acpConfigOptions = result.configOptions;
       } catch (error) {
         console.warn(
           `[${acpProviderLabel(proc.cliProvider).toUpperCase()} ACP] setSessionConfigOption(${configId}=${value}) failed [${proc.sessionId}]:`,
@@ -9945,7 +9947,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     }
   }
 
-  private async handleKimiAcpPermission(
+  private async handleAcpPermission(
     sessionId: string,
     proc: ClaudeProcess,
     params: AcpRequestPermissionRequest
@@ -10106,7 +10108,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     return false;
   }
 
-  private async handleKimiAcpUpdate(
+  private async handleAcpUpdate(
     sessionId: string,
     proc: ClaudeProcess,
     notification: AcpSessionNotification
@@ -10133,8 +10135,8 @@ The planning phase is complete. You are now in Auto-Accept mode.
         // ACP sends reasoning as small token chunks. Keep a bounded rolling
         // window so the activity line shows meaningful live progress instead
         // of looking frozen during long K3 tool-planning steps.
-        proc.kimiThinkingText = `${proc.kimiThinkingText || ''}${update.content.text}`.slice(-600);
-        proc.currentActivitySummary = proc.kimiThinkingText.replace(/\s+/g, ' ').trim();
+        proc.acpThinkingText = `${proc.acpThinkingText || ''}${update.content.text}`.slice(-600);
+        proc.currentActivitySummary = proc.acpThinkingText.replace(/\s+/g, ' ').trim();
       }
       this.io.to(`session:${sessionId}`).emit('session:thinking', {
         sessionId,
@@ -10156,7 +10158,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     }
 
     if (update.sessionUpdate === 'tool_call') {
-      this.trackKimiSubagent(
+      this.trackAcpSubagent(
         sessionId,
         proc,
         update.toolCallId,
@@ -10186,14 +10188,14 @@ The planning phase is complete. You are now in Auto-Accept mode.
       const toolName =
         update.title || pending?.toolName || `${acpProviderLabel(proc.cliProvider)} tool`;
       const input = update.rawInput ?? pending?.input;
-      this.trackKimiSubagent(
+      this.trackAcpSubagent(
         sessionId,
         proc,
         update.toolCallId,
         toolName,
         input,
         update.status,
-        kimiAcpToolResultText(update)
+        acpToolResultText(update)
       );
       if (!proc.emittedTools?.has(update.toolCallId)) {
         proc.emittedTools?.add(update.toolCallId);
@@ -10209,10 +10211,10 @@ The planning phase is complete. You are now in Auto-Accept mode.
 
       if (
         (update.status === 'completed' || update.status === 'failed') &&
-        !proc.kimiCompletedTools?.has(update.toolCallId)
+        !proc.acpCompletedTools?.has(update.toolCallId)
       ) {
-        proc.kimiCompletedTools?.add(update.toolCallId);
-        const result = kimiAcpToolResultText(update).slice(0, 20_000);
+        proc.acpCompletedTools?.add(update.toolCallId);
+        const result = acpToolResultText(update).slice(0, 20_000);
         this.emitToolUse(sessionId, {
           sessionId,
           toolName,
@@ -10239,7 +10241,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     }
 
     if (update.sessionUpdate === 'config_option_update') {
-      proc.kimiAcpConfigOptions = update.configOptions;
+      proc.acpConfigOptions = update.configOptions;
     }
   }
 
@@ -10301,7 +10303,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     proc.pendingToolResults.set(id, { toolName: name, input });
 
     const startedAgain = !pending || rawInput != null || title;
-    if (startedAgain && !proc.kimiCompletedTools?.has(id)) {
+    if (startedAgain && !proc.acpCompletedTools?.has(id)) {
       proc.emittedTools?.add(id);
       this.emitToolUse(sessionId, {
         sessionId,
@@ -10321,7 +10323,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
           : {}),
       });
       if (name === 'Task')
-        this.trackKimiSubagent(sessionId, proc, id, 'Agent', input, 'in_progress');
+        this.trackAcpSubagent(sessionId, proc, id, 'Agent', input, 'in_progress');
       if (isVibeUltracodeTool(name)) {
         // Ultracode workflow: the parent card; its agents arrive through
         // POST /api/ultracode/internal/progress while the tool runs. The
@@ -10347,15 +10349,15 @@ The planning phase is complete. You are now in Auto-Accept mode.
 
     if (
       (update.status === 'completed' || update.status === 'failed') &&
-      !proc.kimiCompletedTools?.has(id)
+      !proc.acpCompletedTools?.has(id)
     ) {
-      proc.kimiCompletedTools?.add(id);
+      proc.acpCompletedTools?.add(id);
       const result = vibeToolResult(name, {
         rawOutput: update.rawOutput,
         content: (update.content as Array<Record<string, unknown>> | null | undefined) ?? null,
       }).slice(0, 20_000);
       if (name === 'Task') {
-        this.trackKimiSubagent(sessionId, proc, id, 'Agent', input, update.status, result);
+        this.trackAcpSubagent(sessionId, proc, id, 'Agent', input, update.status, result);
       }
       if (isVibeUltracodeTool(name)) {
         const output = isRecordValue(update.rawOutput) ? update.rawOutput : null;
@@ -10384,29 +10386,29 @@ The planning phase is complete. You are now in Auto-Accept mode.
     }
   }
 
-  private queueKimiTurn(sessionId: string, proc: ClaudeProcess, turn: CodexPreparedTurn): void {
-    proc.kimiQueuedTurns ??= [];
-    proc.kimiQueuedTurns.push(turn);
+  private queueAcpTurn(sessionId: string, proc: ClaudeProcess, turn: CodexPreparedTurn): void {
+    proc.acpQueuedTurns ??= [];
+    proc.acpQueuedTurns.push(turn);
     console.log(
-      `[${acpProviderLabel(proc.cliProvider).toUpperCase()} ACP] Queued user turn while current turn is running [${sessionId}], depth=${proc.kimiQueuedTurns.length}`
+      `[${acpProviderLabel(proc.cliProvider).toUpperCase()} ACP] Queued user turn while current turn is running [${sessionId}], depth=${proc.acpQueuedTurns.length}`
     );
     this.emitQueueState(sessionId, proc);
   }
 
-  private async dispatchKimiAcpTurn(
+  private async dispatchAcpTurn(
     sessionId: string,
     proc: ClaudeProcess,
     turn: CodexPreparedTurn
   ): Promise<void> {
-    const connection = proc.kimiAcpConnection;
-    const nativeSessionId = proc.kimiAcpSessionId;
+    const connection = proc.acpConnection;
+    const nativeSessionId = proc.acpSessionId;
     const acpLabel = acpProviderLabel(proc.cliProvider);
     if (!connection || !nativeSessionId) {
       throw new Error(`${acpLabel} ACP session is not ready`);
     }
 
     proc.currentChatId = turn.chatId;
-    proc.kimiIdle = false;
+    proc.acpIdle = false;
     proc.currentUsageTurnId = turn.queueId;
     proc.currentUsageTurnStartedAt = turn.queuedAt;
     if (turn.updateLastMessage) {
@@ -10418,10 +10420,10 @@ The planning phase is complete. You are now in Auto-Accept mode.
     proc.currentToolName = null;
     proc.currentToolId = null;
     proc.currentActivitySummary = null;
-    proc.kimiThinkingText = '';
+    proc.acpThinkingText = '';
     proc.pendingToolResults.clear();
     proc.emittedTools = new Set();
-    proc.kimiCompletedTools = new Set();
+    proc.acpCompletedTools = new Set();
     this.resetCurrentContextUsage(proc);
     this.io.to(`session:${sessionId}`).emit('session:thinking', {
       sessionId,
@@ -10431,18 +10433,6 @@ The planning phase is complete. You are now in Auto-Accept mode.
     this.emitQueueState(sessionId, proc);
 
     let response: AcpPromptResponse | null = null;
-    // Kimi 0.31 writes exact per-model-call counters to its native ledger but
-    // does not currently attach the optional ACP PromptResponse.usage payload.
-    // Snapshot the append-only ledgers while the persistent session is idle so
-    // this WebUI turn can book only the records written by the prompt below.
-    // Vibe has no such ledger: it answers with the ACP usage payload.
-    const usageCursor =
-      proc.cliProvider === 'kimi'
-        ? captureKimiUsageCursor(
-            CLI_PROVIDERS.kimi.credentialsPath.replace('~', os.homedir()),
-            nativeSessionId
-          )
-        : null;
     try {
       const promptBlocks: AcpContentBlock[] = [{ type: 'text', text: turn.messageForClaude }];
       // Vibe sees images natively (promptCapabilities.image).
@@ -10469,17 +10459,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
         sessionId: nativeSessionId,
         prompt: promptBlocks,
       });
-      const nativeUsage = usageCursor ? readKimiUsageSince(usageCursor) : null;
-      if (nativeUsage && nativeUsage.totalTokens > 0) {
-        proc.turnInputTokens = nativeUsage.inputTokens;
-        proc.turnOutputTokens = nativeUsage.outputTokens;
-        proc.turnCacheReadTokens = nativeUsage.cacheReadTokens;
-        proc.turnCacheCreationTokens = nativeUsage.cacheCreationTokens;
-        const dominantModel = Object.entries(nativeUsage.models).sort(
-          (a, b) => b[1] - a[1]
-        )[0]?.[0];
-        if (dominantModel) proc.model = dominantModel;
-      } else if (proc.cliProvider === 'vibe') {
+      if (proc.cliProvider === 'vibe') {
         // Vibe reports the session's running totals, not this turn's usage:
         // book the difference to the last turn (its meta.json also has the
         // cached share, which the ACP payload lacks).
@@ -10509,17 +10489,6 @@ The planning phase is complete. You are now in Auto-Accept mode.
           proc.turnOutputTokens += workflow.output;
           proc.vibeWorkflowUsage = undefined;
         }
-      } else if (response.usage) {
-        // ACP usage payload: the fallback for a future Kimi build that starts
-        // returning it.
-        const cacheRead = Math.max(0, response.usage.cachedReadTokens || 0);
-        proc.turnInputTokens = Math.max(0, response.usage.inputTokens - cacheRead);
-        proc.turnCacheReadTokens = cacheRead;
-        proc.turnCacheCreationTokens = Math.max(0, response.usage.cachedWriteTokens || 0);
-        proc.turnOutputTokens = Math.max(
-          0,
-          response.usage.outputTokens + (response.usage.thoughtTokens || 0)
-        );
       }
       proc.totalInputTokens += proc.turnInputTokens;
       proc.totalOutputTokens += proc.turnOutputTokens;
@@ -10553,11 +10522,11 @@ The planning phase is complete. You are now in Auto-Accept mode.
     } finally {
       proc.streamingText = '';
       proc.isStreaming = false;
-      proc.kimiIdle = true;
+      proc.acpIdle = true;
       proc.currentToolName = null;
       proc.currentToolId = null;
       proc.currentActivitySummary = null;
-      proc.kimiThinkingText = '';
+      proc.acpThinkingText = '';
       this.io.to(`session:${sessionId}`).emit('session:thinking', {
         sessionId,
         isThinking: false,
@@ -10567,313 +10536,35 @@ The planning phase is complete. You are now in Auto-Accept mode.
       // A directly dispatched turn owns no drain loop, so kick one off for any
       // follow-ups that arrived while it was running. When a drain loop already
       // owns the turn it will continue synchronously after this promise resolves.
-      if (!proc.kimiQueueDraining) {
-        queueMicrotask(() => void this.drainKimiQueuedTurns(sessionId, proc));
+      if (!proc.acpQueueDraining) {
+        queueMicrotask(() => void this.drainAcpQueuedTurns(sessionId, proc));
       }
     }
   }
 
-  private async drainKimiQueuedTurns(sessionId: string, proc: ClaudeProcess): Promise<void> {
-    if (!isAcpProvider(proc.cliProvider) || !proc.kimiIdle || proc.kimiQueueDraining) return;
-    proc.kimiQueueDraining = true;
+  private async drainAcpQueuedTurns(sessionId: string, proc: ClaudeProcess): Promise<void> {
+    if (!isAcpProvider(proc.cliProvider) || !proc.acpIdle || proc.acpQueueDraining) return;
+    proc.acpQueueDraining = true;
     try {
-      while (proc.kimiIdle) {
-        const nextTurn = proc.kimiQueuedTurns?.shift();
+      while (proc.acpIdle) {
+        const nextTurn = proc.acpQueuedTurns?.shift();
         if (!nextTurn) break;
         try {
           await assertTaskTurnAllowed(sessionId, proc.userId);
         } catch (error) {
-          proc.kimiQueuedTurns ??= [];
-          proc.kimiQueuedTurns.unshift(nextTurn);
+          proc.acpQueuedTurns ??= [];
+          proc.acpQueuedTurns.unshift(nextTurn);
           this.io.to(`session:${sessionId}`).emit('session:error', {
             sessionId,
             error: error instanceof Error ? error.message : 'Task konnte nicht weiterarbeiten',
           });
           break;
         }
-        await this.dispatchKimiAcpTurn(sessionId, proc, nextTurn);
+        await this.dispatchAcpTurn(sessionId, proc, nextTurn);
       }
     } finally {
-      proc.kimiQueueDraining = false;
+      proc.acpQueueDraining = false;
       this.emitQueueState(sessionId, proc);
-    }
-  }
-
-  /** Legacy `kimi -p` translator retained for old captured output fixtures. */
-  private async dispatchKimiTurn(
-    sessionId: string,
-    proc: ClaudeProcess,
-    turn: CodexPreparedTurn,
-    retriedWithoutResume = false
-  ): Promise<void> {
-    if (proc.codexIdle === false) {
-      throw new Error('Kimi process is still running');
-    }
-    proc.currentChatId = turn.chatId;
-    proc.codexIdle = false;
-    proc.currentUsageTurnId = turn.queueId;
-    proc.currentUsageTurnStartedAt = turn.queuedAt;
-    if (turn.updateLastMessage) {
-      proc.lastUserMessage = turn.originalMessage;
-      proc.lastAttachments = turn.attachments || null;
-    }
-    proc.pendingPermissionDenials = null;
-    proc.streamingText = '';
-    proc.isStreaming = false;
-    proc.buffer = '';
-    proc.turnInputTokens = 0;
-    proc.turnOutputTokens = 0;
-
-    const providerConfig = CLI_PROVIDERS.kimi;
-    const session = (await pgGet(
-      'SELECT working_directory, allowed_directories FROM sessions WHERE id = ?',
-      sessionId
-    )) as unknown as { working_directory: string; allowed_directories: string | null } | undefined;
-    const workingDirectory = session?.working_directory || proc.workingDirectory || os.homedir();
-    let allowedDirectories: string[] = [];
-    try {
-      allowedDirectories = session?.allowed_directories
-        ? JSON.parse(session.allowed_directories)
-        : [];
-    } catch {
-      allowedDirectories = [];
-    }
-
-    const attemptedResumeId = proc.codexSessionId || proc.claudeSessionId || undefined;
-    const args = getCLIArgs('kimi', {
-      mode: proc.mode,
-      model: proc.model && proc.model !== 'unknown' ? proc.model : undefined,
-      // First turn must omit --session so Kimi creates its own native session.
-      // processKimiLine captures and persists the emitted session.resume_hint id.
-      resumeSessionId: attemptedResumeId,
-      allowedDirectories,
-      workingDirectory,
-    });
-    // kimi reads the prompt from the -p argument, never stdin.
-    args.push('-p', turn.messageForClaude);
-
-    const extraEnv: Record<string, string> = {};
-    Object.assign(extraEnv, await buildIntegrationEnv());
-    Object.assign(extraEnv, await buildSessionConnectionEnv(sessionId, proc.userId));
-
-    console.log(
-      `[KIMI] Respawning process for next message [${sessionId}] args=${args
-        .filter((a) => a.length < 200)
-        .join(' ')} -p <prompt>`
-    );
-
-    const child = spawnManagedProcess(providerConfig.command, args, {
-      cwd: workingDirectory,
-      env: {
-        ...process.env,
-        ...extraEnv,
-        WEBUI_SESSION_ID: sessionId,
-        WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
-        WEBUI_PROJECT_PATH: workingDirectory,
-        WEBUI_HOOK_SECRET: config.hookSecret,
-      },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    proc.process = child;
-    let receivedStructuredOutput = false;
-    let stderr = '';
-    const quietProgressTimer = setTimeout(() => {
-      const managedProc = this.processes.get(sessionId);
-      if (managedProc?.process !== child || receivedStructuredOutput) return;
-      this.io.to(`session:${sessionId}`).emit('session:output', {
-        sessionId,
-        chatId: managedProc.currentChatId,
-        content:
-          '🌙 Kimi is working on the request. Complex first steps can stay quiet for a few minutes.\n\n',
-        isComplete: false,
-      });
-    }, 8000);
-
-    this.io.to(`session:${sessionId}`).emit('session:thinking', {
-      sessionId,
-      isThinking: true,
-    });
-
-    this.attachJsonStdoutHandler(child, sessionId, () => {
-      receivedStructuredOutput = true;
-      clearTimeout(quietProgressTimer);
-    });
-    child.stderr?.on('data', (data: Buffer) => {
-      const chunk = data.toString();
-      stderr = `${stderr}${chunk}`.slice(-8_000);
-      console.error(`Kimi stderr [${sessionId}]:`, chunk);
-    });
-    child.on('exit', async (exitCode) => {
-      clearTimeout(quietProgressTimer);
-      console.log(`[KIMI] Process for session ${sessionId} exited with code ${exitCode}`);
-      const managedProc = this.processes.get(sessionId);
-      if (!managedProc || managedProc.process !== child) return;
-
-      if (
-        exitCode !== 0 &&
-        attemptedResumeId &&
-        !retriedWithoutResume &&
-        isKimiSessionNotFoundError(stderr)
-      ) {
-        console.warn(
-          `[KIMI] Native session ${attemptedResumeId} is missing; retrying once without resume [${sessionId}]`
-        );
-        managedProc.codexSessionId = undefined;
-        managedProc.claudeSessionId = null;
-        managedProc.codexIdle = true;
-        managedProc.streamingText = '';
-        managedProc.isStreaming = false;
-        await pgRun('UPDATE sessions SET claude_session_id = NULL WHERE id = ?', sessionId);
-        void this.dispatchKimiTurn(sessionId, managedProc, turn, true).catch((error) => {
-          console.error(`[KIMI] Fresh-session retry failed [${sessionId}]:`, error);
-          managedProc.codexIdle = true;
-          this.io.to(`session:${sessionId}`).emit('session:thinking', {
-            sessionId,
-            isThinking: false,
-          });
-          this.io.to(`session:${sessionId}`).emit('session:error', {
-            sessionId,
-            error: `Kimi failed to restart: ${error instanceof Error ? error.message : String(error)}`,
-          });
-        });
-        return;
-      }
-
-      const text = managedProc.streamingText.trim();
-      if (text) {
-        await this.saveAssistantMessage(sessionId, text);
-      } else if (exitCode !== 0) {
-        this.io.to(`session:${sessionId}`).emit('session:output', {
-          sessionId,
-          chatId: managedProc.currentChatId,
-          content: formatKimiExitMessage(exitCode, stderr),
-          isComplete: false,
-        });
-      }
-      managedProc.streamingText = '';
-      managedProc.isStreaming = false;
-      managedProc.codexIdle = true;
-      await this.saveUsageToDatabase(sessionId, managedProc);
-      this.io.to(`session:${sessionId}`).emit('session:thinking', {
-        sessionId,
-        isThinking: false,
-      });
-      this.emitStatus(sessionId, { sessionId, status: 'running' });
-    });
-    child.on('error', (error) => {
-      clearTimeout(quietProgressTimer);
-      console.error(`Kimi process error [${sessionId}]:`, error);
-      const managedProc = this.processes.get(sessionId);
-      if (managedProc?.process === child) {
-        managedProc.codexIdle = true;
-        managedProc.streamingText = '';
-        managedProc.isStreaming = false;
-      }
-      this.io.to(`session:${sessionId}`).emit('session:thinking', {
-        sessionId,
-        isThinking: false,
-      });
-      this.io.to(`session:${sessionId}`).emit('session:error', {
-        sessionId,
-        error: `Kimi failed to start: ${error.message}`,
-      });
-    });
-  }
-
-  /**
-   * Translate one Kimi stream-json NDJSON object into socket events. Kimi emits
-   * OpenAI-style chat messages (assistant text / tool_calls, then tool results).
-   * Defensive: any text found is streamed; unknown shapes are ignored rather
-   * than crashing the turn. Refined against real output post-login.
-   */
-  private async processKimiLine(
-    sessionId: string,
-    proc: ClaudeProcess,
-    raw: unknown
-  ): Promise<void> {
-    if (!raw || typeof raw !== 'object') return;
-    const obj = raw as Record<string, unknown>;
-    const role = typeof obj.role === 'string' ? obj.role : '';
-
-    const usage = (obj.usage ?? obj.token_usage ?? obj.tokens) as
-      | Record<string, unknown>
-      | undefined;
-    if (usage && typeof usage === 'object') {
-      const num = (value: unknown) =>
-        typeof value === 'number' && Number.isFinite(value) ? value : 0;
-      if (proc.turnInputTokens === 0) {
-        proc.turnInputTokens = num(usage.input_tokens ?? usage.prompt_tokens);
-      }
-      proc.turnOutputTokens = num(
-        usage.output_tokens ?? usage.completion_tokens ?? usage.completionTokens
-      );
-    }
-
-    const sid = obj.session_id ?? obj.sessionId ?? obj.id;
-    if (typeof sid === 'string' && sid && !proc.codexSessionId) {
-      proc.codexSessionId = sid;
-      proc.claudeSessionId = sid;
-      try {
-        await pgRun('UPDATE sessions SET claude_session_id = ? WHERE id = ?', sid, sessionId);
-        console.log(`[KIMI] Captured native session id ${sid} for ${sessionId}`);
-      } catch (error) {
-        console.warn('[KIMI] Failed to persist native session id:', error);
-      }
-    }
-
-    let text: string | null = null;
-    if (role === 'assistant') {
-      const content = obj.content;
-      if (typeof content === 'string') {
-        text = content;
-      } else if (Array.isArray(content)) {
-        text = content
-          .map((block) => {
-            if (typeof block === 'string') return block;
-            if (block && typeof block === 'object') {
-              const b = block as Record<string, unknown>;
-              if (typeof b.text === 'string') return b.text;
-              if (typeof b.content === 'string') return b.content;
-            }
-            return '';
-          })
-          .join('');
-      }
-    } else if (!role && typeof obj.text === 'string') {
-      text = obj.text;
-    } else if (!role && typeof obj.content === 'string') {
-      text = obj.content;
-    }
-
-    if (text && text.length > 0) {
-      proc.streamingText += text;
-      proc.isStreaming = true;
-      this.io.to(`session:${sessionId}`).emit('session:output', {
-        sessionId,
-        chatId: proc.currentChatId,
-        content: text,
-        isComplete: false,
-      });
-    }
-
-    const toolCalls = obj.tool_calls;
-    if (Array.isArray(toolCalls)) {
-      for (const call of toolCalls) {
-        if (call && typeof call === 'object') {
-          const c = call as Record<string, unknown>;
-          const fn = c.function as Record<string, unknown> | undefined;
-          const name = (fn?.name ?? c.name) as string | undefined;
-          if (name) {
-            this.io.to(`session:${sessionId}`).emit('session:output', {
-              sessionId,
-              chatId: proc.currentChatId,
-              content: `\n🔧 ${name}\n`,
-              isComplete: false,
-            });
-          }
-        }
-      }
     }
   }
 
@@ -11177,14 +10868,25 @@ The planning phase is complete. You are now in Auto-Accept mode.
       uploadIds?: string[];
       /** Internal: set when re-dispatching after a mid-send session restart. */
       staleProcRedispatch?: boolean;
+      contextContinuation?: boolean;
     }
   ): Promise<SendMessageResult> {
+    const continuation = this.contextContinuations.get(sessionId);
+    if (continuation && continuation.userId !== userId) throw new Error('Unauthorized');
+    if (!options?.contextContinuation) this.contextContinuations.delete(sessionId);
     await assertRunnerAccess(userId);
     await assertTaskTurnAllowed(sessionId, userId);
     // Resolve once before reading attachments. Later cross-device switches may
     // change sessions.active_chat_id, but this turn remains pinned here.
     const targetChatId = await resolveSessionSendChatId(sessionId, userId, options?.chatId);
+    // Recovery may have queued while the ownership/context reads awaited.
+    if (!options?.contextContinuation) this.contextContinuations.delete(sessionId);
     let proc = this.processes.get(sessionId);
+    if (proc?.contextRecoveryPending && !options?.contextContinuation) {
+      this.detachProcessForRestart(proc);
+      await this.cleanupProcess(sessionId, proc);
+      proc = undefined;
+    }
 
     if (!proc) {
       await this.startSession(sessionId, userId);
@@ -11203,6 +10905,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
       throw new Error('Provider context belongs to a different chat; retry after switching');
     }
     proc.currentChatId = targetChatId;
+    if (!options?.contextContinuation) proc.contextRecoveryVersion = (proc.contextRecoveryVersion || 0) + 1;
 
     const materializedAttachments = await materializeAttachments(
       attachments,
@@ -11211,6 +10914,16 @@ The planning phase is complete. You are now in Auto-Accept mode.
     const filePaths = materializedAttachments.files;
     const inlineTextContents = materializedAttachments.inlineText;
 
+    if (options?.contextContinuation && !this.contextContinuations.has(sessionId)) throw new Error('Fortsetzung wurde abgebrochen');
+    if (!options?.contextContinuation && isClaudeTransportProvider(proc.cliProvider)) {
+      const saved = await pgGet('SELECT context_handoff_json FROM sessions WHERE id=? AND user_id=?', sessionId, userId);
+      if (saved?.context_handoff_json && !proc.contextReminder) {
+        try {
+          const checkpoint = JSON.parse(String(saved.context_handoff_json));
+          if (checkpoint.provider === proc.cliProvider && checkpoint.chatId === targetChatId && typeof checkpoint.summary === 'string') proc.contextReminder = { summary: checkpoint.summary, reason: 'context-limit' };
+        } catch { /* no usable checkpoint */ }
+      }
+    }
     // Build message for Claude (with attachment instructions and/or working dir reminder if needed)
     let messageForClaude = message;
     const codexReviewCommand =
@@ -11476,7 +11189,7 @@ ${proc.contextReminder.summary}
     let recordedEventSequence: number | undefined;
 
     if (recordMessage) {
-      // Save user message and emit to frontend (show original message, images as metadata)
+    // Save user message and emit to frontend (show original message, images as metadata)
       recordedEventSequence = await this.allocateEventSequence(sessionId);
       try {
         await pgRun(
@@ -11703,7 +11416,7 @@ ${proc.contextReminder.summary}
     }
 
     if (isAcpProvider(proc.cliProvider)) {
-      const kimiTurn: CodexPreparedTurn = {
+      const acpTurn: CodexPreparedTurn = {
         queueId: recordedMessageId,
         chatId: recordedChatId,
         queuedAt: recordedCreatedAt,
@@ -11715,8 +11428,8 @@ ${proc.contextReminder.summary}
         codexExecCommand: undefined,
         codexNativeSlashCommand: false,
       };
-      if (proc.kimiIdle === false || proc.kimiQueueDraining) {
-        this.queueKimiTurn(sessionId, proc, kimiTurn);
+      if (proc.acpIdle === false || proc.acpQueueDraining) {
+        this.queueAcpTurn(sessionId, proc, acpTurn);
         return {
           ...(recordMessage ? { messageId: recordedMessageId } : {}),
           chatId: recordedChatId,
@@ -11725,7 +11438,7 @@ ${proc.contextReminder.summary}
             recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
         };
       }
-      await this.dispatchKimiAcpTurn(sessionId, proc, kimiTurn);
+      await this.dispatchAcpTurn(sessionId, proc, acpTurn);
       return {
         ...(recordMessage ? { messageId: recordedMessageId } : {}),
         chatId: recordedChatId,
@@ -11740,6 +11453,7 @@ ${proc.contextReminder.summary}
     // Never write into the stale child — its stdin is dead or belongs to a
     // replaced turn. Re-dispatch once through the current transport instead;
     // the user message is already recorded, so the retry must not re-record.
+    if (options?.contextContinuation && !this.contextContinuations.has(sessionId)) throw new Error('Fortsetzung wurde abgebrochen');
     if (this.processes.get(sessionId) !== proc) {
       if (options?.staleProcRedispatch) {
         throw new Error('Session restarted repeatedly while sending; message not delivered');
@@ -11819,14 +11533,19 @@ ${proc.contextReminder.summary}
   }
 
   async interrupt(sessionId: string, userId: string): Promise<void> {
+    const pending = this.contextContinuations.get(sessionId);
+    if (pending && pending.userId !== userId) throw new Error('Unauthorized');
+    this.contextContinuations.delete(sessionId);
     const proc = this.processes.get(sessionId);
     if (!proc) {
+      if (pending) return;
       throw new Error('Session not running');
     }
 
     if (proc.userId !== userId) {
       throw new Error('Unauthorized');
     }
+    proc.contextRecoveryVersion = (proc.contextRecoveryVersion || 0) + 1;
 
     console.log(`Interrupting session [${sessionId}]`);
 
@@ -11868,9 +11587,9 @@ ${proc.contextReminder.summary}
       return;
     }
 
-    if (isAcpProvider(proc.cliProvider) && proc.kimiAcpConnection && proc.kimiAcpSessionId) {
-      void proc.kimiAcpConnection
-        .cancel({ sessionId: proc.kimiAcpSessionId })
+    if (isAcpProvider(proc.cliProvider) && proc.acpConnection && proc.acpSessionId) {
+      void proc.acpConnection
+        .cancel({ sessionId: proc.acpSessionId })
         .catch((error) =>
           console.error(
             `[${acpProviderLabel(proc.cliProvider).toUpperCase()} ACP] Cancel failed [${sessionId}]:`,
@@ -11890,6 +11609,9 @@ ${proc.contextReminder.summary}
   }
 
   async stopSession(sessionId: string, userId: string): Promise<void> {
+    const pending = this.contextContinuations.get(sessionId);
+    if (pending && pending.userId !== userId) throw new Error('Unauthorized');
+    this.contextContinuations.delete(sessionId);
     const proc = this.processes.get(sessionId);
     if (!proc) {
       return;
@@ -11898,6 +11620,7 @@ ${proc.contextReminder.summary}
     if (proc.userId !== userId) {
       throw new Error('Unauthorized');
     }
+    proc.contextRecoveryVersion = (proc.contextRecoveryVersion || 0) + 1;
 
     // The router token dies with the session. A respawn mints a new one, so
     // this is belt-and-braces rather than load-bearing, but a stopped session
@@ -11952,6 +11675,9 @@ ${proc.contextReminder.summary}
   ): Promise<void> {
     console.log(`[SESSION] Restarting session ${sessionId}`);
 
+    const continuation = this.contextContinuations.get(sessionId);
+    if (continuation && continuation.userId !== userId) throw new Error('Unauthorized');
+    if (!options.preserveNativeContext) this.contextContinuations.delete(sessionId);
     const proc = this.processes.get(sessionId);
 
     // A runtime-setting reload (model, reasoning, provider, service tier) must
@@ -11999,6 +11725,7 @@ ${proc.contextReminder.summary}
         throw new Error('Unauthorized');
       }
 
+      if (!options.preserveNativeContext) proc.contextRecoveryVersion = (proc.contextRecoveryVersion || 0) + 1;
       this.discardQueuedTurns(sessionId, proc);
       // Stop the provider transport immediately. Server-backed OpenCode sessions
       // need an HTTP abort plus handler cleanup; their virtual child kill is a no-op.
@@ -12050,23 +11777,14 @@ ${proc.contextReminder.summary}
       return null;
     }
 
-    const formatted = rows
-      .reverse()
-      .filter(
-        (row) => !(row.role === 'assistant' && isClaudeContextLimitAssistantReply(row.content))
-      )
-      .map((row) => {
-        const role =
-          row.role === 'assistant' ? 'Assistant' : row.role === 'user' ? 'User' : row.role;
-        return `${role}: ${row.content.trim()}`;
-      })
-      .join('\n\n');
-
-    if (formatted.length <= maxChars) {
-      return formatted;
-    }
-
-    return `${formatted.slice(0, maxChars)}...`;
+    const requests = await pgAll('SELECT content FROM messages WHERE session_id=? AND chat_id IS ? AND role=\'user\' ORDER BY created_at DESC,seq DESC LIMIT 12', sessionId, chatId);
+    const original = await pgGet('SELECT content FROM messages WHERE session_id=? AND chat_id IS ? AND role=\'user\' ORDER BY created_at ASC,seq ASC LIMIT 1', sessionId, chatId);
+    return buildContinuationHandoff({
+      original: original?.content ? String(original.content) : null,
+      users: requests.reverse().map(row => String(row.content)),
+      recent: rows.reverse().filter(row => !(row.role === 'assistant' && isClaudeContextLimitAssistantReply(row.content))),
+      maxChars,
+    });
   }
 
   /**
@@ -12159,16 +11877,16 @@ ${proc.contextReminder.summary}
     proc.mode = mode;
     this.emitModeChange(sessionId, mode);
 
-    if (isAcpProvider(proc.cliProvider) && proc.kimiAcpConnection && proc.kimiAcpSessionId) {
+    if (isAcpProvider(proc.cliProvider) && proc.acpConnection && proc.acpSessionId) {
       const acpMode = acpModeForSessionMode(proc.cliProvider, mode);
-      void proc.kimiAcpConnection
+      void proc.acpConnection
         .setSessionConfigOption({
-          sessionId: proc.kimiAcpSessionId,
+          sessionId: proc.acpSessionId,
           configId: 'mode',
           value: acpMode,
         })
         .then((result) => {
-          proc.kimiAcpConfigOptions = result.configOptions;
+          proc.acpConfigOptions = result.configOptions;
           console.log(
             `[MODE] Applied ${mode} through ${acpProviderLabel(proc.cliProvider)} ACP [${sessionId}]`
           );
@@ -12302,6 +12020,10 @@ ${proc.contextReminder.summary}
       sessionId,
       status: 'stopped',
     });
+    if (proc.contextRecoveryPending && this.contextContinuations.has(sessionId)) {
+      setImmediate(() => { void this.resumeAfterContextLimit(sessionId); });
+    }
+
   }
 
   getRunningSessionIds(): string[] {
@@ -12352,7 +12074,7 @@ ${proc.contextReminder.summary}
           : isClaudeTransportProvider(proc.cliProvider)
             ? proc.claudeIdle === false || queueItems.length > 0 || hasActiveSubagents
             : isAcpProvider(proc.cliProvider)
-              ? proc.kimiIdle === false || queueItems.length > 0 || hasActiveSubagents
+              ? proc.acpIdle === false || queueItems.length > 0 || hasActiveSubagents
               : proc.isStreaming || !!proc.currentToolName || hasActiveSubagents;
     const activitySummary = this.getActivitySummary(proc, busy, queueItems.length);
 

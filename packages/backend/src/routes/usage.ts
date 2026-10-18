@@ -22,7 +22,6 @@ import {
 import { safeDecrypt } from '../utils/encryption.js';
 import { safeJsonParse } from '../utils/json.js';
 import { requestClaudeOAuthTokenRefresh } from '../utils/claudeOauth.js';
-import { fetchKimiUsage } from '../utils/kimiUsage.js';
 import { getZaiApiConfigForUser } from './settings.js';
 import {
   buildMistralLimitResponse,
@@ -131,7 +130,6 @@ const TRACKED_USAGE_LIMIT_PROVIDERS: TrackedUsageLimitProvider[] = [
   'codex',
   'claude',
   'zai',
-  'kimi',
 ];
 
 function persistUsageLimitResult(userId: string, result: UsageLimitResult): UsageLimitResult {
@@ -567,8 +565,6 @@ function providerSqlPredicate(provider: CLIProvider): string {
       return "(lower(provider) = 'opencode' OR (lower(provider) IN ('', 'unknown') AND (strpos(model, '/') > 0 OR lower(model) LIKE '%opencode%')))";
     case 'pi':
       return "lower(provider) = 'pi'";
-    case 'kimi':
-      return "lower(provider) = 'kimi'";
     case 'vibe':
       return "lower(provider) = 'vibe'";
     default: {
@@ -1726,7 +1722,7 @@ router.get('/limits', requireAuth, rateLimiters.usageLimits, async (req, res) =>
       );
     }
 
-    const accountProviders: UsageProviderId[] = ['claude', 'zai', 'codex', 'kimi', 'z-ai'];
+    const accountProviders: UsageProviderId[] = ['claude', 'zai', 'codex', 'z-ai'];
     if (!accountProviders.includes(providerParam as UsageProviderId)) {
       return res.status(400).json({
         success: false,
@@ -1736,7 +1732,7 @@ router.get('/limits', requireAuth, rateLimiters.usageLimits, async (req, res) =>
         error: {
           code: 'UNKNOWN_LIMIT_PROVIDER',
           message:
-            'Account limits are available for Codex, Claude, Kimi, Z.AI, Mistral, and the Alibaba Token Plan.',
+            'Account limits are available for Codex, Claude, Z.AI, Mistral, and the Alibaba Token Plan.',
         },
       });
     }
@@ -1822,27 +1818,6 @@ router.get('/limits', requireAuth, rateLimiters.usageLimits, async (req, res) =>
           },
         });
       }
-    }
-
-    if (provider === 'kimi') {
-      const result = await fetchKimiUsage();
-      if (!result.ok) {
-        return res.status(result.status >= 500 ? 502 : 200).json({
-          success: false,
-          supported: false,
-          provider: 'kimi',
-          data: null,
-          error: { code: result.code, message: result.message },
-        });
-      }
-      return res.json(
-        persistUsageLimitResult(userId, {
-          success: true,
-          supported: true,
-          provider: 'kimi',
-          data: result.data,
-        })
-      );
     }
 
     let credentials = await getClaudeCredentials();

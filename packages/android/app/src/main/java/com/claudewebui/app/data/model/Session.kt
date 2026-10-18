@@ -16,14 +16,14 @@ enum class CLIProvider(val displayName: String) {
     @SerialName("codex") CODEX("Codex"),
     @SerialName("opencode") OPENCODE("OpenCode"),
     @SerialName("pi") PI("Pi"),
-    @SerialName("kimi") KIMI("Kimi"),
+
     @SerialName("vibe") VIBE("Vibe"),
     @SerialName("zai") ZAI("Z.AI");
 
     companion object {
-        // Codex first, Claude last (legacy); Vibe sits beside Kimi because both
-        // are persistent ACP harnesses.
-        val active: List<CLIProvider> = listOf(CODEX, OPENCODE, PI, KIMI, VIBE, ZAI, CLAUDE)
+        // Codex first, Claude last (legacy); Vibe uses persistent ACP sessions; all providers
+        // keep their own reasoning choices.
+        val active: List<CLIProvider> = listOf(CODEX, OPENCODE, PI, VIBE, ZAI, CLAUDE)
 
         fun fromId(id: String): CLIProvider? =
             entries.firstOrNull { it.name.equals(id, ignoreCase = true) }

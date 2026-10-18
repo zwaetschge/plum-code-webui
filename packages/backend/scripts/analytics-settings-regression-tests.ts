@@ -7,7 +7,6 @@ import { parseAnalyticsSettings, updateSettingsSchema } from '../src/routes/sett
 
 assert.deepEqual(DEFAULT_ANALYTICS_HIDDEN_LIMIT_METRICS, {
   codex: ['additional_gpt_5_3_codex_spark'],
-  kimi: ['additional_parallel_sessions'],
   zai: ['additional_web_search'],
 });
 
@@ -28,7 +27,6 @@ assert.deepEqual(
   {
     hiddenLimitMetrics: {
       codex: ['seven_day'],
-      kimi: ['additional_parallel_sessions'],
     },
   }
 );

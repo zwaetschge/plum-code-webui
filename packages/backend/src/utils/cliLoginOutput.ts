@@ -17,9 +17,6 @@ const CLI_LOGIN_INVOCATIONS = {
   claude: ['auth', 'login'],
   codex: ['login', '--device-auth'],
   opencode: ['auth', 'login'],
-  // Kimi Code CLI device-code login: prints the verification URL + user code to
-  // stderr and self-polls until the browser authorization completes (exit 0).
-  kimi: ['login'],
   // Pi has no CLI-level login: /login is a built-in TUI command, and its own RPC
   // docs state built-in commands "would not execute if sent via prompt". So the
   // TUI is started bare and the command is typed into it (see PI_LOGIN_INPUT).

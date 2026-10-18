@@ -1236,8 +1236,7 @@ export function SessionPage() {
     sessionProvider === 'codex' ||
     sessionProvider === 'opencode' ||
     sessionProvider === 'pi' ||
-    // ACP harnesses queue follow-ups in the backend (queueKimiTurn).
-    sessionProvider === 'kimi' ||
+    // ACP harnesses queue follow-ups in the backend (queueAcpTurn).
     sessionProvider === 'vibe';
   const supportsSteeredFollowups = sessionProvider === 'codex';
   const composerActiveFollowupMode: ActiveFollowupMode | undefined = supportsActiveFollowups
@@ -1252,7 +1251,6 @@ export function SessionPage() {
     sessionProvider === 'zai' ||
     sessionProvider === 'opencode' ||
     sessionProvider === 'pi' ||
-    sessionProvider === 'kimi' ||
     sessionProvider === 'vibe' ||
     (supportsSteeredFollowups && activeFollowupMode === 'queue');
   const composerSteersWhileActive = supportsSteeredFollowups && activeFollowupMode === 'steer';

@@ -106,7 +106,7 @@ export function BasicLoginPage() {
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-            {(['codex', 'opencode', 'pi', 'kimi', 'vibe', 'claude'] as const).map((provider) => (
+            {(['codex', 'opencode', 'pi', 'vibe', 'claude'] as const).map((provider) => (
               <span key={provider} className="ui-pill ui-pill-subtle gap-2 backdrop-blur-sm">
                 <ProviderLogo provider={provider} className="h-4 w-4" alt="" />
                 <span className="text-xs font-medium">

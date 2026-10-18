@@ -9,16 +9,9 @@ import org.junit.Test
 
 class CLIProviderTest {
     @Test
-    fun kimiUsesBackendWireId() {
-        assertEquals("\"kimi\"", Json.encodeToString(CLIProvider.KIMI))
-        assertEquals(CLIProvider.KIMI, Json.decodeFromString<CLIProvider>("\"kimi\""))
-    }
-
-    @Test
-    fun kimiIsAnActiveStandaloneProvider() {
-        assertTrue(CLIProvider.KIMI in CLIProvider.active)
-        assertEquals("Kimi", CLIProvider.KIMI.displayName)
-        assertEquals(CLIProvider.KIMI, CLIProvider.fromId("kimi"))
+    fun retiredKimiIsNotAnActiveProvider() {
+        assertEquals(null, CLIProvider.fromId("kimi"))
+        assertTrue(CLIProvider.active.none { it.name == "KIMI" })
     }
 
     @Test
@@ -28,7 +21,7 @@ class CLIProviderTest {
     }
 
     @Test
-    fun vibeSitsBesideKimiInsideTheActiveOrdering() {
+    fun vibeKeepsItsPlaceInsideTheActiveOrdering() {
         assertTrue(CLIProvider.VIBE in CLIProvider.active)
         assertEquals("Vibe", CLIProvider.VIBE.displayName)
         assertEquals(CLIProvider.VIBE, CLIProvider.fromId("vibe"))
@@ -36,7 +29,7 @@ class CLIProviderTest {
         // two persistent ACP harnesses stay neighbours.
         assertEquals(CLIProvider.CODEX, CLIProvider.active.first())
         assertEquals(CLIProvider.CLAUDE, CLIProvider.active.last())
-        assertEquals(CLIProvider.KIMI, CLIProvider.active[CLIProvider.active.indexOf(CLIProvider.VIBE) - 1])
+        assertEquals(CLIProvider.PI, CLIProvider.active[CLIProvider.active.indexOf(CLIProvider.VIBE) - 1])
     }
 
     @Test
@@ -53,7 +46,6 @@ class CLIProviderTest {
         // would send a value the harness rejects and silently drop reasoning.
         assertTrue(ReasoningLevel.NONE in ReasoningLevel.forProvider(CLIProvider.CODEX))
         assertTrue(ReasoningLevel.OFF !in ReasoningLevel.forProvider(CLIProvider.CODEX))
-        assertTrue(ReasoningLevel.OFF !in ReasoningLevel.forProvider(CLIProvider.KIMI))
         assertTrue(ReasoningLevel.OFF !in ReasoningLevel.forProvider(CLIProvider.CLAUDE))
     }
 }

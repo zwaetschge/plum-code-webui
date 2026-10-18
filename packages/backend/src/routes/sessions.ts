@@ -96,7 +96,7 @@ export const createSessionSchema = z.object({
   name: z.string().min(1).max(100),
   workingDirectory: z.string().optional(), // Optional - will be auto-generated from name
   cliProvider: z
-    .enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe'])
+    .enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'vibe'])
     .optional()
     .default('codex'),
   cliModel: z.string().trim().min(1).max(200).nullable().optional(),
@@ -167,7 +167,7 @@ const updateSessionSchema = z.object({
 });
 
 export const updateProviderSchema = z.object({
-  cliProvider: z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'kimi', 'vibe']),
+  cliProvider: z.enum(['claude', 'zai', 'codex', 'opencode', 'pi', 'vibe']),
 });
 
 const updateSessionModelSchema = z.object({

@@ -7,7 +7,7 @@
  * - Codex CLI (codex) - OpenAI
  * - OpenCode CLI (opencode) - Multi-provider (75+ LLM backends)
  * - Pi (pi) - Alternative harness sharing OpenCode provider connections
- * - Kimi Code (kimi) and Mistral Vibe (vibe) - persistent ACP agents
+ * - Mistral Vibe (vibe) - persistent ACP agent
  */
 
 import os from 'os';
@@ -31,7 +31,7 @@ import {
 const execFileAsync = promisify(execFile);
 const CODEX_UNRAID_DEFAULT_ALLOWED_DIRS = ['/mnt/user', '/mnt/cache'];
 
-export type CLIProvider = 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'kimi' | 'vibe';
+export type CLIProvider = 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'vibe';
 
 export interface CLIProviderConfig {
   id: CLIProvider;
@@ -71,11 +71,11 @@ export function withClaude1mVariants(models: string[]): string[] {
 
 /**
  * Harnesses that speak ACP (Agent Client Protocol) over stdio as one persistent
- * process per session: Kimi Code and Mistral Vibe. They share the spawn, turn
+ * process per session. Mistral Vibe uses the spawn, turn
  * queue, permission and cancellation plumbing in ClaudeProcessManager.
  */
 export function isAcpProvider(provider: CLIProvider | null | undefined): boolean {
-  return provider === 'kimi' || provider === 'vibe';
+  return provider === 'vibe';
 }
 
 /** Absolute VIBE_HOME for this deployment (`~/.vibe` unless overridden). */
@@ -173,10 +173,6 @@ const CLI_PROVIDER_MODELS: Record<CLIProvider, string[]> = {
     'deepseek/deepseek-chat',
     'google/gemini-2.5-pro',
   ],
-  // Kimi Code CLI (@moonshot-ai/kimi-code). Model aliases resolve through the
-  // managed Kimi provider that `kimi login` populates. Fallback only — the
-  // runtime list should come from the CLI's configured providers after login.
-  kimi: ['kimi-code/kimi-for-coding', 'kimi-code/kimi-for-coding-highspeed', 'kimi-code/k3'],
   // Mistral Vibe ships exactly one hosted model: the alias `mistral-medium-3.5`
   // for `mistral-vibe-cli-latest`, which is the model the plan's Vibe Code
   // allowance pays for. Its second built-in entry (`local`) points at a
@@ -224,13 +220,7 @@ const MODEL_DISPLAY_LABELS: Record<string, string> = {
   'openai/gpt-4o': 'GPT-4o',
   'deepseek/deepseek-chat': 'DeepSeek Chat',
   'google/gemini-2.5-pro': 'Gemini 2.5 Pro',
-  // Kimi Code CLI model aliases (populated by `kimi login`).
-  'kimi-for-coding': 'Kimi K2.7 Code',
-  'kimi-for-coding-highspeed': 'Kimi K2.7 Code HighSpeed',
   k3: 'Kimi K3',
-  'kimi-code/kimi-for-coding': 'Kimi K2.7 Code',
-  'kimi-code/kimi-for-coding-highspeed': 'Kimi K2.7 Code HighSpeed',
-  'kimi-code/k3': 'Kimi K3',
   // Mistral Vibe aliases. `mistral-medium-3.5` is the alias Vibe exposes for
   // `mistral-vibe-cli-latest`; the others come from a deployment's own
   // config.toml (see discoverVibe) or from Mistral API traffic through Pi.
@@ -1210,40 +1200,6 @@ export const CLI_PROVIDERS: Record<CLIProvider, CLIProviderConfig> = {
     defaultModel: getProviderEnv('zai', 'DEFAULT_MODEL') || 'opus',
     models: parseEnvModels('zai') ?? CLI_PROVIDER_MODELS.zai,
   },
-  kimi: {
-    id: 'kimi',
-    name: 'Kimi Code',
-    command: defaultCliCommand('kimi', 'kimi'),
-    icon: '🌙',
-    // Kimi Code CLI (@moonshot-ai/kimi-code) keeps OAuth + provider state under
-    // ~/.kimi-code. `kimi login` writes the device-code OAuth token there; the
-    // managed Kimi provider/models are populated into config.toml on success.
-    credentialsPath: envOr('kimi', 'CREDENTIALS_PATH', '~/.kimi-code'),
-    // Interactive runtime uses persistent `kimi acp` over stdio. The argument
-    // builder below remains for one-shot diagnostics and compatibility tests.
-    // NDJSON on stdout (assistant text, tool_calls, tool results); thinking is
-    // omitted from the JSONL and tool progress goes to stderr.
-    supportsStreamJson: true,
-    supportsResume: true,
-    supportsModes: true,
-    capabilities: {
-      streaming: true,
-      resume: true,
-      modes: true,
-      approvals: true,
-      nativeVision: true,
-      imageBridge: false,
-      mcp: true,
-      mcpSessionAttribution: 'native',
-      usageLimits: 'upstream',
-      reasoning: true,
-      serviceTier: false,
-      webSearch: true,
-      allowedDirectories: true,
-    },
-    defaultModel: getProviderEnv('kimi', 'DEFAULT_MODEL') || 'kimi-code/kimi-for-coding',
-    models: parseEnvModels('kimi') ?? CLI_PROVIDER_MODELS.kimi,
-  },
   vibe: {
     id: 'vibe',
     name: 'Mistral Vibe',
@@ -1253,7 +1209,7 @@ export const CLI_PROVIDERS: Record<CLIProvider, CLIProviderConfig> = {
     // VIBE_HOME. Signing in through Mistral stores a key that draws on the
     // plan's Vibe allowance rather than the API allowance.
     credentialsPath: envOr('vibe', 'CREDENTIALS_PATH', '~/.vibe'),
-    // Persistent `vibe-acp` over stdio, like Kimi: streaming, native resume,
+    // Persistent `vibe-acp` over stdio: streaming, native resume,
     // cancellation and queued follow-ups.
     supportsStreamJson: true,
     supportsResume: true,
@@ -1489,30 +1445,6 @@ export function getCLIArgs(
         args.push('--session', options.resumeSessionId);
       }
       break;
-
-    case 'kimi': {
-      // Legacy one-shot diagnostics: `kimi --output-format stream-json [-m model] [--session id] -p "<prompt>"`.
-      // The prompt itself is appended as the trailing `-p <message>` arg by the
-      // process manager (kimi does not read the prompt from stdin).
-      // `--output-format` may only be combined with `--prompt`.
-      args.push('--output-format', 'stream-json');
-      if (options.model) {
-        // `kimi login` registers aliases as `kimi-code/<model>`. Preserve
-        // explicitly-qualified custom aliases, while upgrading the unqualified
-        // values stored by the first WebUI integration for compatibility.
-        const model = options.model.includes('/') ? options.model : `kimi-code/${options.model}`;
-        args.push('-m', model);
-      }
-      if (options.resumeSessionId && config.supportsResume) {
-        // Kimi only resumes an ID it previously emitted; it cannot create a
-        // native session from an arbitrary WebUI id.
-        args.push('--session', options.resumeSessionId);
-      }
-      // Reasoning effort is expressed as a model-alias suffix (e.g. model:high)
-      // in kimi-code; there is no standalone --thinking flag in prompt mode, so
-      // we leave the model alias untouched here.
-      break;
-    }
     case 'vibe':
       // `vibe-acp` takes no arguments; model, mode and thinking are ACP
       // session config options set after the session opens.
@@ -1863,14 +1795,6 @@ export async function isProviderAvailable(
         return true;
       }
       return Boolean(process.env.MISTRAL_API_KEY && process.env.MISTRAL_API_KEY.trim());
-    }
-    if (provider === 'kimi') {
-      // Kimi Code CLI only creates ~/.kimi-code/credentials/ after a successful
-      // `kimi login` (device-code OAuth). The home dir itself exists before
-      // login, so directory presence alone is not a logged-in signal.
-      const credsDir = path.join(credPath, 'credentials');
-      const entries = await fs.readdir(credsDir);
-      return entries.some((entry) => !entry.startsWith('.'));
     }
     await fs.access(credPath);
     return true;

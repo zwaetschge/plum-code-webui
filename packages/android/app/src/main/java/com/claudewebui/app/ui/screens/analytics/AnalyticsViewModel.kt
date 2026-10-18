@@ -335,7 +335,7 @@ class AnalyticsViewModel(
         UsageLimitProvider.CODEX -> 0xFF22C55EL
         UsageLimitProvider.CLAUDE -> 0xFFF97316L
         UsageLimitProvider.ZAI -> 0xFF14B8A6L
-        UsageLimitProvider.KIMI -> 0xFF2582EDL
+
         UsageLimitProvider.ALIBABA -> 0xFFFF8A3DL
         UsageLimitProvider.MISTRAL -> 0xFFFA520FL
         // Same family as the Mistral API row, one shade apart: two allowances of

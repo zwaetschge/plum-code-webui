@@ -38,7 +38,6 @@ export const PROVIDER_ACCENT: Record<CLIProvider, string> = {
   codex: '#10a37f',
   opencode: '#8b5cf6',
   pi: '#0ea5e9',
-  kimi: '#2582ed',
   vibe: '#ff7000',
 };
 

@@ -155,7 +155,6 @@ services:
       - ${HOME}/.codex:/home/node/.codex
       - ${HOME}/.opencode:/home/node/.opencode
       - ${HOME}/.pi:/home/node/.pi
-      - ${HOME}/.kimi-code:/home/node/.kimi-code
       - ${HOME}/.vibe:/home/node/.vibe
       # Persist npm global installs (CLI updates)
       - ${HOME}/.npm-global:/home/node/.npm-global

@@ -124,7 +124,6 @@ ARG PI_MCP_ADAPTER_VERSION=2.11.0
 # the supported way back in — it registers an `antigravity` provider with its
 # own OAuth flow. Ships TypeScript source with no install scripts.
 ARG PI_ANTIGRAVITY_VERSION=0.3.0
-ARG KIMI_CODE_VERSION=0.31.1
 # Mistral Vibe ships on PyPI (package `mistral-vibe`), not npm, so it gets its
 # own pipx layer below instead of joining the npm prefix.
 ARG VIBE_VERSION=2.25.0
@@ -145,12 +144,10 @@ RUN mkdir -p /home/node/.npm-global /opt/plum-cli && \
       pi-antigravity@${PI_ANTIGRAVITY_VERSION} && \
     npm install -g --prefix /opt/plum-cli @openai/codex@${CODEX_VERSION} && \
     npm install -g --prefix /opt/plum-cli opencode-ai@${OPENCODE_VERSION} && \
-    npm install -g --prefix /opt/plum-cli @moonshot-ai/kimi-code@${KIMI_CODE_VERSION} && \
     rm -f /opt/plum-cli/lib/node_modules/opencode-ai/bin/.opencode && \
     /opt/plum-cli/bin/claude --version && \
     /opt/plum-cli/bin/codex --version && \
     /opt/plum-cli/bin/opencode --version && \
-    /opt/plum-cli/bin/kimi --version && \
     test -x /opt/plum-cli/bin/pi && \
     test -x /opt/plum-cli/bin/pi-mcp-adapter && \
     test -f /opt/plum-cli/lib/node_modules/pi-antigravity/src/index.ts && \
@@ -214,7 +211,7 @@ RUN mkdir -p /home/node/.npm-global /opt/plum-cli && \
       | grep -Fx "${PI_UNDICI_VERSION}" && \
     /usr/local/bin/npm cache clean --force && rm -rf /root/.npm
 
-# Mistral Vibe (`vibe` / `vibe-acp`, persistent ACP harness like Kimi Code) is a
+# Mistral Vibe (`vibe` / `vibe-acp`, persistent ACP harness) is a
 # Python package, so pipx installs it as the `node` user into ~/.local: /opt is
 # root-owned and not writable at runtime, while ~/.local/bin already sits first
 # on PATH. The backend resolves harnesses through findCliBinary(), which probes
@@ -273,7 +270,7 @@ RUN install -m 0755 ./scripts/chromium-webui.sh /usr/local/bin/plum-chromium && 
 #
 # Vibe reads VIBE_HOME (~/.vibe) for its .env plan key, trusted folders and
 # logs, so it gets the same pre-created, node-owned directory as the others.
-RUN mkdir -p /home/node/.claude /home/node/.codex /home/node/.pi /home/node/.kimi-code \
+RUN mkdir -p /home/node/.claude /home/node/.codex /home/node/.pi \
              /home/node/.vibe \
              /home/node/.opencode/config /home/node/.opencode/share \
              /home/node/.config /home/node/.local/share /home/node/.agents \

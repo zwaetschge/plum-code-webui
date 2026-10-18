@@ -1,20 +1,12 @@
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { estimateModelCost, type CLIProvider } from '@plum-code-webui/shared';
+import { type CLIProvider } from '@plum-code-webui/shared';
 
-import {
-  readAllKimiUsageRecords,
-  readKimiLedgerSignature,
-  readKimiRootPrompts,
-  summarizeKimiUsageBetween,
-} from '../utils/kimiTurnUsage.js';
 import { bootstrapAdmin, seedUserFromEnv } from './bootstrap.js';
 import { runPendingMigrations } from './migrations.js';
 import {
-  all as pgAll,
   get as pgGet,
   getPool,
   run as pgRun,
@@ -233,7 +225,7 @@ export async function insertUsageHistoryTurn(input: UsageHistoryTurnInput): Prom
  *
  * `usage_limit_snapshots` has had a 180-day retention since it was written;
  * `usage_history` had none, and it grows faster than one row per turn — routed
- * subagent requests, CLI-subagent runs and the Kimi backfill all write here
+ * subagent requests and CLI-subagent runs all write here
  * too. Seven indexes ride along with it, and the analytics timeline scans
  * `(user_id, created_at)` ranges whose plan cost grows with the table. On a
  * box that stays up for years that is not a rounding error.
@@ -269,191 +261,6 @@ export async function reconcileStaleRunningSessions(): Promise<number> {
       WHERE status = 'running'`
   );
   return result.changes;
-}
-
-/**
- * Per-session record of how big the native Kimi ledgers were the last time the
- * backfill looked at them. A JSON object keyed by session id.
- */
-const KIMI_BACKFILL_CURSOR_KEY = 'kimi_usage_backfill_cursor';
-
-/**
- * Recover usage rows for Kimi turns from the CLI's own append-only ledgers.
- *
- * This is a catch-up pass for sessions that ran before the live usage path
- * existed. It is *not* incremental by nature — it re-derives every turn of a
- * session from scratch — so a cursor is what keeps it from being O(all history)
- * on every single boot: the wire files only grow, so an unchanged set of file
- * sizes means there is provably nothing new to find. Without it this re-read
- * and re-parsed every ledger of every Kimi session at every start, purely so
- * the inserts could fall through `ON CONFLICT DO NOTHING`.
- */
-export async function backfillKimiUsageHistory(): Promise<number> {
-  const kimiHome = (
-    process.env.CLI_PROVIDER_KIMI_CREDENTIALS_PATH || path.join(os.homedir(), '.kimi-code')
-  ).replace(/^~/, os.homedir());
-  const sessions = (await pgAll(
-    `SELECT id, user_id as userId, claude_session_id as nativeSessionId, cli_model as model
-       FROM sessions
-      WHERE cli_provider = 'kimi' AND claude_session_id IS NOT NULL`
-  )) as unknown as Array<{
-    id: string;
-    userId: string;
-    nativeSessionId: string;
-    model: string | null;
-  }>;
-  if (sessions.length === 0) return 0;
-
-  let cursor: Record<string, string> = {};
-  try {
-    const stored = await getAppConfig(KIMI_BACKFILL_CURSOR_KEY);
-    const parsed = stored ? JSON.parse(stored) : null;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      cursor = parsed as Record<string, string>;
-    }
-  } catch {
-    // A corrupt cursor costs one extra full pass, not correctness.
-  }
-
-  const pending: Array<(typeof sessions)[number] & { signature: string }> = [];
-  for (const session of sessions) {
-    const signature = await readKimiLedgerSignature(kimiHome, session.nativeSessionId);
-    // No ledger on disk: nothing to read now, and nothing to remember either —
-    // the files may still appear later.
-    if (!signature) continue;
-    if (cursor[session.id] === signature) continue;
-    pending.push({ ...session, signature });
-  }
-  // Drop sessions that no longer exist, so the cursor cannot grow without bound.
-  const nextCursor: Record<string, string> = {};
-  for (const session of sessions) {
-    if (cursor[session.id]) nextCursor[session.id] = cursor[session.id]!;
-  }
-  if (pending.length === 0) {
-    if (JSON.stringify(nextCursor) !== JSON.stringify(cursor)) {
-      await setAppConfig(KIMI_BACKFILL_CURSOR_KEY, JSON.stringify(nextCursor));
-    }
-    return 0;
-  }
-
-  // One query for every pending session rather than one per session: the loop
-  // below used to issue a round trip each time round even when it then found
-  // nothing to do.
-  const messagesBySession = new Map<
-    string,
-    Array<{ id: string; content: string; createdAt: string }>
-  >();
-  const messageRows = (await pgAll(
-    `SELECT session_id as sessionId, id, content, created_at as createdAt
-       FROM messages
-      WHERE role = 'user' AND session_id IN (${pending.map(() => '?').join(', ')})
-      ORDER BY created_at ASC, id ASC`,
-    ...pending.map((session) => session.id)
-  )) as unknown as Array<{
-    sessionId: string;
-    id: string;
-    content: string;
-    createdAt: string;
-  }>;
-  for (const row of messageRows) {
-    const bucket = messagesBySession.get(row.sessionId);
-    if (bucket) bucket.push(row);
-    else messagesBySession.set(row.sessionId, [row]);
-  }
-
-  let inserted = 0;
-  for (const session of pending) {
-    try {
-      const messages = messagesBySession.get(session.id) ?? [];
-      // Recorded either way: an examined session with no user messages has
-      // nothing to map, and re-checking it next boot would find the same.
-      nextCursor[session.id] = session.signature;
-      if (messages.length === 0) continue;
-
-      const prompts = readKimiRootPrompts(kimiHome, session.nativeSessionId);
-      const usageRecords = readAllKimiUsageRecords(kimiHome, session.nativeSessionId);
-      if (prompts.length === 0 || usageRecords.length === 0) continue;
-
-      const mappedPrompts: Array<{ messageId: string; recordedAt: number }> = [];
-      let promptCursor = 0;
-      for (const message of messages) {
-        const sqlTime = Date.parse(`${message.createdAt.replace(' ', 'T')}Z`);
-        let match = -1;
-        for (let index = promptCursor; index < prompts.length; index += 1) {
-          const prompt = prompts[index]!;
-          if (Number.isFinite(sqlTime) && prompt.recordedAt < sqlTime - 5_000) continue;
-          if (message.content && prompt.text.includes(message.content)) {
-            match = index;
-            break;
-          }
-        }
-        if (match < 0) {
-          match = prompts.findIndex(
-            (prompt, index) =>
-              index >= promptCursor &&
-              (!Number.isFinite(sqlTime) || prompt.recordedAt >= sqlTime - 2_000)
-          );
-        }
-        if (match < 0) continue;
-        mappedPrompts.push({ messageId: message.id, recordedAt: prompts[match]!.recordedAt });
-        promptCursor = match + 1;
-      }
-
-      for (let index = 0; index < mappedPrompts.length; index += 1) {
-        const prompt = mappedPrompts[index]!;
-        const nextPrompt = mappedPrompts[index + 1];
-        const usage = summarizeKimiUsageBetween(
-          usageRecords,
-          prompt.recordedAt,
-          nextPrompt?.recordedAt ?? Number.POSITIVE_INFINITY
-        );
-        if (usage.totalTokens <= 0) continue;
-        const dominantModel = Object.entries(usage.models).sort((a, b) => b[1] - a[1])[0]?.[0];
-        const model = dominantModel || session.model;
-        const cost = estimateModelCost(
-          model,
-          {
-            inputTokens: usage.inputTokens,
-            outputTokens: usage.outputTokens,
-            cacheReadTokens: usage.cacheReadTokens,
-            cacheCreationTokens: usage.cacheCreationTokens,
-          },
-          null
-        ).cost;
-        if (
-          await insertUsageHistoryTurn({
-            userId: session.userId,
-            sessionId: session.id,
-            provider: 'kimi',
-            turnId: prompt.messageId,
-            inputTokens: usage.inputTokens,
-            outputTokens: usage.outputTokens,
-            cacheReadTokens: usage.cacheReadTokens,
-            cacheCreationTokens: usage.cacheCreationTokens,
-            totalTokens: usage.totalTokens,
-            costUsd: cost,
-            model,
-            createdAt: usage.lastRecordedAt
-              ? new Date(usage.lastRecordedAt).toISOString()
-              : new Date(prompt.recordedAt).toISOString(),
-          })
-        ) {
-          inserted += 1;
-        }
-      }
-    } catch (error) {
-      // Leave this session out of the cursor so the next boot retries it.
-      delete nextCursor[session.id];
-      console.warn(`[DB] Kimi usage backfill skipped for session ${session.id}:`, error);
-    }
-  }
-
-  await setAppConfig(KIMI_BACKFILL_CURSOR_KEY, JSON.stringify(nextCursor));
-
-  if (inserted > 0) {
-    console.log(`[DB] Backfilled ${inserted} Kimi usage turn(s) from native ACP ledgers.`);
-  }
-  return inserted;
 }
 
 export async function getAppConfig(key: string): Promise<string | null> {

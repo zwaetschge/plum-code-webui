@@ -58,11 +58,11 @@ assert.equal(normalizeReasoningLevel('codex', 'ultra'), 'ultra');
 for (const provider of ['pi', 'claude', 'zai', 'vibe'] as const) {
   assert.equal(normalizeReasoningLevel(provider, 'ultracode'), 'ultracode');
 }
-for (const provider of ['codex', 'opencode', 'kimi'] as const) {
+for (const provider of ['codex', 'opencode'] as const) {
   assert.equal(normalizeReasoningLevel(provider, 'ultracode'), null);
 }
 // Ultrathink is Claude Code's prompt keyword.
-for (const provider of ['codex', 'opencode', 'kimi', 'pi', 'vibe'] as const) {
+for (const provider of ['codex', 'opencode', 'pi', 'vibe'] as const) {
   assert.equal(normalizeReasoningLevel(provider, 'ultrathink'), null);
 }
 assert.deepEqual(claudeEffortLaunch('ultrathink'), {
