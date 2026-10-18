@@ -10,7 +10,6 @@ plugins {
 android {
     namespace = "com.claudewebui.app"
     if (projectDir.absolutePath.startsWith("/app/projects/")) {
-        sourceSets.getByName("test").java.srcDir(rootProject.file("plum-tests/java"))
         sourceSets.getByName("androidTest").java.srcDir(rootProject.file("plum-ui-tests/java"))
     }
     compileSdk = 35
