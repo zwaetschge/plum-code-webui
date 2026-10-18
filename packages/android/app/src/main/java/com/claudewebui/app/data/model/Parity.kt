@@ -69,7 +69,9 @@ data class BrowserConnection(
 data class DesktopScreen(val name: String = "", val width: Int = 0, val height: Int = 0, val primary: Boolean = false)
 
 @Serializable
-data class DesktopLayout(val chatScreen: String = "primary", val chatPlacement: String = "floating", val chatVisible: Boolean = true)
+// All layout fields must be sent, including primary/floating/true: ApiHttp
+// omits constructor defaults, but these are explicit updates to desktop state.
+data class DesktopLayout(val chatScreen: String, val chatPlacement: String, val chatVisible: Boolean)
 
 @Serializable
 data class DesktopActivity(

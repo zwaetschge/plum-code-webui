@@ -26,7 +26,7 @@ def production_class(name, methods):
     return scope[name]
 
 
-App = production_class("App", {"_chat_event", "_finish_turn", "record_step", "describe_action", "_human_input", "set_mode", "_remote_action"})
+App = production_class("App", {"_chat_event", "_finish_turn", "record_step", "describe_action", "_human_input", "set_mode", "_remote_action", "stop_task"})
 Tools = production_class("Tools", {"desktop_task", "_text"})
 
 
@@ -104,6 +104,19 @@ class DesktopControlTests(unittest.TestCase):
             app._chat_event({"event": event, "payload": {"sessionId": "ours", "error": "Fenster fehlt"}})
             app._chat_event({"event": "session:lifecycle", "payload": {"sessionId": "ours", "busy": False}})
             self.assertNotEqual(app.activity_state["status"], "Abgeschlossen")
+
+    def test_stop_releases_input_and_interrupts_the_attached_session(self):
+        app = fixture()
+        calls = []
+        app.bridge.rpc = lambda method, params: calls.append((method, params))
+        app.turn_active = True
+        app.stop_task()
+        self.assertEqual(app.mode, "paused")
+        self.assertFalse(app.turn_active)
+        self.assertEqual(app.released, 1)
+        self.assertEqual(calls, [("chat.interrupt", {"sessionId": "ours"})])
+        app._chat_event({"event": "session:lifecycle", "payload": {"sessionId": "ours", "busy": False}})
+        self.assertEqual(app.activity_state["status"], "Gestoppt")
 
     def test_history_is_bounded_and_does_not_echo_input_text(self):
         app = fixture()

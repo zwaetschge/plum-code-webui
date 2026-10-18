@@ -17,7 +17,9 @@ Ziel: alle zehn gewünschten Verbesserungen im Desktop-Companion, WebUI und Andr
 - [ ] Verhaltenstests und Typechecks; Android über android-builder bauen, APK kopieren und SHA-256 prüfen.
 - [ ] Über repair-bot ausliefern; Desktop-Autoupdate und echte Oberfläche/Interaktionen prüfen.
 
-Stand: Version 0.6.0 vollständig verdrahtet, noch nicht ausgeliefert. Backend- und Frontend-Typecheck grün, sieben Python-Verhaltenstests und zwei Backend-Tests grün. Android-Build läuft im Hintergrund. Echte Qt-Widgets mit simulierten Daten sowie WebUI bei 1440/390 Pixeln geprüft; Bedienaktionen und Layout passen. Danach echte Geekom-Prüfung. Fremde Änderungen in AGENTS.md und piConfig.ts bestehen bereits.
+Stand: Version 0.6.0 in Commit `4ed9ec6`; repair-bot baut seit 10:39 UTC. Backend- und Frontend-Typecheck, ESLint, acht Python-Verhaltenstests und zwei Backend-Tests grün. Echte Qt-Widgets mit simulierten Daten sowie WebUI bei 1440/390 Pixeln geprüft; Bedienaktionen und Layout passen. Danach echte Geekom-Prüfung. Fremde Änderungen in AGENTS.md und piConfig.ts bestehen bereits.
+
+Android: erster Build inkl. Unit-Tests erfolgreich, APK kopiert/Hash geprüft (`b20f5a…`). Beim abschliessenden Vertragscheck gefunden: `encodeDefaults=false` liess Layoutwerte primary/floating/true aus. DesktopLayout-Felder haben jetzt keine Konstruktor-Defaults mehr, damit explizite Änderungen vollständig übertragen werden. Regressionstest ergänzt; finale APK baut erneut. Nicht installiert.
 
 ## Integration mit „oled control“
 
