@@ -53,3 +53,7 @@ gdbus call --session --dest ch.zwaetschge.PlumDesktop --object-path / --method c
 ```
 
 Andere Aktionen: `show_chat`, `hide_chat`, `pause`, `resume`, `stop`, `context`. Dieselbe Schnittstelle funktioniert für andere Decks/KDE-Kurzbefehle. Monitorwahl: `primary`, `secondary` (= kleinster Zusatzmonitor) oder Ausgangsname. Anordnung: `full` für die ganze Fläche, `left`/`right` für geteilte Nutzung; `floating` merkt die verschobene Position. Schriftgrösse und freier Platz oben sind unabhängig einstellbar. Keine Änderungen an Auflösung, Rotation, KDE-Leisten oder Videoplayer.
+
+## Separate Steuerleiste – Nutzerkorrektur
+
+0.6.3 blendet das zusätzliche schwebende Steuerfenster standardmässig aus, auch bei Sitzungswechsel, Verbindung und Werkzeug-Aufrufen. Im Tray kann „Separate Steuerleiste anzeigen“ bei Bedarf aktiviert werden; die Auswahl wird lokal gespeichert. Pause/Weiter/Stoppen bleiben im Chat sowie die Moduswahl im Tray. Keine Änderung der WebUI-/Android-Bedienung erforderlich. Syntaxprüfung und zehn Desktop-Verhaltenstests grün; Auslieferung wird geprüft.

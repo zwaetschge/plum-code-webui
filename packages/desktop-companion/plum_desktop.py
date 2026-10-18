@@ -84,7 +84,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QMen
 
 import websockets
 
-VERSION = "0.6.2"
+VERSION = "0.6.3"
 CONFIG_DIR = os.path.expanduser("~/.config/plum-desktop")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
@@ -1080,6 +1080,9 @@ class DesktopDock(Floating):
                   max(rect.top(), min(self.y(), rect.bottom() - self.height() + 1)))
 
     def present(self):
+        if self.s.state.get("showControlBar") is not True:
+            self.hide()
+            return
         if not self.placed:
             self.adjustSize()
             rect = QGuiApplication.primaryScreen().availableGeometry()
@@ -3326,6 +3329,10 @@ class App(QObject):
             menu.addAction(action)
             self.mode_actions[mode] = action
         menu.addSeparator()
+        control_bar = QAction("Separate Steuerleiste anzeigen", menu, checkable=True)
+        control_bar.setChecked(self.state.get("showControlBar") is True)
+        control_bar.triggered.connect(self._toggle_control_bar)
+        menu.addAction(control_bar)
         self.record_action = QAction("Vorführung aufnehmen", menu)
         self.record_action.triggered.connect(self.toggle_recording)
         menu.addAction(self.record_action)
@@ -3347,6 +3354,11 @@ class App(QObject):
         self.menu = menu
         self._refresh_tray()
         self.tray.show()
+
+    def _toggle_control_bar(self, checked):
+        self.state["showControlBar"] = bool(checked)
+        save_state(self.state)
+        self.dock.present()
 
     def _toggle_glow(self, checked):
         self.overlay.glow_enabled = bool(checked)
