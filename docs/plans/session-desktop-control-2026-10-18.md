@@ -15,20 +15,34 @@ Ziel: alle zehn gewünschten Verbesserungen im Desktop-Companion, WebUI und Andr
 - [x] Abschluss mit Ergebnis, Öffnen und Nachbessern implementiert.
 - [x] WebUI und Android: Live-Aktivität, Steuerung, Nachrichten, Monitor-/Layout-Einstellungen implementiert und bestehende Settings-Einstiegspunkte geprüft.
 - [x] Verhaltenstests und Typechecks; Android über android-builder bauen, APK kopieren und SHA-256 prüfen.
-- [ ] Über repair-bot ausliefern; Desktop-Autoupdate und echte Oberfläche/Interaktionen prüfen.
-- [ ] Lesbarkeit auf dem echten kleinen Bildschirm korrigieren: ganze nutzbare Fläche, explizite Text-/Bediengrösse, Dock oben freihalten; in WebUI und Android einstellbar.
+- [x] Über repair-bot ausliefern; Desktop-Autoupdate und echte Oberfläche/Interaktionen prüfen.
+- [x] Lesbarkeit auf dem echten kleinen Bildschirm korrigieren: ganze nutzbare Fläche, explizite Text-/Bediengrösse, Dock oben freihalten; in WebUI und Android einstellbar.
 
-Stand: Version 0.6.0 in Commit `4ed9ec6`; repair-bot hat am 18.10.2026 um 10:45 UTC erfolgreich ausgeliefert, /health/ready bestätigt. Backend- und Frontend-Typecheck, ESLint, acht Python-Verhaltenstests und zwei Backend-Tests grün. Echte Qt-Widgets mit simulierten Daten sowie WebUI bei 1440/390 Pixeln geprüft; Bedienaktionen und Layout passen. Echte Geekom-Prüfung läuft: Companion meldet 0.6.0, Chat ist auf secondary/right/visible eingestellt und im Screenshot auf dem kleinen DP-1 zu sehen. Fremde Änderungen in AGENTS.md und piConfig.ts bestehen bereits.
+## Auslieferungsstand
 
-Android: finaler Build (Commit `11680c9`) erfolgreich, inklusive DesktopLayoutSerializationTest (1 Test, 0 Fehler). `encodeDefaults=false` liess zunächst Layoutwerte primary/floating/true aus; DesktopLayout-Felder haben jetzt keine Konstruktor-Defaults mehr, damit explizite Änderungen vollständig übertragen werden. Finale APK nach `/mnt/user/Zwischenspeicher/plum-code-android-app-debug.apk` kopiert, SHA-256 Original/Kopie identisch: `5309661bef01f0e124905b4c7347dfb3ed6d5372d53d7711fae7febed8e67b73`. Nicht installiert.
+Companion **0.6.2**, Commit `0715e4e`, ist auf dem Geekom verbunden. repair-bot hat am 18.10.2026 um 14:30 UTC erfolgreich ausgeliefert; `/health/ready` bestätigt Datenbank und Frontend. Die zehn Erweiterungen sind in `4ed9ec6` implementiert, Android-Serialisierung in `11680c9`, die Geometriekorrektur in `d93535b`.
 
-Live-API geprüft: ohne Anmeldung 401, ungültige Anordnung 400, unbekannter Computer 409. Status liefert die Monitorwahl des richtigen verbundenen Companions.
+Backend- und Frontend-Typecheck sowie ESLint sind grün. Zehn Python-Verhaltenstests prüfen unter anderem physische Eingabeübergabe, Sitzungsisolation, Fortschritt, Verlauf und Monitorgeometrie; zwei Backend-Tests prüfen Zustandsgrenzen und Benutzer-/Verbindungsisolation. Echte Qt-Widgets sowie WebUI bei 1440/390 Pixeln wurden geprüft. Live-API: ohne Anmeldung 401, ungültige Anordnung 400, unbekannter Computer 409. Beide Client-Karten sind in den bestehenden Desktop-Settings erreichbar.
 
-Realer Geekom-Test: Chat rechts auf DP-1, Retroid/Taskleiste bleiben erreichbar. Entwurf in natives Eingabefeld getippt und gelöscht, nicht gesendet; Ausblenden gibt das Panel frei; Endzustand pausiert, Chat sekundär/rechts/sichtbar. Dabei vorhandenen Skalierungsfehler bestätigt: Spectacle lieferte 6880×3360 mit DP-1 an einer anderen Pixelposition als die Qt-Eingabegeometrie. 0.6.1 nimmt deshalb jeden Ausgang über KWins CaptureScreen auf und setzt alle Ausgänge mit einer gemeinsamen Pixel-Skalierung anhand ihrer echten Qt-Positionen zusammen. Zehn Python-Tests grün, inklusive Geekom-Geometrie und Monitor links vom Ursprung. Zweite Auslieferung und Nachtest der Screenshot-Klickkoordinaten stehen noch aus.
+Android: finaler android-builder-Build am 18.10.2026 um 14:33 UTC erfolgreich, inklusive `DesktopLayoutSerializationTest` (1 Test, 0 Fehler). Dieser Test prüft die explizite Übertragung auch von Standardwerten bei `encodeDefaults=false`. APK nach `/mnt/user/Zwischenspeicher/plum-code-android-app-debug.apk` kopiert; SHA-256 Original/Kopie identisch:
 
-## Lesbarkeit – Nutzerkorrektur
+`5e2e169d6a6a9825a29e933116a9688b50f719ecad573b0b90752e16a638437d`
 
-0.6.1 ist seit 13:13 UTC live. Neuer echter Screenshot bestätigt die korrigierte Geometrie (1568×985; DP-1 bei 769,656). Der Nutzer meldet zu kleine Schrift; Screenshot bestätigt etwa 11 native Pixel und ungenutzte linke Hälfte. 0.6.2 ergänzt `full`, `chatZoom` (100–250 %) und `chatInsetTop` (0–200 px), wendet Schrift explizit auch auf QTextDocument an und fasst die Kopfzeilen zusammen. Grosse Pause/Weiter-/Stoppen-Tasten direkt im Chat. Geekom-Ziel: secondary/full, 200 %, 80 px für das Dock oben. Auswahl bleibt flexibel und auf diesem Computer gespeichert. Android-/WebUI-Parität wird in diesem Durchgang gebaut; reale Nachprüfung steht aus.
+Builder-Claim freigegeben. Die APK wurde nicht auf dem Android-Testgerät installiert; Gerätesichtprüfung der Android-Karte bleibt eine Verifikationsgrenze.
+
+## Echte Desktop-Prüfung und Lesbarkeit
+
+Der ursprüngliche native Test bestätigte Chat, Sitzungswahl, Eingabefokus und Ausblenden: Testentwurf eingegeben und gelöscht, keine Nachricht gesendet; Deck bleibt zugänglich. Spectacle lieferte dabei bei gemischter Skalierung abweichende Bildschirmkoordinaten. Seit 0.6.1 werden KWin-Ausgänge einzeln aufgenommen und mit einer gemeinsamen Skalierung an den Qt-Positionen zusammengesetzt. Ein echter Screenshot bestätigt die korrigierte Geometrie (1568×985; DP-1 bei 769,656); Tests decken auch Monitore links vom Ursprung ab.
+
+Auf die Nutzerrückmeldung zur Lesbarkeit folgt 0.6.2: `full` nutzt die ganze verfügbare Bildschirmfläche, `chatZoom` erlaubt 100–250 %, `chatInsetTop` hält 0–200 px für ein Dock frei. Schrift wird explizit auf Widgets und QTextDocument angewendet. Kopfzeilen sind zusammengefasst, Pause/Weiter und Stoppen direkt im Chat erreichbar. Dieselben Einstellungen bestehen in WebUI und Android.
+
+Geekom-Profil angewendet und vom Companion bestätigt: **secondary / full / 200 % / 80 px oben / sichtbar**. Einstellungen bleiben pro Computer gespeichert; andere Monitorgrössen und Aufteilungen bleiben frei wählbar. Abschliessend am echten Gerät geprüft: Kopfzeile, Text und Eingabefeld sind bei 200 % lesbar, das Retroid-Dock oben bleibt frei. Einen Testentwurf im nativen Feld eingegeben, visuell bestätigt und mit Ctrl+A/Backspace gelöscht; nichts gesendet. Die separate verschiebbare Plum-Steuerleiste auf den Hauptmonitor gezogen und damit den Chat-Titel freigegeben. Das Ergebnisfeld nutzt bei Bedarf den äusseren Scrollbereich. Endzustand: **pausiert**, Chat sichtbar mit unverändertem Profil.
+
+Belege im Workspace:
+- `.claude-webui-images/desk-1792345153917.jpg`: beide echten Monitore, freie Deck-Leiste und Chat auf DP-1.
+- `.claude-webui-images/desk-1792345153292.jpg`: vergrösserter Ausschnitt des kleinen Displays nach der Korrektur.
+
+Verifikationsgrenzen: Android gebaut und Serialisierung geprüft, nicht auf Gerät installiert. Die während Werkzeug-Aufrufen kurz sichtbare Statusblase kann Teile des Chats überlagern; sie läuft nach der Aktivität aus. Physische Lesbarkeit hängt zusätzlich von Betrachtungsabstand und Displaygrösse ab; die Schrift lässt sich lokal und in beiden Clients weiter anpassen.
 
 ## Integration mit „oled control“
 
@@ -38,4 +52,4 @@ Bestehendes Projekt `/mnt/user/AI/plum-code/oled control` bleibt unverändert. D
 gdbus call --session --dest ch.zwaetschge.PlumDesktop --object-path / --method ch.zwaetschge.PlumDesktop.desktop toggle_chat
 ```
 
-Andere Aktionen: `show_chat`, `hide_chat`, `pause`, `resume`, `stop`, `context`. Dieselbe Schnittstelle funktioniert für andere Decks/KDE-Kurzbefehle. Monitorwahl: `primary`, `secondary` (= kleinster Zusatzmonitor) oder Ausgangsname. Geteilte Anordnung: `left`/`right`; `floating` merkt die verschobene Position. Keine Änderungen an Auflösung, Rotation, KDE-Leisten oder Videoplayer.
+Andere Aktionen: `show_chat`, `hide_chat`, `pause`, `resume`, `stop`, `context`. Dieselbe Schnittstelle funktioniert für andere Decks/KDE-Kurzbefehle. Monitorwahl: `primary`, `secondary` (= kleinster Zusatzmonitor) oder Ausgangsname. Anordnung: `full` für die ganze Fläche, `left`/`right` für geteilte Nutzung; `floating` merkt die verschobene Position. Schriftgrösse und freier Platz oben sind unabhängig einstellbar. Keine Änderungen an Auflösung, Rotation, KDE-Leisten oder Videoplayer.
