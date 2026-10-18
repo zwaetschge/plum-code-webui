@@ -81,6 +81,7 @@ import org.koin.compose.koinInject
 import com.claudewebui.app.ui.components.chat.WritingStyleSheet
 import com.claudewebui.app.ui.components.chat.presetName
 import com.claudewebui.app.ui.components.dynamicui.DynamicUi
+import com.claudewebui.app.ui.components.dynamicui.DynamicUiStateStore
 import com.claudewebui.app.ui.components.dynamicui.DynamicUiNote
 import com.claudewebui.app.ui.components.dynamicui.DynamicUiPending
 import java.time.Instant
@@ -118,6 +119,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var sources by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
     var chat by remember { mutableStateOf<AssistantResource?>(null) }
     var turns by remember { mutableStateOf<List<AssistantApiTurn>>(emptyList()) }
+    val dynamicUiState = rememberSaveable(chat?.id, saver = DynamicUiStateStore.StateSaver) { DynamicUiStateStore() }
     var pending by remember { mutableStateOf<List<AssistantPendingCommand>>(emptyList()) }
     var providerId by remember { mutableStateOf("") }
     var model by remember { mutableStateOf("") }
@@ -442,8 +444,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                         )
                                     } else if (turn.response.isNotEmpty() || (turn.ui == null && !turn.uiPending)) Text(turn.response, style = MaterialTheme.typography.bodyLarge, color = palette.text)
                                     // Dynamic UI: an interactive view below the text, rendered natively.
-                                    if (turn.uiPending) DynamicUiPending()
-                                    turn.ui?.let { spec -> DynamicUi(spec, busy = busy || running || !live, onSendMessage = if (live) ({ text: String -> send(text) }) else null) }
+                                    if (turn.uiPending && turn.ui == null) DynamicUiPending()
+                                    turn.ui?.let { spec -> DynamicUi(spec, stateStore = dynamicUiState, stateKey = turn.id, busy = busy || running || !live, onSendMessage = if (live) ({ text: String -> send(text) }) else null) }
                                     turn.uiError?.let { note -> if (turn.status != "running") DynamicUiNote(note) }
                                 }
                                 turn.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }

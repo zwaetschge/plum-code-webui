@@ -1,3 +1,5 @@
+import { dynamicUiComponentInstructions } from '@plum-code-webui/shared';
+
 /**
  * Model instructions for Dynamic UI v1 (see packages/shared/src/utils/dynamicUi.ts).
  * The fenced block works the same with every provider protocol and streams
@@ -8,7 +10,7 @@ You may attach ONE interactive view to an answer by ending it with a fenced bloc
 - Use it only when interaction or visual structure clearly helps: calculators and what-if questions (loans, savings, compound interest, budgets, unit or price conversions), data you present as figures or trends (dashboards, KPIs, charts), comparisons of options/products, or tables the user will want to filter.
 - Do NOT use it for simple factual questions, explanations, opinions, code, writing tasks or anything a short text answers well. Never mention the block or its JSON in the text.
 - Always write a normal short text answer first; the view complements it and must not be the only content.
-- Never output HTML, JavaScript, CSS or code inside the view. Only the components and fields below are allowed; anything else makes the whole view be discarded.
+- Never output HTML, JavaScript, CSS or code inside the view. Only the components and fields below are allowed; invalid components are replaced with a local fallback; invalid global data or formulas reject the view.
 
 Schema: {"version":1,"title"?,"layout"?:"inline"|"dashboard","state"?:{name:value},"computed"?:{name:"formula"},"data"?:{name:[rows]},"views"?:{name:view},"root":node}
 - Names: letters/digits/_ starting with a letter, max 40 chars. Rows are flat objects of numbers/strings/booleans (max 500 rows).
@@ -18,12 +20,9 @@ Schema: {"version":1,"title"?,"layout"?:"inline"|"dashboard","state"?:{name:valu
 - Inside a view filter or a table highlight, row fields take precedence over state names: give state keys names that differ from row fields (e.g. state "selectedRegion" vs row field "region").
 - Text fields may embed values: "Endkapital: {{final|currency:CHF}}". Formats: number, integer, percent, compact, decimal:N, currency:XXX (ISO code), text.
 
-Nodes ("id" optional and unique):
-- Layout: {"type":"stack","gap"?:"sm|md|lg","children":[..]}, {"type":"row","children":[..]}, {"type":"grid","columns":1-4,"children":[..]}, {"type":"card","title"?,"subtitle"?,"highlight"?:"formula","children":[..]}, {"type":"calculator","title"?,"inputs":[inputs],"outputs":[kpis/text],"chart"?:chart}
-- Content: {"type":"heading","text","level"?:2|3}, {"type":"text","text","tone"?:"default|muted|strong"}, {"type":"markdown","text"}, {"type":"badge","text","tone"?:"neutral|success|warning|danger|accent"}, {"type":"divider"}, {"type":"kpi","label","value":"formula","format"?,"hint"?,"trend"?:"formula (positive = up)"}
-- Inputs: {"type":"slider","bind","label","min","max","step"?,"format"?}, {"type":"input","bind","label","kind"?:"number|text","min"?,"max"?,"step"?}, {"type":"select","bind","label","options":[{"value","label"}]}, {"type":"segmented",...same as select}, {"type":"checkbox","bind","label"}
-- Actions: {"type":"button","label","variant"?:"primary|secondary","action":{"type":"sendMessage","text":"follow-up question, may use {{values}}"} | {"type":"set","key":"stateName","value":"formula"} | {"type":"reset"}}
-- Data: {"type":"table","data":"viewName" or [rows],"columns":[{"key","label","format"?,"align"?}],"highlight"?:"formula over row"}, {"type":"chart","kind":"bar|line|area|pie","data":"viewName" or [rows],"x":"field","series":[{"key","label"}],"format"?,"height"?:120-480,"stacked"?}, {"type":"compare","bind"?:"stateName holding the chosen id","items":[{"id","title","subtitle"?,"badge"?,"values":{field:value}}],"specs":[{"key","label","format"?,"better"?:"higher|lower"}]}
+Nodes (give stable unique ids to components you may update):
+${dynamicUiComponentInstructions()}
+To update the most recent interactive view, emit a plum-ui block {"version":1,"patch":[{"op":"replace","target":"nodeId","node":node},{"op":"append","target":"containerId","node":node},{"op":"remove","target":"nodeId"}],"state"?:{newDefault:value},"computed"?:{name:"formula"},"data"?:{name:[rows]},"views"?:{name:view},"title"?}. Only changed sections are needed. Keep the same bind names for existing inputs so their user values survive. Do not repeat the whole view for a small change. Targets must exist in the latest view. For a completely different view, send a full spec instead. Put state/computed/data/views BEFORE root or patch, so completed children can appear while streaming. Finish each child before starting the next.
 Keep views compact (usually under 40 nodes); German labels when the user writes German.
 
 Example (compound interest):

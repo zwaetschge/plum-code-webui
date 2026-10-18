@@ -18,10 +18,6 @@ import kotlinx.serialization.json.doubleOrNull
 
 const val DYNAMIC_UI_VERSION = 1
 
-val UI_NODE_TYPES = listOf(
-    "stack", "row", "grid", "card", "calculator", "heading", "text", "markdown", "badge", "divider",
-    "kpi", "slider", "input", "select", "segmented", "checkbox", "button", "table", "chart", "compare",
-)
 
 private object Limits {
     const val NODES = 250
@@ -186,6 +182,7 @@ fun validateDynamicUi(input: JsonElement?): DynamicUiValidation = try {
     }
     input["title"]?.let { checkText("title", it, 120) }
     input["layout"]?.let { if (!(it.isStr() && (it as JsonPrimitive).content in listOf("inline", "dashboard"))) fail("layout", "inline oder dashboard") }
+    input["viewId"]?.let { if (!it.isStr() || !Regex("^[A-Za-z0-9_-]{1,80}$").matches((it as JsonPrimitive).content)) fail("viewId", "ungültige Ansichtskennung") }
     val counter = Counter()
     checkNode("root", input["root"], 0, counter, state.keys, sources)
     DynamicUiValidation.Valid(DynamicUiDoc(input))
@@ -299,6 +296,7 @@ private fun checkNode(path: String, value: JsonElement?, depth: Int, counter: Co
     val type = if (typeElement.isStr()) (typeElement as JsonPrimitive).content else null
     if (type == null || type !in UI_NODE_TYPES) fail(path, "unbekannte Komponente \"${(typeElement as? JsonPrimitive)?.content ?: "undefined"}\"")
     val at = "$path<$type>"
+    for (field in UI_REQUIRED_FIELDS[type].orEmpty()) if (node[field] == null) fail("$at.$field", "Pflichtfeld fehlt")
     node["id"]?.let { id ->
         if (!(id.isStr() && NAME.matches((id as JsonPrimitive).content))) fail("$at.id", "ungültige ID")
         if (!counter.ids.add((id as JsonPrimitive).content)) fail("$at.id", "ID doppelt")

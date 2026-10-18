@@ -540,3 +540,10 @@ button.dui-compare-item {
 html.plum-page-hidden .dui-root {
   animation: none !important;
 }
+
+.dui-interactive-body {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}

@@ -1,9 +1,8 @@
 import {
   Component,
-  useEffect,
   useId,
   useMemo,
-  useState,
+  useSyncExternalStore,
   type ReactElement,
   type ReactNode,
 } from 'react';
@@ -30,6 +29,7 @@ import {
 import {
   formatUiValue,
   validateDynamicUi,
+  mergeDynamicUiState,
   type DynamicUiSpec,
   type UiNode,
   type UiNodeType,
@@ -38,9 +38,12 @@ import {
 import { cn } from '@/lib/utils';
 import { isTruthy, UiRuntime } from './runtime';
 import './dynamic-ui.css';
+import { DynamicUiStateStore } from './state';
 
 export interface DynamicUiProps {
   spec: DynamicUiSpec;
+  stateStore?: DynamicUiStateStore;
+  stateKey?: string;
   /** Runs a `sendMessage` action as a new chat message; omitted = button disabled. */
   onSendMessage?: (text: string) => void;
   /** Disables actions while an answer runs. */
@@ -611,19 +614,31 @@ class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
  * All components of the message share one state; every change recomputes the
  * formulas, views and charts at once — no new model request.
  */
-export default function DynamicUi({ spec, onSendMessage, busy }: DynamicUiProps) {
+export default function DynamicUi({
+  spec,
+  onSendMessage,
+  busy,
+  stateStore,
+  stateKey,
+}: DynamicUiProps) {
   // Client-side validation: the server already checked, but stored history or
   // fixtures must pass the same gate before anything renders.
   const checked = useMemo(() => validateDynamicUi(spec), [spec]);
-  const initial = useMemo(() => ({ ...(spec.state ?? {}) }), [spec]);
-  const [state, setState] = useState<Record<string, UiValue>>(initial);
-  useEffect(() => setState(initial), [initial]);
+  const localStore = useMemo(() => new DynamicUiStateStore(), []);
+  const store = stateStore ?? localStore;
+  const edits = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
+  const view = spec.viewId ?? stateKey ?? 'local';
+  const state = mergeDynamicUiState(spec.state ?? {}, edits[view] ?? {});
   if (!checked.ok)
     return <p className="dui-note">Interaktive Ansicht verworfen ({checked.error}).</p>;
   const ctx: Ctx = {
     rt: new UiRuntime(checked.spec, state),
-    set: (key, value) => setState((current) => ({ ...current, [key]: value })),
-    reset: () => setState(initial),
+    set: (key, value) => {
+      if (!busy) store.set(view, key, value);
+    },
+    reset: () => {
+      if (!busy) store.reset(view);
+    },
     send: onSendMessage,
     busy,
   };
@@ -631,7 +646,9 @@ export default function DynamicUi({ spec, onSendMessage, busy }: DynamicUiProps)
     <Boundary>
       <div className={cn('dui-root', checked.spec.layout === 'dashboard' && 'is-dashboard')}>
         {checked.spec.title && <h3 className="dui-title">{checked.spec.title}</h3>}
-        <Node node={checked.spec.root} ctx={ctx} />
+        <fieldset disabled={busy} className="dui-interactive-body">
+          <Node node={checked.spec.root} ctx={ctx} />
+        </fieldset>
       </div>
     </Boundary>
   );

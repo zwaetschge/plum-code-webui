@@ -17,6 +17,18 @@ import org.junit.Test
  * reference fixtures (DynamicUiFixtures.kt, copied from the frontend's fixtures.ts).
  */
 class DynamicUiTest {
+    @Test fun editedInputsSurviveRevisionAndResetUsesNewDefaults() {
+        val defaults = mapOf<String, Any?>("amount" to 20.0, "newField" to true)
+        assertEquals(mapOf("amount" to 42.0, "newField" to true), mergeDynamicUiState(defaults, mapOf("amount" to 42.0, "removed" to 5.0)))
+        assertEquals(mapOf("amount" to "changedType"), mergeDynamicUiState(mapOf("amount" to "changedType"), mapOf("amount" to 42.0)))
+        val store = DynamicUiStateStore()
+        store.set("view-a", "amount", 42.0)
+        assertEquals(42.0, mergeDynamicUiState(defaults, store.edits["view-a"].orEmpty())["amount"])
+        assertEquals(20.0, mergeDynamicUiState(defaults, store.edits["view-b"].orEmpty())["amount"])
+        store.reset("view-a")
+        assertEquals(defaults, mergeDynamicUiState(defaults, store.edits["view-a"].orEmpty()))
+    }
+
     private fun fixture(name: String): JsonObject = Json.parseToJsonElement(
         when (name) {
             "compound-interest" -> COMPOUND_INTEREST

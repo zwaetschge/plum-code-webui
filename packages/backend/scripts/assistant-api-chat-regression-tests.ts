@@ -851,6 +851,82 @@ try {
     afterPurge.apiChatFiles.some((row) => row.chat_id === temporary.id),
     false
   );
+  mode = 'openai';
+  const uiChat = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    title: 'UI revisions',
+  });
+  const uiSpec = {
+    version: 1,
+    state: { amount: 10 },
+    root: {
+      type: 'stack',
+      id: 'panel',
+      children: [
+        { type: 'input', id: 'amountInput', bind: 'amount', label: 'Betrag' },
+        { type: 'text', id: 'summary', text: 'Alt' },
+      ],
+    },
+  };
+  researchReply = 'Rechner.\n```plum-ui\n' + JSON.stringify(uiSpec) + '\n```';
+  const uiFirst = await startApiTurn('api-alice', uiChat.id, {
+    commandId: randomUUID(),
+    expectedRevision: 1,
+    prompt: 'Rechner erstellen',
+  });
+  const uiOriginal = await settled('api-alice', uiChat.id, uiFirst.id);
+  assert.equal(uiOriginal.ui?.viewId, uiFirst.id);
+  // Force the base off the next history page and outside model-history limits.
+  for (let seq = 2; seq <= 55; seq++)
+    await run(
+      "INSERT INTO assistant_api_turns(id,chat_id,seq,payload_hash,prompt,response,status,model,profile_json,created_at,updated_at,expires_at) VALUES (?,?,?,'fixture','p','Nur Text','completed','gpt-5.5','{}',?,?,?)",
+      randomUUID(),
+      uiChat.id,
+      seq,
+      stamp,
+      stamp,
+      stamp
+    );
+  researchReply =
+    'Ergänzt.\n```plum-ui\n' +
+    JSON.stringify({
+      version: 1,
+      patch: [{ op: 'replace', target: 'summary', node: { type: 'text', text: 'Neu' } }],
+    }) +
+    '\n```';
+  const uiNextInput = {
+    commandId: randomUUID(),
+    expectedRevision: 1,
+    prompt: 'Nur den Text ändern',
+  };
+  await startApiTurn('api-alice', uiChat.id, uiNextInput);
+  const uiNext = await settled('api-alice', uiChat.id, uiNextInput.commandId);
+  assert.equal(uiNext.ui?.viewId, uiFirst.id);
+  assert.match(JSON.stringify(uiNext.ui), /Neu/);
+  assert.match(JSON.stringify(uiNext.ui), /amountInput/);
+  assert(JSON.stringify(requests.at(-1)?.body).includes('Latest interactive view'));
+  const reread = await apiChatTurns('api-alice', uiChat.id);
+  assert(!reread.turns.some((row) => row.id === uiFirst.id));
+  assert.deepEqual(reread.turns.at(-1)?.ui, uiNext.ui);
+  assert.deepEqual((await startApiTurn('api-alice', uiChat.id, uiNextInput)).ui, uiNext.ui);
+  const emptyUiChat = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    title: 'Separate UI chat',
+  });
+  const noBase = await startApiTurn('api-alice', emptyUiChat.id, {
+    commandId: randomUUID(),
+    expectedRevision: 1,
+    prompt: 'Ändern',
+  });
+  const isolatedUi = await settled('api-alice', emptyUiChat.id, noBase.id);
+  assert.equal(isolatedUi.ui, null);
+  assert.match(isolatedUi.uiError ?? '', /vorherige Ansicht/);
+  researchReply = null;
+  console.log(
+    'PASS: UI edits pin an owned base across pagination/replay, expose current schema to the model and never cross chat boundaries'
+  );
   console.log(
     'PASS: private image original bytes, deduplication, owned chat binding, OpenAI/Anthropic image payloads, lossless media branches and temporary orphan cleanup'
   );

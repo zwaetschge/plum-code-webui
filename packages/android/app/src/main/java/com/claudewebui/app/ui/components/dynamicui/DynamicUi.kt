@@ -132,7 +132,7 @@ private val StateSaver = Saver<Map<String, Any?>, String>(
  * descriptions show only a short muted note; the text answer stands alone.
  */
 @Composable
-fun DynamicUi(spec: JsonObject, busy: Boolean, onSendMessage: ((String) -> Unit)?, modifier: Modifier = Modifier) {
+fun DynamicUi(spec: JsonObject, busy: Boolean, onSendMessage: ((String) -> Unit)?, modifier: Modifier = Modifier, stateStore: DynamicUiStateStore? = null, stateKey: String = "local") {
     // Client-side validation: stored history must pass the same gate as fresh answers.
     val checked = remember(spec) { validateDynamicUi(spec) }
     if (checked is DynamicUiValidation.Invalid) {
@@ -140,14 +140,17 @@ fun DynamicUi(spec: JsonObject, busy: Boolean, onSendMessage: ((String) -> Unit)
         return
     }
     val doc = (checked as DynamicUiValidation.Valid).doc
-    var state by rememberSaveable(spec, stateSaver = StateSaver) { mutableStateOf(doc.state) }
+    val view = spec.string("viewId") ?: stateKey
+    val localStore = rememberSaveable(view, saver = DynamicUiStateStore.StateSaver) { DynamicUiStateStore() }
+    val store = stateStore ?: localStore
+    val state = mergeDynamicUiState(doc.state, store.edits[view].orEmpty())
     val palette = PlumTheme.palette
     val runtime = remember(doc, state) { UiRuntime(doc, state) }
     val ctx = DuiCtx(
         rt = runtime,
         palette = palette,
-        set = { key, value -> state = state + (key to value) },
-        reset = { state = doc.state },
+        set = { key, value -> if (!busy) store.set(view, key, value) },
+        reset = { if (!busy) store.reset(view) },
         send = onSendMessage,
         busy = busy,
     )
@@ -457,6 +460,7 @@ private fun DuiSlider(node: JsonObject, ctx: DuiCtx, modifier: Modifier) {
                 val clean = java.math.BigDecimal(snapped).setScale(decimals, java.math.RoundingMode.HALF_UP).toDouble().coerceIn(lo, hi)
                 if (clean != value) ctx.set(bind, clean)
             },
+            enabled = !ctx.busy,
             valueRange = lo.toFloat()..hi.toFloat(),
             colors = SliderDefaults.colors(
                 thumbColor = Color.White,
@@ -511,6 +515,7 @@ private fun DuiInput(node: JsonObject, ctx: DuiCtx, modifier: Modifier) {
         FieldBox(ctx.palette) {
             if (text.isEmpty()) node.string("placeholder")?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = ctx.palette.muted) }
             BasicTextField(
+                enabled = !ctx.busy,
                 value = text,
                 onValueChange = { typed ->
                     text = typed.take(200)
@@ -551,7 +556,7 @@ private fun DuiSelect(node: JsonObject, ctx: DuiCtx, modifier: Modifier) {
         Box {
             FieldBox(
                 ctx.palette,
-                Modifier.clickable(role = Role.DropdownList, onClickLabel = label) { open = true }.semantics(mergeDescendants = true) {
+                Modifier.clickable(enabled = !ctx.busy, role = Role.DropdownList, onClickLabel = label) { open = true }.semantics(mergeDescendants = true) {
                     contentDescription = label
                     stateDescription = selected?.label ?: inputText(current)
                 },
@@ -602,7 +607,7 @@ private fun DuiSegmented(node: JsonObject, ctx: DuiCtx, modifier: Modifier) {
                         .pressScale(source)
                         .clip(RoundedCornerShape(9.dp))
                         .background(fill)
-                        .selectable(active, interactionSource = source, indication = null, role = Role.RadioButton) { ctx.set(bind, option.value) }
+                        .selectable(active, enabled = !ctx.busy, interactionSource = source, indication = null, role = Role.RadioButton) { ctx.set(bind, option.value) }
                         .heightIn(min = 34.dp)
                         .padding(horizontal = 12.dp),
                     contentAlignment = Alignment.Center,
@@ -619,7 +624,7 @@ private fun DuiCheckbox(node: JsonObject, ctx: DuiCtx, modifier: Modifier) {
     val bind = node.string("bind").orEmpty()
     val checked = uiTruthy(ctx.rt.state[bind] ?: false)
     Row(
-        modifier.toggleable(checked, role = Role.Checkbox) { ctx.set(bind, it) }.padding(vertical = 2.dp),
+        modifier.toggleable(checked, enabled = !ctx.busy, role = Role.Checkbox) { ctx.set(bind, it) }.padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -632,7 +637,7 @@ private fun DuiCheckbox(node: JsonObject, ctx: DuiCtx, modifier: Modifier) {
 private fun DuiButton(node: JsonObject, ctx: DuiCtx, modifier: Modifier) {
     val action = node["action"] as? JsonObject ?: return
     val type = action.string("type")
-    val enabled = type != "sendMessage" || (ctx.send != null && !ctx.busy)
+    val enabled = !ctx.busy && (type != "sendMessage" || ctx.send != null)
     val primary = node.string("variant") != "secondary"
     val source = remember { MutableInteractionSource() }
     val shape = RoundedCornerShape(11.dp)
@@ -772,7 +777,7 @@ private fun CompareItem(item: JsonObject, id: String, specs: List<JsonObject>, b
             .then(if (active) Modifier.border(3.dp, palette.accent.copy(alpha = .14f), shape) else Modifier)
             .then(if (onSelect != null) Modifier.pressScale(source) else Modifier)
             .plumGlass(GlassRole.Default, shape, borderColor = border)
-            .then(if (onSelect != null) Modifier.selectable(active, interactionSource = source, indication = null, role = Role.RadioButton, onClick = onSelect) else Modifier)
+            .then(if (onSelect != null) Modifier.selectable(active, enabled = !ctx.busy, interactionSource = source, indication = null, role = Role.RadioButton, onClick = onSelect) else Modifier)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {

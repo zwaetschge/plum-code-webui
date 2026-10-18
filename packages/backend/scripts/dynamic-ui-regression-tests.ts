@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import {
   evalExpr,
+  applyDynamicUiPatch,
+  recoverDynamicUi,
+  mergeDynamicUiState,
+  UI_COMPONENT_CATALOG,
   extractDynamicUi,
   formatUiValue,
   parseExpr,
@@ -188,6 +192,132 @@ test('model instructions describe the block and the restraint rule', () => {
   const example = /```plum-ui\n([\s\S]+?)\n```/.exec(DYNAMIC_UI_INSTRUCTIONS)?.[1] ?? '';
   const result = validateDynamicUi(JSON.parse(example));
   assert.ok(result.ok, result.ok ? '' : result.error);
+});
+
+test('streaming renders completed children before the fence ends and every preview validates', () => {
+  const spec = {
+    version: 1,
+    state: { amount: 10 },
+    root: {
+      type: 'stack',
+      id: 'panel',
+      children: [
+        { type: 'input', id: 'amountInput', bind: 'amount', label: 'Betrag' },
+        { type: 'text', id: 'summary', text: 'Betrag: {{amount}}' },
+      ],
+    },
+  };
+  const prefix = 'Antwort.\n```plum-ui\n';
+  const json = JSON.stringify(spec);
+  let previews = 0;
+  for (let n = 0; n < json.length; n++) {
+    const result = extractDynamicUi(prefix + json.slice(0, n), {
+      streaming: true,
+      viewId: 'turn-1',
+    });
+    assert.equal(result.pending, true);
+    assert.equal(result.error, null);
+    if (result.ui) {
+      assert.ok(validateDynamicUi(result.ui).ok);
+      previews++;
+    }
+  }
+  assert.ok(previews > 10, 'should render before all JSON arrives');
+  const done = extractDynamicUi(prefix + json + '\n```', { streaming: false, viewId: 'turn-1' });
+  assert.equal(done.ui?.viewId, 'turn-1');
+  assert.equal(done.pending, false);
+  const interrupted = extractDynamicUi(prefix + json.slice(0, -4), { streaming: false });
+  assert.equal(
+    interrupted.ui,
+    null,
+    'an interrupted preview must not become an actionable final view'
+  );
+  assert.equal(interrupted.pending, false);
+});
+
+test('one broken chart or forbidden action leaves valid siblings usable', () => {
+  const result = recoverDynamicUi({
+    version: 1,
+    root: {
+      type: 'stack',
+      children: [
+        { type: 'text', id: 'good', text: 'Bleibt sichtbar' },
+        { type: 'chart', kind: 'evil' },
+        {
+          type: 'button',
+          label: 'Unsafe',
+          action: { type: 'fetch', url: 'https://invalid.example' },
+        },
+      ],
+    },
+  });
+  assert.ok(result.ok);
+  assert.equal(result.warnings.length, 2);
+  assert.ok(validateDynamicUi(result.spec).ok);
+  assert.match(JSON.stringify(result.spec), /Bleibt sichtbar/);
+  assert.doesNotMatch(JSON.stringify(result.spec), /https:|fetch|evil/);
+  assert.equal(
+    recoverDynamicUi({ version: 1, computed: { bad: 'eval(1)' }, root: { type: 'divider' } }).ok,
+    false
+  );
+});
+
+test('targeted changes preserve identity, unchanged components and dirty compatible inputs', () => {
+  const base: DynamicUiSpec = {
+    version: 1,
+    viewId: 'view-a',
+    state: { amount: 10, untouched: 1 },
+    root: {
+      type: 'stack',
+      id: 'panel',
+      children: [
+        { type: 'input', id: 'amountInput', bind: 'amount', label: 'Betrag' },
+        { type: 'text', id: 'summary', text: 'Alt' },
+      ],
+    },
+  };
+  const patch = {
+    version: 1,
+    state: { amount: 20, untouched: 2, added: true },
+    patch: [
+      { op: 'replace', target: 'summary', node: { type: 'text', text: 'Neu' } },
+      {
+        op: 'append',
+        target: 'panel',
+        node: { type: 'kpi', id: 'value', label: 'Wert', value: 'amount*2' },
+      },
+    ],
+  };
+  const response = 'Ergänzt.\n```plum-ui\n' + JSON.stringify(patch) + '\n```';
+  const result = extractDynamicUi(response, { base, viewId: 'new-turn' });
+  assert.ok(result.ui);
+  assert.equal(result.ui.viewId, 'view-a');
+  assert.match(JSON.stringify(result.ui), /amountInput/);
+  assert.deepEqual(mergeDynamicUiState(result.ui.state!, { amount: 42, removed: 1 }), {
+    amount: 42,
+    untouched: 2,
+    added: true,
+  });
+  assert.deepEqual(mergeDynamicUiState({ a: 'new' }, { a: 5 }), { a: 'new' });
+  assert.equal(base.state?.amount, 10, 'base history must remain unchanged');
+  assert.equal(extractDynamicUi(response).ui, null, 'no cross-chat/global base fallback');
+  assert.throws(() =>
+    applyDynamicUiPatch(base, { version: 1, patch: [{ op: 'remove', target: 'missing' }] })
+  );
+  assert.throws(() =>
+    applyDynamicUiPatch(base, { version: 1, patch: [{ op: 'remove', target: 'panel' }] })
+  );
+  const removed = applyDynamicUiPatch(base, {
+    version: 1,
+    patch: [{ op: 'remove', target: 'summary' }],
+  });
+  assert.doesNotMatch(JSON.stringify(removed), /Alt/);
+});
+
+test('catalog supplies every component contract to the model exactly once', () => {
+  assert.equal(new Set(UI_COMPONENT_CATALOG.map((c) => c.type)).size, 20);
+  for (const component of UI_COMPONENT_CATALOG)
+    assert.ok(DYNAMIC_UI_INSTRUCTIONS.includes(component.signature));
 });
 
 console.log(`\n${passed} Dynamic UI tests passed`);

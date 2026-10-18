@@ -135,7 +135,11 @@ function turn(row: Record<string, unknown>): AssistantApiTurn {
   const context = JSON.parse(String(row.profile_json));
   // The stored answer keeps the model's ```plum-ui block; clients get the text
   // and the validated view separately (invalid views fall back to text).
-  const dynamic = extractDynamicUi(String(row.response));
+  const dynamic = extractDynamicUi(String(row.response), {
+    base: context.dynamicUiBase,
+    viewId: String(row.id),
+    streaming: row.status === 'running',
+  });
   return {
     id: String(row.id),
     seq: Number(row.seq),
@@ -528,6 +532,14 @@ export async function startApiTurn(
     ].slice(0, 20);
     const versions = await captureTaskSources(tx, userId, selectedIds);
     const images = await apiImagePayloads(userId, id, input.imageAssetIds ?? [], tx);
+    // Pin the validated base with this turn, so edits remain replayable even
+    // after the base leaves a history page. It is scoped to this owned chat.
+    const previousViews = await tx.all(
+      "SELECT * FROM assistant_api_turns WHERE chat_id=? AND status='completed' AND response LIKE ? ORDER BY seq DESC LIMIT 10",
+      id,
+      '%```plum-ui%'
+    );
+    const dynamicUiBase = previousViews.map((row) => turn(row).ui).find(Boolean) ?? null;
     const seq = Number(
       (
         await tx.get(
@@ -544,7 +556,7 @@ export async function startApiTurn(
       hash,
       input.prompt,
       model,
-      JSON.stringify(context),
+      JSON.stringify({ ...context, dynamicUiBase }),
       JSON.stringify(versions),
       JSON.stringify(input.imageAssetIds ?? []),
       now,
@@ -609,6 +621,16 @@ export async function startApiTurn(
           });
         }
         if (!budget) break;
+      }
+      const dynamicUiBase = JSON.parse(String(claimed.row.profile_json)).dynamicUiBase;
+      if (dynamicUiBase && !input.voice && chat.body.workflow !== 'research') {
+        messages.push({
+          role: 'assistant',
+          content:
+            'Latest interactive view (use its ids for a targeted update):\n```plum-ui\n' +
+            JSON.stringify(dynamicUiBase) +
+            '\n```',
+        });
       }
       messages.push({
         role: 'user',

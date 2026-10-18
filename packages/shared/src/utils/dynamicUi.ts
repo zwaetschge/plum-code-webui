@@ -7,6 +7,7 @@
  * through safe formulas (dynamicUiExpr). The server and the client both run
  * validateDynamicUi; anything invalid falls back to the plain text answer.
  */
+import { UI_COMPONENT_CATALOG } from './dynamicUiCatalog.js';
 import { parseExpr, TEMPLATE_PATTERN, type UiRow, type UiValue } from './dynamicUiExpr.js';
 
 export const DYNAMIC_UI_VERSION = 1;
@@ -133,6 +134,8 @@ export type UiView =
 
 export interface DynamicUiSpec {
   version: 1;
+  /** Server-assigned identity shared by incremental revisions. */
+  viewId?: string;
   title?: string;
   layout?: 'inline' | 'dashboard';
   state?: Record<string, UiValue>;
@@ -142,28 +145,7 @@ export interface DynamicUiSpec {
   root: UiNode;
 }
 
-export const UI_NODE_TYPES: readonly UiNodeType[] = [
-  'stack',
-  'row',
-  'grid',
-  'card',
-  'calculator',
-  'heading',
-  'text',
-  'markdown',
-  'badge',
-  'divider',
-  'kpi',
-  'slider',
-  'input',
-  'select',
-  'segmented',
-  'checkbox',
-  'button',
-  'table',
-  'chart',
-  'compare',
-];
+export const UI_NODE_TYPES: readonly UiNodeType[] = UI_COMPONENT_CATALOG.map((c) => c.type);
 
 const LIMITS = {
   nodes: 250,
@@ -196,6 +178,11 @@ export function validateDynamicUi(input: unknown): Result {
     if (!isObject(input)) fail('ui', 'Objekt erwartet');
     const spec = input as Record<string, unknown>;
     if (spec.version !== DYNAMIC_UI_VERSION) fail('version', `nur Version ${DYNAMIC_UI_VERSION}`);
+    if (
+      spec.viewId !== undefined &&
+      (typeof spec.viewId !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(spec.viewId))
+    )
+      fail('viewId', 'ungültige Ansichtskennung');
     const known = new Set<string>();
     const state = spec.state ?? {};
     if (!isObject(state)) fail('state', 'Objekt erwartet');
@@ -361,6 +348,9 @@ function checkNode(
   const type = node.type as UiNodeType;
   if (!UI_NODE_TYPES.includes(type)) fail(path, `unbekannte Komponente "${String(node.type)}"`);
   const at = `${path}<${type}>`;
+  const contract = UI_COMPONENT_CATALOG.find((c) => c.type === type)!;
+  for (const key of contract.required)
+    if (node[key] === undefined) fail(`${at}.${key}`, 'Pflichtfeld fehlt');
   if (node.id !== undefined) {
     if (typeof node.id !== 'string' || !NAME.test(node.id)) fail(`${at}.id`, 'ungültige ID');
     if (counter.ids.has(node.id as string)) fail(`${at}.id`, 'ID doppelt');
@@ -528,33 +518,257 @@ export interface ExtractedDynamicUi {
 const OPEN = '```' + DYNAMIC_UI_FENCE;
 
 /** Splits a model answer into its text and its validated UI description. */
-export function extractDynamicUi(response: string): ExtractedDynamicUi {
+export function extractDynamicUi(
+  response: string,
+  options: { base?: DynamicUiSpec | null; viewId?: string; streaming?: boolean } = {}
+): ExtractedDynamicUi {
   const start = response.indexOf(OPEN);
   if (start < 0) return { text: response, ui: null, error: null, pending: false };
   const bodyStart = response.indexOf('\n', start);
   const end = bodyStart < 0 ? -1 : response.indexOf('\n```', bodyStart);
   const before = response.slice(0, start).trimEnd();
-  if (end < 0) return { text: before, ui: null, error: null, pending: true };
-  const after = response
-    .slice(end + 4)
-    .replace(/^[^\n]*\n?/, '')
-    .trim();
-  const text = [before, after].filter(Boolean).join('\n\n');
-  let parsed: unknown;
+  const pending = end < 0;
+  const text = pending
+    ? before
+    : [
+        before,
+        response
+          .slice(end + 4)
+          .replace(/^[^\n]*\n?/, '')
+          .trim(),
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+  const empty = { text, ui: null, error: null, pending };
+  if (pending && options.streaming === false)
+    return {
+      ...empty,
+      pending: false,
+      error: 'Die interaktive Ansicht wurde nicht fertiggestellt.',
+    };
+  if (bodyStart < 0) return empty;
   try {
-    parsed = JSON.parse(response.slice(bodyStart + 1, end));
-  } catch {
+    const raw = response.slice(bodyStart + 1, pending ? undefined : end);
+    let parsed: unknown = pending ? parsePartialUiJson(raw) : JSON.parse(raw);
+    if (!isObject(parsed))
+      return pending ? empty : { ...empty, error: 'Interaktive Ansicht: Objekt erwartet.' };
+    if (Object.hasOwn(parsed, 'patch')) {
+      if (!options.base)
+        return pending
+          ? empty
+          : { ...empty, error: 'Keine vorherige Ansicht zum Ändern vorhanden.' };
+      parsed = applyDynamicUiPatch(options.base, parsed, pending);
+    } else parsed = { ...parsed, ...(options.viewId ? { viewId: options.viewId } : {}) };
+    const result = recoverDynamicUi(parsed, pending);
+    if (!result.ok)
+      return pending
+        ? empty
+        : { ...empty, error: `Interaktive Ansicht verworfen (${result.error}).` };
     return {
       text,
-      ui: null,
-      error: 'Die interaktive Ansicht war kein gültiges JSON.',
-      pending: false,
+      ui: result.spec,
+      error: result.warnings.length
+        ? `Einzelne Teile konnten nicht dargestellt werden (${result.warnings.join('; ')}).`
+        : null,
+      pending,
     };
+  } catch (error) {
+    return pending
+      ? empty
+      : {
+          ...empty,
+          error: `Interaktive Ansicht ungültig (${error instanceof Error ? error.message : 'JSON'}).`,
+        };
   }
-  const result = validateDynamicUi(parsed);
-  return result.ok
-    ? { text, ui: result.spec, error: null, pending: false }
-    : { text, ui: null, error: `Interaktive Ansicht verworfen (${result.error}).`, pending: false };
+}
+
+/** Parse only received JSON values. No evaluation or invented string contents. */
+export function parsePartialUiJson(source: string): unknown {
+  if (source.length > 50000) throw new Error('JSON zu gross');
+  let i = 0;
+  const ws = () => {
+    while (/\s/.test(source[i] ?? '') && i < source.length) i++;
+  };
+  const read = (depth: number): unknown => {
+    if (depth > 32) throw new Error('JSON zu tief');
+    ws();
+    if (source[i] === '{') {
+      i++;
+      const out: Record<string, unknown> = Object.create(null);
+      while (i < source.length) {
+        ws();
+        if (source[i] === '}') {
+          i++;
+          break;
+        }
+        const key = read(depth + 1);
+        if (typeof key !== 'string') break;
+        ws();
+        if (source[i++] !== ':') break;
+        const value = read(depth + 1);
+        if (value === undefined) break;
+        out[key] = value;
+        ws();
+        if (source[i] === ',') {
+          i++;
+          continue;
+        }
+        if (source[i] === '}') i++;
+        break;
+      }
+      return out;
+    }
+    if (source[i] === '[') {
+      i++;
+      const out: unknown[] = [];
+      while (i < source.length) {
+        ws();
+        if (source[i] === ']') {
+          i++;
+          break;
+        }
+        const value = read(depth + 1);
+        if (value === undefined) break;
+        out.push(value);
+        ws();
+        if (source[i] === ',') {
+          i++;
+          continue;
+        }
+        if (source[i] === ']') i++;
+        break;
+      }
+      return out;
+    }
+    const start = i;
+    if (source[i] === '"') {
+      i++;
+      let escaped = false;
+      while (i < source.length) {
+        const char = source[i++];
+        if (char === '"' && !escaped) return JSON.parse(source.slice(start, i));
+        escaped = char === '\\' && !escaped;
+      }
+      return undefined;
+    }
+    while (i < source.length && !/[\s,}\]]/.test(source[i] ?? '')) i++;
+    if (start === i) return undefined;
+    try {
+      return JSON.parse(source.slice(start, i));
+    } catch {
+      return undefined;
+    }
+  };
+  return read(0);
+}
+
+/** Structural errors stay local to a component; global data/formulas remain strict. */
+export function recoverDynamicUi(
+  input: unknown,
+  pending = false
+): { ok: true; spec: DynamicUiSpec; warnings: string[] } | { ok: false; error: string } {
+  if (!isObject(input)) return { ok: false, error: 'Objekt erwartet' };
+  const shell = { ...input, root: { type: 'divider' } };
+  const global = validateDynamicUi(shell);
+  if (!global.ok) return global;
+  const warnings: string[] = [];
+  let count = 0;
+  const ids = new Set<string>();
+  const walk = (value: unknown, path: string, depth: number): UiNode | null => {
+    if (++count > LIMITS.nodes || depth > LIMITS.depth)
+      throw new Error('Komponentengrenze überschritten');
+    if (!isObject(value)) return null;
+    const node = { ...value };
+    if (typeof node.id === 'string') {
+      if (ids.has(node.id)) {
+        warnings.push(`${path}: ID doppelt`);
+        delete node.id;
+      } else ids.add(node.id);
+    }
+    for (const key of ['children', 'inputs', 'outputs'])
+      if (Array.isArray(node[key])) {
+        node[key] = (node[key] as unknown[])
+          .map((child, index) => walk(child, `${path}.${key}[${index}]`, depth + 1))
+          .filter(Boolean);
+      }
+    if (node.type === 'calculator' && node.chart !== undefined) {
+      const chart = walk(node.chart, `${path}.chart`, depth + 1);
+      if (chart) node.chart = chart;
+      else delete node.chart;
+    }
+    const checked = validateDynamicUi({ ...shell, root: node });
+    if (checked.ok) return checked.spec.root;
+    if (pending) return null;
+    if (warnings.length < 10) warnings.push(`${path}: ${checked.error}`);
+    if (depth === 0) return null;
+    return { type: 'text', text: 'Dieser Teil der Ansicht ist nicht verfügbar.', tone: 'muted' };
+  };
+  try {
+    const root = walk(input.root, 'root', 0);
+    if (!root) return { ok: false, error: warnings[0] ?? 'Ansicht noch unvollständig' };
+    const result = validateDynamicUi({ ...input, root });
+    return result.ok ? { ...result, warnings } : result;
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
+}
+
+/** Bounded edits by component ID, never arbitrary object paths or executable code. */
+export function applyDynamicUiPatch(
+  base: DynamicUiSpec,
+  patch: Record<string, unknown>,
+  pending = false
+): DynamicUiSpec {
+  if (patch.version !== 1 || !Array.isArray(patch.patch) || patch.patch.length > 50)
+    throw new Error('Ungültige Änderungsbeschreibung');
+  const next = JSON.parse(JSON.stringify(base)) as DynamicUiSpec;
+  for (const key of ['state', 'computed', 'data', 'views'] as const)
+    if (patch[key] !== undefined) {
+      if (!isObject(patch[key])) throw new Error(`Ungültiges Feld ${key}`);
+      (next as unknown as Record<string, unknown>)[key] = {
+        ...next[key],
+        ...(patch[key] as object),
+      };
+    }
+  if (patch.title !== undefined) next.title = patch.title as string;
+  for (const operation of patch.patch) {
+    if (
+      !isObject(operation) ||
+      typeof operation.target !== 'string' ||
+      !['replace', 'append', 'remove'].includes(String(operation.op))
+    ) {
+      if (pending) break;
+      throw new Error('Ungültige Komponentenänderung');
+    }
+    if (operation.op !== 'remove' && !isObject(operation.node)) {
+      if (pending) break;
+      throw new Error('Komponente fehlt');
+    }
+    let found = false;
+    const edit = (node: UiNode): UiNode | null => {
+      if (node.id === operation.target) {
+        if (found) throw new Error('Mehrdeutiges Änderungsziel');
+        found = true;
+        if (operation.op === 'remove') return null;
+        if (operation.op === 'replace') return { id: node.id, ...(operation.node as UiNode) };
+        if (!('children' in node)) throw new Error('An dieses Ziel kann nichts angefügt werden');
+        return { ...node, children: [...node.children, operation.node as UiNode] };
+      }
+      const copy = { ...node } as UiNode & Record<string, unknown>;
+      for (const key of ['children', 'inputs', 'outputs'])
+        if (Array.isArray(copy[key])) copy[key] = (copy[key] as UiNode[]).map(edit).filter(Boolean);
+      if (copy.type === 'calculator' && copy.chart) copy.chart = edit(copy.chart) ?? undefined;
+      return copy;
+    };
+    const root = edit(next.root);
+    if (!found) {
+      if (pending) break;
+      throw new Error(`Änderungsziel ${operation.target} nicht gefunden`);
+    }
+    if (!root) throw new Error('Wurzel kann nicht entfernt werden');
+    next.root = root;
+  }
+  return next;
 }
 
 /** Formats a value for display; locale de-CH, currency codes like CHF or EUR. */
@@ -590,4 +804,20 @@ export function formatUiValue(value: UiValue | undefined, format?: string): stri
       maximumFractionDigits: Math.abs(value) >= 1000 ? 0 : 2,
     }).format(value);
   return String(value);
+}
+
+/** Retain only explicitly edited fields that still exist with a compatible type. */
+export function mergeDynamicUiState(
+  defaults: Record<string, UiValue>,
+  edits: Record<string, UiValue>
+): Record<string, UiValue> {
+  const state = { ...defaults };
+  for (const key of Object.keys(defaults)) {
+    if (
+      Object.hasOwn(edits, key) &&
+      (defaults[key] === null || edits[key] === null || typeof defaults[key] === typeof edits[key])
+    )
+      state[key] = edits[key]!;
+  }
+  return state;
 }

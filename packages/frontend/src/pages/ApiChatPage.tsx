@@ -1,3 +1,4 @@
+import { DynamicUiStateStore } from '@/components/assistant/dynamic-ui/state';
 import { orderChatApiProviders } from '@/lib/chatApiProviders';
 import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
 import {
@@ -28,7 +29,16 @@ import {
 } from 'lucide-react';
 import { LiveImageCapture } from '@/components/assistant/LiveImageCapture';
 import { ScreenHistoryDisclosure } from '@/components/assistant/ScreenHistory';
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import '@/components/assistant/dynamic-ui/dynamic-ui.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -183,6 +193,9 @@ export function ApiChatPage() {
       ...new Map([...older, ...(latest.data?.turns ?? [])].map((turn) => [turn.id, turn])).values(),
     ].sort((a, b) => a.seq - b.seq),
     running = turns.find((turn) => turn.status === 'running');
+  // The store lifetime follows the conversation, independent of its revisions.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const dynamicUiState = useMemo(() => new DynamicUiStateStore(), [chat?.id]);
   // Turns already there when a conversation opens stay still; later ones rise in.
   // After the start-page handoff the first turn rises too.
   const baseline = useRef<{ scope: string; ids: Set<string> } | null>(null);
@@ -640,7 +653,7 @@ export function ApiChatPage() {
                       </ReactMarkdown>
                     </div>
                   ) : null}
-                  {item.uiPending && (
+                  {item.uiPending && !item.ui && (
                     <div className="dui-pending" role="status">
                       <span>Interaktive Ansicht wird erstellt …</span>
                       <div className="dui-pending-bars" aria-hidden>
@@ -652,7 +665,13 @@ export function ApiChatPage() {
                   )}
                   {item.ui && (
                     <Suspense fallback={null}>
-                      <DynamicUi spec={item.ui} busy={busy || !!running} onSendMessage={sendText} />
+                      <DynamicUi
+                        spec={item.ui}
+                        stateStore={dynamicUiState}
+                        stateKey={item.id}
+                        busy={busy || !!running}
+                        onSendMessage={sendText}
+                      />
                     </Suspense>
                   )}
                   {item.uiError && item.status !== 'running' && (
