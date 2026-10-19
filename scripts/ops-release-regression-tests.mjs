@@ -42,6 +42,37 @@ async function setAge(file, isoTimestamp) {
   await utimes(file, time, time);
 }
 
+async function testConcurrentStatusWriters(tempDir) {
+  const statusFile = path.join(tempDir, 'concurrent-status.json');
+  const harness = path.join(tempDir, 'concurrent-status.sh');
+  await writeFile(
+    harness,
+    `#!/bin/sh
+REBUILD_ROBOT_SOURCE_ONLY=true . '${sidecarScript}'
+STATUS_FILE='${statusFile}'
+umask 077
+pids=""
+for writer in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  (write_status watching "writer-$writer" idle) &
+  pids="$pids $!"
+done
+for pid in $pids; do wait "$pid" || exit 1; done
+`
+  );
+  const result = run('sh', [harness]);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(JSON.parse(await readFile(statusFile, 'utf8')).status, 'watching');
+  assert.equal(
+    (await stat(statusFile)).mode & 0o777,
+    0o644,
+    'main container must be able to read the sidecar status under a restrictive umask'
+  );
+  assert.deepEqual(
+    (await readdir(tempDir)).filter((name) => name.startsWith('concurrent-status.json.tmp.')),
+    []
+  );
+}
+
 async function testRebuildRollback(tempDir) {
   execFileSync('sh', ['-n', sidecarScript]);
 
@@ -478,6 +509,7 @@ try {
     'plum\n/srv/plum/deploy/docker-compose.geekom.yml',
     'sidecar must target the active production project and allow disabling the legacy override'
   );
+  await testConcurrentStatusWriters(tempDir);
   await testRebuildRollback(tempDir);
   await testHubProductionGuards(tempDir);
   await testDockerProxyReleaseContract(tempDir);

@@ -604,7 +604,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     if (showVoiceSheet) VoicePickerSheet(api) { showVoiceSheet = false }
     if (showWorkspace) ChatWorkspaceSheet(
         owner = owner, api = api, providers = providers,
-        initialProfile = chat?.body?.get("profileId")?.jsonPrimitive?.contentOrNull ?: profileId,
+        initialProfile = if (chat == null) profileId else chat?.body?.get("profileId")?.jsonPrimitive?.contentOrNull,
         initialProject = if (chat == null) projectId else chat?.body?.get("projectId")?.jsonPrimitive?.contentOrNull,
         onDismiss = { showWorkspace = false },
         onChat = { resource -> showWorkspace = false; showChat(resource); currentOnChatSelected(resource.id) },

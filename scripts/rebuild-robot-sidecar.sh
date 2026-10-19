@@ -82,7 +82,8 @@ write_status() {
   # first, so the poller can read an empty or half-written document and treat a
   # healthy rebuild as malformed. Write to a temp file in the same directory and
   # rename it into place, which is atomic on the same filesystem.
-  _status_tmp="${STATUS_FILE}.tmp.$$"
+  # Background heartbeats inherit $$; each writer needs its own temp file.
+  _status_tmp="$(mktemp "${STATUS_FILE}.tmp.XXXXXX")"
   cat > "$_status_tmp" << EOF
 {
   "status": "${_status}",
@@ -93,6 +94,7 @@ write_status() {
   "container": true
 }
 EOF
+  chmod 0644 "$_status_tmp"
   mv -f "$_status_tmp" "$STATUS_FILE"
 }
 
