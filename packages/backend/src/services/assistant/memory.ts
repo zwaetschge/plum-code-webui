@@ -110,15 +110,25 @@ export async function memorySource(
       : null;
     if (body.profileId && !profile) return null;
     const p = profile ? JSON.parse(profile.body_json) : {};
+    const projectId = (Object.hasOwn(body, 'projectId') ? body.projectId : p.projectId) ?? null;
+    if (projectId) {
+      const project = await db.get(
+        "SELECT body_json FROM assistant_resources WHERE id=? AND user_id=? AND kind='project' AND archived=0",
+        projectId,
+        userId
+      );
+      // Separate conversations must not become shared project/global recall later.
+      if (!project || JSON.parse(project.body_json).contextMode === 'separate') return null;
+    }
     return {
       type: 'api',
       id,
       turnId,
       userText: row.prompt,
       createdAt: row.created_at,
-      projectId: p.projectId ?? null,
+      projectId,
       profileMode: p.memory,
-      hash: digest(JSON.stringify([row.prompt, p.projectId ?? null, p.memory ?? null])),
+      hash: digest(JSON.stringify([row.prompt, projectId, p.memory ?? null])),
       providerId: body.providerId,
       model: body.model,
     };

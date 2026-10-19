@@ -1,6 +1,6 @@
 import { usePersonalization } from '@/components/assistant/usePersonalization';
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUp, Paperclip, SlidersHorizontal, X, Mic, Loader2 } from 'lucide-react';
 import type { AssistantApiProvider, AssistantResource } from '@plum-code-webui/shared';
@@ -33,6 +33,18 @@ import { ChatWorkspace } from '@/components/assistant/ChatWorkspace';
 export function ChatPage() {
   const owner = useAuthStore((s) => s.user?.id);
   const location = useLocation();
+  const legacy = new URLSearchParams(location.search);
+  if (legacy.has('workspace'))
+    return (
+      <Navigate
+        replace
+        to={
+          legacy.get('workspace') === 'projects'
+            ? '/chat/projects' + (legacy.get('project') ? '/' + legacy.get('project') : '')
+            : '/chat/assistants'
+        }
+      />
+    );
   return <ChatAccountPage key={`${owner}:${location.key}`} owner={owner} />;
 }
 function ChatAccountPage({ owner }: { owner?: string }) {
@@ -83,6 +95,16 @@ function ChatAccountPage({ owner }: { owner?: string }) {
   const models = upstream?.models ?? [];
   const actualModel = models.includes(model) ? model : models[0];
   const chosenProfile = profiles.data?.find((p) => p.id === profile);
+  const initialModelApplied = useRef(false);
+  useEffect(() => {
+    if (initialModelApplied.current || !chosenProfile || !providers.data) return;
+    initialModelApplied.current = true;
+    const preferred = providers.data.find((p) => p.id === chosenProfile.body.apiProviderId);
+    if (preferred && !selection) {
+      setSelection(`api:${preferred.id}`);
+      setModel(String(chosenProfile.body.model || preferred.models[0] || ''));
+    }
+  }, [chosenProfile, providers.data, selection]);
   useEffect(() => {
     const element = input.current;
     if (element) {
@@ -198,9 +220,7 @@ function ChatAccountPage({ owner }: { owner?: string }) {
         <ChatWorkspace
           profileId={profile}
           projectId={project}
-          providers={providers.data}
           disabled={busy || !!created}
-          initialOpen={initial.has('workspace')}
           onProject={setProject}
           onProfile={(value) => {
             setProfile(value?.id ?? '');

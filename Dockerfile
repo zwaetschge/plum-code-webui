@@ -68,7 +68,7 @@ LABEL org.opencontainers.image.vendor="Plum Code WebUI"
 # fixes already available in the repository. The image scan gates the pipeline
 # on exactly those.
 RUN apk upgrade --no-cache && \
-    apk add --no-cache git bash docker-cli docker-cli-compose curl openssh-client unzip imagemagick gcompat libstdc++ libgcc python3 py3-pip py3-numpy pipx ripgrep py3-httpx jq coreutils tzdata chromium chromium-chromedriver nss freetype harfbuzz font-noto font-noto-cjk ttf-freefont xvfb blender-headless github-cli postgresql17-client ffmpeg
+    apk add --no-cache git bash docker-cli docker-cli-compose curl openssh-client unzip imagemagick gcompat libstdc++ libgcc python3 py3-pip py3-numpy pipx ripgrep procps-ng py3-httpx jq coreutils tzdata chromium chromium-chromedriver nss freetype harfbuzz font-noto font-noto-cjk ttf-freefont xvfb blender-headless github-cli postgresql17-client ffmpeg
 
 # plum-python: one venv with the PDF/TTS/screenshot toolkit skills expect
 # (`uv run --with pymupdf|edge-tts|playwright|pillow` upstream; uv cannot fetch

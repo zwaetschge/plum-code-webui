@@ -29,4 +29,12 @@
     <string name="chat_workspace_edit">Edit</string>
     <string name="chat_workspace_conversations">Project conversations</string>
     <string name="chat_workspace_empty_chats">No conversations yet. Select the project and send your first message.</string>
+    <string name="chat_workspace_new_chat">Neuer Chat</string>
+    <string name="chat_workspace_context">Kontext zwischen Gesprächen</string>
+    <string name="chat_workspace_shared">Gemeinsamer Projektkontext</string>
+    <string name="chat_workspace_separate">Getrennte Chatverläufe</string>
+    <string name="chat_workspace_context_hint">Bei getrennten Verläufen bleiben Projektanweisungen, Quellen und explizite Experten-Erinnerungen verfügbar.</string>
+    <string name="chat_workspace_shared_memories">Gemeinsame Erinnerungen</string>
+    <string name="chat_workspace_shared_memories_hint">Von dir gepflegte Notizen für alle dauerhaften Gespräche dieses Experten. Änderungen gelten auch in bestehenden Chats.</string>
+    <string name="chat_workspace_all_experts">Alle · neuer Chat mit Plum</string>
 </resources>

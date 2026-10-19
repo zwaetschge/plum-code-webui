@@ -1,6 +1,6 @@
 import { lazy, Suspense, useLayoutEffect, useRef, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LIBRARY_PARAM, LIBRARY_SECTIONS, libraryHref } from './libraryNav';
@@ -93,6 +93,19 @@ export function LibraryPanel() {
     navigate(`${location.pathname}${query ? `?${query}` : ''}`, { replace: true });
   };
 
+  if (slug === 'projects' || slug === 'profiles') {
+    const id = new URLSearchParams(location.search).get('resource');
+    return (
+      <Navigate
+        replace
+        to={
+          '/chat/' +
+          (slug === 'projects' ? 'projects' : 'assistants') +
+          (id ? '/' + encodeURIComponent(id) : '')
+        }
+      />
+    );
+  }
   return (
     <DialogPrimitive.Root open={!!active} modal={false} onOpenChange={(open) => !open && close()}>
       <DialogPrimitive.Portal>

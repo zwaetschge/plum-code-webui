@@ -313,6 +313,16 @@ export function ApiChatPage() {
         )
       ).data.data,
   });
+  const workspaceProject = useQuery({
+    queryKey: ['assistant', 'workspace-project', chat?.body.projectId, owner],
+    enabled: !!chat?.body.projectId,
+    queryFn: async () =>
+      (
+        await api.get<{ data: AssistantResource }>(
+          '/api/assistant/projects/' + chat?.body.projectId
+        )
+      ).data.data,
+  });
   const invoke = async (operation: () => Promise<void>) => {
     const captured = scope;
     setBusy(true);
@@ -452,7 +462,36 @@ export function ApiChatPage() {
   };
   return (
     <main className="plum-api-conversation">
-      {/* No top bar: the title shows in the sidebar, options sit in the `+` menu. */}
+      {(!!chat.body.projectId || !!chat.body.profileId) && (
+        <nav
+          aria-label="Gesprächs-Arbeitsbereich"
+          className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b px-4 py-2 text-xs text-muted-foreground"
+        >
+          {!!chat.body.projectId && (
+            <Link
+              className="underline underline-offset-4"
+              to={'/chat/projects/' + chat.body.projectId}
+            >
+              {workspaceProject.data?.title ?? 'Zum Projekt'}
+            </Link>
+          )}
+          {!!chat.body.profileId && (
+            <Link
+              className="underline underline-offset-4"
+              to={'/chat/assistants/' + chat.body.profileId}
+            >
+              {profile.data?.title ?? 'Zum Assistenten'}
+            </Link>
+          )}
+          {workspaceProject.data && (
+            <span>
+              {workspaceProject.data.body.contextMode === 'separate'
+                ? 'Getrennte Chatverläufe'
+                : 'Gemeinsamer Projektkontext'}
+            </span>
+          )}
+        </nav>
+      )}
       <h1 className="sr-only">{chat.title}</h1>
       <div
         ref={scroll}

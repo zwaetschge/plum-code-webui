@@ -25,7 +25,7 @@ export const LIBRARY_SECTIONS: LibrarySection[] = [
   { slug: 'sources', label: 'Quellen', icon: BookOpen },
   { slug: 'artifacts', label: 'Ergebnisse', icon: FileStack },
   { slug: 'memory', label: 'Gedächtnis', icon: Brain },
-  { slug: 'profiles', label: 'Profile', icon: UserRound },
+  { slug: 'profiles', label: 'Assistenten', icon: UserRound },
   { slug: 'agents', label: 'Agenten', icon: Bot },
   { slug: 'routines', label: 'Routinen', icon: Repeat },
   { slug: 'collections', label: 'Sammlungen', icon: Layers },
@@ -38,6 +38,8 @@ export const LIBRARY_PARAM = 'library';
 
 /** Current path with the library panel opened on `slug`. */
 export function libraryHref(pathname: string, search: string, slug: string) {
+  if (slug === 'projects' || slug === 'profiles')
+    return '/chat/' + (slug === 'projects' ? 'projects' : 'assistants');
   const params = new URLSearchParams(search);
   params.delete('resource');
   params.delete('revision');

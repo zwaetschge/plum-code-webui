@@ -19,6 +19,7 @@ const { apiChatProviders } = await import('../src/services/assistant/apiTranspor
 const { apiUsage } = await import('../src/services/assistant/apiUsage.js');
 const {
   createApiChat,
+  systemContext,
   updateApiChat,
   startApiTurn,
   apiChatTurns,
@@ -779,6 +780,150 @@ try {
   assert(!JSON.stringify(requests.at(-1)?.body.messages?.[0]).includes('BOB PROJECT'));
   console.log(
     'PASS: direct project context, explicit detach, project switch/isolation, ownership and pinned assistant knowledge'
+  );
+  const workspaceProject = await createResource(
+    'api-alice',
+    'project',
+    'Workspace sharing',
+    BODY_SCHEMAS.project.parse({ instructions: 'WORKSPACE INSTRUCTIONS', contextMode: 'shared' })
+  );
+  const expert = await createResource(
+    'api-alice',
+    'profile',
+    'Prompt expert',
+    BODY_SCHEMAS.profile.parse({
+      instructions: 'PINNED EXPERT PROMPT',
+      sharedMemories: 'OLD EXPERT NOTES',
+    })
+  );
+  const workspaceChat = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    profileId: expert.id,
+    projectId: workspaceProject.id,
+  });
+  const sibling = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    profileId: null,
+    projectId: workspaceProject.id,
+  });
+  const excluded = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    profileId: null,
+    projectId: otherProject.id,
+  });
+  const archivedSibling = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    profileId: null,
+    projectId: workspaceProject.id,
+  });
+  const temporarySibling = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    profileId: null,
+    temporary: true,
+    projectId: null,
+  });
+  const foreignSibling = await createResource(
+    'api-bob',
+    'api-chat',
+    'Foreign chat',
+    BODY_SCHEMAS['api-chat'].parse({
+      providerId: input.providerId,
+      model: input.model,
+      projectId: null,
+    })
+  );
+  for (const [resource, marker] of [
+    [sibling, 'SHARED SIBLING FACT'],
+    [excluded, 'OTHER PROJECT FACT'],
+    [archivedSibling, 'ARCHIVED SIBLING FACT'],
+    [temporarySibling, 'TEMPORARY SIBLING FACT'],
+    [foreignSibling, 'OTHER OWNER FACT'],
+  ] as const) {
+    await run(
+      "INSERT INTO assistant_api_turns(id,chat_id,seq,payload_hash,prompt,response,status,model,profile_json,created_at,updated_at,expires_at) VALUES (?,?,1,'workspace-fixture',?,?,'completed','gpt-5.5','{}',?,?,?)",
+      randomUUID(),
+      resource.id,
+      marker,
+      marker,
+      stamp,
+      stamp,
+      '2999-01-01T00:00:00.000Z'
+    );
+  }
+  // Malformed legacy owner/temporary bindings must still never enter shared excerpts.
+  await run(
+    "UPDATE assistant_resources SET body_json=(body_json::jsonb || jsonb_build_object('projectId', ?::text))::text WHERE id=?",
+    workspaceProject.id,
+    foreignSibling.id
+  );
+  await run(
+    "UPDATE assistant_resources SET body_json=(body_json::jsonb || jsonb_build_object('projectId', ?::text))::text WHERE id=?",
+    workspaceProject.id,
+    temporarySibling.id
+  );
+  await archiveResource('api-alice', archivedSibling.id, 1);
+  await reviseResource(
+    'api-alice',
+    expert.id,
+    1,
+    expert.title,
+    BODY_SCHEMAS.profile.parse({
+      ...expert.body,
+      instructions: 'NEW UNPINNED PROMPT',
+      sharedMemories: 'LIVE EXPERT NOTES',
+    })
+  );
+  const sharedContext = (await systemContext('api-alice', workspaceChat)).system;
+  assert(sharedContext.includes('PINNED EXPERT PROMPT'));
+  assert(!sharedContext.includes('NEW UNPINNED PROMPT'));
+  assert(sharedContext.includes('LIVE EXPERT NOTES'));
+  assert(!sharedContext.includes('OLD EXPERT NOTES'));
+  assert(sharedContext.includes('SHARED SIBLING FACT'));
+  for (const excludedMarker of [
+    'OTHER PROJECT FACT',
+    'ARCHIVED SIBLING FACT',
+    'TEMPORARY SIBLING FACT',
+    'OTHER OWNER FACT',
+  ])
+    assert(!sharedContext.includes(excludedMarker), excludedMarker);
+  await reviseResource(
+    'api-alice',
+    workspaceProject.id,
+    1,
+    workspaceProject.title,
+    BODY_SCHEMAS.project.parse({ ...workspaceProject.body, contextMode: 'separate' })
+  );
+  const separateContext = (await systemContext('api-alice', workspaceChat)).system;
+  assert(!separateContext.includes('SHARED SIBLING FACT'));
+  assert(separateContext.includes('WORKSPACE INSTRUCTIONS'));
+  assert(separateContext.includes('LIVE EXPERT NOTES'));
+  assert(separateContext.includes('Project chats are separate'));
+  const { memorySource } = await import('../src/services/assistant/memory.js');
+  const siblingTurn = await get('SELECT id FROM assistant_api_turns WHERE chat_id=?', sibling.id);
+  assert.equal(
+    await memorySource('api-alice', 'api', sibling.id, siblingTurn.id),
+    null,
+    'separate chats do not feed shared recall'
+  );
+  await reviseResource(
+    'api-alice',
+    workspaceProject.id,
+    2,
+    workspaceProject.title,
+    BODY_SCHEMAS.project.parse({ ...workspaceProject.body, contextMode: 'shared' })
+  );
+  assert.equal(
+    (await memorySource('api-alice', 'api', sibling.id, siblingTurn.id))?.projectId,
+    workspaceProject.id,
+    'explicit project binding determines memory scope'
+  );
+  console.log(
+    'PASS: shared/separate project excerpts; owner, archive, temporary and cross-project exclusion; live expert notes with pinned prompt; correctly scoped memory learning'
   );
   await archiveResource('api-alice', project.id, 1);
   const archived = await startApiTurn('api-alice', contextual.id, {

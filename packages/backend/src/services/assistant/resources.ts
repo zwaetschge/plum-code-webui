@@ -71,6 +71,7 @@ export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
     writingStyleSkill: z.string().min(1).max(100).nullable().optional(),
   }),
   profile: z.object({
+    sharedMemories: z.string().max(30000).default(''),
     instructions: z.string().max(30000).default(''),
     provider: provider.default('codex'),
     model: z.string().max(200).nullable().optional(),
@@ -98,6 +99,7 @@ export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
     sourceIds: z.array(z.string().max(200)).max(20).default([]),
   }),
   project: z.object({
+    contextMode: z.enum(['shared', 'separate']).default('shared'),
     description: z.string().max(30000).default(''),
     instructions: z.string().max(30000).default(''),
   }),

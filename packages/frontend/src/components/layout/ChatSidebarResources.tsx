@@ -93,19 +93,24 @@ export function ChatSidebarResources({
   return (
     <>
       <nav aria-label="Chat-Arbeitsbereiche">
-        <Link
-          to="/chat?workspace=assistants"
+        <NavLink
+          to="/chat/assistants"
           onClick={onNavigate}
-          className={row}
+          className={({ isActive }) => cn(row, isActive && 'is-active')}
           title="Assistenten (Gems / Custom GPTs)"
         >
           <Bot className="h-4 w-4 shrink-0" />
           {!collapsed && 'Assistenten'}
-        </Link>
-        <Link to="/chat?workspace=projects" onClick={onNavigate} className={row} title="Projekte">
+        </NavLink>
+        <NavLink
+          to="/chat/projects"
+          onClick={onNavigate}
+          className={({ isActive }) => cn(row, isActive && 'is-active')}
+          title="Projekte"
+        >
           <FolderOpen className="h-4 w-4 shrink-0" />
           {!collapsed && 'Projekte'}
-        </Link>
+        </NavLink>
       </nav>
       <nav aria-label="Gesprächsverlauf" className="sidebar-chat-history">
         {groups.map((group) => (

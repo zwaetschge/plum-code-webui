@@ -116,6 +116,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val outbox = remember(owner) { AssistantApiOutbox(api, owner) }
     var providers by remember { mutableStateOf<List<AssistantApiProvider>>(emptyList()) }
     var profiles by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
+    var projects by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
     var sources by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
     var chat by remember { mutableStateOf<AssistantResource?>(null) }
     var turns by remember { mutableStateOf<List<AssistantApiTurn>>(emptyList()) }
@@ -174,6 +175,15 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val running = turns.any { it.status == "running" }
     LaunchedEffect(owner, chatId) { readText = null }
     fun checkOwner() { if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed") }
+    fun refreshWorkspaceResources() {
+        scope.launch {
+            try {
+                val profileResult = api.getAssistantResources("profiles"); checkOwner(); profiles = profileResult.data.orEmpty()
+                val projectResult = api.getAssistantResources("projects"); checkOwner(); projects = projectResult.data.orEmpty()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { checkOwner(); error = failure.message }
+        }
+    }
     val currentOnChatSelected by rememberUpdatedState(onChatSelected)
     fun showChat(resource: AssistantResource?) { chat = resource; turns = emptyList(); prompt = ""; imageIds = emptyList() }
     // The workspace picked another conversation (history column, restored
@@ -222,6 +232,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             providers = catalog.data.orEmpty()
             providerId = providers.firstOrNull()?.id.orEmpty(); model = providers.firstOrNull()?.models?.firstOrNull().orEmpty()
             val profileResult = api.getAssistantResources("profiles"); checkOwner(); profiles = profileResult.data.orEmpty()
+            val projectResult = api.getAssistantResources("projects"); checkOwner(); projects = projectResult.data.orEmpty()
             val sourceResult = api.getAssistantResources("sources"); checkOwner(); sources = sourceResult.data.orEmpty()
             runCatching { api.getStyleLibrary() }.getOrNull()?.data?.let { checkOwner(); writingStyles = it.writingStyles }
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -343,9 +354,12 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val researchChat = chat?.body?.get("workflow")?.jsonPrimitive?.contentOrNull == "research"
     val activeWritingStyle = chat?.let { it.body["writingStyleSkill"]?.jsonPrimitive?.contentOrNull }
         ?: if (chat != null) null else if (newChatStyleSet) newChatStyle else personalization?.defaultWritingStyle?.ifBlank { null }
-    Column(Modifier.fillMaxSize().padding(top = topInset).navigationBarsPadding().imePadding().padding(horizontal = 16.dp)) {
+    if (!showWorkspace) Column(Modifier.fillMaxSize().padding(top = topInset).navigationBarsPadding().imePadding().padding(horizontal = 16.dp)) {
         TextButton(enabled = !busy && !running, onClick = { showWorkspace = true }) {
-            Text(stringResource(R.string.chat_workspace_title), maxLines = 2)
+            val boundProfile = if (chat == null) profileId else chat?.body?.get("profileId")?.jsonPrimitive?.contentOrNull
+            val boundProject = if (chat == null) projectId else chat?.body?.get("projectId")?.jsonPrimitive?.contentOrNull
+            val labels = listOfNotNull(projects.firstOrNull { it.id == boundProject }?.title, profiles.firstOrNull { it.id == boundProfile }?.title)
+            Text(if (labels.isEmpty()) stringResource(R.string.chat_workspace_title) else labels.joinToString(" · "), maxLines = 2)
         }
         // Switching chats: the old conversation leaves quickly, the new one
         // settles in. Each slot renders its own snapshot, so the leaving chat
@@ -602,12 +616,24 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         }
     }
     if (showVoiceSheet) VoicePickerSheet(api) { showVoiceSheet = false }
-    if (showWorkspace) ChatWorkspaceSheet(
+    if (showWorkspace) ChatWorkspaceScreen(
+        modifier = Modifier.padding(top = topInset).navigationBarsPadding().imePadding(),
         owner = owner, api = api, providers = providers,
         initialProfile = if (chat == null) profileId else chat?.body?.get("profileId")?.jsonPrimitive?.contentOrNull,
         initialProject = if (chat == null) projectId else chat?.body?.get("projectId")?.jsonPrimitive?.contentOrNull,
-        onDismiss = { showWorkspace = false },
+        onDismiss = { showWorkspace = false; refreshWorkspaceResources() },
         onChat = { resource -> showWorkspace = false; showChat(resource); currentOnChatSelected(resource.id) },
+        onNewChat = { selected, project ->
+            showChat(null); currentOnChatSelected(null)
+            profileId = selected?.id; projectId = project
+            profiles = profiles.filter { it.id != selected?.id } + listOfNotNull(selected)
+            val preferred = providers.firstOrNull { it.id == selected?.body?.get("apiProviderId")?.jsonPrimitive?.contentOrNull }
+            if (preferred != null) {
+                providerId = preferred.id
+                model = selected?.body?.get("model")?.jsonPrimitive?.contentOrNull?.takeIf { it in preferred.models } ?: preferred.models.firstOrNull().orEmpty()
+            }
+            showWorkspace = false; refreshWorkspaceResources()
+        },
         onApply = { selected, project ->
             val current = chat
             if (current == null) {
@@ -618,7 +644,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                     providerId = preferred.id
                     model = selected?.body?.get("model")?.jsonPrimitive?.contentOrNull?.takeIf { it in preferred.models } ?: preferred.models.firstOrNull().orEmpty()
                 }
-                showWorkspace = false
+                showWorkspace = false; refreshWorkspaceResources()
             } else scope.launch {
                 busy = true; error = null
                 try {
@@ -631,7 +657,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                         put("sourceIds", current.body["sourceIds"] as? JsonArray ?: JsonArray(emptyList()))
                     })
                     checkOwner(); check(response.success) { response.error?.message.orEmpty() }
-                    chat = requireNotNull(response.data); refresh++; showWorkspace = false
+                    chat = requireNotNull(response.data); refresh++; showWorkspace = false; refreshWorkspaceResources()
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (failure: Exception) { error = failure.message }
                 finally { busy = false }
