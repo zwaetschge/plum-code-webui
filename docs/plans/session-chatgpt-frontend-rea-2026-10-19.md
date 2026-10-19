@@ -47,8 +47,8 @@ The user's desired semantics take precedence over copying ChatGPT limitations:
 - [x] Complete backend context modes and expert notes. Project-bound automatic memories now follow the explicit chat project; separate conversations do not feed shared recall.
 - [x] Verify account isolation, shared/separate history, expert notes and ownership with the existing backend integration suite.
 - [x] Inspect rendered desktop and narrow WebUI paths, including the wider mobile expert selector.
-- [ ] Build Android through android-builder and verify/copy the APK. Installation remains separately authorised.
-- [ ] Roll out through the production Geekom repair-bot path, preserving unrelated working-tree edits.
+- [x] Build Android through android-builder and verify/copy the APK. Installation remains separately authorised.
+- [x] Roll out through the production Geekom repair-bot path, preserving unrelated working-tree edits.
 
 Research completed first, then implementation continued in this same task. Rollout and APK evidence are recorded below when verified. Existing `AGENTS.md` and `utils/piConfig.ts` changes belong to other work and must be preserved.
 
@@ -58,4 +58,25 @@ Research completed first, then implementation continued in this same task. Rollo
 - Existing chat view now shows its project, expert and project context mode with links back. New-chat deep links honour the expert's preferred API model.
 - Android `ChatWorkspaceScreen` replaces the modal sheet, with list/detail/editor navigation, system Back, project chat filtering, sources, context choice, expert notes and a dedicated new-chat action that does not reassign the existing conversation.
 - Backend API chat integration suite passes, including live notes versus pinned instructions, cross-owner/project, archived/temporary exclusions and switching shared/separate context. Long-term memory regression: 38 checks pass.
-- Final WebUI browser journeys pass at 1440/390px, including browser Back and legacy library redirects, with no dialogs, JavaScript errors or horizontal overflow. Screenshot inspection prompted a wider mobile expert selector. Both typechecks pass. Android build and production rollout remain in progress.
+- Final WebUI browser journeys pass at 1440/390px, including browser Back and legacy library redirects, with no dialogs, JavaScript errors or horizontal overflow. Screenshot inspection prompted a wider mobile expert selector. Both typechecks pass. Android build and production rollout are now verified; details below.
+
+## Final delivery and verification
+
+Implementation commit: `49bc09c`. Both tracked foreign edits (`AGENTS.md`, backend `utils/piConfig.ts`) remain untouched and uncommitted.
+
+Production image `ec6c00b362df8251a3c43b4a54c9b2674216480415a65c57adb82b6cabe4f917` is healthy. Official repair-bot completed readiness at 20:14:35 UTC. Three compiled backend modules, matching source hashes, preserved runtime piConfig/native manifests and functioning `procps-ng` were verified. Public Firefox navigation renders `/chat/projects` and `/chat/assistants/new` with no dialogs or alerts; existing signed-in browser requests returned HTTP 200 for readiness and new assets. Public entry `index-_GE3hqSt.js` and workspace chunk `ChatWorkspacePage-pN_lTHS4.js` match the image hashes. Production resources were not mutated during validation. The unauthenticated `/mobile` request returns 401; the verification correctly uses the already authenticated Firefox session rather than disabling auth or extracting credentials.
+
+Android builder reports `built` at 20:19:52 UTC. Fresh APK mtime 20:16:39 UTC; 47,855,723 bytes. Delivered to `/mnt/user/Zwischenspeicher/plum-code-android-app-debug.apk`. Original/copy SHA-256: `4b121409c87e65c357c773cf05de9da1f5c437ba8d47aea5d4edc5cd64c770f8`. All four modified source/resource files match the builder workspace. All 37 fresh unit-test report files total 91 tests, zero errors/failures/skips. Project claim released. No physical-device install or UI QA was authorised/performed.
+
+The main container restart left the two build-monitor agents in `pending_init` and their persisted progress summaries stale. The root agent completed final checks directly against the live Docker image, Android MCP state and fresh artifacts. Future monitoring should not infer continued building from a pre-restart status file. The Android listener log is partial; success is independently established by current builder status, fresh matching APK and fresh test reports.
+
+Evidence:
+
+- `.logs/chat-workspace-pages-validation.json`
+- `.logs/chat-workspace-pages-browser.log`
+- `.logs/chat-workspace-pages-rollout-result.json`
+- `.logs/chat-workspace-pages-android-result.json`
+- `.screenshots/chat-workspace-production-editor.jpg` (actual public production editor; private chat sidebar excluded)
+- `.screenshots/chat-workspace-project-1440.png`, `.screenshots/chat-workspace-project-390.png` (real rendered components with isolated test data)
+
+Remaining limits: shared project context uses the latest eight completed turn excerpts from other eligible project chats, bounded to 800 prompt / 1200 response characters per turn. Expert shared memories are explicitly maintained user notes, not a newly implemented automatic expert-learning system. Existing prompt/knowledge revisions remain pinned; expert notes and project context settings are live for subsequent responses. Physical Android UI testing remains open. The unrelated general runtime PyMuPDF/Python 3.14 build issue remains; this release uses the documented verified runtime plus the small REA prerequisite package.
