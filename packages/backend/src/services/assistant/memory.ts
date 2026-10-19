@@ -764,7 +764,7 @@ export async function projectChatReferences(
      WHERE r.user_id=? AND r.kind='api-chat' AND r.archived=0 AND r.id<>?
        AND r.body_json::jsonb->>'projectId'=?
        AND COALESCE((r.body_json::jsonb->>'temporary')::boolean,false)=false
-       AND t.status='completed'
+       AND t.status='completed' AND t.hidden_by IS NULL
      ORDER BY relevance DESC,t.created_at DESC,t.id DESC LIMIT 8`,
     terms,
     terms || 'unusedtoken',

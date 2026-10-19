@@ -362,6 +362,76 @@
 .plum-api-answer {
   padding: 20px 0;
 }
+/* The edit pencil sits left of the user bubble and appears on hover, like ChatGPT. */
+.plum-api-user-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.plum-api-user-row > .plum-api-user {
+  margin-left: 0;
+}
+.plum-api-user-edit-button {
+  margin-top: 10px;
+  display: inline-flex;
+  height: 30px;
+  width: 30px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: hsl(var(--muted-foreground));
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.plum-api-user-row:hover .plum-api-user-edit-button,
+.plum-api-user-edit-button:focus-visible {
+  opacity: 1;
+}
+.plum-api-user-edit-button:hover {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+@media (hover: none) {
+  .plum-api-user-edit-button {
+    opacity: 1;
+  }
+}
+.plum-api-user-edit {
+  width: 100%;
+  max-width: 100%;
+}
+.plum-api-user-edit textarea {
+  width: 100%;
+  resize: vertical;
+  background: transparent;
+  outline: none;
+  font: inherit;
+}
+.plum-version-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--muted-foreground));
+}
+.plum-version-switcher button {
+  display: inline-flex;
+  height: 28px;
+  width: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+.plum-version-switcher button:hover:not(:disabled) {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+.plum-version-switcher button:disabled {
+  opacity: 0.35;
+}
 .plum-api-answer .prose {
   font-size: 15px;
   line-height: 1.8;

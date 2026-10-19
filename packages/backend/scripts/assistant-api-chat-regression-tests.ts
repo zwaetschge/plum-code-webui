@@ -965,6 +965,105 @@ try {
   console.log(
     'PASS: ChatGPT project memory (default vs project-only) for saved memories and history; project chats reference each other in both modes; owner, archive, temporary and cross-project exclusion; legacy expert notes and separate mode'
   );
+  // ChatGPT-style regenerate/edit in place with a version switcher, and real deletion.
+  const { activateApiTurnVersion, deleteApiChat, updateApiChatMeta } =
+    await import('../src/services/assistant/apiChats.js');
+  const versioned = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    profileId: null,
+    projectId: null,
+    sourceIds: [],
+  });
+  const ask = async (prompt: string, regenerate?: string) => {
+    const started = await startApiTurn('api-alice', versioned.id, {
+      commandId: randomUUID(),
+      expectedRevision: versioned.revision,
+      prompt,
+      ...(regenerate ? { regenerate } : {}),
+    });
+    await settled('api-alice', versioned.id, started.id);
+    return started.id;
+  };
+  const visible = async () => (await apiChatTurns('api-alice', versioned.id)).turns;
+  const first = await ask('ERSTE FRAGE');
+  const second = await ask('ZWEITE FRAGE');
+  const again = await ask('ZWEITE FRAGE', second);
+  assert.deepEqual(
+    (await visible()).map((t) => t.id),
+    [first, again],
+    'regenerate stays in the same chat and replaces the answer'
+  );
+  assert.deepEqual((await visible())[1]!.versions, [second, again]);
+  const resent = JSON.stringify(requests.at(-1)?.body.messages);
+  assert.equal(resent.split('ZWEITE FRAGE').length - 1, 1, 'hidden version is not resent');
+  assert(resent.includes('ERSTE FRAGE'));
+  const edited = await ask('ERSTE FRAGE GEÄNDERT', first);
+  assert.deepEqual(
+    (await visible()).map((t) => t.id),
+    [edited],
+    'editing an earlier message hides the thread that followed it'
+  );
+  assert(!JSON.stringify(requests.at(-1)?.body.messages).includes('ZWEITE FRAGE'));
+  await activateApiTurnVersion('api-alice', versioned.id, first);
+  assert.deepEqual(
+    (await visible()).map((t) => [t.id, t.versions?.length ?? 1]),
+    [
+      [first, 2],
+      [again, 2],
+    ],
+    'switching back restores the whole earlier thread'
+  );
+  await activateApiTurnVersion('api-alice', versioned.id, second);
+  assert.deepEqual(
+    (await visible()).map((t) => t.id),
+    [first, second]
+  );
+  await activateApiTurnVersion('api-alice', versioned.id, edited);
+  assert.deepEqual(
+    (await visible()).map((t) => t.id),
+    [edited]
+  );
+  await activateApiTurnVersion('api-alice', versioned.id, first);
+  assert.deepEqual(
+    (await visible()).map((t) => t.id),
+    [first, second],
+    'each version keeps the follow-up it last showed'
+  );
+  await assert.rejects(
+    startApiTurn('api-alice', versioned.id, {
+      commandId: randomUUID(),
+      expectedRevision: versioned.revision,
+      prompt: 'X',
+      regenerate: again,
+    }),
+    /nicht mehr sichtbar/
+  );
+  const renamed = await updateApiChatMeta('api-alice', versioned.id, {
+    expectedRevision: versioned.revision,
+    title: 'Umbenannt',
+    projectId: workspaceProject.id,
+  });
+  assert.equal(renamed.title, 'Umbenannt');
+  assert.equal(renamed.body.projectId, workspaceProject.id);
+  assert.equal(renamed.body.model, versioned.body.model);
+  await assert.rejects(
+    updateApiChatMeta('api-alice', versioned.id, {
+      expectedRevision: renamed.revision,
+      projectId: foreignProject.id,
+    })
+  );
+  await assert.rejects(deleteApiChat('api-bob', versioned.id), /nicht gefunden/);
+  await deleteApiChat('api-alice', versioned.id);
+  await assert.rejects(apiChatTurns('api-alice', versioned.id));
+  assert.equal(
+    (await get('SELECT COUNT(*) AS n FROM assistant_api_turns WHERE chat_id=?', versioned.id)).n,
+    0,
+    'deletion removes all versions'
+  );
+  console.log(
+    'PASS: regenerate and edit in place with version switching that restores whole threads; hidden versions excluded from context; owner-checked permanent deletion'
+  );
   await archiveResource('api-alice', project.id, 1);
   const archived = await startApiTurn('api-alice', contextual.id, {
     commandId: randomUUID(),

@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { ModelChatMenu, ModelChatRename } from './ModelChatMenu';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { isPlainClick, rememberLibraryOrigin, transitionPane } from '@/lib/motion/navigation';
 import { LIBRARY_PARAM, LIBRARY_SECTIONS, libraryHref } from './libraryNav';
@@ -22,7 +23,7 @@ const HISTORY_GROUPS = ['Heute', 'Gestern', 'Älter'] as const;
 type HistoryGroup = (typeof HISTORY_GROUPS)[number];
 
 type HistoryEntry =
-  | { kind: 'model'; id: string; title: string; time: string }
+  | { kind: 'model'; id: string; title: string; time: string; chat: AssistantResource }
   | { kind: 'session'; id: string; title: string; time: string; session: Session };
 
 function historyGroup(time: string, todayStart: number): HistoryGroup {
@@ -60,6 +61,12 @@ export function ChatSidebarResources({
       (await api.get<{ data: AssistantResource[] }>('/api/assistant/api-chats')).data.data,
     refetchInterval: 30000,
   });
+  const projects = useQuery({
+    queryKey: ['assistant', 'resources', 'projects', owner],
+    queryFn: async () =>
+      (await api.get<{ data: AssistantResource[] }>('/api/assistant/projects?limit=100')).data.data,
+  });
+  const [renaming, setRenaming] = useState('');
   const query = search.trim().toLocaleLowerCase();
   const entries: HistoryEntry[] = [
     ...(chats.data ?? []).map(
@@ -68,6 +75,7 @@ export function ChatSidebarResources({
         id: chat.id,
         title: chat.title,
         time: chat.updatedAt,
+        chat,
       })
     ),
     ...chatSessions.map(
@@ -120,28 +128,45 @@ export function ChatSidebarResources({
               entry.kind === 'session' ? (
                 renderSession(entry.session)
               ) : (
-                <NavLink
+                <div
                   key={`model-${entry.id}`}
-                  to={`/chat/model/${entry.id}`}
-                  onClick={(event) => {
-                    // Between model chats the pane swaps through a view transition.
-                    const to = `/chat/model/${entry.id}`;
-                    if (
-                      isPlainClick(event) &&
-                      location.pathname !== to &&
-                      transitionPane(() => navigate(to))
-                    )
-                      event.preventDefault();
-                    onNavigate();
-                  }}
-                  title={entry.title}
-                  className={({ isActive }) =>
-                    cn(row, isActive && 'is-active', collapsed && 'justify-center')
-                  }
+                  className="sidebar-session-row group/session relative flex items-center"
                 >
-                  <MessageCircle className="h-4 w-4 shrink-0" />
-                  {!collapsed && <span className="truncate">{entry.title}</span>}
-                </NavLink>
+                  {renaming === entry.id && !collapsed ? (
+                    <ModelChatRename chat={entry.chat} onDone={() => setRenaming('')} />
+                  ) : (
+                    <>
+                      <NavLink
+                        to={`/chat/model/${entry.id}`}
+                        onClick={(event) => {
+                          // Between model chats the pane swaps through a view transition.
+                          const to = `/chat/model/${entry.id}`;
+                          if (
+                            isPlainClick(event) &&
+                            location.pathname !== to &&
+                            transitionPane(() => navigate(to))
+                          )
+                            event.preventDefault();
+                          onNavigate();
+                        }}
+                        title={entry.title}
+                        className={({ isActive }) =>
+                          cn(row, isActive && 'is-active', collapsed && 'justify-center')
+                        }
+                      >
+                        <MessageCircle className="h-4 w-4 shrink-0" />
+                        {!collapsed && <span className="truncate">{entry.title}</span>}
+                      </NavLink>
+                      {!collapsed && (
+                        <ModelChatMenu
+                          chat={entry.chat}
+                          projects={projects.data ?? []}
+                          onRename={() => setRenaming(entry.id)}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
               )
             )}
           </div>

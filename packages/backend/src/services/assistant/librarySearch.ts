@@ -38,7 +38,7 @@ export async function searchAssistantLibrary(
     UNION ALL
     SELECT 'api-turn',t.id,'api-chat',r.title,r.revision,t.updated_at,t.prompt || E'\n' || t.response,'chats',r.id,NULL::text,t.seq
     FROM assistant_api_turns t JOIN assistant_resources r ON r.id=t.chat_id
-    WHERE r.user_id=? AND r.kind='api-chat' AND r.archived=0 AND COALESCE(r.body_json::jsonb->>'temporary','false')<>'true'
+    WHERE r.user_id=? AND r.kind='api-chat' AND r.archived=0 AND t.hidden_by IS NULL AND COALESCE(r.body_json::jsonb->>'temporary','false')<>'true'
     UNION ALL
     SELECT 'session',s.id,'session',s.name,NULL::bigint,s.updated_at,'',CASE WHEN s.surface='code' THEN 'code' ELSE 'chats' END,NULL::text,NULL::text,NULL::bigint
     FROM sessions s LEFT JOIN assistant_session_bindings b ON b.session_id=s.id

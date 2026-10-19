@@ -29,6 +29,8 @@ export interface AssistantApiTurn {
   profileRevision: number | null;
   sourceVersions: Array<{ id: string; revision: number }>;
   imageAssetIds?: string[];
+  /** All versions of this turn (regenerated or edited in place), oldest first. */
+  versions?: string[];
   /** Validated interactive view the model attached to this answer (Dynamic UI v1). */
   ui?: import('../utils/dynamicUi.js').DynamicUiSpec | null;
   /** Why an attached view was rejected; the text answer is shown instead. */

@@ -34,6 +34,12 @@ interface AssistantApi {
     suspend fun getAssistantApiProviders(): ApiResponse<List<AssistantApiProvider>>
     suspend fun getAssistantApiTurns(id: String, beforeSeq: Long? = null): ApiResponse<AssistantApiHistory>
     suspend fun getAssistantApiImages(id: String): ApiResponse<List<AssistantApiImage>>
+    /** Show another version of a regenerated/edited turn (with the thread that followed it). */
+    suspend fun activateAssistantApiTurn(id: String, turnId: String): ApiResponse<JsonObject>
+    /** Rename and/or move a model chat; `projectId` JsonNull removes it from its project. */
+    suspend fun updateAssistantApiChatMeta(id: String, meta: JsonObject): ApiResponse<AssistantResource>
+    /** Permanently delete a model chat with all versions. */
+    suspend fun deleteAssistantApiChat(id: String): ApiResponse<JsonObject>
     suspend fun getAssistantApiImage(id: String, assetId: String): ByteArray
     suspend fun uploadAssistantApiImage(owner: String, id: String, filename: String, mimeType: String, bytes: ByteArray): ApiResponse<AssistantApiImage>
     /** Whisper through Vocarium; dictation sends AAC, the voice mode 16 kHz WAV. */
@@ -108,6 +114,9 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
     override suspend fun getAssistantApiProviders(): ApiResponse<List<AssistantApiProvider>> = http.get("/api/assistant/api-chat-providers")
     override suspend fun getAssistantApiTurns(id: String, beforeSeq: Long?): ApiResponse<AssistantApiHistory> = http.get("/api/assistant/api-chats/${checked(id)}/turns") { url { beforeSeq?.let { parameters.append("beforeSeq", it.toString()) } } }
     override suspend fun getAssistantApiImages(id: String): ApiResponse<List<AssistantApiImage>> = http.get("/api/assistant/api-chats/${checked(id)}/images")
+    override suspend fun activateAssistantApiTurn(id: String, turnId: String): ApiResponse<JsonObject> = http.post("/api/assistant/api-chats/${checked(id)}/turns/${checked(turnId)}/activate") { setBody(kotlinx.serialization.json.buildJsonObject {}) }
+    override suspend fun updateAssistantApiChatMeta(id: String, meta: JsonObject): ApiResponse<AssistantResource> = http.post("/api/assistant/api-chats/${checked(id)}/meta") { setBody(meta) }
+    override suspend fun deleteAssistantApiChat(id: String): ApiResponse<JsonObject> = http.post("/api/assistant/api-chats/${checked(id)}/delete") { setBody(kotlinx.serialization.json.buildJsonObject {}) }
     override suspend fun getAssistantApiImage(id: String, assetId: String): ByteArray = http.get("/api/assistant/api-chats/${checked(id)}/images/${checked(assetId)}")
     override suspend fun uploadAssistantApiImage(owner: String, id: String, filename: String, mimeType: String, bytes: ByteArray): ApiResponse<AssistantApiImage> {
         require(owner == TokenStore.assistantOwnerKey())

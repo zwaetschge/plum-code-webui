@@ -21,9 +21,13 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Mic,
   MoreHorizontal,
+  Pencil,
+  RefreshCw,
   SlidersHorizontal,
   Square,
 } from 'lucide-react';
@@ -117,7 +121,8 @@ export function ApiChatPage() {
   const scrollStop = useRef<(() => void) | null>(null);
   const [tools, setTools] = useState(false),
     [voiceOpen, setVoiceOpen] = useState(false),
-    [copied, setCopied] = useState('');
+    [copied, setCopied] = useState(''),
+    [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [draft, setDraft] = useState(''),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
@@ -363,6 +368,33 @@ export function ApiChatPage() {
     }
     return result;
   };
+  // ChatGPT semantics: a new answer (or an edited question) replaces this turn in the
+  // same chat; the previous version stays reachable through the version switcher.
+  const regenerate = (item: AssistantApiTurn, prompt = item.prompt) => {
+    if (!chat || running || busy || !prompt.trim()) return;
+    followLatest.current = true;
+    void invoke(async () => {
+      await deliverAssistant(
+        `/api/assistant/api-chats/${chat.id}/turns`,
+        {
+          expectedRevision: chat.revision,
+          prompt: prompt.trim(),
+          imageAssetIds: item.imageAssetIds ?? [],
+          regenerate: item.id,
+          ...effortPayload(effort),
+        },
+        prompt === item.prompt ? 'Antwort neu generieren' : 'Nachricht bearbeiten',
+        { expiresAt: chat.body.temporary ? String(chat.body.expiresAt) : undefined }
+      );
+      setEditing(null);
+      setOlder([]);
+    });
+  };
+  const showVersion = (versionId: string) =>
+    void invoke(async () => {
+      await api.post(`/api/assistant/api-chats/${id}/turns/${versionId}/activate`, {});
+      setOlder([]);
+    });
   const send = async () => {
     if (!chat || !draft.trim() || running || busy) return;
     followLatest.current = true;
@@ -667,13 +699,68 @@ export function ApiChatPage() {
                   }
                 }}
               >
-                <div className="plum-api-user">
-                  <p className="mb-2 text-xs font-medium text-muted-foreground">Du</p>
-                  <p className="whitespace-pre-wrap break-words">{item.prompt}</p>
-                  {!!item.imageAssetIds?.length && (
-                    <ChatImageStrip chatId={chat.id} ids={item.imageAssetIds} />
-                  )}
-                </div>
+                {editing?.id === item.id ? (
+                  <form
+                    className="plum-api-user plum-api-user-edit"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      regenerate(item, editing.text);
+                    }}
+                  >
+                    <label className="block">
+                      <span className="sr-only">Nachricht bearbeiten</span>
+                      <textarea
+                        autoFocus
+                        value={editing.text}
+                        maxLength={20000}
+                        rows={Math.min(10, Math.max(2, editing.text.split('\n').length))}
+                        onChange={(event) => setEditing({ id: item.id, text: event.target.value })}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') setEditing(null);
+                        }}
+                      />
+                    </label>
+                    <div className="mt-2 flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditing(null)}
+                      >
+                        Abbrechen
+                      </Button>
+                      <Button
+                        type="submit"
+                        size="sm"
+                        disabled={busy || !!running || !editing.text.trim()}
+                      >
+                        Senden
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="plum-api-user-row">
+                    {item.status !== 'running' && !running && (
+                      <button
+                        type="button"
+                        className="plum-api-user-edit-button"
+                        aria-label="Nachricht bearbeiten"
+                        title="Nachricht bearbeiten"
+                        disabled={busy}
+                        onClick={() => setEditing({ id: item.id, text: item.prompt })}
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    )}
+                    <div className="plum-api-user">
+                      <p className="mb-2 text-xs font-medium text-muted-foreground">Du</p>
+                      <p className="whitespace-pre-wrap break-words">{item.prompt}</p>
+                      {!!item.imageAssetIds?.length && (
+                        <ChatImageStrip chatId={chat.id} ids={item.imageAssetIds} />
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div
                   className={cn(
                     'plum-api-answer',
@@ -775,8 +862,16 @@ export function ApiChatPage() {
                       }
                     />
                   )}
-                  {item.status !== 'running' && !chat.body.temporary && (
+                  {item.status !== 'running' && (
                     <div className="plum-message-actions mt-3">
+                      {(item.versions?.length ?? 0) > 1 && (
+                        <VersionSwitcher
+                          versions={item.versions!}
+                          current={item.id}
+                          disabled={busy || !!running}
+                          onSelect={showVersion}
+                        />
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
@@ -803,6 +898,16 @@ export function ApiChatPage() {
                         )}
                         {copied === item.id ? 'Kopiert' : 'Kopieren'}
                       </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        disabled={busy || !!running}
+                        onClick={() => regenerate(item)}
+                      >
+                        <RefreshCw size={13} />
+                        Neu generieren
+                      </Button>
                       {item.response && (
                         <ReadAloudButton
                           text={item.response}
@@ -811,45 +916,46 @@ export function ApiChatPage() {
                           onError={setError}
                         />
                       )}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" type="button">
-                            <MoreHorizontal size={13} />
-                            Mehr
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <StepOutContent align="start" side="bottom" className="w-72">
-                          <DropdownMenuItem disabled={busy} onSelect={() => branch(item, false)}>
-                            Nachricht bearbeiten / neue Antwort
-                          </DropdownMenuItem>
-                          <DropdownMenuItem disabled={busy} onSelect={() => branch(item, true)}>
-                            Hier abzweigen
-                          </DropdownMenuItem>
-                          {item.response && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                disabled={busy}
-                                onSelect={() => saveAnswer(item, 'document')}
-                              >
-                                Als Ergebnis speichern
+                      {!chat.body.temporary && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" type="button">
+                              <MoreHorizontal size={13} />
+                              Mehr
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <StepOutContent align="start" side="bottom" className="w-72">
+                            {!chat.body.temporary && (
+                              <DropdownMenuItem disabled={busy} onSelect={() => branch(item, true)}>
+                                In neuem Chat abzweigen
                               </DropdownMenuItem>
-                              <DropdownMenuItem
-                                disabled={busy}
-                                onSelect={() => saveAnswer(item, 'task')}
-                              >
-                                Als Task-Entwurf übernehmen
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                disabled={busy}
-                                onSelect={() => saveAnswer(item, 'memory')}
-                              >
-                                Als persönliche Erinnerung speichern
-                              </DropdownMenuItem>
-                            </>
-                          )}
-                        </StepOutContent>
-                      </DropdownMenu>
+                            )}
+                            {item.response && !chat.body.temporary && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  disabled={busy}
+                                  onSelect={() => saveAnswer(item, 'document')}
+                                >
+                                  Als Ergebnis speichern
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={busy}
+                                  onSelect={() => saveAnswer(item, 'task')}
+                                >
+                                  Als Task-Entwurf übernehmen
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  disabled={busy}
+                                  onSelect={() => saveAnswer(item, 'memory')}
+                                >
+                                  Als persönliche Erinnerung speichern
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </StepOutContent>
+                        </DropdownMenu>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1082,5 +1188,43 @@ export function ApiChatPage() {
         <AssistantOutbox />
       </div>
     </main>
+  );
+}
+
+/** ChatGPT-style «‹ 2/3 ›» between regenerated or edited versions of one turn. */
+function VersionSwitcher({
+  versions,
+  current,
+  disabled,
+  onSelect,
+}: {
+  versions: string[];
+  current: string;
+  disabled: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const index = versions.indexOf(current);
+  return (
+    <span className="plum-version-switcher" role="group" aria-label="Antwortversionen">
+      <button
+        type="button"
+        aria-label="Vorherige Version"
+        disabled={disabled || index <= 0}
+        onClick={() => onSelect(versions[index - 1]!)}
+      >
+        <ChevronLeft size={14} />
+      </button>
+      <span aria-live="polite">
+        {index + 1}/{versions.length}
+      </span>
+      <button
+        type="button"
+        aria-label="Nächste Version"
+        disabled={disabled || index >= versions.length - 1}
+        onClick={() => onSelect(versions[index + 1]!)}
+      >
+        <ChevronRight size={14} />
+      </button>
+    </span>
   );
 }

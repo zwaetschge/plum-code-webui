@@ -305,4 +305,13 @@
     <string name="desktop_install_create">Befehl erzeugen</string>
     <string name="desktop_install_copy">Befehl kopieren</string>
     <string name="desktop_install_hint">Im Terminal des Computers ausführen. Gilt 15 Minuten und nur einmal; installiert Abhängigkeiten (sudo), Rechte für Tastatur und Maus und den Autostart.</string>
+    <string name="assistant_regenerate">Neu generieren</string>
+    <string name="assistant_edit_message">Nachricht bearbeiten</string>
+    <string name="assistant_previous_version">Vorherige Version</string>
+    <string name="assistant_next_version">Nächste Version</string>
+    <string name="assistant_rename_chat">Umbenennen</string>
+    <string name="assistant_archive_chat">Archivieren</string>
+    <string name="assistant_delete_chat">Löschen</string>
+    <string name="assistant_delete_chat_title">Chat löschen?</string>
+    <string name="assistant_delete_chat_text">Dadurch wird «%1$s» endgültig gelöscht, mit allen Antworten und Versionen. Gespeicherte Erinnerungen bleiben erhalten.</string>
 </resources>

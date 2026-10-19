@@ -129,6 +129,9 @@ import {
   startApiTurn,
   stopApiTurn,
   branchApiChat,
+  activateApiTurnVersion,
+  deleteApiChat,
+  updateApiChatMeta,
   materializeApiAnswer,
   applyApiSelection,
 } from '../services/assistant/apiChats.js';
@@ -1144,6 +1147,39 @@ router.post(
   '/api-chats/:id/turns/:turn/stop',
   handle(async (req, res) => {
     await stopApiTurn(owner(req), String(req.params.id), String(req.params.turn));
+    res.json({ success: true });
+  })
+);
+router.post(
+  '/api-chats/:id/turns/:turn/activate',
+  handle(async (req, res) => {
+    await activateApiTurnVersion(owner(req), String(req.params.id), String(req.params.turn));
+    res.json({ success: true });
+  })
+);
+router.post(
+  '/api-chats/:id/meta',
+  handle(async (req, res) => {
+    const input = parse(
+      z
+        .object({
+          expectedRevision: z.number().int().positive(),
+          title: z.string().trim().min(1).max(200).optional(),
+          projectId: z.string().min(1).max(200).nullable().optional(),
+        })
+        .strict(),
+      req.body
+    );
+    res.json({
+      success: true,
+      data: await updateApiChatMeta(owner(req), String(req.params.id), input),
+    });
+  })
+);
+router.post(
+  '/api-chats/:id/delete',
+  handle(async (req, res) => {
+    await deleteApiChat(owner(req), String(req.params.id));
     res.json({ success: true });
   })
 );

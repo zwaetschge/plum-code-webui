@@ -305,4 +305,13 @@
     <string name="desktop_install_create">Create command</string>
     <string name="desktop_install_copy">Copy command</string>
     <string name="desktop_install_hint">Run it in the computer\'s terminal. Valid once for 15 minutes; installs dependencies (sudo), keyboard and mouse access and autostart.</string>
+    <string name="assistant_regenerate">Regenerate</string>
+    <string name="assistant_edit_message">Edit message</string>
+    <string name="assistant_previous_version">Previous version</string>
+    <string name="assistant_next_version">Next version</string>
+    <string name="assistant_rename_chat">Rename</string>
+    <string name="assistant_archive_chat">Archive</string>
+    <string name="assistant_delete_chat">Delete</string>
+    <string name="assistant_delete_chat_title">Delete chat?</string>
+    <string name="assistant_delete_chat_text">This permanently deletes «%1$s» with all answers and versions. Saved memories are kept.</string>
 </resources>

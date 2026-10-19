@@ -106,6 +106,8 @@ export const API_TURN_INPUT = z
      * fastest Claude with adaptive thinking; reasoningEffort is ignored.
      */
     voice: z.boolean().optional(),
+    /** Answer again in place: this visible turn and everything after become a hidden version. */
+    regenerate: z.string().uuid().optional(),
   })
   .strict();
 
@@ -473,12 +475,85 @@ export async function apiChatTurns(userId: string, id: string, offset = 0, befor
     id
   );
   const rows = await all(
-    `SELECT * FROM assistant_api_turns WHERE chat_id=?${beforeSeq ? ' AND seq<?' : ''} ORDER BY seq DESC LIMIT 50 OFFSET ?`,
+    `SELECT * FROM assistant_api_turns WHERE chat_id=? AND hidden_by IS NULL${beforeSeq ? ' AND seq<?' : ''} ORDER BY seq DESC LIMIT 50 OFFSET ?`,
     id,
     ...(beforeSeq ? [beforeSeq] : []),
     offset
   );
-  return { chat, turns: rows.reverse().map(turn) };
+  const groups = [...new Set(rows.map((r) => String(r.version_of ?? r.id)))];
+  const members = groups.length
+    ? await all(
+        `SELECT id,version_of FROM assistant_api_turns WHERE chat_id=? AND (id=ANY(?::text[]) OR version_of=ANY(?::text[])) ORDER BY seq`,
+        id,
+        groups,
+        groups
+      )
+    : [];
+  return {
+    chat,
+    turns: rows.reverse().map((row) => {
+      const root = String(row.version_of ?? row.id);
+      const ids = members
+        .filter((m) => String(m.version_of ?? m.id) === root)
+        .map((m) => String(m.id));
+      return ids.length > 1 ? { ...turn(row), versions: ids } : turn(row);
+    }),
+  };
+}
+/** Rename or move a chat between projects without re-pinning its expert or model. */
+export async function updateApiChatMeta(
+  userId: string,
+  id: string,
+  input: { expectedRevision: number; title?: string; projectId?: string | null }
+) {
+  return transaction(async (tx) => {
+    const chat = await findResource(userId, id, tx);
+    if (chat.kind !== 'api-chat') throw new AppError('Modellchat nicht gefunden', 404, 'NOT_FOUND');
+    if (chat.body.temporary && input.projectId)
+      throw new AppError('Temporäre Chats gehören zu keinem Projekt', 400, 'TEMPORARY_CHAT');
+    const body = {
+      ...chat.body,
+      ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
+    };
+    await checkReferences(userId, body, tx);
+    return reviseResource(userId, id, input.expectedRevision, input.title ?? chat.title, body, tx);
+  });
+}
+/** Show another version of a regenerated/edited turn, with the thread that followed it. */
+export async function activateApiTurnVersion(userId: string, id: string, turnId: string) {
+  await ownedChat(userId, id);
+  await transaction(async (tx) => {
+    await tx.get('SELECT id FROM assistant_resources WHERE id=? FOR UPDATE', id);
+    if (await tx.get("SELECT id FROM assistant_api_turns WHERE chat_id=? AND status='running'", id))
+      throw new AppError('In diesem Gespräch läuft bereits eine Antwort', 409, 'API_CHAT_BUSY');
+    const target = await tx.get(
+      'SELECT id,version_of,hidden_by FROM assistant_api_turns WHERE id=? AND chat_id=?',
+      turnId,
+      id
+    );
+    if (!target) throw new AppError('Version nicht gefunden', 404, 'NOT_FOUND');
+    if (!target.hidden_by) return;
+    const root = String(target.version_of ?? target.id);
+    const shown = await tx.get(
+      'SELECT seq FROM assistant_api_turns WHERE chat_id=? AND hidden_by IS NULL AND (id=? OR version_of=?)',
+      id,
+      root,
+      root
+    );
+    if (!shown) throw new AppError('Version nicht gefunden', 404, 'NOT_FOUND');
+    // Each hide is labelled with the turn that took over, so a line returns as a whole.
+    await tx.run(
+      'UPDATE assistant_api_turns SET hidden_by=? WHERE chat_id=? AND hidden_by IS NULL AND seq>=?',
+      target.id,
+      id,
+      shown.seq
+    );
+    await tx.run(
+      'UPDATE assistant_api_turns SET hidden_by=NULL WHERE chat_id=? AND hidden_by=?',
+      id,
+      target.hidden_by
+    );
+  });
 }
 export async function startApiTurn(
   userId: string,
@@ -495,6 +570,7 @@ export async function startApiTurn(
           imageAssetIds: input.imageAssetIds ?? [],
           ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
           ...(input.voice ? { voice: true } : {}),
+          ...(input.regenerate ? { regenerate: input.regenerate } : {}),
         })
       )
       .digest('hex');
@@ -563,6 +639,22 @@ export async function startApiTurn(
     );
     if (Number(running.count) >= 5)
       throw new AppError('Für dein Konto laufen bereits fünf Antworten', 429, 'API_CHAT_CAPACITY');
+    const replaced = input.regenerate
+      ? await tx.get(
+          'SELECT id,seq,version_of FROM assistant_api_turns WHERE id=? AND chat_id=? AND hidden_by IS NULL',
+          input.regenerate,
+          id
+        )
+      : null;
+    if (input.regenerate && !replaced)
+      throw new AppError('Diese Antwort ist nicht mehr sichtbar', 409, 'REVISION_CONFLICT');
+    if (replaced)
+      await tx.run(
+        'UPDATE assistant_api_turns SET hidden_by=? WHERE chat_id=? AND hidden_by IS NULL AND seq>=?',
+        input.commandId,
+        id,
+        replaced.seq
+      );
     const projectSources = context.projectId
       ? await tx.all(
           "SELECT id FROM assistant_resources WHERE user_id=? AND kind='source' AND archived=0 AND (body_json::jsonb)->>'projectId'=? ORDER BY updated_at DESC LIMIT 20",
@@ -583,7 +675,7 @@ export async function startApiTurn(
     // Pin the validated base with this turn, so edits remain replayable even
     // after the base leaves a history page. It is scoped to this owned chat.
     const previousViews = await tx.all(
-      "SELECT * FROM assistant_api_turns WHERE chat_id=? AND status='completed' AND response LIKE ? ORDER BY seq DESC LIMIT 10",
+      "SELECT * FROM assistant_api_turns WHERE chat_id=? AND status='completed' AND hidden_by IS NULL AND response LIKE ? ORDER BY seq DESC LIMIT 10",
       id,
       '%```plum-ui%'
     );
@@ -597,7 +689,7 @@ export async function startApiTurn(
       ).next
     );
     await tx.run(
-      "INSERT INTO assistant_api_turns(id,chat_id,seq,payload_hash,prompt,status,model,profile_json,source_versions,image_asset_ids,created_at,updated_at,expires_at) VALUES (?,?,?,?,?,'running',?,?,?,?,?,?,?)",
+      "INSERT INTO assistant_api_turns(id,chat_id,seq,payload_hash,prompt,status,model,profile_json,source_versions,image_asset_ids,created_at,updated_at,expires_at,version_of) VALUES (?,?,?,?,?,'running',?,?,?,?,?,?,?,?)",
       input.commandId,
       id,
       seq,
@@ -609,7 +701,8 @@ export async function startApiTurn(
       JSON.stringify(input.imageAssetIds ?? []),
       now,
       now,
-      new Date(Date.now() + 240000).toISOString()
+      new Date(Date.now() + 240000).toISOString(),
+      replaced ? (replaced.version_of ?? replaced.id) : null
     );
     await tx.run('UPDATE assistant_resources SET updated_at=? WHERE id=?', now, id);
     await tx.run(
@@ -639,7 +732,7 @@ export async function startApiTurn(
     timer.unref();
     try {
       const rows = await all(
-        "SELECT prompt,response,image_asset_ids FROM assistant_api_turns WHERE chat_id=? AND seq<? AND status IN ('completed','cancelled','failed','interrupted') ORDER BY seq DESC LIMIT 20",
+        "SELECT prompt,response,image_asset_ids FROM assistant_api_turns WHERE chat_id=? AND seq<? AND hidden_by IS NULL AND status IN ('completed','cancelled','failed','interrupted') ORDER BY seq DESC LIMIT 20",
         id,
         claimed.row.seq
       );
@@ -843,7 +936,7 @@ export async function branchApiChat(
       tx
     );
     const rows = await tx.all(
-      'SELECT * FROM assistant_api_turns WHERE chat_id=? AND seq<=? ORDER BY seq',
+      'SELECT * FROM assistant_api_turns WHERE chat_id=? AND seq<=? AND hidden_by IS NULL ORDER BY seq',
       id,
       includeAnswer ? cut.seq : Number(cut.seq) - 1
     );
@@ -1139,7 +1232,37 @@ export async function applyApiSelection(
   });
 }
 
-export async function purgeTemporaryApiChat(userId: string, id: string) {
+/** Permanently delete a chat, like ChatGPT's «Löschen» (archiving stays separate). */
+export async function deleteApiChat(userId: string, id: string) {
+  if (
+    await get(
+      "SELECT t.id FROM assistant_api_turns t JOIN assistant_resources r ON r.id=t.chat_id WHERE t.chat_id=? AND r.user_id=? AND t.status='running' AND t.expires_at>?",
+      id,
+      userId,
+      new Date().toISOString()
+    )
+  )
+    throw new AppError('Die aktuelle Antwort zuerst stoppen', 409, 'API_CHAT_BUSY');
+  if (!(await purgeTemporaryApiChat(userId, id, true)))
+    throw new AppError('Gespräch nicht gefunden', 404, 'NOT_FOUND');
+  // Learned chat-history summaries point at the deleted chat; saved memories stay.
+  await run(
+    "DELETE FROM assistant_memory_history WHERE user_id=? AND source_type='api' AND source_id=?",
+    userId,
+    id
+  );
+  await run(
+    "DELETE FROM assistant_memory_jobs WHERE user_id=? AND source_type='api' AND source_id=?",
+    userId,
+    id
+  );
+  await run(
+    "DELETE FROM assistant_memory_vectors WHERE user_id=? AND kind='history' AND NOT EXISTS(SELECT 1 FROM assistant_memory_history h WHERE h.user_id=? AND h.id=assistant_memory_vectors.id)",
+    userId,
+    userId
+  );
+}
+export async function purgeTemporaryApiChat(userId: string, id: string, permanent = false) {
   return transaction(async (tx) => {
     await tx.get('SELECT id FROM users WHERE id=? FOR UPDATE', userId);
     const row = await tx.get(
@@ -1149,7 +1272,11 @@ export async function purgeTemporaryApiChat(userId: string, id: string) {
     );
     if (!row) return false;
     const body = JSON.parse(row.body_json);
-    if (!body.temporary || !body.expiresAt || Date.parse(body.expiresAt) > Date.now()) return false;
+    if (
+      !permanent &&
+      (!body.temporary || !body.expiresAt || Date.parse(body.expiresAt) > Date.now())
+    )
+      return false;
     const turns = await tx.all('SELECT id FROM assistant_api_turns WHERE chat_id=?', id);
     const files = await tx.all('SELECT asset_id FROM assistant_api_files WHERE chat_id=?', id);
     for (const item of turns) active.get(String(item.id))?.abort();

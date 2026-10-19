@@ -201,12 +201,23 @@ const MIGRATIONS: Migration[] = [
   },
   {
     id: '016-context-handoff',
-    statements: [`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS context_handoff_json TEXT DEFAULT NULL`],
+    statements: [
+      `ALTER TABLE sessions ADD COLUMN IF NOT EXISTS context_handoff_json TEXT DEFAULT NULL`,
+    ],
   },
   {
     id: '017-retire-kimi-code',
     statements: [
       `UPDATE sessions SET cli_provider='codex',cli_model='${DEFAULT_CODEX_MODEL}',claude_session_id=NULL,status='stopped' WHERE cli_provider='kimi'`,
+    ],
+  },
+  {
+    // Regenerated/edited answers stay as hidden versions instead of new chats.
+    id: '018-api-turn-versions',
+    statements: [
+      `ALTER TABLE assistant_api_turns ADD COLUMN IF NOT EXISTS version_of TEXT DEFAULT NULL`,
+      `ALTER TABLE assistant_api_turns ADD COLUMN IF NOT EXISTS hidden_by TEXT DEFAULT NULL`,
+      `CREATE INDEX IF NOT EXISTS assistant_api_turns_versions ON assistant_api_turns(chat_id,version_of)`,
     ],
   },
 ];

@@ -42,10 +42,14 @@ import com.claudewebui.app.ui.motion.pressScale
 import com.claudewebui.app.ui.motion.reducedMotion
 import com.claudewebui.app.ui.motion.riseIn
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.Check
@@ -200,6 +204,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { checkOwner(); error = failure.message; currentOnChatSelected(chat?.id) }
     }
+    var regenerating by remember { mutableStateOf(false) }
     fun updatePending() { scope.launch { checkOwner(); pending = outbox.pending() } }
     fun accept(path: String, result: JsonObject, keepDraft: Boolean = false) {
         checkOwner()
@@ -211,7 +216,11 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             currentOnChatSelected(chat?.id)
             turns = emptyList(); prompt = result["prompt"]?.jsonPrimitive?.content.orEmpty()
             imageIds = result["imageAssetIds"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
-        } else if (path == "/api/assistant/api-chats/${chat?.id}/turns") { if (!keepDraft) prompt = ""; imageIds = emptyList() }
+        } else if (path == "/api/assistant/api-chats/${chat?.id}/turns") {
+            if (!keepDraft) prompt = ""
+            // A regenerated version replaces part of the thread: reload it whole.
+            if (result["versionOf"] != null || regenerating) { turns = emptyList(); regenerating = false } else imageIds = emptyList()
+        }
         else if (path.endsWith("/results")) notice = context.getString(R.string.assistant_result_saved)
         refresh++
     }
@@ -249,7 +258,9 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                         val history = requireNotNull(response.data)
                         // Latest snapshots replace their suffix, retaining older loaded pages.
                         val first = history.turns.firstOrNull()?.seq ?: Long.MAX_VALUE
-                        val merged = if (turns.isNotEmpty() && turns.last().seq < first - 1) history.turns else (turns.filter { it.seq < first } + history.turns).distinctBy { it.id }.sortedBy { it.seq }
+                        // A short snapshot is the whole visible thread (regenerated versions may
+                        // have hidden older turns); only a full page keeps loaded older pages.
+                        val merged = if (history.turns.size < 50 || (turns.isNotEmpty() && turns.last().seq < first - 1)) history.turns else (turns.filter { it.seq < first } + history.turns).distinctBy { it.id }.sortedBy { it.seq }
                         // The first snapshot of a chat is its history: it is drawn in
                         // place. Only turns with a higher seq rise in afterwards.
                         if (baselineChat != chatId) { baselineChat = chatId; baselineSeq = merged.maxOfOrNull { it.seq } ?: 0L }
@@ -325,6 +336,32 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         }
     }
     // The voice mode (voice = true) also starts a new chat and leaves the draft alone.
+    // ChatGPT semantics: answer again (or with an edited question) in this chat;
+    // the previous version stays reachable through the version switcher.
+    fun regenerate(turn: AssistantApiTurn, text: String = turn.prompt) {
+        val current = chat ?: return
+        if (busy || running || text.isBlank()) return
+        regenerating = true
+        command("/api/assistant/api-chats/${current.id}/turns", buildJsonObject {
+            put("prompt", text.trim()); put("expectedRevision", current.revision)
+            put("imageAssetIds", JsonArray(turn.imageAssetIds.map(::JsonPrimitive))); put("regenerate", turn.id)
+            effort?.let { put("reasoningEffort", it) }
+        }, context.getString(if (text.trim() == turn.prompt) R.string.assistant_regenerate else R.string.assistant_edit_message), keepDraft = true)
+    }
+    fun showVersion(turnId: String) {
+        val current = chat ?: return
+        if (busy || running) return
+        scope.launch {
+            busy = true; error = null
+            try {
+                val response = api.activateAssistantApiTurn(current.id, turnId); checkOwner()
+                check(response.success) { response.error?.message.orEmpty() }
+                turns = emptyList(); refresh++
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { checkOwner(); error = failure.message }
+            finally { if (TokenStore.assistantOwnerKey() == owner) busy = false }
+        }
+    }
     fun send(override: String? = null, voice: Boolean = false) {
         val text = (override ?: prompt).trim()
         if (text.isEmpty() || busy || running) return
@@ -443,9 +480,24 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                             // Only turns newer than the loaded history rise, and only once.
                             val rise = remember { live && baselineChat == shownId && turn.seq > baselineSeq && risen.add(turn.id) }
                             Column(Modifier.riseIn(rise), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                var editing by remember(turn.id) { mutableStateOf<String?>(null) }
                                 Column(Modifier.fillMaxWidth(), horizontalAlignment = androidx.compose.ui.Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp), color = palette.controlSurface, modifier = Modifier.widthIn(max = 320.dp)) {
-                                        Text(turn.prompt, Modifier.padding(horizontal = 16.dp, vertical = 11.dp), style = MaterialTheme.typography.bodyLarge, color = palette.text)
+                                    val draft = editing
+                                    if (draft != null) Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp), color = palette.controlSurface, modifier = Modifier.fillMaxWidth()) {
+                                        Column(Modifier.padding(12.dp)) {
+                                            OutlinedTextField(draft, { editing = it.take(20000) }, label = { Text(stringResource(R.string.assistant_edit_message)) }, minLines = 2, modifier = Modifier.fillMaxWidth())
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                                TextButton(onClick = { editing = null }) { Text(stringResource(R.string.assistant_cancel)) }
+                                                Button(enabled = !busy && !running && draft.isNotBlank(), onClick = { regenerate(turn, draft); editing = null }) { Text(stringResource(R.string.assistant_send)) }
+                                            }
+                                        }
+                                    } else Row(verticalAlignment = androidx.compose.ui.Alignment.Top) {
+                                        if (turn.status != "running" && !running && live) IconButton(onClick = { editing = turn.prompt }, enabled = !busy) {
+                                            Icon(androidx.compose.material.icons.Icons.Outlined.Edit, stringResource(R.string.assistant_edit_message), tint = palette.muted, modifier = Modifier.size(18.dp))
+                                        }
+                                        Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp), color = palette.controlSurface, modifier = Modifier.widthIn(max = 320.dp)) {
+                                            Text(turn.prompt, Modifier.padding(horizontal = 16.dp, vertical = 11.dp), style = MaterialTheme.typography.bodyLarge, color = palette.text)
+                                        }
                                     }
                                     turn.imageAssetIds.forEach { id -> ModelImage(owner, api, shownId, id) }
                                 }
@@ -469,7 +521,13 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                     turn.uiError?.let { note -> if (turn.status != "running") DynamicUiNote(note) }
                                 }
                                 turn.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
-                                if (turn.status != "running" && turn.response.isNotBlank()) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                if (turn.status != "running" && (turn.response.isNotBlank() || turn.versions.size > 1)) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    if (turn.versions.size > 1) {
+                                        val index = turn.versions.indexOf(turn.id)
+                                        IconButton(onClick = { showVersion(turn.versions[index - 1]) }, enabled = index > 0 && !busy && !running && live) { Icon(androidx.compose.material.icons.Icons.Outlined.ChevronLeft, stringResource(R.string.assistant_previous_version), tint = palette.muted, modifier = Modifier.size(20.dp)) }
+                                        Text("${index + 1}/${turn.versions.size}", style = MaterialTheme.typography.labelMedium, color = palette.muted)
+                                        IconButton(onClick = { showVersion(turn.versions[index + 1]) }, enabled = index < turn.versions.size - 1 && !busy && !running && live) { Icon(androidx.compose.material.icons.Icons.Outlined.ChevronRight, stringResource(R.string.assistant_next_version), tint = palette.muted, modifier = Modifier.size(20.dp)) }
+                                    }
                                     var copied by remember { mutableStateOf(false) }
                                     LaunchedEffect(copied) { if (copied) { delay(PlumMotionTokens.COPY_CONFIRM_MS); copied = false } }
                                     val copySource = remember { MutableInteractionSource() }
@@ -489,12 +547,12 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                             )
                                         }
                                     }
+                                    if (live) { val regenSource = remember { MutableInteractionSource() }; IconButton(onClick = { regenerate(turn) }, enabled = !busy && !running, interactionSource = regenSource, modifier = Modifier.pressScale(regenSource)) { Icon(androidx.compose.material.icons.Icons.Outlined.Refresh, stringResource(R.string.assistant_regenerate), tint = palette.muted, modifier = Modifier.size(20.dp)) } }
                                     if (voiceEnabled) { val readSource = remember { MutableInteractionSource() }; IconButton(onClick = { readText = turn.response }, interactionSource = readSource, modifier = Modifier.pressScale(readSource)) { Icon(androidx.compose.material.icons.Icons.Outlined.VolumeUp, stringResource(R.string.assistant_read_aloud), tint = palette.muted, modifier = Modifier.size(20.dp)) } }
                                     if (!shownTemporary) Box {
                                         val moreSource = remember { MutableInteractionSource() }
                                         IconButton(onClick = { menu = true }, interactionSource = moreSource, modifier = Modifier.pressScale(moreSource)) { Icon(androidx.compose.material.icons.Icons.Outlined.MoreHoriz, stringResource(R.string.assistant_more_actions), tint = palette.muted, modifier = Modifier.size(20.dp)) }
                                         DropdownMenu(menu, { menu = false }) {
-                                            DropdownMenuItem(text = { Text(stringResource(R.string.assistant_edit_branch)) }, enabled = !busy && !running, onClick = { menu = false; command("/api/assistant/api-chats/$shownId/branches", buildJsonObject { put("turnId", turn.id); put("includeAnswer", false) }, context.getString(R.string.assistant_edit_branch)) })
                                             DropdownMenuItem(text = { Text(stringResource(R.string.assistant_branch)) }, enabled = !busy && !running, onClick = { menu = false; command("/api/assistant/api-chats/$shownId/branches", buildJsonObject { put("turnId", turn.id); put("includeAnswer", true) }, context.getString(R.string.assistant_branch)) })
                                             if (turn.status == "completed") {
                                                 val kinds = listOf("document" to R.string.assistant_artifacts, "task" to R.string.assistant_task, "memory" to R.string.assistant_memory) + if (researchChat) listOf("research" to R.string.assistant_research) else emptyList()
@@ -751,6 +809,7 @@ internal object RecentModelChats {
  * the phone's history sheet and as the expanded layout's list column, where
  * it sits permanently beside the open conversation.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ModelChatHistoryList(
     selectedChatId: String?,
@@ -771,9 +830,10 @@ fun ModelChatHistoryList(
         var chats by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
         var hasMore by remember { mutableStateOf(false) }
         var loaded by remember { mutableStateOf(false) }
+        var refreshList by remember { mutableIntStateOf(0) }
         // Refreshes while visible, and right away when the open conversation
         // changes, so a chat created in the composer shows up in the list.
-        LaunchedEffect(owner, search, offset, selectedChatId) {
+        LaunchedEffect(owner, search, offset, selectedChatId, refreshList) {
             if (search.isNotEmpty()) delay(250)
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (isActive) {
@@ -810,12 +870,22 @@ fun ModelChatHistoryList(
                     }
                     items(group, key = { it.id }) { resource ->
                         val active = resource.id == selectedChatId
+                        var rowMenu by remember { mutableStateOf(false) }
+                        var renaming by remember { mutableStateOf<String?>(null) }
+                        var confirmDelete by remember { mutableStateOf(false) }
+                        val rowScope = rememberCoroutineScope()
+                        fun manage(remove: Boolean = true, action: suspend () -> Unit) { rowScope.launch {
+                            try { action(); if (remove) chats = chats.filter { it.id != resource.id }; offset = 0; refreshList++ }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { }
+                        } }
+                        Box {
                         Row(
                             Modifier.fillMaxWidth()
                                 .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
                                 .background(if (active) palette.controlSurface else androidx.compose.ui.graphics.Color.Transparent)
                                 .semantics { selected = active }
-                                .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button) { RecentModelChats.put(resource); onSelect(resource) }
+                                .combinedClickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onLongClick = { rowMenu = true }) { RecentModelChats.put(resource); onSelect(resource) }
                                 .padding(vertical = 12.dp, horizontal = 12.dp),
                             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                         ) {
@@ -828,6 +898,29 @@ fun ModelChatHistoryList(
                             )
                             Text(chatTime(resource.updatedAt, LocalContext.current), style = MaterialTheme.typography.labelSmall, color = palette.muted, modifier = Modifier.padding(start = 8.dp))
                         }
+                        // Long press: ChatGPT's chat menu (rename, archive, delete).
+                        DropdownMenu(rowMenu, { rowMenu = false }) {
+                            DropdownMenuItem(text = { Text(stringResource(R.string.assistant_rename_chat)) }, onClick = { rowMenu = false; renaming = resource.title })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.assistant_archive_chat)) }, onClick = { rowMenu = false; manage { check(api.archiveAssistantResource("api-chats", resource.id, resource.revision).success) } })
+                            DropdownMenuItem(text = { Text(stringResource(R.string.assistant_delete_chat), color = MaterialTheme.colorScheme.error) }, onClick = { rowMenu = false; confirmDelete = true })
+                        }
+                        }
+                        renaming?.let { title ->
+                            AlertDialog(
+                                onDismissRequest = { renaming = null },
+                                title = { Text(stringResource(R.string.assistant_rename_chat)) },
+                                text = { OutlinedTextField(title, { renaming = it.take(200) }, singleLine = true, modifier = Modifier.fillMaxWidth()) },
+                                confirmButton = { TextButton(enabled = title.isNotBlank(), onClick = { manage(remove = false) { check(api.updateAssistantApiChatMeta(resource.id, buildJsonObject { put("expectedRevision", resource.revision); put("title", title.trim()) }).success) }; renaming = null }) { Text(stringResource(R.string.assistant_save)) } },
+                                dismissButton = { TextButton(onClick = { renaming = null }) { Text(stringResource(R.string.assistant_cancel)) } },
+                            )
+                        }
+                        if (confirmDelete) AlertDialog(
+                            onDismissRequest = { confirmDelete = false },
+                            title = { Text(stringResource(R.string.assistant_delete_chat_title)) },
+                            text = { Text(stringResource(R.string.assistant_delete_chat_text, resource.title)) },
+                            confirmButton = { TextButton(onClick = { confirmDelete = false; manage { check(api.deleteAssistantApiChat(resource.id).success); if (active) onNewChat?.invoke() } }) { Text(stringResource(R.string.assistant_delete_chat), color = MaterialTheme.colorScheme.error) } },
+                            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.assistant_cancel)) } },
+                        )
                     }
                 }
                 if (hasMore) item { TextButton(onClick = { offset += 100 }) { Text(stringResource(R.string.assistant_more)) } }
