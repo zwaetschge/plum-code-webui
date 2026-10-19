@@ -34,6 +34,13 @@ exec(compile(ast.fix_missing_locations(ast.Module(body=[layout_node], type_ignor
 screenshot_layout = layout_scope["screenshot_layout"]
 
 
+mapping_scope = {}
+for name in ("display_rect_at", "map_display_point"):
+    node = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == name)
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[node], type_ignores=[])), str(SOURCE), "exec"), mapping_scope)
+map_display_point = mapping_scope["map_display_point"]
+
+
 def fixture():
     app = App()
     app.activity_state = {"sessionId": "ours", "sessionName": "Test", "status": "Bereit", "action": "", "progress": "",
@@ -77,6 +84,43 @@ class DesktopControlTests(unittest.TestCase):
         size, targets = screenshot_layout([(0, 0, 3440, 1440), (-1280, 200, 1280, 720)], [(6880, 2880), (1280, 720)])
         self.assertEqual(size, (9440, 2880))
         self.assertEqual(targets, [(2560, 0, 6880, 2880), (0, 400, 2560, 1440)])
+
+    def test_xwayland_origins_map_to_native_kwin_input_and_back(self):
+        mapping = [((840, 2160, 1963, 1227), (560, 1440, 1963, 1227)),
+                   ((0, 0, 3440, 1440), (0, 0, 3440, 1440))]
+        self.assertEqual(map_display_point((2780, 2367), mapping), (2500, 1647))
+        self.assertEqual(map_display_point((2500, 1647), mapping, False), (2780, 2367))
+        self.assertEqual(map_display_point((500, 1000), mapping), (500, 1000))
+        self.assertEqual(map_display_point((-100, 200), []), (-100, 200))
+
+    def test_screenshot_coordinates_survive_xwayland_window_repositioning(self):
+        class Point:
+            def __init__(self, x=0, y=None):
+                self._x, self._y = (x.x(), x.y()) if y is None and hasattr(x, "x") else (x, y or 0)
+            def x(self): return self._x
+            def y(self): return self._y
+            def __add__(self, other): return Point(self.x() + other.x(), self.y() + other.y())
+            def __sub__(self, other): return Point(self.x() - other.x(), self.y() - other.y())
+        Overlay = production_class("Overlay", {"to_local", "to_shot", "global_point", "local_point"})
+        scope = Overlay.to_local.__globals__
+        scope["QPointF"] = Point
+        scope["QGuiApplication"] = Box(primaryScreen=lambda: Box(virtualGeometry=lambda: Box(topLeft=lambda: Point(0, 0))))
+        overlay = Overlay()
+        overlay.factor = 1568 / 3440
+        overlay.geometry = lambda: Box(x=lambda: 280, y=lambda: 720)
+        local = overlay.to_local(1267, 1079)
+        global_point = overlay.global_point(local)
+        self.assertAlmostEqual(global_point.x(), 1267 / overlay.factor)
+        self.assertAlmostEqual(global_point.y(), 1079 / overlay.factor)
+        self.assertEqual(overlay.to_shot(local), (1267, 1079))
+
+    def test_mapping_preserves_negative_origins_and_per_output_scales(self):
+        mapping = [((-1280, 0, 1280, 720), (-640, 0, 640, 360)),
+                   ((0, 0, 1920, 1080), (0, 0, 1920, 1080))]
+        point = (-1000, 300)
+        native = map_display_point(point, mapping)
+        self.assertEqual(native, (-500, 150))
+        self.assertEqual(map_display_point(native, mapping, False), point)
 
     def test_live_chat_is_isolated_and_stream_becomes_final_once(self):
         app = fixture()

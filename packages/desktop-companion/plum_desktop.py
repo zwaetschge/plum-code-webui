@@ -84,7 +84,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QMen
 
 import websockets
 
-VERSION = "0.6.4"
+VERSION = "0.6.5"
 CONFIG_DIR = os.path.expanduser("~/.config/plum-desktop")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
@@ -176,6 +176,45 @@ def ease(t):
     return 1 - (1 - t) ** 3
 
 
+# XWayland Qt can report scaled monitor origins while KWin input/window
+# coordinates remain native logical pixels. Keep the conversion explicit.
+DISPLAY_MAPPING = []  # [(Qt rect, KWin rect)], aligned by output name
+
+
+def display_rect_at(point, rectangles):
+    x, y = point
+    return min(rectangles, key=lambda r: max(r[0] - x, 0, x - r[0] - r[2]) ** 2
+               + max(r[1] - y, 0, y - r[1] - r[3]) ** 2)
+
+
+def map_display_point(point, mapping, to_native=True):
+    if not mapping:
+        return point
+    pairs = mapping if to_native else [(b, a) for a, b in mapping]
+    source = display_rect_at(point, [a for a, _ in pairs])
+    target = next(b for a, b in pairs if a == source)
+    return (target[0] + (point[0] - source[0]) * target[2] / source[2],
+            target[1] + (point[1] - source[1]) * target[3] / source[3])
+
+
+def refresh_display_mapping(kwin):
+    global DISPLAY_MAPPING
+    try:
+        outputs = kwin.run("var a=[];for(var i=0;i<workspace.screens.length;i++){"
+                           "var s=workspace.screens[i],r=s.geometry;"
+                           "a.push({name:s.name,x:r.x,y:r.y,w:r.width,h:r.height});}reply(a);")
+        native = {s["name"]: (s["x"], s["y"], s["w"], s["h"]) for s in outputs}
+        mapping = []
+        for screen in QGuiApplication.screens():
+            r = screen.geometry()
+            if screen.name() not in native:
+                return
+            mapping.append(((r.x(), r.y(), r.width(), r.height()), native[screen.name()]))
+        DISPLAY_MAPPING = mapping
+    except (RuntimeError, Stopped, TypeError, KeyError) as error:
+        log("monitor coordinate mapping unavailable:", error)
+
+
 # --------------------------------------------------------------------------- KWin
 
 
@@ -241,7 +280,7 @@ class KWin(QObject):
 
     def cursor(self):
         point = self.run("reply({x: workspace.cursorPos.x, y: workspace.cursorPos.y});")
-        return QPointF(point["x"], point["y"])
+        return QPointF(*map_display_point((point["x"], point["y"]), DISPLAY_MAPPING, False))
 
     WINDOWS_JS = """
 var list = workspace.stackingOrder || (workspace.windowList ? workspace.windowList() : workspace.clientList());
@@ -258,7 +297,19 @@ for (var i = 0; i < list.length; i++) {
 """
 
     def windows(self):
-        return self.run(self.WINDOWS_JS + "reply(out);")
+        windows = self.run(self.WINDOWS_JS + "reply(out);")
+        for window in windows:
+            if not DISPLAY_MAPPING:
+                continue
+            native = display_rect_at((window["x"] + window["width"] / 2,
+                                      window["y"] + window["height"] / 2), [b for _, b in DISPLAY_MAPPING])
+            qt = next(a for a, b in DISPLAY_MAPPING if b == native)
+            for x, y in (("x", "y"), ("cx", "cy")):
+                window[x] = qt[0] + (window[x] - native[0]) * qt[2] / native[2]
+                window[y] = qt[1] + (window[y] - native[1]) * qt[3] / native[3]
+            window["width"] *= qt[2] / native[2]
+            window["height"] *= qt[3] / native[3]
+        return windows
 
     def active_class(self):
         try:
@@ -354,8 +405,15 @@ class Input:
     def move(self, point):
         self._devices()
         e = self.e
-        x = (point.x() - self.area.x()) / max(1, self.area.width() - 1)
-        y = (point.y() - self.area.y()) / max(1, self.area.height() - 1)
+        if DISPLAY_MAPPING:
+            nx, ny = map_display_point((point.x(), point.y()), DISPLAY_MAPPING)
+            rects = [b for _, b in DISPLAY_MAPPING]
+            left, top = min(r[0] for r in rects), min(r[1] for r in rects)
+            right, bottom = max(r[0] + r[2] for r in rects), max(r[1] + r[3] for r in rects)
+            x, y = (nx - left) / max(1, right - left - 1), (ny - top) / max(1, bottom - top - 1)
+        else:
+            x = (point.x() - self.area.x()) / max(1, self.area.width() - 1)
+            y = (point.y() - self.area.y()) / max(1, self.area.height() - 1)
         self.pointer.write(e.EV_ABS, e.ABS_X, round(min(max(x, 0), 1) * 65535))
         self.pointer.write(e.EV_ABS, e.ABS_Y, round(min(max(y, 0), 1) * 65535))
         self.pointer.syn()
@@ -475,9 +533,12 @@ class Overlay(QWidget):
 
     # screenshot pixels ↔ overlay (logical, relative to the overlay) coordinates
     def to_local(self, x, y):
-        return QPointF(float(x) / self.factor, float(y) / self.factor)
+        origin = QGuiApplication.primaryScreen().virtualGeometry().topLeft()
+        return self.local_point(QPointF(float(x) / self.factor, float(y) / self.factor) + QPointF(origin))
 
     def to_shot(self, point):
+        origin = QGuiApplication.primaryScreen().virtualGeometry().topLeft()
+        point = self.global_point(point) - QPointF(origin)
         return round(point.x() * self.factor), round(point.y() * self.factor)
 
     def global_point(self, local):
@@ -1705,7 +1766,7 @@ class Tools(QObject):
                 self.overlay.update()
                 if pill:
                     self.s.pill.show()
-        logical = self.overlay.geometry()
+        logical = QGuiApplication.primaryScreen().virtualGeometry()
         self._black_out(image, logical)
         scale = min(1.0, SHOT_MAX_EDGE / max(image.width(), image.height()))
         full_w, full_h = round(image.width() * scale), round(image.height() * scale)
@@ -2800,7 +2861,7 @@ class Recorder(QObject):
                 image = take_screenshot(os.path.join(tmp, "s.png"))
         except Exception:  # noqa: BLE001
             return
-        logical = self.s.overlay.geometry()
+        logical = QGuiApplication.primaryScreen().virtualGeometry()
         self.s.tools._black_out(image, logical)
         ratio = image.width() / max(1, logical.width())
         # Around the click on its screen, not the whole desktop.
@@ -2918,6 +2979,7 @@ class App(QObject):
         self.overlay.glow_enabled = self.state.get("edgeGlow", True) is not False
         self.input = Input(self.overlay.geometry())
         self.kwin = KWin()
+        refresh_display_mapping(self.kwin)
         self.pill = Pill(lambda: self.set_mode("paused"))
         self.card = GuideCard(self.guide_done)
         self.bridge = Bridge(config, self)
@@ -2993,6 +3055,7 @@ class App(QObject):
             log("chat launcher not saved:", error)
 
     def _screens_changed(self):
+        refresh_display_mapping(self.kwin)
         geometry = QGuiApplication.primaryScreen().virtualGeometry()
         if self.overlay.geometry() != geometry:
             self.set_mode("paused")

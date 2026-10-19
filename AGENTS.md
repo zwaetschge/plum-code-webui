@@ -25,6 +25,8 @@ bash scripts/plum-rebuild.sh        # flags: --no-cache --no-wait --timeout=N
 
 It triggers `repair-bot` (sidecar in `docker-compose.override.yml`), which builds, restarts externally, checks `/health/ready`, and rolls back on failure. If `repair-bot` is dead: `docker compose up -d repair-bot`. Main container never mounts raw `docker.sock`; keep `CLI_RUNNER_ACCESS=admin-only`.
 
+**Public routing (verified 2026-10-19):** public Plum currently targets Geekom `192.168.1.124:4545` through Traefik file `plum-geekom-prod.yml`; an older CLI session may still run against Unraid localhost. Verify the actual public target before deploying or pairing. Create production browser tokens through its authenticated public API. Geekom file-router priorities exceed legacy Docker routers to prevent split routing. Handover: `docs/plans/session-new-desktop-2026-10-19.md`.
+
 ## Android
 
 - `android-builder` (and godot, blender, meshy, rea; vocarium is live again) are **not** loaded per session: load the `mcp-on-demand` skill (`node /app/scripts/capability-catalog.mjs show mcp-on-demand`) and call them via `node scripts/mcp-call.mjs call <server> <tool> '<json>'`. **Never** `adb`/`gradle` directly. Project `796aa064-f0bb-4031-bbf2-2da83a4bca94`.
