@@ -3,7 +3,15 @@ import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { isPlainClick, rememberLibraryOrigin, transitionPane } from '@/lib/motion/navigation';
 import { LIBRARY_PARAM, LIBRARY_SECTIONS, libraryHref } from './libraryNav';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, Library, MessageCircle, SlidersHorizontal, Users } from 'lucide-react';
+import {
+  Bot,
+  FolderOpen,
+  ChevronDown,
+  Library,
+  MessageCircle,
+  SlidersHorizontal,
+  Users,
+} from 'lucide-react';
 import type { AssistantResource, Session } from '@plum-code-webui/shared';
 import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
@@ -84,6 +92,21 @@ export function ChatSidebarResources({
 
   return (
     <>
+      <nav aria-label="Chat-Arbeitsbereiche">
+        <Link
+          to="/chat?workspace=assistants"
+          onClick={onNavigate}
+          className={row}
+          title="Assistenten (Gems / Custom GPTs)"
+        >
+          <Bot className="h-4 w-4 shrink-0" />
+          {!collapsed && 'Assistenten'}
+        </Link>
+        <Link to="/chat?workspace=projects" onClick={onNavigate} className={row} title="Projekte">
+          <FolderOpen className="h-4 w-4 shrink-0" />
+          {!collapsed && 'Projekte'}
+        </Link>
+      </nav>
       <nav aria-label="Gesprächsverlauf" className="sidebar-chat-history">
         {groups.map((group) => (
           <div key={group.label} className="sidebar-session-group">

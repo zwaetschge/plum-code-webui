@@ -59,6 +59,7 @@ export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
     model: z.string().min(1).max(200),
     profileId: optionalId,
     profileRevision: z.number().int().positive().optional(),
+    projectId: optionalId.nullable(),
     sourceIds: z.array(z.string().max(200)).max(20).default([]),
     parentChatId: optionalId,
     parentTurnId: optionalId,
@@ -77,6 +78,8 @@ export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
     voice: z.string().max(100).default('Rufus Beck'),
     memory: z.enum(['off', 'read', 'read-write']).default('off'),
     projectId: optionalId,
+    sourceIds: z.array(z.string().min(1).max(200)).max(20).default([]),
+    apiProviderId: z.string().min(1).max(200).optional(),
   }),
   task: z.object({
     goal: text,

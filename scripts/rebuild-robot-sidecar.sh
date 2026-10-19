@@ -12,8 +12,8 @@
 set -eu
 
 WEBUI_DIR="/webui"
-COMPOSE_FILE="${WEBUI_DIR}/docker-compose.yml"
-OVERRIDE_FILE="${WEBUI_DIR}/docker-compose.override.yml"
+COMPOSE_FILE="${REBUILD_COMPOSE_FILE:-${WEBUI_DIR}/docker-compose.yml}"
+OVERRIDE_FILE="${REBUILD_COMPOSE_OVERRIDE_FILE-${WEBUI_DIR}/docker-compose.override.yml}"
 TRIGGER_FILE="${WEBUI_DIR}/data/rebuild-trigger.json"
 STATUS_FILE="${WEBUI_DIR}/data/rebuild-robot-status.json"
 REPORT_FILE="${WEBUI_DIR}/REBUILD_ROBOT_REPORT.md"
@@ -25,7 +25,7 @@ DOCKER_PROXY_SERVICE="${REBUILD_DOCKER_PROXY_SERVICE:-docker-socket-proxy}"
 # Project name must match the original compose project (derived from the host directory name).
 # Inside the repair-bot container, the compose file is at /webui/ which would derive project "webui",
 # but the actual containers run under project "claude-code-webui".
-COMPOSE_PROJECT="claude-code-webui"
+COMPOSE_PROJECT="${REBUILD_COMPOSE_PROJECT:-claude-code-webui}"
 POLL_INTERVAL=5
 HEARTBEAT_INTERVAL=10
 READINESS_ATTEMPTS="${REBUILD_READINESS_ATTEMPTS:-36}"

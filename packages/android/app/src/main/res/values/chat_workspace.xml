@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_workspace_title">Assistants and projects</string>
+    <string name="chat_workspace_description">Custom assistants like Gems or Custom GPTs: instructions, model and knowledge. Projects group conversations and shared sources.</string>
+    <string name="chat_workspace_name">Name</string>
+    <string name="chat_workspace_instructions">Instructions</string>
+    <string name="chat_workspace_source_text">Source text</string>
+    <string name="chat_workspace_project_description">Description</string>
+    <string name="chat_workspace_provider">Preferred API connection</string>
+    <string name="chat_workspace_keep_model">Keep current selection</string>
+    <string name="chat_workspace_model">Preferred model</string>
+    <string name="chat_workspace_default">Plum · Default</string>
+    <string name="chat_workspace_knowledge">Assistant knowledge</string>
+    <string name="chat_workspace_revision_hint">Changes apply to new conversations. Existing conversations keep their profile revision until you update it.</string>
+    <string name="chat_workspace_save">Save</string>
+    <string name="chat_workspace_back">Back</string>
+    <string name="chat_workspace_archive">Archive</string>
+    <string name="chat_workspace_assistant">Assistant</string>
+    <string name="chat_workspace_project">Project</string>
+    <string name="chat_workspace_no_project">No project</string>
+    <string name="chat_workspace_apply">Use for this conversation</string>
+    <string name="chat_workspace_assistants">Assistants</string>
+    <string name="chat_workspace_projects">Projects</string>
+    <string name="chat_workspace_sources">Sources</string>
+    <string name="chat_workspace_new_assistant">New assistant</string>
+    <string name="chat_workspace_new_project">New project</string>
+    <string name="chat_workspace_new_source">New project source</string>
+    <string name="chat_workspace_empty">No entries yet. Create your first one.</string>
+    <string name="chat_workspace_edit">Edit</string>
+    <string name="chat_workspace_conversations">Project conversations</string>
+    <string name="chat_workspace_empty_chats">No conversations yet. Select the project and send your first message.</string>
+</resources>

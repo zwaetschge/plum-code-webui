@@ -124,6 +124,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var providerId by remember { mutableStateOf("") }
     var model by remember { mutableStateOf("") }
     var profileId by remember { mutableStateOf<String?>(null) }
+    var projectId by remember { mutableStateOf<String?>(null) }
+    var showWorkspace by remember { mutableStateOf(false) }
     var sourceIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var imageIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var prompt by remember { mutableStateOf("") }
@@ -324,6 +326,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                 val created = outbox.send("/api/assistant/api-chats", buildJsonObject {
                     put("title", text.take(48)); put("providerId", providerId); put("model", model)
                     profileId?.let { put("profileId", it) }; put("sourceIds", JsonArray(emptyList()))
+                    put("projectId", projectId?.let(::JsonPrimitive) ?: JsonNull)
                     if (newChatStyleSet) put("writingStyleSkill", newChatStyle?.let(::JsonPrimitive) ?: JsonNull)
                 }, context.getString(R.string.assistant_new), null)
                 checkOwner(); accept("/api/assistant/api-chats", created)
@@ -341,6 +344,9 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val activeWritingStyle = chat?.let { it.body["writingStyleSkill"]?.jsonPrimitive?.contentOrNull }
         ?: if (chat != null) null else if (newChatStyleSet) newChatStyle else personalization?.defaultWritingStyle?.ifBlank { null }
     Column(Modifier.fillMaxSize().padding(top = topInset).navigationBarsPadding().imePadding().padding(horizontal = 16.dp)) {
+        TextButton(enabled = !busy && !running, onClick = { showWorkspace = true }) {
+            Text(stringResource(R.string.chat_workspace_title), maxLines = 2)
+        }
         // Switching chats: the old conversation leaves quickly, the new one
         // settles in. Each slot renders its own snapshot, so the leaving chat
         // never shows the arriving chat's title or turns.
@@ -596,6 +602,42 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         }
     }
     if (showVoiceSheet) VoicePickerSheet(api) { showVoiceSheet = false }
+    if (showWorkspace) ChatWorkspaceSheet(
+        owner = owner, api = api, providers = providers,
+        initialProfile = chat?.body?.get("profileId")?.jsonPrimitive?.contentOrNull ?: profileId,
+        initialProject = if (chat == null) projectId else chat?.body?.get("projectId")?.jsonPrimitive?.contentOrNull,
+        onDismiss = { showWorkspace = false },
+        onChat = { resource -> showWorkspace = false; showChat(resource); currentOnChatSelected(resource.id) },
+        onApply = { selected, project ->
+            val current = chat
+            if (current == null) {
+                profileId = selected?.id; projectId = project
+                profiles = profiles.filter { it.id != selected?.id } + listOfNotNull(selected)
+                val preferred = providers.firstOrNull { it.id == selected?.body?.get("apiProviderId")?.jsonPrimitive?.contentOrNull }
+                if (preferred != null) {
+                    providerId = preferred.id
+                    model = selected?.body?.get("model")?.jsonPrimitive?.contentOrNull?.takeIf { it in preferred.models } ?: preferred.models.firstOrNull().orEmpty()
+                }
+                showWorkspace = false
+            } else scope.launch {
+                busy = true; error = null
+                try {
+                    checkOwner()
+                    val response = api.updateAssistantApiChat(owner, current.id, buildJsonObject {
+                        put("title", current.title); put("expectedRevision", current.revision)
+                        put("providerId", current.body.getValue("providerId")); put("model", current.body.getValue("model"))
+                        put("profileId", selected?.id?.let(::JsonPrimitive) ?: JsonNull)
+                        put("projectId", project?.let(::JsonPrimitive) ?: JsonNull)
+                        put("sourceIds", current.body["sourceIds"] as? JsonArray ?: JsonArray(emptyList()))
+                    })
+                    checkOwner(); check(response.success) { response.error?.message.orEmpty() }
+                    chat = requireNotNull(response.data); refresh++; showWorkspace = false
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { error = failure.message }
+                finally { busy = false }
+            }
+        },
+    )
     LaunchedEffect(voiceEnabled) { if (!voiceEnabled) voiceMode = false }
     if (voiceMode) AssistantVoiceMode(
         owner = owner, api = api,

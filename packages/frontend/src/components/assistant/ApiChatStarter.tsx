@@ -44,6 +44,7 @@ export function ApiChatStarter({
   const [provider, setProvider] = useState(''),
     [model, setModel] = useState(''),
     [profile, setProfile] = useState<string[]>([]),
+    [project, setProject] = useState<string[]>([]),
     [sources, setSources] = useState<string[]>([]),
     [prompt, setPrompt] = useState(''),
     [error, setError] = useState(''),
@@ -72,6 +73,7 @@ export function ApiChatStarter({
               providerId: chosen.id,
               model: actualModel,
               profileId: profile[0] ?? null,
+              projectId: temporary ? null : (project[0] ?? null),
               sourceIds: sources,
               ...(artifactEdit ? { artifactEdit } : {}),
               ...(research ? { workflow: 'research' } : {}),
@@ -205,6 +207,13 @@ export function ApiChatStarter({
                 value={profile}
                 maximum={1}
                 onChange={setProfile}
+              />
+              <ResourcePicker
+                label="Projekt"
+                kind="project"
+                value={project}
+                maximum={1}
+                onChange={setProject}
               />
               <ResourcePicker
                 label="Dokumentquellen"

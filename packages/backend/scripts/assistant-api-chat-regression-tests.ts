@@ -677,6 +677,109 @@ try {
   assert(transmitted.includes('OWN PROJECT'));
   assert(transmitted.includes('gezielte Ergebnis'));
   assert(transmitted.includes('ACTIVE PROJECT MEMORY'));
+  // Projects work without an assistant, and explicit null overrides inherited projects.
+  const directProject = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    profileId: null,
+    projectId: project.id,
+    sourceIds: [],
+  });
+  assert.equal(directProject.body.projectId, project.id);
+  const directTurn = await startApiTurn('api-alice', directProject.id, {
+    commandId: randomUUID(),
+    expectedRevision: 1,
+    prompt: 'Quantencomputer?',
+  });
+  assert.deepEqual((await settled('api-alice', directProject.id, directTurn.id)).sourceVersions, [
+    { id: knowledge.id, revision: 1 },
+  ]);
+  assert(JSON.stringify(requests.at(-1)?.body.messages?.[0]).includes('OWN PROJECT'));
+  const detached = await updateApiChat('api-alice', directProject.id, {
+    title: directProject.title,
+    providerId: input.providerId,
+    model: input.model,
+    profileId: contextualProfile.id,
+    projectId: null,
+    sourceIds: [],
+    expectedRevision: 1,
+  });
+  const detachedTurn = await startApiTurn('api-alice', detached.id, {
+    commandId: randomUUID(),
+    expectedRevision: detached.revision,
+    prompt: 'Nur Assistentenanweisungen',
+  });
+  assert.deepEqual((await settled('api-alice', detached.id, detachedTurn.id)).sourceVersions, []);
+  assert(!JSON.stringify(requests.at(-1)?.body.messages?.[0]).includes('OWN PROJECT'));
+  const foreignProject = await createResource(
+    'api-bob',
+    'project',
+    'Privat',
+    BODY_SCHEMAS.project.parse({ instructions: 'BOB PROJECT' })
+  );
+  await assert.rejects(
+    createApiChat('api-alice', { ...input, commandId: randomUUID(), projectId: foreignProject.id })
+  );
+  const otherProject = await createResource(
+    'api-alice',
+    'project',
+    'Anderes Thema',
+    BODY_SCHEMAS.project.parse({ instructions: 'OTHER PROJECT' })
+  );
+  const switched = await updateApiChat('api-alice', detached.id, {
+    title: detached.title,
+    providerId: input.providerId,
+    model: input.model,
+    profileId: contextualProfile.id,
+    projectId: otherProject.id,
+    sourceIds: [],
+    expectedRevision: detached.revision,
+  });
+  const switchedTurn = await startApiTurn('api-alice', switched.id, {
+    commandId: randomUUID(),
+    expectedRevision: switched.revision,
+    prompt: 'Welches Projekt?',
+  });
+  assert.deepEqual((await settled('api-alice', switched.id, switchedTurn.id)).sourceVersions, []);
+  assert(JSON.stringify(requests.at(-1)?.body.messages?.[0]).includes('OTHER PROJECT'));
+  assert(!JSON.stringify(requests.at(-1)?.body.messages?.[0]).includes('OWN PROJECT'));
+  const knowledgeable = await createResource(
+    'api-alice',
+    'profile',
+    'Eigener Assistent',
+    BODY_SCHEMAS.profile.parse({
+      instructions: 'ASSISTANT KNOWLEDGE',
+      sourceIds: [source.id],
+      apiProviderId: input.providerId,
+    })
+  );
+  const knowledgeChat = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    profileId: knowledgeable.id,
+    projectId: null,
+    sourceIds: [],
+  });
+  await reviseResource('api-alice', knowledgeable.id, 1, knowledgeable.title, {
+    ...knowledgeable.body,
+    sourceIds: [knowledge.id],
+  });
+  const knowledgeTurn = await startApiTurn('api-alice', knowledgeChat.id, {
+    commandId: randomUUID(),
+    expectedRevision: 1,
+    prompt: 'Was weisst du?',
+  });
+  const pinnedAnswer = await settled('api-alice', knowledgeChat.id, knowledgeTurn.id);
+  assert.equal(pinnedAnswer.sourceVersions.length, 1);
+  assert.equal(
+    pinnedAnswer.sourceVersions[0].id,
+    source.id,
+    'assistant knowledge uses the pinned profile revision'
+  );
+  assert(!JSON.stringify(requests.at(-1)?.body.messages?.[0]).includes('BOB PROJECT'));
+  console.log(
+    'PASS: direct project context, explicit detach, project switch/isolation, ownership and pinned assistant knowledge'
+  );
   await archiveResource('api-alice', project.id, 1);
   const archived = await startApiTurn('api-alice', contextual.id, {
     commandId: randomUUID(),

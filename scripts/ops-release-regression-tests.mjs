@@ -284,19 +284,15 @@ async function testDockerProxyReleaseContract(tempDir) {
 
   // Without a password there is no sensible default to fall back to, so the
   // deployment has to fail loudly instead of reaching some other database.
-  const withoutPassword = run(
-    'docker',
-    ['compose', '-f', portableCompose, 'config', '--quiet'],
-    {
-      env: {
-        ...process.env,
-        SESSION_SECRET: 's'.repeat(48),
-        JWT_SECRET: 'j'.repeat(48),
-        ENCRYPTION_KEY: 'e'.repeat(48),
-        POSTGRES_PASSWORD: '',
-      },
-    }
-  );
+  const withoutPassword = run('docker', ['compose', '-f', portableCompose, 'config', '--quiet'], {
+    env: {
+      ...process.env,
+      SESSION_SECRET: 's'.repeat(48),
+      JWT_SECRET: 'j'.repeat(48),
+      ENCRYPTION_KEY: 'e'.repeat(48),
+      POSTGRES_PASSWORD: '',
+    },
+  });
   assert.notEqual(withoutPassword.status, 0, 'a missing POSTGRES_PASSWORD must fail the config');
   assert.match(withoutPassword.stderr, /POSTGRES_PASSWORD/);
 
@@ -375,7 +371,6 @@ async function testMaintenance(tempDir) {
     mkdir(sessionDir, { recursive: true }),
     mkdir(cacheDir, { recursive: true }),
   ]);
-
 
   const files = {
     oldBackup: path.join(backupDir, 'backup-2026-01-01_00-00-00.dump'),
@@ -462,6 +457,27 @@ async function testMaintenance(tempDir) {
 
 const tempDir = await mkdtemp(path.join(os.tmpdir(), 'plum-ops-release-'));
 try {
+  const target = run(
+    'sh',
+    [
+      '-c',
+      `REBUILD_ROBOT_SOURCE_ONLY=true . '${sidecarScript}'; printf '%s\\n' "$COMPOSE_PROJECT" "$COMPOSE_FILE" "$OVERRIDE_FILE"`,
+    ],
+    {
+      env: {
+        ...process.env,
+        REBUILD_COMPOSE_PROJECT: 'plum',
+        REBUILD_COMPOSE_FILE: '/srv/plum/deploy/docker-compose.geekom.yml',
+        REBUILD_COMPOSE_OVERRIDE_FILE: '',
+      },
+    }
+  );
+  assert.equal(target.status, 0, target.stderr);
+  assert.equal(
+    target.stdout.trimEnd(),
+    'plum\n/srv/plum/deploy/docker-compose.geekom.yml',
+    'sidecar must target the active production project and allow disabling the legacy override'
+  );
   await testRebuildRollback(tempDir);
   await testHubProductionGuards(tempDir);
   await testDockerProxyReleaseContract(tempDir);

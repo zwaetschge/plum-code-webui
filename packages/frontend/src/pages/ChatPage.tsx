@@ -28,6 +28,7 @@ import { prefersReducedMotion } from '@/lib/motion/reducedMotion';
 import { cn } from '@/lib/utils';
 import { StartSuggestions } from '@/components/assistant/StartSuggestions';
 import { RecentChats } from '@/components/assistant/RecentChats';
+import { ChatWorkspace } from '@/components/assistant/ChatWorkspace';
 
 export function ChatPage() {
   const owner = useAuthStore((s) => s.user?.id);
@@ -35,6 +36,8 @@ export function ChatPage() {
   return <ChatAccountPage key={`${owner}:${location.key}`} owner={owner} />;
 }
 function ChatAccountPage({ owner }: { owner?: string }) {
+  const location = useLocation();
+  const initial = new URLSearchParams(location.search);
   const user = useAuthStore((state) => state.user);
   const { preferences } = usePersonalization();
   const firstName = preferences.nickname || user?.name?.trim().split(/\s+/)[0];
@@ -48,7 +51,8 @@ function ChatAccountPage({ owner }: { owner?: string }) {
   const [draft, setDraft] = useState(''),
     [selection, setSelection] = useState(''),
     [model, setModel] = useState(''),
-    [profile, setProfile] = useState('');
+    [profile, setProfile] = useState(initial.get('assistant') ?? ''),
+    [project, setProject] = useState(initial.get('project') ?? '');
   const [options, setOptions] = useState(false),
     [voice, setVoice] = useState(false),
     [temporary, setTemporary] = useState(false),
@@ -104,6 +108,7 @@ function ChatAccountPage({ owner }: { owner?: string }) {
                 providerId: upstream.id,
                 model: actualModel,
                 profileId: profile || null,
+                projectId: temporary ? null : project || null,
                 temporary,
                 sourceIds: sources,
                 ...(research ? { workflow: 'research' } : {}),
@@ -190,6 +195,22 @@ function ChatAccountPage({ owner }: { owner?: string }) {
             />
           </>
         )}
+        <ChatWorkspace
+          profileId={profile}
+          projectId={project}
+          providers={providers.data}
+          disabled={busy || !!created}
+          initialOpen={initial.has('workspace')}
+          onProject={setProject}
+          onProfile={(value) => {
+            setProfile(value?.id ?? '');
+            const provider = providers.data?.find((p) => p.id === value?.body.apiProviderId);
+            if (provider) {
+              setSelection(`api:${provider.id}`);
+              setModel(String(value?.body.model || provider.models[0] || ''));
+            }
+          }}
+        />
         <RecentChats />
         <AssistantOutbox />
       </div>

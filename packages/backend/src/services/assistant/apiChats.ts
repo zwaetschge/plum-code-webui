@@ -82,6 +82,7 @@ export const API_CHAT_INPUT = z
     providerId: z.string().min(1).max(200),
     model: z.string().min(1).max(200),
     profileId: z.string().min(1).max(200).nullable().optional(),
+    projectId: z.string().min(1).max(200).nullable().optional(),
     sourceIds: z.array(z.string().min(1).max(200)).max(20).default([]),
     artifactEdit: ARTIFACT_EDIT_INPUT.optional(),
     workflow: z.literal('research').optional(),
@@ -191,9 +192,13 @@ export async function systemContext(
 ) {
   const profile = await profileBody(userId, chat.body);
   const personal = await readPersonalization(userId);
+  // Explicit null means no project; old chats inherit their pinned profile's project.
+  const selectedProject = Object.hasOwn(chat.body, 'projectId')
+    ? chat.body.projectId
+    : profile?.projectId;
   const candidateProject =
-    !chat.body.temporary && profile?.projectId
-      ? await findResource(userId, String(profile.projectId)).catch(() => null)
+    !chat.body.temporary && selectedProject
+      ? await findResource(userId, String(selectedProject)).catch(() => null)
       : null;
   const project = candidateProject?.kind === 'project' ? candidateProject : null;
   const parts = [
@@ -337,6 +342,11 @@ export async function createApiChat(userId: string, input: z.infer<typeof API_CH
       ...(input.artifactEdit ? { artifactEdit: input.artifactEdit } : {}),
       ...(input.workflow ? { workflow: input.workflow } : {}),
       temporary: input.temporary ?? false,
+      projectId: input.temporary
+        ? null
+        : input.projectId === undefined
+          ? (profile?.body.projectId ?? null)
+          : input.projectId,
       ...(input.temporary ? { expiresAt: new Date(Date.now() + 86400000).toISOString() } : {}),
       ...(profile ? { profileId: profile.id, profileRevision: profile.revision } : {}),
       ...(writingStyleSkill ? { writingStyleSkill } : {}),
@@ -406,6 +416,9 @@ export async function updateApiChat(
       providerId: input.providerId,
       model: input.model,
       sourceIds: input.sourceIds,
+      ...(input.projectId !== undefined
+        ? { projectId: chat.body.temporary ? null : input.projectId }
+        : {}),
       ...(profile ? { profileId: profile.id, profileRevision: profile.revision } : {}),
       ...(writingStyleSkill !== undefined ? { writingStyleSkill } : {}),
     };
@@ -524,9 +537,11 @@ export async function startApiTurn(
           context.projectId
         )
       : [];
+    const profile = await profileBody(userId, chat.body);
     const selectedIds = [
       ...new Set([
         ...((chat.body.sourceIds ?? []) as string[]),
+        ...((profile?.sourceIds ?? []) as string[]),
         ...projectSources.map((source) => String(source.id)),
       ]),
     ].slice(0, 20);

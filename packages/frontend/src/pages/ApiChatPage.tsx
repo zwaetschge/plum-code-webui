@@ -128,6 +128,7 @@ export function ApiChatPage() {
       providerId: string;
       model: string;
       profile: string[];
+      project: string[];
       sources: string[];
     } | null>(null);
   const scope = `${owner}:${id}`,
@@ -445,6 +446,7 @@ export function ApiChatPage() {
       providerId: String(chat.body.providerId),
       model: String(chat.body.model),
       profile: chat.body.profileId ? [String(chat.body.profileId)] : [],
+      project: chat.body.projectId ? [String(chat.body.projectId)] : [],
       sources: (chat.body.sourceIds ?? []) as string[],
     });
   };
@@ -495,6 +497,7 @@ export function ApiChatPage() {
                         providerId: configuration.providerId,
                         model: configuration.model,
                         profileId: configuration.profile[0] ?? null,
+                        projectId: configuration.project[0] ?? null,
                         sourceIds: configuration.sources,
                         expectedRevision: chat.revision,
                       });
@@ -558,6 +561,15 @@ export function ApiChatPage() {
                     maximum={20}
                     onChange={(sources) => setConfiguration({ ...configuration, sources })}
                   />
+                  {!chat.body.temporary && (
+                    <ResourcePicker
+                      label="Projekt"
+                      kind="project"
+                      value={configuration.project}
+                      maximum={1}
+                      onChange={(project) => setConfiguration({ ...configuration, project })}
+                    />
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Speichern bindet die aktuelle Profilrevision für kommende Nachrichten. Frühere
                     Antworten behalten ihr damaliges Profil und ihren Quellenstand.
