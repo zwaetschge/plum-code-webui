@@ -4,12 +4,14 @@ import {
   semanticMemoryScores,
   semanticExcerptStart,
   embeddingModel,
+  memoryScope,
+  type MemoryScope,
 } from './memorySemantic.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { estimateModelCost } from '@plum-code-webui/shared';
 import { all, get, run, transaction, type TransactionScope } from '../../db/pg.js';
-import { readPersonalization, memoryPermission } from './personalization.js';
+import { readPersonalization, memoryPermission, effectiveMemoryMode } from './personalization.js';
 import { apiChatProviders, apiChatEndpoint, streamApiChat } from './apiTransport.js';
 import { BODY_SCHEMAS, createResource, findResource, reviseResource } from './resources.js';
 import { AppError } from '../../middleware/errorHandler.js';
@@ -111,15 +113,15 @@ export async function memorySource(
     if (body.profileId && !profile) return null;
     const p = profile ? JSON.parse(profile.body_json) : {};
     const projectId = (Object.hasOwn(body, 'projectId') ? body.projectId : p.projectId) ?? null;
-    if (projectId) {
-      const project = await db.get(
-        "SELECT body_json FROM assistant_resources WHERE id=? AND user_id=? AND kind='project' AND archived=0",
+    if (
+      projectId &&
+      !(await db.get(
+        "SELECT id FROM assistant_resources WHERE id=? AND user_id=? AND kind='project' AND archived=0",
         projectId,
         userId
-      );
-      // Separate conversations must not become shared project/global recall later.
-      if (!project || JSON.parse(project.body_json).contextMode === 'separate') return null;
-    }
+      ))
+    )
+      return null;
     return {
       type: 'api',
       id,
@@ -209,10 +211,13 @@ export function explicitRemember(text: string) {
 export function explicitForget(text: string) {
   return /(?:^|[.!?]\s*)(?:bitte\s+)?(?:vergiss|vergesse|forget)\b/i.test(text);
 }
+// Inside a project its memory setting governs; the expert switch decides elsewhere.
+const sourceMode = (pref: Awaited<ReturnType<typeof readPersonalization>>, source: Source) =>
+  effectiveMemoryMode(pref, source.profileMode, !!source.projectId);
 function eligible(pref: Awaited<ReturnType<typeof readPersonalization>>, source: Source) {
   return (
-    memoryPermission(pref, source.profileMode, false) &&
-    ((memoryPermission(pref, source.profileMode, false, true) &&
+    memoryPermission(pref, sourceMode(pref, source), false) &&
+    ((memoryPermission(pref, sourceMode(pref, source), false, true) &&
       (pref.memoryLearning ||
         explicitRemember(source.userText) ||
         explicitForget(source.userText))) ||
@@ -403,7 +408,9 @@ export async function processMemoryJob(
     );
     const scores = await semanticMemoryScores(
       userId,
-      source.projectId,
+      source.projectId
+        ? { personal: false, projects: [source.projectId], prefer: source.projectId }
+        : { personal: true, projects: [], prefer: null },
       source.userText,
       'memory'
     ).catch(() => new Map<string, number>());
@@ -473,7 +480,7 @@ export async function processMemoryJob(
         throw new AppError('Gedächtniszugriff wurde geändert.', 409, 'MEMORY_REVOKED');
       if (
         explicitForget(source.userText) &&
-        memoryPermission(current, live.profileMode, false, true)
+        memoryPermission(current, sourceMode(current, live), false, true)
       ) {
         for (const forgotten of extracted.forget) {
           if (!source.userText.includes(forgotten.quote)) continue;
@@ -491,7 +498,7 @@ export async function processMemoryJob(
       }
       if (
         (current.memoryLearning || explicitRemember(source.userText)) &&
-        memoryPermission(current, live.profileMode, false, true)
+        memoryPermission(current, sourceMode(current, live), false, true)
       )
         for (const m of extracted.memories) {
           if (!source.userText.includes(m.quote) || containsSecret(m.text + ' ' + m.quote))
@@ -643,7 +650,13 @@ export async function processMemoryJob(
   }
 }
 
-export async function relevantMemories(userId: string, projectId: string | null, query: string) {
+export async function relevantMemories(
+  userId: string,
+  projectId: string | null,
+  query: string,
+  known?: MemoryScope
+) {
+  const scope = known ?? (await memoryScope(userId, projectId));
   const terms =
     query
       .match(/[\p{L}\p{N}]{3,}/gu)
@@ -669,28 +682,33 @@ export async function relevantMemories(userId: string, projectId: string | null,
       )
       .slice(0, 32) ?? [];
   const q = terms.map((t) => `'${t.replace(/'/g, '')}'`).join(' | ');
-  const semantic = await semanticMemoryScores(userId, projectId, query, 'memory').catch(
+  const semantic = await semanticMemoryScores(userId, scope, query, 'memory').catch(
     () => new Map<string, number>()
   );
   const rows = await all(
-    `SELECT id,title,revision,body_json, CASE WHEN ?='' THEN 0 ELSE ts_rank_cd(to_tsvector('simple',title||' '||COALESCE(body_json::jsonb->>'text','')||' '||COALESCE(body_json::jsonb->>'keywords','')),to_tsquery('simple',?)) END AS relevance FROM assistant_resources WHERE user_id=? AND kind='memory' AND archived=0 AND COALESCE(body_json::jsonb->>'state','active')='active' AND (body_json::jsonb->>'scope'='personal' OR (body_json::jsonb->>'scope'='project' AND body_json::jsonb->>'projectId'=?)) ORDER BY relevance DESC,COALESCE((body_json::jsonb->>'pinned')::boolean,false) DESC,updated_at DESC LIMIT 24`,
+    `SELECT id,title,revision,body_json, CASE WHEN ?='' THEN 0 ELSE ts_rank_cd(to_tsvector('simple',title||' '||COALESCE(body_json::jsonb->>'text','')||' '||COALESCE(body_json::jsonb->>'keywords','')),to_tsquery('simple',?)) END AS relevance FROM assistant_resources WHERE user_id=? AND kind='memory' AND archived=0 AND COALESCE(body_json::jsonb->>'state','active')='active' AND ((body_json::jsonb->>'scope'='personal' AND ?::boolean) OR (body_json::jsonb->>'scope'='project' AND body_json::jsonb->>'projectId'=ANY(?::text[]))) ORDER BY relevance DESC,COALESCE((body_json::jsonb->>'pinned')::boolean,false) DESC,updated_at DESC LIMIT 24`,
     q,
     q || 'unusedtoken',
     userId,
-    projectId ?? ''
+    scope.personal,
+    scope.projects
   );
   if (semantic.size) {
     const extra = await all(
-      `SELECT id,title,revision,body_json,0 AS relevance FROM assistant_resources WHERE user_id=? AND kind='memory' AND archived=0 AND COALESCE(body_json::jsonb->>'state','active')='active' AND (body_json::jsonb->>'scope'='personal' OR (body_json::jsonb->>'scope'='project' AND body_json::jsonb->>'projectId'=?)) AND id IN (${[...semantic.keys()].map(() => '?').join(',')})`,
+      `SELECT id,title,revision,body_json,0 AS relevance FROM assistant_resources WHERE user_id=? AND kind='memory' AND archived=0 AND COALESCE(body_json::jsonb->>'state','active')='active' AND ((body_json::jsonb->>'scope'='personal' AND ?::boolean) OR (body_json::jsonb->>'scope'='project' AND body_json::jsonb->>'projectId'=ANY(?::text[]))) AND id IN (${[...semantic.keys()].map(() => '?').join(',')})`,
       userId,
-      projectId ?? '',
+      scope.personal,
+      scope.projects,
       ...semantic.keys()
     );
     const found = new Set(rows.map((r) => r.id));
     rows.push(...extra.filter((r) => !found.has(r.id)));
   }
+  // The current project is prioritised, as in ChatGPT projects.
   for (const row of rows)
-    row.relevance = Math.max(Number(row.relevance), semantic.get(row.id) ?? 0);
+    row.relevance =
+      Math.max(Number(row.relevance), semantic.get(row.id) ?? 0) *
+      (scope.prefer && JSON.parse(row.body_json).projectId === scope.prefer ? 1.5 : 1);
   rows.sort((a, b) => Number(b.relevance) - Number(a.relevance));
   let budget = 18000;
   return rows.slice(0, 24).flatMap((r) => {
@@ -721,15 +739,58 @@ export async function relevantMemories(userId: string, projectId: string | null,
     ];
   });
 }
+/**
+ * Other conversations in the same project, ranked by relevance to the current request
+ * (recency as tie-breaker), like ChatGPT project chats referencing each other. Works in
+ * both project memory modes; needs the account memory switch.
+ */
+export async function projectChatReferences(
+  userId: string,
+  projectId: string,
+  query: string,
+  excludeChatId: string,
+  clean: (response: string) => string = (r) => r
+) {
+  const terms =
+    query
+      .match(/[\p{L}\p{N}]{3,}/gu)
+      ?.slice(0, 25)
+      .map((t) => `'${t.replace(/'/g, '')}'`)
+      .join(' | ') ?? '';
+  const rows = await all(
+    `SELECT r.id,r.title,t.prompt,t.response,t.created_at,
+       CASE WHEN ?='' THEN 0 ELSE ts_rank_cd(to_tsvector('simple',t.prompt||' '||t.response),to_tsquery('simple',?)) END AS relevance
+     FROM assistant_api_turns t JOIN assistant_resources r ON r.id=t.chat_id
+     WHERE r.user_id=? AND r.kind='api-chat' AND r.archived=0 AND r.id<>?
+       AND r.body_json::jsonb->>'projectId'=?
+       AND COALESCE((r.body_json::jsonb->>'temporary')::boolean,false)=false
+       AND t.status='completed'
+     ORDER BY relevance DESC,t.created_at DESC,t.id DESC LIMIT 8`,
+    terms,
+    terms || 'unusedtoken',
+    userId,
+    excludeChatId,
+    projectId
+  );
+  return rows.map((r) => ({
+    chatId: r.id,
+    title: r.title,
+    at: r.created_at,
+    prompt: String(r.prompt).slice(0, 1200),
+    response: clean(String(r.response)).slice(0, 2400),
+  }));
+}
 export async function memoryRecall(
   userId: string,
   projectId: string | null,
   query: string,
   pref: Awaited<ReturnType<typeof readPersonalization>>,
-  excludeId?: string
+  excludeId?: string,
+  known?: MemoryScope
 ) {
   const parts: string[] = [];
   if (pref.chatHistory || (pref.writingStyleEnabled && pref.writingStyleLearning)) {
+    const scope = known ?? (await memoryScope(userId, projectId));
     const terms =
       query
         .match(/[\p{L}\p{N}]{3,}/gu)
@@ -737,40 +798,42 @@ export async function memoryRecall(
         .map((t) => `'${t}'`)
         .join(' | ') || 'unusedtoken';
     const semantic = pref.chatHistory
-      ? await semanticMemoryScores(userId, projectId, query, 'history').catch(
+      ? await semanticMemoryScores(userId, scope, query, 'history').catch(
           () => new Map<string, number>()
         )
       : new Map<string, number>();
     const rows = await all(
-      `SELECT *,ts_rank_cd(to_tsvector('simple',summary),to_tsquery('simple',?)) AS relevance FROM assistant_memory_history WHERE user_id=? AND (project_id IS NULL OR project_id=?) AND source_id<>? ORDER BY relevance DESC,created_at DESC LIMIT 12`,
+      `SELECT *,ts_rank_cd(to_tsvector('simple',summary),to_tsquery('simple',?)) AS relevance FROM assistant_memory_history WHERE user_id=? AND ((project_id IS NULL AND ?::boolean) OR project_id=ANY(?::text[])) AND source_id<>? ORDER BY (CASE WHEN project_id=? THEN 1 ELSE 0 END) DESC,relevance DESC,created_at DESC LIMIT 12`,
       terms,
       userId,
-      projectId ?? '',
-      excludeId ?? ''
+      scope.personal,
+      scope.projects,
+      excludeId ?? '',
+      scope.prefer ?? ''
     );
     if (semantic.size) {
       const extra = await all(
-        `SELECT *,0 AS relevance FROM assistant_memory_history WHERE user_id=? AND source_id<>? AND (project_id IS NULL OR project_id=?) AND id IN (${[...semantic.keys()].map(() => '?').join(',')})`,
+        `SELECT *,0 AS relevance FROM assistant_memory_history WHERE user_id=? AND source_id<>? AND ((project_id IS NULL AND ?::boolean) OR project_id=ANY(?::text[])) AND id IN (${[...semantic.keys()].map(() => '?').join(',')})`,
         userId,
         excludeId ?? '',
-        projectId ?? '',
+        scope.personal,
+        scope.projects,
         ...semantic.keys()
       );
       const found = new Set(rows.map((r) => r.id));
       rows.push(...extra.filter((r) => !found.has(r.id)));
     }
-    rows.sort(
-      (a, b) =>
-        Math.max(Number(b.relevance), semantic.get(b.id) ?? 0) -
-        Math.max(Number(a.relevance), semantic.get(a.id) ?? 0)
-    );
+    const rank = (r: Record<string, unknown>) =>
+      Math.max(Number(r.relevance), semantic.get(String(r.id)) ?? 0) *
+      (scope.prefer && r.project_id === scope.prefer ? 1.5 : 1);
+    rows.sort((a, b) => rank(b) - rank(a));
     for (const row of rows.slice(0, 12)) {
       const source = await memorySource(userId, row.source_type, row.source_id, row.turn_id);
       if (
         !source ||
         source.hash !== row.source_hash ||
         source.projectId !== row.project_id ||
-        !memoryPermission(pref, source.profileMode, false)
+        !memoryPermission(pref, sourceMode(pref, source), false)
       )
         continue;
       if (pref.chatHistory && row.summary && (row.relevance > 0 || semantic.has(row.id)))

@@ -3,11 +3,13 @@ package com.claudewebui.app.ui.screens.dashboard
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.claudewebui.app.R
 import com.claudewebui.app.core.network.ApiClient
@@ -45,8 +47,8 @@ fun ChatWorkspaceScreen(
     var title by remember { mutableStateOf("") }
     var instructions by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
-    var sharedMemories by remember { mutableStateOf("") }
-    var contextMode by remember { mutableStateOf("shared") }
+    var memoryMode by remember { mutableStateOf("default") }
+    var expertMemory by remember { mutableStateOf("off") }
     var provider by remember { mutableStateOf("") }
     var model by remember { mutableStateOf("") }
     var sourceIds by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -69,9 +71,12 @@ fun ChatWorkspaceScreen(
         editing = resource; editor = true; error = null
         title = resource?.title.orEmpty()
         instructions = resource?.body?.get(if (collection == "sources") "text" else "instructions")?.jsonPrimitive?.contentOrNull.orEmpty()
+        // Legacy hand-written expert notes are folded into the instructions on the next save.
+        resource?.body?.get("sharedMemories")?.jsonPrimitive?.contentOrNull?.takeIf { collection == "profiles" && it.isNotBlank() }
+            ?.let { instructions = listOf(instructions, it).filter(String::isNotBlank).joinToString("\n\nNotizen:\n") }
         description = resource?.body?.get("description")?.jsonPrimitive?.contentOrNull.orEmpty()
-        sharedMemories = resource?.body?.get("sharedMemories")?.jsonPrimitive?.contentOrNull.orEmpty()
-        contextMode = resource?.body?.get("contextMode")?.jsonPrimitive?.contentOrNull ?: "shared"
+        memoryMode = projectMemoryMode(resource?.body)
+        expertMemory = resource?.body?.get("memory")?.jsonPrimitive?.contentOrNull ?: "off"
         provider = resource?.body?.get("apiProviderId")?.jsonPrimitive?.contentOrNull.orEmpty()
         model = resource?.body?.get("model")?.jsonPrimitive?.contentOrNull.orEmpty()
         sourceIds = (resource?.body?.get("sourceIds") as? JsonArray)?.map { it.jsonPrimitive.content }.orEmpty()
@@ -101,19 +106,21 @@ fun ChatWorkspaceScreen(
                 OutlinedTextField(title, { title = it.take(200) }, label = { Text(stringResource(R.string.chat_workspace_name)) }, enabled = !busy, modifier = Modifier.fillMaxWidth())
                 if (collection == "projects") OutlinedTextField(description, { description = it.take(30000) }, label = { Text(stringResource(R.string.chat_workspace_project_description)) }, enabled = !busy, modifier = Modifier.fillMaxWidth())
                 if (collection == "projects") {
-                    Text(stringResource(R.string.chat_workspace_context), style = MaterialTheme.typography.titleSmall)
-                    listOf("shared" to R.string.chat_workspace_shared, "separate" to R.string.chat_workspace_separate).forEach { (value, label) ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            RadioButton(contextMode == value, enabled = !busy, onClick = { contextMode = value })
-                            TextButton(enabled = !busy, onClick = { contextMode = value }) { Text(stringResource(label)) }
-                        }
-                    }
-                    Text(stringResource(R.string.chat_workspace_context_hint), style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.chat_workspace_memory), style = MaterialTheme.typography.titleSmall)
+                    listOf(
+                        Triple("default", R.string.chat_workspace_memory_default, R.string.chat_workspace_memory_default_hint),
+                        Triple("project-only", R.string.chat_workspace_memory_project, R.string.chat_workspace_memory_project_hint),
+                    ).forEach { (value, label, hint) -> MemoryOption(memoryMode == value, stringResource(label), stringResource(hint), !busy) { memoryMode = value } }
+                    Text(stringResource(R.string.chat_workspace_memory_settings_hint), style = MaterialTheme.typography.bodySmall)
                 }
                 OutlinedTextField(instructions, { instructions = it.take(if (collection == "sources") 50000 else 30000) }, label = { Text(stringResource(if (collection == "sources") R.string.chat_workspace_source_text else R.string.chat_workspace_instructions)) }, minLines = 4, enabled = !busy, modifier = Modifier.fillMaxWidth())
                 if (collection == "profiles") {
-                    OutlinedTextField(sharedMemories, { sharedMemories = it.take(30000) }, label = { Text(stringResource(R.string.chat_workspace_shared_memories)) }, minLines = 3, enabled = !busy, modifier = Modifier.fillMaxWidth())
-                    Text(stringResource(R.string.chat_workspace_shared_memories_hint), style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.chat_workspace_memory), style = MaterialTheme.typography.titleSmall)
+                    listOf(
+                        Triple("off", R.string.chat_workspace_expert_memory_off, R.string.chat_workspace_expert_memory_off_hint),
+                        Triple("read", R.string.chat_workspace_expert_memory_read, R.string.chat_workspace_expert_memory_read_hint),
+                        Triple("read-write", R.string.chat_workspace_expert_memory_learn, R.string.chat_workspace_expert_memory_learn_hint),
+                    ).forEach { (value, label, hint) -> MemoryOption(expertMemory == value, stringResource(label), stringResource(hint), !busy) { expertMemory = value } }
                     WorkspaceChoice(stringResource(R.string.chat_workspace_provider), provider, listOf("" to stringResource(R.string.chat_workspace_keep_model)) + providers.map { it.id to it.name }, !busy) { provider = it; model = "" }
                     if (provider.isNotEmpty()) WorkspaceChoice(stringResource(R.string.chat_workspace_model), model, listOf("" to stringResource(R.string.chat_workspace_default)) + providers.firstOrNull { it.id == provider }?.models.orEmpty().map { it to it }, !busy) { model = it }
                     Text(stringResource(R.string.chat_workspace_knowledge), style = MaterialTheme.typography.titleSmall)
@@ -132,12 +139,12 @@ fun ChatWorkspaceScreen(
                             try {
                                 checkOwner()
                                 val body = buildJsonObject {
-                                    editing?.body?.forEach { (k,v) -> if (collection != "profiles" || k != "apiProviderId") put(k,v) }
+                                    editing?.body?.forEach { (k,v) -> if ((collection != "profiles" || k !in setOf("apiProviderId", "sharedMemories")) && (collection != "projects" || k != "contextMode")) put(k,v) }
                                     put(if (collection == "sources") "text" else "instructions", instructions)
                                     if (collection == "sources") put("projectId", requireNotNull(selectedProject))
-                                    if (collection == "projects") { put("description", description); put("contextMode", contextMode) }
+                                    if (collection == "projects") { put("description", description); put("memoryMode", memoryMode) }
                                     if (collection == "profiles") {
-                                        put("sharedMemories", sharedMemories)
+                                        put("memory", expertMemory)
                                         put("sourceIds", JsonArray(sourceIds.map(::JsonPrimitive)))
                                         put("model", model.ifBlank { null }?.let(::JsonPrimitive) ?: JsonNull)
                                         if (provider.isNotEmpty()) put("apiProviderId", provider)
@@ -202,7 +209,9 @@ fun ChatWorkspaceScreen(
                     val isProject = collection == "projects"
                     Text(viewed.title, style = MaterialTheme.typography.headlineMedium)
                     if (isProject) {
-                        Text(stringResource(if (viewed.body["contextMode"]?.jsonPrimitive?.contentOrNull == "separate") R.string.chat_workspace_separate else R.string.chat_workspace_shared), style = MaterialTheme.typography.titleSmall)
+                        val sealed = projectMemoryMode(viewed.body) == "project-only"
+                        Text(stringResource(if (sealed) R.string.chat_workspace_memory_project else R.string.chat_workspace_memory_default), style = MaterialTheme.typography.titleSmall)
+                        Text(stringResource(if (sealed) R.string.chat_workspace_memory_project_hint else R.string.chat_workspace_memory_default_hint), style = MaterialTheme.typography.bodySmall)
                         viewed.body["description"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { Text(it) }
                         WorkspaceChoice(stringResource(R.string.chat_workspace_assistant), selectedProfile.orEmpty(), listOf("" to stringResource(R.string.chat_workspace_all_experts)) + profiles.map { it.id to it.title }, !busy) { selectedProfile = it.ifBlank { null } }
                     } else {
@@ -237,6 +246,24 @@ private fun WorkspaceChoice(label: String, value: String, options: List<Pair<Str
         OutlinedButton(modifier = Modifier.fillMaxWidth(), enabled = enabled, onClick = { expanded = true }) { Text("$label: ${options.firstOrNull { it.first == value }?.second ?: value}") }
         DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
             options.forEach { (id, name) -> DropdownMenuItem(text = { Text(name) }, onClick = { expanded = false; onSelect(id) }) }
+        }
+    }
+}
+
+/** ChatGPT project memory; legacy `contextMode: separate` projects read as project-only. */
+internal fun projectMemoryMode(body: Map<String, kotlinx.serialization.json.JsonElement>?): String =
+    when (val mode = body?.get("memoryMode")?.jsonPrimitive?.contentOrNull) {
+        "default", "project-only" -> mode
+        else -> if (body?.get("contextMode")?.jsonPrimitive?.contentOrNull == "separate") "project-only" else "default"
+    }
+
+@Composable
+private fun MemoryOption(selected: Boolean, label: String, hint: String, enabled: Boolean, onSelect: () -> Unit) {
+    Row(Modifier.fillMaxWidth().selectable(selected, enabled = enabled, role = Role.RadioButton, onClick = onSelect).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        RadioButton(selected, onClick = null, enabled = enabled)
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

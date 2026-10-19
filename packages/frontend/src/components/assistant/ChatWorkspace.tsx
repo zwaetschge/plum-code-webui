@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { AssistantResource } from '@plum-code-webui/shared';
 import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
+import { PROJECT_MEMORY, projectMemoryMode } from '@/components/assistant/projectMemory';
 
 export function ChatWorkspace({
   profileId,
@@ -81,13 +82,7 @@ export function ChatWorkspace({
         >
           {projectId ? 'Zum Projekt' : 'Projekte öffnen'}
         </Link>
-        {project && (
-          <span>
-            {project.body.contextMode === 'separate'
-              ? 'Getrennte Chatverläufe'
-              : 'Gemeinsamer Projektkontext'}
-          </span>
-        )}
+        {project && <span>{PROJECT_MEMORY[projectMemoryMode(project.body)].label}</span>}
       </nav>
       {(profiles.isError || projects.isError) && (
         <p role="alert" className="text-sm">

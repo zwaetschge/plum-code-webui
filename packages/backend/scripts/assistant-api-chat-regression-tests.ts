@@ -785,7 +785,7 @@ try {
     'api-alice',
     'project',
     'Workspace sharing',
-    BODY_SCHEMAS.project.parse({ instructions: 'WORKSPACE INSTRUCTIONS', contextMode: 'shared' })
+    BODY_SCHEMAS.project.parse({ instructions: 'WORKSPACE INSTRUCTIONS', memoryMode: 'default' })
   );
   const expert = await createResource(
     'api-alice',
@@ -878,10 +878,10 @@ try {
       sharedMemories: 'LIVE EXPERT NOTES',
     })
   );
-  const sharedContext = (await systemContext('api-alice', workspaceChat)).system;
+  const sharedContext = (await systemContext('api-alice', workspaceChat, 'SIBLING')).system;
   assert(sharedContext.includes('PINNED EXPERT PROMPT'));
   assert(!sharedContext.includes('NEW UNPINNED PROMPT'));
-  assert(sharedContext.includes('LIVE EXPERT NOTES'));
+  assert(sharedContext.includes('LIVE EXPERT NOTES'), 'legacy notes stay live until re-saved');
   assert(!sharedContext.includes('OLD EXPERT NOTES'));
   assert(sharedContext.includes('SHARED SIBLING FACT'));
   for (const excludedMarker of [
@@ -891,39 +891,79 @@ try {
     'OTHER OWNER FACT',
   ])
     assert(!sharedContext.includes(excludedMarker), excludedMarker);
+  const { memorySource, relevantMemories } = await import('../src/services/assistant/memory.js');
+  const { memoryScope } = await import('../src/services/assistant/memorySemantic.js');
+  const memory = (title: string, body: Record<string, unknown>) =>
+    createResource('api-alice', 'memory', title, BODY_SCHEMAS.memory.parse(body));
+  await memory('Personal', { text: 'PERSONAL MEMORY FACT', scope: 'personal' });
+  await memory('Workspace', {
+    text: 'WORKSPACE MEMORY FACT',
+    scope: 'project',
+    projectId: workspaceProject.id,
+  });
+  await memory('Other', {
+    text: 'OTHER DEFAULT PROJECT MEMORY',
+    scope: 'project',
+    projectId: otherProject.id,
+  });
+  const texts = async (projectId: string | null) =>
+    (await relevantMemories('api-alice', projectId, '')).map((m) => m.text).join('|');
+  // Default memory (ChatGPT): saved memories flow across default projects and plain chats.
+  for (const scoped of [workspaceProject.id, null]) {
+    const seen = await texts(scoped);
+    for (const fact of [
+      'PERSONAL MEMORY FACT',
+      'WORKSPACE MEMORY FACT',
+      'OTHER DEFAULT PROJECT MEMORY',
+    ])
+      assert(seen.includes(fact), fact + ' in default scope ' + scoped);
+  }
   await reviseResource(
     'api-alice',
     workspaceProject.id,
     1,
     workspaceProject.title,
-    BODY_SCHEMAS.project.parse({ ...workspaceProject.body, contextMode: 'separate' })
+    BODY_SCHEMAS.project.parse({ ...workspaceProject.body, memoryMode: 'project-only' })
   );
-  const separateContext = (await systemContext('api-alice', workspaceChat)).system;
-  assert(!separateContext.includes('SHARED SIBLING FACT'));
-  assert(separateContext.includes('WORKSPACE INSTRUCTIONS'));
-  assert(separateContext.includes('LIVE EXPERT NOTES'));
-  assert(separateContext.includes('Project chats are separate'));
-  const { memorySource } = await import('../src/services/assistant/memory.js');
-  const siblingTurn = await get('SELECT id FROM assistant_api_turns WHERE chat_id=?', sibling.id);
+  assert.deepEqual(await memoryScope('api-alice', workspaceProject.id), {
+    personal: false,
+    projects: [workspaceProject.id],
+    prefer: workspaceProject.id,
+  });
   assert.equal(
-    await memorySource('api-alice', 'api', sibling.id, siblingTurn.id),
-    null,
-    'separate chats do not feed shared recall'
+    await texts(workspaceProject.id),
+    'WORKSPACE MEMORY FACT',
+    'project-only is sealed in'
   );
-  await reviseResource(
-    'api-alice',
-    workspaceProject.id,
-    2,
-    workspaceProject.title,
-    BODY_SCHEMAS.project.parse({ ...workspaceProject.body, contextMode: 'shared' })
+  const outside = await texts(null);
+  assert(!outside.includes('WORKSPACE MEMORY FACT'), 'project-only memories never leak out');
+  assert(
+    outside.includes('PERSONAL MEMORY FACT') && outside.includes('OTHER DEFAULT PROJECT MEMORY')
   );
+  const sealedContext = (await systemContext('api-alice', workspaceChat, 'SIBLING')).system;
+  assert(sealedContext.includes('SHARED SIBLING FACT'), 'project chats still see each other');
+  assert(sealedContext.includes('WORKSPACE INSTRUCTIONS'));
+  assert(sealedContext.includes('Project-only memory'));
+  assert(!sealedContext.includes('OTHER PROJECT FACT'));
+  const siblingTurn = await get('SELECT id FROM assistant_api_turns WHERE chat_id=?', sibling.id);
   assert.equal(
     (await memorySource('api-alice', 'api', sibling.id, siblingTurn.id))?.projectId,
     workspaceProject.id,
-    'explicit project binding determines memory scope'
+    'project-only chats keep learning into their own project'
+  );
+  const legacy = await createResource(
+    'api-alice',
+    'project',
+    'Legacy separate',
+    BODY_SCHEMAS.project.parse({ contextMode: 'separate' })
+  );
+  assert.equal(
+    (await memoryScope('api-alice', legacy.id)).personal,
+    false,
+    'separate → project-only'
   );
   console.log(
-    'PASS: shared/separate project excerpts; owner, archive, temporary and cross-project exclusion; live expert notes with pinned prompt; correctly scoped memory learning'
+    'PASS: ChatGPT project memory (default vs project-only) for saved memories and history; project chats reference each other in both modes; owner, archive, temporary and cross-project exclusion; legacy expert notes and separate mode'
   );
   await archiveResource('api-alice', project.id, 1);
   const archived = await startApiTurn('api-alice', contextual.id, {

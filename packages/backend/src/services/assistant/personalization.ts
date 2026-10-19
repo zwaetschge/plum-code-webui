@@ -202,6 +202,18 @@ export function memoryPermission(
   if (!pref.memoryEnabled || profileMode === 'off') return false;
   return write ? profileMode === undefined || profileMode === 'read-write' : true;
 }
+/**
+ * Inside a project the account memory settings govern (ChatGPT project memory), so an
+ * expert switched to `off` cannot hide the project's context. Accounts that never set up
+ * personalization keep the expert's explicit grant as their only memory permission.
+ */
+export function effectiveMemoryMode(
+  pref: AssistantPersonalization,
+  profileMode: unknown,
+  inProject: boolean
+) {
+  return inProject && pref.revision !== 0 ? undefined : profileMode;
+}
 export function personalizationPrompt(
   pref: AssistantPersonalization,
   surface: string,

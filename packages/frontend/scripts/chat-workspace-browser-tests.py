@@ -92,7 +92,9 @@ with sync_playwright() as playwright:
         page.get_by_role('link', name='Neuer Assistent', exact=True).click()
         page.get_by_role('textbox', name='Name', exact=True).fill('Schreibcoach')
         page.get_by_role('textbox', name='Anweisungen', exact=True).fill('Antworte klar und auf Deutsch.')
-        page.get_by_role('textbox', name='Gemeinsame Erinnerungen').fill('Wir verwenden Schweizer Rechtschreibung.')
+        expect(page.get_by_role('textbox', name='Gemeinsame Erinnerungen')).to_have_count(0)
+        expect(page.get_by_role('radio', name='Aus')).to_be_checked()
+        page.get_by_role('radio', name='Nutzen und dazulernen').check()
         page.get_by_text('Modell und Wissen', exact=True).click()
         page.get_by_role('combobox', name='Bevorzugte API-Verbindung', exact=True).select_option('fixture')
         page.get_by_role('combobox', name='Bevorzugtes Modell', exact=True).select_option('preferred-model')
@@ -104,7 +106,8 @@ with sync_playwright() as playwright:
         page.get_by_role('button', name='Speichern', exact=True).click()
         expect(page).to_have_url(url + '/chat/assistants/profiles-1')
         assert state['profiles'][0]['body']['sourceIds'] == ['reference']
-        assert state['profiles'][0]['body']['sharedMemories'] == 'Wir verwenden Schweizer Rechtschreibung.'
+        assert state['profiles'][0]['body']['memory'] == 'read-write'
+        assert 'sharedMemories' not in state['profiles'][0]['body']
         page.get_by_role('link', name='Bearbeiten', exact=True).click()
         expect(page.get_by_role('textbox', name='Anweisungen', exact=True)).to_have_value('Antworte klar und auf Deutsch.')
         page.get_by_role('textbox', name='Anweisungen', exact=True).fill('Antworte klar, kurz und auf Deutsch.')
@@ -117,10 +120,12 @@ with sync_playwright() as playwright:
         page.get_by_role('textbox', name='Name', exact=True).fill('Hausumbau')
         page.get_by_role('textbox', name='Beschreibung', exact=True).fill('Alle Gespräche zum Umbau')
         page.get_by_role('textbox', name='Anweisungen', exact=True).fill('Budget in Schweizer Franken berücksichtigen.')
-        page.get_by_role('radio', name='Getrennte Chatverläufe').check()
+        expect(page.get_by_role('radio', name='Standardgedächtnis')).to_be_checked()
+        page.get_by_role('radio', name='Nur Projektgedächtnis').check()
         page.get_by_role('button', name='Speichern', exact=True).click()
         expect(page).to_have_url(url + '/chat/projects/projects-1')
-        assert state['projects'][0]['body']['contextMode'] == 'separate'
+        assert state['projects'][0]['body']['memoryMode'] == 'project-only'
+        expect(page.get_by_text('Nur Projektgedächtnis', exact=True).first).to_be_visible()
         page.get_by_role('navigation', name='Projektinhalt').get_by_role('link', name='Quellen', exact=True).click()
         page.get_by_role('link', name='Neue Projektquelle', exact=True).click()
         page.get_by_role('textbox', name='Name', exact=True).fill('Umbau-Budget')
@@ -160,10 +165,10 @@ with sync_playwright() as playwright:
         page.get_by_role('combobox', name='Assistent', exact=True).select_option('profiles-1')
         expect(page.locator('main').last.get_by_role('link', name='Wie verteile ich mein Budget?', exact=False)).to_be_visible()
         page.get_by_role('link', name='Bearbeiten', exact=True).click()
-        page.get_by_role('radio', name='Gemeinsamer Projektkontext').check()
+        page.get_by_role('radio', name='Standardgedächtnis').check()
         page.get_by_role('button', name='Speichern', exact=True).click()
         expect(page).to_have_url(url + '/chat/projects/projects-1')
-        assert state['projects'][0]['body']['contextMode'] == 'shared'
+        assert state['projects'][0]['body']['memoryMode'] == 'default'
         page.go_back()
         expect(page.get_by_role('heading', name='Projekt bearbeiten', exact=True)).to_be_visible()
         page.get_by_role('link', name='Abbrechen', exact=True).click()

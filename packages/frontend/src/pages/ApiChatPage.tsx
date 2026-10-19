@@ -70,6 +70,7 @@ import {
   ChatImageStrip,
   uploadChatImages,
 } from '@/components/assistant/ChatImages';
+import { PROJECT_MEMORY, projectMemoryMode } from '@/components/assistant/projectMemory';
 
 // Interactive views pull in the chart library; only messages that have one load it.
 const DynamicUi = lazy(() => import('@/components/assistant/dynamic-ui/DynamicUi'));
@@ -484,11 +485,7 @@ export function ApiChatPage() {
             </Link>
           )}
           {workspaceProject.data && (
-            <span>
-              {workspaceProject.data.body.contextMode === 'separate'
-                ? 'Getrennte Chatverläufe'
-                : 'Gemeinsamer Projektkontext'}
-            </span>
+            <span>{PROJECT_MEMORY[projectMemoryMode(workspaceProject.data.body)].label}</span>
           )}
         </nav>
       )}

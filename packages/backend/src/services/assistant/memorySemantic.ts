@@ -8,6 +8,34 @@ const endpoint = () =>
   'http://schwarm-plum-relay:8080/einbettung';
 export const embeddingModel = () => process.env.EINBETTUNG_MODELL || 'bge-m3';
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+
+/** ChatGPT-style project memory: `default` shares with the account, `project-only` is sealed. */
+export function projectMemoryMode(body: Record<string, unknown> | undefined) {
+  if (body?.memoryMode === 'project-only' || body?.memoryMode === 'default') return body.memoryMode;
+  return body?.contextMode === 'separate' ? 'project-only' : 'default';
+}
+export type MemoryScope = { personal: boolean; projects: string[]; prefer: string | null };
+/**
+ * What a chat may reference. Outside projects and in default-memory projects: personal
+ * memories plus every default-memory project. Project-only: exclusively that project, and
+ * its memories never reach chats elsewhere.
+ */
+export async function memoryScope(userId: string, projectId: string | null): Promise<MemoryScope> {
+  const rows = await all(
+    "SELECT id,body_json FROM assistant_resources WHERE user_id=? AND kind='project' AND archived=0",
+    userId
+  );
+  const own = projectId ? rows.find((r) => r.id === projectId) : undefined;
+  if (own && projectMemoryMode(JSON.parse(own.body_json)) === 'project-only')
+    return { personal: false, projects: [own.id], prefer: own.id };
+  return {
+    personal: true,
+    projects: rows
+      .filter((r) => projectMemoryMode(JSON.parse(r.body_json)) === 'default')
+      .map((r) => String(r.id)),
+    prefer: own?.id ?? null,
+  };
+}
 export async function embedMemory(texts: string[]): Promise<number[][]> {
   if (!texts.length) return [];
   const response = await fetch(endpoint(), {
@@ -117,7 +145,7 @@ const queries = new Map<
 >();
 export async function semanticMemoryScores(
   userId: string,
-  projectId: string | null,
+  scope: MemoryScope,
   query: string,
   kind: 'memory' | 'history'
 ) {
@@ -143,22 +171,24 @@ export async function semanticMemoryScores(
           `SELECT * FROM (SELECT DISTINCT ON (id) * FROM (SELECT v.id,v.part,(SELECT SUM(a.x*b.x) FROM unnest(v.vector) WITH ORDINALITY a(x,n) JOIN unnest(?::double precision[]) WITH ORDINALITY b(x,n) USING(n)) AS similarity
       FROM assistant_memory_vectors v JOIN assistant_resources r ON r.id=v.id AND r.user_id=v.user_id AND r.revision::text=v.version
       WHERE v.user_id=? AND v.kind='memory' AND v.model=? AND r.archived=0 AND COALESCE(r.body_json::jsonb->>'state','active')='active'
-      AND (r.body_json::jsonb->>'scope'='personal' OR (r.body_json::jsonb->>'scope'='project' AND r.body_json::jsonb->>'projectId'=?))
+      AND ((r.body_json::jsonb->>'scope'='personal' AND ?::boolean) OR (r.body_json::jsonb->>'scope'='project' AND r.body_json::jsonb->>'projectId'=ANY(?::text[])))
       AND cardinality(v.vector)=? ) candidates ORDER BY id,similarity DESC) winners ORDER BY similarity DESC LIMIT 40`,
           cached.vector,
           userId,
           embeddingModel(),
-          projectId ?? '',
+          scope.personal,
+          scope.projects,
           cached.vector.length
         )
       : await all(
           `SELECT * FROM (SELECT DISTINCT ON (id) * FROM (SELECT v.id,v.part,(SELECT SUM(a.x*b.x) FROM unnest(v.vector) WITH ORDINALITY a(x,n) JOIN unnest(?::double precision[]) WITH ORDINALITY b(x,n) USING(n)) AS similarity
       FROM assistant_memory_vectors v JOIN assistant_memory_history h ON h.id=v.id AND h.user_id=v.user_id AND h.source_hash=v.version
-      WHERE v.user_id=? AND v.kind='history' AND v.model=? AND (h.project_id IS NULL OR h.project_id=?) AND cardinality(v.vector)=? ) candidates ORDER BY id,similarity DESC) winners ORDER BY similarity DESC LIMIT 40`,
+      WHERE v.user_id=? AND v.kind='history' AND v.model=? AND ((h.project_id IS NULL AND ?::boolean) OR h.project_id=ANY(?::text[])) AND cardinality(v.vector)=? ) candidates ORDER BY id,similarity DESC) winners ORDER BY similarity DESC LIMIT 40`,
           cached.vector,
           userId,
           embeddingModel(),
-          projectId ?? '',
+          scope.personal,
+          scope.projects,
           cached.vector.length
         );
   cached.parts ??= {};

@@ -80,3 +80,15 @@ Evidence:
 - `.screenshots/chat-workspace-project-1440.png`, `.screenshots/chat-workspace-project-390.png` (real rendered components with isolated test data)
 
 Remaining limits: shared project context uses the latest eight completed turn excerpts from other eligible project chats, bounded to 800 prompt / 1200 response characters per turn. Expert shared memories are explicitly maintained user notes, not a newly implemented automatic expert-learning system. Existing prompt/knowledge revisions remain pinned; expert notes and project context settings are live for subsequent responses. Physical Android UI testing remains open. The unrelated general runtime PyMuPDF/Python 3.14 build issue remains; this release uses the documented verified runtime plus the small REA prerequisite package.
+
+## Korrektur 2026-10-19 (abends): Gedächtnis wie ChatGPT
+
+Nutzerhinweis: Die «gemeinsamen Erinnerungen» funktionierten nicht wie bei ChatGPT. Abgleich mit den aktuellen OpenAI-Hilfeartikeln (Projects in ChatGPT, Memory in ChatGPT, GPTs in ChatGPT, im angemeldeten Firefox gelesen):
+
+- Projekte haben **Standardgedächtnis** oder **Nur Projektgedächtnis**, jederzeit umstellbar. Projektchats greifen in beiden Modi aufeinander zurück (nach Relevanz, Projekt priorisiert). Standard: gespeicherte Erinnerungen und frühere Chats fliessen in beide Richtungen. Nur Projekt: keine persönlichen Erinnerungen, keine Chats ausserhalb, nichts gelangt nach aussen; beim Umstellen wird Projektwissen sofort aus der Aussennutzung genommen.
+- Erinnerungen entstehen automatisch (gespeicherte Erinnerungen + «Reference chat history»), nicht als handgepflegte Notizen.
+- GPTs nutzen laut Hilfe **kein** Gedächtnis («Each conversation starts fresh») und werden zugunsten von Plugins abgelöst. Ein eigenes, handgepflegtes Expertengedächtnis gibt es bei ChatGPT nicht.
+
+Umsetzung: `memoryMode: 'default' | 'project-only'` ersetzt `contextMode` (alt `separate` → project-only). `memoryScope()` bestimmt Sichtbarkeit für gespeicherte Erinnerungen, Verlaufszusammenfassungen und Vektorsuche; Projekterinnerungen bleiben mit Herkunftsprojekt gespeichert, damit ein Wechsel auf «Nur Projekt» sie sofort abschottet. `projectChatReferences()` ersetzt die «letzten 8 Turns» durch relevanzsortierte Projektchats (API- und CLI-Chatkontext). In Projekten bestimmt das Projekt, nicht der Experten-Schalter (`effectiveMemoryMode`). Experten: Notizfeld entfernt, stattdessen Gedächtnis-Schalter Aus / Nutzen / Nutzen und dazulernen (bestehendes Feld `memory`); alte Notizen werden beim nächsten Speichern in die Anweisungen übernommen und bis dahin weiter verwendet. WebUI und Android angepasst.
+
+Nachweise: `test:assistant-api-chat` grün (neuer Fall: Standard vs. Nur Projekt, Abschottung nach aussen, Projektchats in beiden Modi, Altmodus), `test:assistant-memory` 38/38, Typechecks, ESLint, Vite-Build. Browser-Journey neu als Node-Skript `packages/frontend/scripts/chat-workspace-browser-tests.mjs` (Python-Playwright hat im Alpine-Container kein Wheel), 1440/390 px grün. `test:assistant-memory-completion` (benötigt echten bge-m3-Dienst) angepasst, nicht ausgeführt.

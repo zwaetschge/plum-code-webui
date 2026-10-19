@@ -7,6 +7,12 @@ import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { ResourcePicker } from '@/components/assistant/ResourcePicker';
+import {
+  EXPERT_MEMORY,
+  PROJECT_MEMORY,
+  projectMemoryMode,
+  type ProjectMemoryMode,
+} from '@/components/assistant/projectMemory';
 
 type Collection = 'profiles' | 'projects' | 'sources';
 const field = 'w-full rounded-xl border bg-background p-3 text-base';
@@ -123,7 +129,7 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                 <p className="max-w-xl text-muted-foreground">
                   {isProject
                     ? 'Ein Ort für deine Gespräche, Experten und Quellen. Du entscheidest, ob Chats ihren Kontext teilen.'
-                    : 'Prompt-Experten mit eigenen Anweisungen, Wissen und gemeinsamen Erinnerungen. In jedem Projekt einsetzbar.'}
+                    : 'Prompt-Experten mit eigenen Anweisungen, Wissen, Modell und Gedächtnis-Einstellung. In jedem Projekt einsetzbar.'}
                 </p>
               </div>
               <Link className={buttonVariants()} to={base + '/new'}>
@@ -158,9 +164,7 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                           {isProject
                             ? String(
                                 r.body.description ||
-                                  (r.body.contextMode === 'separate'
-                                    ? 'Getrennte Chatverläufe'
-                                    : 'Gemeinsamer Projektkontext')
+                                  PROJECT_MEMORY[projectMemoryMode(r.body)].label
                               )
                             : String(r.body.instructions || 'Eigener Prompt-Experte')}
                         </p>
@@ -202,17 +206,13 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
               </p>
               {isProject && (
                 <p className="text-sm">
-                  <strong>
-                    {resource.body.contextMode === 'separate'
-                      ? 'Getrennte Chatverläufe'
-                      : 'Gemeinsamer Projektkontext'}
-                  </strong>
+                  <strong>{PROJECT_MEMORY[projectMemoryMode(resource.body)].label}</strong>
                   <span className="text-muted-foreground">
-                    {' '}
-                    ·{' '}
-                    {resource.body.contextMode === 'separate'
-                      ? 'Projektanweisungen, Quellen und explizite Experten-Erinnerungen gelten weiterhin.'
-                      : 'Chats können begrenzte Auszüge aus anderen Gesprächen dieses Projekts nutzen.'}
+                    {' · '}
+                    {PROJECT_MEMORY[projectMemoryMode(resource.body)].hint}{' '}
+                    <Link className="underline underline-offset-4" to="/chat/personalization">
+                      Gedächtnis-Einstellungen
+                    </Link>
                   </span>
                 </p>
               )}
@@ -363,17 +363,29 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                 {!isProject && (
                   <details className="space-y-3 rounded-xl border p-4">
                     <summary className="cursor-pointer font-medium">
-                      Anweisungen und gemeinsame Erinnerungen
+                      Anweisungen und Gedächtnis
                     </summary>
                     <p className="whitespace-pre-wrap text-sm">
                       {String(resource.body.instructions || 'Noch keine Anweisungen.')}
                     </p>
-                    <h3 className="font-medium">Gemeinsame Erinnerungen</h3>
-                    <p className="whitespace-pre-wrap text-sm text-muted-foreground">
-                      {String(
-                        resource.body.sharedMemories ||
-                          'Noch keine gemeinsamen Erinnerungen. Im Editor kannst du Notizen für alle Gespräche dieses Experten festhalten.'
-                      )}
+                    {!!resource.body.sharedMemories && (
+                      <p className="whitespace-pre-wrap text-sm">
+                        {String(resource.body.sharedMemories)}
+                      </p>
+                    )}
+                    <h3 className="font-medium">Gedächtnis</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {
+                        (EXPERT_MEMORY.find((m) => m[0] === resource.body.memory) ??
+                          EXPERT_MEMORY[0])[2]
+                      }{' '}
+                      Erinnerungen entstehen automatisch aus deinen Gesprächen.{' '}
+                      <Link
+                        className="underline underline-offset-4"
+                        to="/chat/personalization?view=memory"
+                      >
+                        Erinnerungen verwalten
+                      </Link>
                     </p>
                   </details>
                 )}
@@ -402,12 +414,19 @@ function WorkspaceEditor({
   const cache = useQueryClient(),
     navigate = useNavigate();
   const [title, setTitle] = useState(resource?.title ?? '');
-  const [instructions, setInstructions] = useState(
-    String(resource?.body[collection === 'sources' ? 'text' : 'instructions'] ?? '')
+  const [instructions, setInstructions] = useState(() =>
+    collection === 'profiles'
+      ? [String(resource?.body.instructions ?? ''), String(resource?.body.sharedMemories ?? '')]
+          .filter(Boolean)
+          .join('\n\nNotizen:\n')
+      : String(resource?.body[collection === 'sources' ? 'text' : 'instructions'] ?? '')
   );
   const [description, setDescription] = useState(String(resource?.body.description ?? ''));
-  const [sharedMemories, setSharedMemories] = useState(String(resource?.body.sharedMemories ?? ''));
-  const [contextMode, setContextMode] = useState(String(resource?.body.contextMode ?? 'shared'));
+  // Legacy hand-written expert notes are folded into the instructions above on save.
+  const [memoryMode, setMemoryMode] = useState<ProjectMemoryMode>(
+    projectMemoryMode(resource?.body)
+  );
+  const [expertMemory, setExpertMemory] = useState(String(resource?.body.memory ?? 'off'));
   const [sourceIds, setSourceIds] = useState<string[]>(
     (resource?.body.sourceIds ?? []) as string[]
   );
@@ -430,10 +449,11 @@ function WorkspaceEditor({
       const body = {
         ...resource?.body,
         ...(collection === 'sources' ? { text: instructions, projectId } : { instructions }),
-        ...(collection === 'projects' ? { description, contextMode } : {}),
+        ...(collection === 'projects' ? { description, memoryMode, contextMode: undefined } : {}),
         ...(collection === 'profiles'
           ? {
-              sharedMemories,
+              sharedMemories: undefined,
+              memory: expertMemory,
               sourceIds,
               apiProviderId: provider || undefined,
               model: model || null,
@@ -539,36 +559,31 @@ function WorkspaceEditor({
               />
             </label>
             <fieldset className="space-y-2">
-              <legend className="mb-2 text-sm font-medium">Kontext zwischen Gesprächen</legend>
-              {[
-                [
-                  'shared',
-                  'Gemeinsamer Projektkontext',
-                  'Chats dürfen begrenzte Auszüge aus anderen Gesprächen dieses Projekts nutzen.',
-                ],
-                [
-                  'separate',
-                  'Getrennte Chatverläufe',
-                  'Jeder Chat behält seinen eigenen Verlauf. Projektanweisungen, Quellen und explizite Experten-Erinnerungen gelten weiterhin.',
-                ],
-              ].map(([value, label, hint]) => (
+              <legend className="mb-2 text-sm font-medium">Gedächtnis</legend>
+              {(Object.keys(PROJECT_MEMORY) as ProjectMemoryMode[]).map((value) => (
                 <label
                   key={value}
                   className="flex cursor-pointer items-start gap-3 rounded-xl border p-4"
                 >
                   <input
                     type="radio"
-                    name="contextMode"
+                    name="memoryMode"
                     className="mt-1"
-                    checked={contextMode === value}
-                    onChange={() => setContextMode(value!)}
+                    checked={memoryMode === value}
+                    onChange={() => setMemoryMode(value)}
                   />
                   <span>
-                    <span className="font-medium">{label}</span>
-                    <span className="mt-1 block text-sm text-muted-foreground">{hint}</span>
+                    <span className="font-medium">{PROJECT_MEMORY[value].label}</span>
+                    <span className="mt-1 block text-sm text-muted-foreground">
+                      {PROJECT_MEMORY[value].hint}
+                    </span>
                   </span>
                 </label>
               ))}
+              <p className="text-xs text-muted-foreground">
+                Gespeicherte Erinnerungen und frühere Chats folgen deinen Gedächtnis-Einstellungen.
+                Du kannst die Wahl später hier ändern.
+              </p>
             </fieldset>
           </>
         )}
@@ -589,20 +604,27 @@ function WorkspaceEditor({
         </label>
         {collection === 'profiles' && (
           <>
-            <label className="grid gap-2 text-sm">
-              Gemeinsame Erinnerungen
-              <textarea
-                className={field + ' min-h-28'}
-                maxLength={30000}
-                value={sharedMemories}
-                onChange={(e) => setSharedMemories(e.target.value)}
-                placeholder="Wichtige Fakten und Vereinbarungen für alle Gespräche dieses Experten"
-              />
-              <span className="text-xs text-muted-foreground">
-                Von dir gepflegte Notizen. Änderungen gelten auch für bestehende, dauerhafte Chats
-                dieses Experten.
-              </span>
-            </label>
+            <fieldset className="space-y-2">
+              <legend className="mb-2 text-sm font-medium">Gedächtnis</legend>
+              {EXPERT_MEMORY.map(([value, label, hint]) => (
+                <label
+                  key={value}
+                  className="flex cursor-pointer items-start gap-3 rounded-xl border p-4"
+                >
+                  <input
+                    type="radio"
+                    name="expertMemory"
+                    className="mt-1"
+                    checked={expertMemory === value}
+                    onChange={() => setExpertMemory(value)}
+                  />
+                  <span>
+                    <span className="font-medium">{label}</span>
+                    <span className="mt-1 block text-sm text-muted-foreground">{hint}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
             <details
               className="space-y-4 rounded-xl border p-4"
               open={!!provider || !!sourceIds.length}

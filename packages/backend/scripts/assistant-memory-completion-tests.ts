@@ -11,7 +11,7 @@ const { run, get, all, readPgConfig } = await import('../src/db/pg.js');
 const { createResource, BODY_SCHEMAS } = await import('../src/services/assistant/resources.js');
 const { updatePersonalization, readPersonalization } =
   await import('../src/services/assistant/personalization.js');
-const { indexMemoryVectors, semanticMemoryScores } =
+const { indexMemoryVectors, semanticMemoryScores, memoryScope } =
   await import('../src/services/assistant/memorySemantic.js');
 const {
   relevantMemories,
@@ -74,7 +74,7 @@ try {
     );
   await indexMemoryVectors(user, 100);
   const query = 'Suggest a meat-free dinner that fits my dietary preferences';
-  const semantic = await semanticMemoryScores(user, null, query, 'memory');
+  const semantic = await semanticMemoryScores(user, await memoryScope(user, null), query, 'memory');
   assert(
     semantic.has(meal.id),
     'Real bge-m3 must retrieve a German dietary preference from an English paraphrase'
@@ -105,7 +105,7 @@ try {
     user,
     'project',
     'Privat',
-    BODY_SCHEMAS.project.parse({})
+    BODY_SCHEMAS.project.parse({ memoryMode: 'project-only' })
   );
   const scoped = await createResource(
     user,
@@ -119,12 +119,31 @@ try {
   );
   await indexMemoryVectors(user, 100);
   assert(
-    !(await semanticMemoryScores(user, null, 'What instrument do I play?', 'memory')).has(scoped.id)
+    !(
+      await semanticMemoryScores(
+        user,
+        await memoryScope(user, null),
+        'What instrument do I play?',
+        'memory'
+      )
+    ).has(scoped.id)
   );
-  assert.equal((await semanticMemoryScores('other-owner', null, query, 'memory')).size, 0);
+  assert.equal(
+    (
+      await semanticMemoryScores(
+        'other-owner',
+        await memoryScope('other-owner', null),
+        query,
+        'memory'
+      )
+    ).size,
+    0
+  );
   count++;
   await forgetMemory(user, meal.id, meal.revision);
-  assert(!(await semanticMemoryScores(user, null, query, 'memory')).has(meal.id));
+  assert(
+    !(await semanticMemoryScores(user, await memoryScope(user, null), query, 'memory')).has(meal.id)
+  );
   assert(
     !(await get('SELECT id FROM assistant_memory_vectors WHERE user_id=? AND id=?', user, meal.id))
   );

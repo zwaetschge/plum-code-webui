@@ -280,7 +280,7 @@ try {
     user,
     'project',
     'Privates Projekt',
-    BODY_SCHEMAS.project.parse({})
+    BODY_SCHEMAS.project.parse({ memoryMode: 'project-only' })
   );
   const profile = await createResource(
     user,
@@ -318,6 +318,23 @@ try {
   }));
   assert(!(await systemContext(user, chat, 'ALPHA')).system.includes('Projektcode ALPHA'));
   assert((await systemContext(user, pchat, 'ALPHA')).system.includes('Projektcode ALPHA'));
+  // ChatGPT default project memory: the same project memory now reaches ordinary chats.
+  const opened = await reviseResource(
+    user,
+    project.id,
+    project.revision,
+    project.title,
+    BODY_SCHEMAS.project.parse({ memoryMode: 'default' })
+  );
+  assert((await systemContext(user, chat, 'ALPHA')).system.includes('Projektcode ALPHA'));
+  await reviseResource(
+    user,
+    project.id,
+    opened.revision,
+    project.title,
+    BODY_SCHEMAS.project.parse({ memoryMode: 'project-only' })
+  );
+  assert(!(await systemContext(user, chat, 'ALPHA')).system.includes('Projektcode ALPHA'));
   count++;
   await archiveResource(user, pchat.id, pchat.revision);
   assert(!(await memoryRecall(user, project.id, 'ALPHA', pref)).includes('Projektcode ALPHA'));
