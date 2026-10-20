@@ -12,9 +12,12 @@ A unit only moves when
   * it holds no mountpoint and is not one of the NAS-only data paths,
   * the array copy verifies identical after a final sync.
 
-Usage (root):  plum-mover.py run [--dry-run] | status | promote <path>
+Usage (root):  plum-mover.py run [--dry-run] [--force] [--tier N] | status | promote <path>
+  --force   skip the "first writeback finished" check (whole top-level projects
+            are safe during a running writeback; nested tiers are not)
+  --tier N  only the N-th entry of TIERS (0 = whole projects)
 """
-import json, os, shutil, subprocess, sys, time
+import json, os, shlex, shutil, subprocess, sys, time
 
 ROOT = '/srv/plum'
 ARRAY = '/mnt/user/Backup/Geekom-Plum'
@@ -38,6 +41,11 @@ ALIASES = [
     ('/home/node/.codex/', ROOT + '/appdata/plum-code-webui/config/codex/'),
 ]
 NEVER = {ROOT + '/projects/geekom-server'}
+# Copies go over SSH straight onto an array disk: the NFS export is Unraid's
+# FUSE user share, which crawls on small files (~1 GB in 40 min for a Gradle cache).
+UNRAID = 'root@10.10.10.2'
+SSH = ['ssh', '-i', ROOT + '/appdata/plum-code-webui/config/ssh/id_ed25519', '-o', 'BatchMode=yes',
+       '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', '-o', 'LogLevel=ERROR']
 
 
 def log(msg):
@@ -112,8 +120,10 @@ def open_paths():
 
 
 def scan(path, budget_mtime):
-    """(size, newest mtime, has_mount, file_count); stops early once a fresh file is found."""
+    """(size, newest mtime, blocked, file_count); stops early once a fresh file is found.
+    blocked: a mountpoint inside, or (when not root) entries owned by someone else."""
     size = newest = files = 0
+    me = os.geteuid()
     stack = [path]
     while stack:
         d = stack.pop()
@@ -127,6 +137,8 @@ def scan(path, budget_mtime):
                     except OSError:
                         continue
                     newest = max(newest, s.st_mtime)
+                    if me and s.st_uid != me:
+                        return size, newest, True, files
                     if newest > budget_mtime:
                         return size, newest, False, files
                     if e.is_dir(follow_symlinks=False):
@@ -157,24 +169,64 @@ def units():
             yield p, idle, minimum
 
 
-def rsync(src, dst, check=False):
-    # --delete: the array copy must equal the local unit exactly (stale cache
-    # leftovers in the mirror would otherwise fail verification forever).
-    args = ['rsync', '-aH', '--sparse', '--numeric-ids', '--delete']
-    if check:
-        args += ['-n', '--itemize-changes']
-    out = subprocess.run(args + [src.rstrip('/') + '/', dst.rstrip('/') + '/'],
-                         capture_output=True, text=True)
-    if out.returncode not in (0, 24):
-        raise RuntimeError(f'rsync {src} -> {dst} failed: {out.stderr.strip()[-500:]}')
+def remote(cmd):
+    out = subprocess.run(SSH + [UNRAID, cmd], capture_output=True, text=True)
+    if out.returncode:
+        raise RuntimeError(f'unraid: {cmd[:80]}: {out.stderr.strip()[-300:]}')
     return out.stdout
 
 
-def count_files(path):
-    n = 0
-    for _, _, files in os.walk(path):
-        n += len(files)
+def disk_path(dst, size):
+    """(target, stale): write `dst` (a /mnt/user path) straight onto one array disk on
+    the Unraid host. The writeback mirror may have spread the unit over several disks
+    (high-water, no split level); the other disks' parts are `stale` and removed once
+    the chosen disk holds the complete copy, so the user share shows exactly it."""
+    rel = os.path.relpath(dst, '/mnt/user')
+    share = os.path.relpath(ARRAY, '/mnt/user')
+    found = remote(
+        f'for d in /mnt/disk[0-9]*; do [ -d "$d"/{shlex.quote(share)} ] || continue; '
+        f'[ -e "$d"/{shlex.quote(rel)} ] && h=1 || h=0; '
+        f'echo "$d $h $(df -P --block-size=1 "$d" | awk \'NR==2{{print $4}}\')"; done; true')
+    disks = [(d, h == '1', int(free)) for d, h, free in (l.split() for l in found.splitlines() if l)]
+    room = [x for x in disks if x[2] > size * 1.2 + 50 * GB]
+    if not room:
+        raise RuntimeError('no array disk of the share has room for this unit')
+    # Prefer a disk already holding part of the unit (less to copy), then free space.
+    disk = max(room, key=lambda x: (x[1], x[2]))[0]
+    target = disk + '/' + rel
+    remote(f'mkdir -p {shlex.quote(target)}')
+    return target, [d + '/' + rel for d, held, _ in disks if held and d != disk]
+
+
+def rsync(src, target, check=False):
+    """Local unit -> `target` on the Unraid host. --delete: the copy must equal the unit
+    exactly (stale cache leftovers in the mirror would fail verification forever)."""
+    args = ['rsync', '-aH', '--sparse', '--numeric-ids', '--delete', '--protect-args',
+            '-e', ' '.join(shlex.quote(a) for a in SSH)]
+    if check:
+        args += ['-n', '--itemize-changes']
+    out = subprocess.run(args + [src.rstrip('/') + '/', f'{UNRAID}:{target.rstrip("/")}/'],
+                         capture_output=True, text=True)
+    if out.returncode not in (0, 24):
+        raise RuntimeError(f'rsync {src} -> {target} failed: {out.stderr.strip()[-500:]}')
+    return out.stdout
+
+
+def count_local(path):
+    """Non-directory entries, symlinks counted as entries (matches `find ! -type d`)."""
+    n, stack = 0, [path]
+    while stack:
+        with os.scandir(stack.pop()) as it:
+            for e in it:
+                if e.is_dir(follow_symlinks=False):
+                    stack.append(e.path)
+                else:
+                    n += 1
     return n
+
+
+def count_remote(target):
+    return int(remote(f'find {shlex.quote(target)} ! -type d | wc -l').strip())
 
 
 def traversable(dst):
@@ -201,17 +253,22 @@ def move(path, size, dry):
         log(f'skip {path}: array has only {free / GB:.0f} GB free')
         return False
     traversable(dst)
-    rsync(path, dst)  # bulk copy while the unit is still in place
+    target, stale = disk_path(dst, size)
+    rsync(path, target)  # bulk copy while the unit is still in place
+    if stale:  # complete copy now on one disk; drop the mirror's scattered parts
+        remote('rm -rf ' + ' '.join(shlex.quote(p) for p in stale))
     staging = os.path.join(os.path.dirname(path), STAGING + '-' + os.path.basename(path))
     os.rename(path, staging)  # anything opening the old path now gets the symlink
     os.symlink(dst, path)
     try:
-        rsync(staging, dst)  # catch writes since the bulk copy
-        diff = [l for l in rsync(staging, dst, check=True).splitlines()
+        rsync(staging, target)  # catch writes since the bulk copy
+        diff = [l for l in rsync(staging, target, check=True).splitlines()
                 if l and not l.startswith('.d')]
-        local, remote = count_files(staging), count_files(dst)
-        if diff or local != remote:
-            raise RuntimeError(f'verify failed: {len(diff)} differences, files {local} vs {remote}')
+        local, there = count_local(staging), count_remote(target)
+        if diff or local != there:
+            raise RuntimeError(f'verify failed: {len(diff)} differences, files {local} vs {there}')
+        if sorted(os.listdir(staging)) != sorted(os.listdir(dst)):
+            raise RuntimeError('array copy is not visible through the NFS user share')
     except Exception as exc:
         os.unlink(path)
         os.rename(staging, path)
@@ -225,8 +282,8 @@ def move(path, size, dry):
     return True
 
 
-def run(dry):
-    if not dry and not os.path.exists(ROOT + '/project-writeback-last-success'):
+def run(dry, force=False):
+    if not dry and not force and not os.path.exists(ROOT + '/project-writeback-last-success'):
         log('no successful writeback yet; mover waits')
         return
     if subprocess.run(['findmnt', '-rn', '-t', 'nfs4', '-T', '/mnt/user'],
@@ -249,8 +306,11 @@ def run(dry):
         size, newest, has_mount, _ = scan(path, now - idle * 86400)
         if has_mount or newest > now - idle * 86400 or size < minimum:
             continue
-        if move(path, size, dry):
-            total += size
+        try:
+            if move(path, size, dry):
+                total += size
+        except Exception as exc:  # one unit failing must not stop the others
+            log(f'skip {path}: {exc}')
     log(f'{"would free" if dry else "freed"} {total / GB:.1f} GB')
 
 
@@ -261,10 +321,11 @@ def promote(path):
     if not entry or not os.path.islink(path):
         sys.exit(f'{path} is not a moved unit')
     staging = os.path.join(os.path.dirname(path), STAGING + '-' + os.path.basename(path))
-    rsync(entry['target'], staging)
+    pull = ['rsync', '-aH', '--sparse', '--numeric-ids', '--delete']
+    subprocess.run(pull + [entry['target'] + '/', staging + '/'], check=True)
     os.unlink(path)
     os.rename(staging, path)
-    rsync(entry['target'], path)  # writes made through the symlink meanwhile
+    subprocess.run(pull + [entry['target'] + '/', path + '/'], check=True)  # writes made meanwhile
     del data[path]
     save_registry(data)
     log(f'promoted {path} back to the Geekom SSD (array copy kept)')
@@ -281,7 +342,9 @@ def status():
 if __name__ == '__main__':
     cmd = sys.argv[1] if len(sys.argv) > 1 else 'status'
     if cmd == 'run':
-        run('--dry-run' in sys.argv)
+        if '--tier' in sys.argv:
+            TIERS[:] = [TIERS[int(sys.argv[sys.argv.index('--tier') + 1])]]
+        run('--dry-run' in sys.argv, '--force' in sys.argv)
     elif cmd == 'promote' and len(sys.argv) == 3:
         promote(sys.argv[2])
     elif cmd == 'status':

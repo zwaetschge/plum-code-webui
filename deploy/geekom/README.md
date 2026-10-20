@@ -18,6 +18,15 @@ Array (`/mnt/user/Backup/Geekom-Plum`, Share ohne Cache) die Speicherebene.
 - Writeback und nächtliches State-Backup (`backup-geekom-state.sh`) überspringen
   ausgelagerte Einheiten, damit der Symlink nie die Array-Kopie ersetzt.
 
+Kopiert wird per rsync über SSH direkt auf eine Array-Platte (`/mnt/diskN`), nicht
+über den NFS-User-Share: Unraids FUSE-Schicht schafft bei kleinen Dateien nur
+Bruchteile. Hat der Writeback eine Einheit über mehrere Platten verteilt, landet die
+vollständige Kopie auf einer Platte und die verstreuten Teile werden entfernt. Läuft
+gleichzeitig ein grosser Writeback, teilen sich beide die Paritätsplatten und werden
+sehr langsam; deshalb läuft der Mover regulär direkt nach einem Writeback.
+Manuell (z. B. nur ganze Projekte, auch während eines Writebacks sicher):
+`plum-mover.py run --force --tier 0`.
+
 Sicherheitsnetz pro Einheit: Massenkopie, Umbenennen in einen Staging-Ordner,
 Symlink setzen, Nachsynchronisieren, Prüfung per rsync-Dry-Run und Dateizählung;
 erst dann wird lokal gelöscht, sonst wird zurückgerollt. Mindestens 50 GB plus
