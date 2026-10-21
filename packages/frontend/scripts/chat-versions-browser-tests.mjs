@@ -52,6 +52,7 @@ for (const [width, height] of [
     id: 'project-1', kind: 'project', title: 'Hausumbau', revision: 1,
     body: { memoryMode: 'default' }, createdAt: stamp, updatedAt: stamp,
   };
+  const projects = [project];
   const chats = [
     {
       id: 'chat-1', kind: 'api-chat', title: 'Obstfrage', revision: 1, createdAt: stamp,
@@ -103,7 +104,11 @@ for (const [width, height] of [
     else if (p === '/api/assistant/api-chat-providers')
       data = [{ id: 'fixture', name: 'Testverbindung', protocol: 'openai', models: ['fixture-model'] }];
     else if (p === '/api/assistant/api-chats') data = chats;
-    else if (p.startsWith('/api/assistant/projects')) data = [project];
+    else if (p === '/api/assistant/projects/project-1/delete' && request.method() === 'POST') {
+      projects.length = 0;
+      for (const c of [...chats]) if (c.body.projectId === 'project-1') chats.splice(chats.indexOf(c), 1);
+      data = { chats: 1 };
+    } else if (p.startsWith('/api/assistant/projects')) data = projects;
     else {
       const m = p.match(/^\/api\/assistant\/api-chats\/([^/]+)(?:\/(.*))?$/);
       const chat = m && chats.find((c) => c.id === m[1]);
@@ -215,9 +220,23 @@ for (const [width, height] of [
     await dialog.getByRole('button', { name: 'Löschen' }).click();
     await count(page.locator('.sidebar-session-row', { hasText: 'Gemüsechat' }), 0, 'deleted from sidebar');
     assert.ok(calls.some(([m, p]) => m === 'POST' && p === '/api/assistant/api-chats/chat-2/delete'));
+    step = 'delete project with its chats';
+    chats[0].body = { ...chats[0].body, projectId: 'project-1' };
+    await page.goto(`${url}/chat/projects/project-1`);
+    await visible(page.getByRole('button', { name: 'Optionen für Obstfrage' }), 'chat menu on project page');
+    await page.getByRole('main').getByRole('button', { name: 'Optionen für Projekt Hausumbau' }).click();
+    await page.getByRole('menuitem', { name: 'Projekt löschen' }).click();
+    const projectDialog = page.getByRole('dialog');
+    await visible(projectDialog.getByText('Projekt löschen?'), 'project confirm dialog');
+    assert.match(await projectDialog.innerText(), /mit seinem Chat/);
+    await page.screenshot({ path: `.screenshots/project-delete-${width}.png`, fullPage: false });
+    await projectDialog.getByRole('button', { name: 'Löschen' }).click();
+    await waitFor('back on project list', async () => new URL(page.url()).pathname === '/chat/projects' || page.url());
+    await count(page.locator('.sidebar-project'), 0, 'folder gone from sidebar');
+    assert.equal(chats.length, 0, 'project chat deleted with the project');
     assert.ok(!(await page.evaluate('document.documentElement.scrollWidth > innerWidth')), 'no horizontal overflow');
     assert.deepEqual(errors, []);
-    console.log(`PASS ${width}px: regenerate in place, version switcher, edit hides and restores later thread, sidebar rename/move/archive/delete with confirmation`);
+    console.log(`PASS ${width}px: regenerate in place, version switcher, edit hides and restores later thread, sidebar rename/move/archive/delete with confirmation, project folders, project deletion with its chats`);
   } catch (error) {
     failed = true;
     await page.screenshot({ path: `.screenshots/chat-versions-failure-${width}.png` }).catch(() => {});

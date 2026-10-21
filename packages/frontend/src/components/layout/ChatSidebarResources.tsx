@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { ModelChatMenu, ModelChatRename } from './ModelChatMenu';
+import { ModelChatMenu, ModelChatRename, ProjectMenu } from './ModelChatMenu';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { isPlainClick, rememberLibraryOrigin, transitionPane } from '@/lib/motion/navigation';
 import { LIBRARY_PARAM, LIBRARY_SECTIONS, libraryHref } from './libraryNav';
@@ -187,6 +187,7 @@ export function ChatSidebarResources({
                   {!!items.length && (
                     <ChevronDown className="sidebar-library-chevron h-3 w-3 shrink-0" />
                   )}
+                  <ProjectMenu project={project} chatCount={items.length} />
                 </summary>
                 <Link
                   to={to}

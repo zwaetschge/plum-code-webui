@@ -8979,6 +8979,13 @@ html.dark .chat-composer-form.glass-chrome {
 .sidebar-project > summary::-webkit-details-marker {
   display: none;
 }
+.sidebar-project > summary .sidebar-session-options {
+  margin-right: -6px;
+}
+.sidebar-project > summary:hover .sidebar-session-options,
+.sidebar-project > summary:focus-within .sidebar-session-options {
+  opacity: 1;
+}
 .sidebar-project[open] .sidebar-library-chevron {
   transform: rotate(180deg);
 }

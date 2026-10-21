@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Archive, FolderInput, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Archive, FolderInput, MoreHorizontal, Pencil, Settings2, Trash2 } from 'lucide-react';
 import type { AssistantResource } from '@plum-code-webui/shared';
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/button';
@@ -31,10 +31,12 @@ export function ModelChatMenu({
   chat,
   projects,
   onRename,
+  className = 'sidebar-session-options',
 }: {
   chat: AssistantResource;
   projects: AssistantResource[];
   onRename: () => void;
+  className?: string;
 }) {
   const cache = useQueryClient(),
     navigate = useNavigate(),
@@ -75,10 +77,13 @@ export function ModelChatMenu({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="sidebar-session-options"
+            className={className}
             aria-label={`Optionen für ${chat.title}`}
             title="Chat-Optionen"
-            onClick={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
@@ -169,6 +174,105 @@ export function ModelChatMenu({
                 void act(() => api.post(`/api/assistant/api-chats/${chat.id}/delete`, {}), true)
               }
             >
+              Löschen
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/**
+ * ChatGPT's project menu: edit, and a confirmed delete that removes the project
+ * with all of its chats and sources.
+ */
+export function ProjectMenu({
+  project,
+  chatCount,
+  className = 'sidebar-session-options',
+}: {
+  project: AssistantResource;
+  chatCount: number;
+  className?: string;
+}) {
+  const cache = useQueryClient(),
+    navigate = useNavigate(),
+    location = useLocation();
+  const [confirm, setConfirm] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  const remove = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.post(`/api/assistant/projects/${project.id}/delete`, {});
+      setConfirm(false);
+      if (location.pathname.startsWith(`/chat/projects/${project.id}`)) navigate('/chat/projects');
+      await cache.invalidateQueries({ queryKey: ['assistant'] });
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Löschen fehlgeschlagen.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className={className}
+            aria-label={`Optionen für Projekt ${project.title}`}
+            title="Projekt-Optionen"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent navigation align="end" className="w-56">
+          <DropdownMenuItem
+            className="cursor-pointer"
+            onSelect={() => navigate(`/chat/projects/${project.id}/edit`)}
+          >
+            <Settings2 className="mr-2 h-3.5 w-3.5" />
+            Projekt bearbeiten
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="cursor-pointer text-destructive focus:text-destructive"
+            onSelect={() => setConfirm(true)}
+          >
+            <Trash2 className="mr-2 h-3.5 w-3.5" />
+            Projekt löschen
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Dialog open={confirm} onOpenChange={(open) => !busy && setConfirm(open)}>
+        <DialogContent className="max-w-md">
+          <DialogTitle>Projekt löschen?</DialogTitle>
+          <DialogDescription>
+            Dadurch wird <strong>{project.title}</strong> endgültig gelöscht,{' '}
+            {chatCount === 1
+              ? 'mit seinem Chat'
+              : chatCount
+                ? `mit allen ${chatCount} Chats`
+                : 'mit allen Chats'}
+            , Quellen und Projekt-Erinnerungen. Persönliche Erinnerungen bleiben erhalten.
+          </DialogDescription>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" disabled={busy} onClick={() => setConfirm(false)}>
+              Abbrechen
+            </Button>
+            <Button variant="destructive" disabled={busy} onClick={() => void remove()}>
               Löschen
             </Button>
           </DialogFooter>

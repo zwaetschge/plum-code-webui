@@ -131,6 +131,7 @@ import {
   branchApiChat,
   activateApiTurnVersion,
   deleteApiChat,
+  deleteProject,
   updateApiChatMeta,
   materializeApiAnswer,
   applyApiSelection,
@@ -1174,6 +1175,12 @@ router.post(
       success: true,
       data: await updateApiChatMeta(owner(req), String(req.params.id), input),
     });
+  })
+);
+router.post(
+  '/projects/:id/delete',
+  handle(async (req, res) => {
+    res.json({ success: true, data: await deleteProject(owner(req), String(req.params.id)) });
   })
 );
 router.post(

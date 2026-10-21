@@ -1262,6 +1262,48 @@ export async function deleteApiChat(userId: string, id: string) {
     userId
   );
 }
+/**
+ * ChatGPT's "Delete project": the project, its chats (permanently), its sources
+ * and project-only memories go; saved personal memories stay.
+ */
+export async function deleteProject(userId: string, id: string) {
+  const project = await get(
+    "SELECT id FROM assistant_resources WHERE id=? AND user_id=? AND kind='project' AND archived=0",
+    id,
+    userId
+  );
+  if (!project) throw new AppError('Projekt nicht gefunden', 404, 'NOT_FOUND');
+  const chats = (await all(
+    "SELECT id FROM assistant_resources WHERE user_id=? AND kind='api-chat' AND body_json::jsonb->>'projectId'=?",
+    userId,
+    id
+  )) as { id: string }[];
+  if (
+    chats.length &&
+    (await get(
+      `SELECT id FROM assistant_api_turns WHERE chat_id IN (${chats.map(() => '?').join(',')}) AND status='running' AND expires_at>?`,
+      ...chats.map((chat) => chat.id),
+      new Date().toISOString()
+    ))
+  )
+    throw new AppError('Die laufende Antwort im Projekt zuerst stoppen', 409, 'API_CHAT_BUSY');
+  for (const chat of chats) await deleteApiChat(userId, chat.id);
+  const now = new Date().toISOString();
+  await run(
+    "UPDATE assistant_resources SET archived=1, revision=revision+1, updated_at=? WHERE user_id=? AND archived=0 AND (id=? OR (kind IN ('source','memory') AND body_json::jsonb->>'projectId'=?))",
+    now,
+    userId,
+    id,
+    id
+  );
+  await run('DELETE FROM assistant_memory_history WHERE user_id=? AND project_id=?', userId, id);
+  await run(
+    "DELETE FROM assistant_memory_vectors WHERE user_id=? AND kind='history' AND NOT EXISTS(SELECT 1 FROM assistant_memory_history h WHERE h.user_id=? AND h.id=assistant_memory_vectors.id)",
+    userId,
+    userId
+  );
+  return { chats: chats.length };
+}
 export async function purgeTemporaryApiChat(userId: string, id: string, permanent = false) {
   return transaction(async (tx) => {
     await tx.get('SELECT id FROM users WHERE id=? FOR UPDATE', userId);

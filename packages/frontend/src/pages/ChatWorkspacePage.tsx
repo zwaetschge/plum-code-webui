@@ -7,6 +7,7 @@ import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { ResourcePicker } from '@/components/assistant/ResourcePicker';
+import { ModelChatMenu, ModelChatRename, ProjectMenu } from '@/components/layout/ModelChatMenu';
 import {
   EXPERT_MEMORY,
   PROJECT_MEMORY,
@@ -17,6 +18,8 @@ import {
 type Collection = 'profiles' | 'projects' | 'sources';
 const field = 'w-full rounded-xl border bg-background p-3 text-base';
 const action = buttonVariants({ variant: 'outline' });
+const rowOptions =
+  'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground';
 function useResources(collection: Collection | 'api-chats', owner?: string) {
   return useQuery({
     queryKey: [
@@ -58,6 +61,7 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
     resource = rows.data?.find((r) => r.id === id);
   const editor = id === 'new' || location.pathname.endsWith('/edit');
   const [search, setSearch] = useState('');
+  const [renaming, setRenaming] = useState('');
   const query = search.trim().toLocaleLowerCase();
   const selectedProfile = isProject ? (params.get('expert') ?? '') : (id ?? '');
   const selectedProject = isProject ? (id ?? '') : (params.get('project') ?? '');
@@ -152,25 +156,35 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                 .map((r) => {
                   const Icon = isProject ? FolderOpen : Bot;
                   return (
-                    <Link
-                      key={r.id}
-                      to={base + '/' + r.id}
-                      className="flex min-h-24 items-center gap-4 py-4 hover:text-primary"
-                    >
-                      <Icon className="h-6 w-6 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0 flex-1">
-                        <h2 className="break-words text-lg font-medium">{r.title}</h2>
-                        <p className="line-clamp-2 text-sm text-muted-foreground">
-                          {isProject
-                            ? String(
-                                r.body.description ||
-                                  PROJECT_MEMORY[projectMemoryMode(r.body)].label
-                              )
-                            : String(r.body.instructions || 'Eigener Prompt-Experte')}
-                        </p>
-                      </div>
-                      <ArrowUpRight size={18} className="shrink-0" />
-                    </Link>
+                    <div key={r.id} className="flex items-center gap-2">
+                      <Link
+                        to={base + '/' + r.id}
+                        className="flex min-h-24 min-w-0 flex-1 items-center gap-4 py-4 hover:text-primary"
+                      >
+                        <Icon className="h-6 w-6 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <h2 className="break-words text-lg font-medium">{r.title}</h2>
+                          <p className="line-clamp-2 text-sm text-muted-foreground">
+                            {isProject
+                              ? String(
+                                  r.body.description ||
+                                    PROJECT_MEMORY[projectMemoryMode(r.body)].label
+                                )
+                              : String(r.body.instructions || 'Eigener Prompt-Experte')}
+                          </p>
+                        </div>
+                        <ArrowUpRight size={18} className="shrink-0" />
+                      </Link>
+                      {isProject && (
+                        <ProjectMenu
+                          project={r}
+                          chatCount={
+                            chats.data?.filter((c) => c.body.projectId === r.id).length ?? 0
+                          }
+                          className={rowOptions}
+                        />
+                      )}
+                    </div>
                   );
                 })}
               {!rows.data?.filter((r) => r.title.toLocaleLowerCase().includes(query)).length && (
@@ -192,10 +206,19 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                   {isProject ? <FolderOpen className="shrink-0" /> : <Bot className="shrink-0" />}
                   {resource.title}
                 </h1>
-                <Link to={base + '/' + id + '/edit'} className={action}>
-                  <Settings2 size={15} className="mr-2" />
-                  Bearbeiten
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Link to={base + '/' + id + '/edit'} className={action}>
+                    <Settings2 size={15} className="mr-2" />
+                    Bearbeiten
+                  </Link>
+                  {isProject && (
+                    <ProjectMenu
+                      project={resource}
+                      chatCount={related.length}
+                      className={rowOptions}
+                    />
+                  )}
+                </div>
               </div>
               <p className="text-muted-foreground">
                 {isProject
@@ -331,22 +354,36 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                 {chats.isPending && <p role="status">Gespräche werden geladen …</p>}
                 {chats.isError && <p role="alert">Gespräche konnten nicht geladen werden.</p>}
                 <div className="divide-y">
-                  {related.map((c) => (
-                    <Link
-                      key={c.id}
-                      to={'/chat/model/' + c.id}
-                      className="flex items-center justify-between gap-3 py-4 hover:text-primary"
-                    >
-                      <div className="min-w-0">
-                        <h2 className="break-words font-medium">{c.title}</h2>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {profiles.data?.find((p) => p.id === c.body.profileId)?.title ?? 'Plum'} ·{' '}
-                          {new Date(c.updatedAt).toLocaleDateString('de-CH')}
-                        </p>
+                  {related.map((c) =>
+                    renaming === c.id ? (
+                      <div key={c.id} className="py-3">
+                        <ModelChatRename chat={c} onDone={() => setRenaming('')} />
                       </div>
-                      <ArrowUpRight size={16} className="shrink-0" />
-                    </Link>
-                  ))}
+                    ) : (
+                      <div key={c.id} className="flex items-center gap-2">
+                        <Link
+                          to={'/chat/model/' + c.id}
+                          className="flex min-w-0 flex-1 items-center justify-between gap-3 py-4 hover:text-primary"
+                        >
+                          <div className="min-w-0">
+                            <h2 className="break-words font-medium">{c.title}</h2>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {profiles.data?.find((p) => p.id === c.body.profileId)?.title ??
+                                'Plum'}{' '}
+                              · {new Date(c.updatedAt).toLocaleDateString('de-CH')}
+                            </p>
+                          </div>
+                          <ArrowUpRight size={16} className="shrink-0" />
+                        </Link>
+                        <ModelChatMenu
+                          chat={c}
+                          projects={projects.data ?? []}
+                          onRename={() => setRenaming(c.id)}
+                          className={rowOptions}
+                        />
+                      </div>
+                    )
+                  )}
                 </div>
                 {!related.length && !chats.isPending && !chats.isError && (
                   <div className="space-y-3 py-8 text-center">

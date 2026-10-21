@@ -1064,6 +1064,66 @@ try {
   console.log(
     'PASS: regenerate and edit in place with version switching that restores whole threads; hidden versions excluded from context; owner-checked permanent deletion'
   );
+  // Deleting a project removes its chats, sources and project memory, nothing else.
+  const { deleteProject } = await import('../src/services/assistant/apiChats.js');
+  const doomed = await createResource(
+    'api-alice',
+    'project',
+    'Wegwerfprojekt',
+    BODY_SCHEMAS.project.parse({ instructions: 'GONE' })
+  );
+  const doomedSource = await createResource(
+    'api-alice',
+    'source',
+    'Projektquelle',
+    BODY_SCHEMAS.source.parse({ projectId: doomed.id, text: 'Nur im Projekt.' })
+  );
+  const doomedChat = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    profileId: null,
+    projectId: doomed.id,
+    sourceIds: [],
+  });
+  const survivor = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    profileId: null,
+    projectId: null,
+    sourceIds: [],
+  });
+  await run(
+    "INSERT INTO assistant_memory_history(user_id,id,source_type,source_id,turn_id,project_id,source_hash,summary,writing_style,created_at) VALUES ('api-alice',?,'api',?,'t','" +
+      doomed.id +
+      "','h','Projektverlauf','',?)",
+    randomUUID(),
+    survivor.id,
+    new Date().toISOString()
+  );
+  await assert.rejects(deleteProject('api-bob', doomed.id), /nicht gefunden/);
+  assert.deepEqual(await deleteProject('api-alice', doomed.id), { chats: 1 });
+  await assert.rejects(apiChatTurns('api-alice', doomedChat.id));
+  await apiChatTurns('api-alice', survivor.id);
+  assert.equal(
+    (await get('SELECT archived FROM assistant_resources WHERE id=?', doomedSource.id)).archived,
+    1
+  );
+  assert.equal(
+    (await get('SELECT archived FROM assistant_resources WHERE id=?', doomed.id)).archived,
+    1
+  );
+  assert.equal(
+    (
+      await get(
+        'SELECT COUNT(*) AS n FROM assistant_memory_history WHERE user_id=? AND project_id=?',
+        'api-alice',
+        doomed.id
+      )
+    ).n,
+    0
+  );
+  await assert.rejects(deleteProject('api-alice', doomed.id), /nicht gefunden/);
+  console.log('PASS: project deletion removes its chats, sources and project memory only');
   await archiveResource('api-alice', project.id, 1);
   const archived = await startApiTurn('api-alice', contextual.id, {
     commandId: randomUUID(),

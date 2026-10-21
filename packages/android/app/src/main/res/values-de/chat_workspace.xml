@@ -43,4 +43,7 @@
     <string name="chat_workspace_expert_memory_read_hint">Nutzt deine gespeicherten Erinnerungen und früheren Chats, speichert aber nichts Neues.</string>
     <string name="chat_workspace_expert_memory_learn">Nutzen und dazulernen</string>
     <string name="chat_workspace_expert_memory_learn_hint">Nutzt dein Gedächtnis und merkt sich Neues, sofern automatisches Lernen in der Personalisierung aktiv ist.</string>
+    <string name="chat_workspace_delete_project">Projekt löschen</string>
+    <string name="chat_workspace_delete_project_title">Projekt löschen?</string>
+    <string name="chat_workspace_delete_project_text">Dadurch wird «%1$s» endgültig gelöscht, mit allen Chats (%2$d), Quellen und Projekt-Erinnerungen. Persönliche Erinnerungen bleiben erhalten.</string>
 </resources>

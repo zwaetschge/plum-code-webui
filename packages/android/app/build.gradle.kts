@@ -53,8 +53,8 @@ android {
         applicationId = "com.claudewebui.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 48
-        versionName = "1.8.3"
+        versionCode = 49
+        versionName = "1.8.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

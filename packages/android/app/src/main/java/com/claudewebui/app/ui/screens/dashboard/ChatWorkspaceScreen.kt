@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -54,6 +56,8 @@ fun ChatWorkspaceScreen(
     var sourceIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var confirmProject by remember { mutableStateOf<AssistantResource?>(null) }
+    var confirmChat by remember { mutableStateOf<AssistantResource?>(null) }
     fun checkOwner() { if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed") }
     suspend fun load() {
         profiles = api.getAssistantResources("profiles").also { checkOwner(); check(it.success) { it.error?.message.orEmpty() } }.data.orEmpty()
@@ -92,6 +96,49 @@ fun ChatWorkspaceScreen(
         }
     }
     BackHandler { goBack() }
+    fun remove(action: suspend () -> com.claudewebui.app.data.model.ApiResponse<*>, done: () -> Unit) {
+        scope.launch {
+            busy = true; error = null
+            try {
+                checkOwner(); val response = action()
+                checkOwner(); check(response.success) { response.error?.message.orEmpty() }
+                done(); load()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { error = failure.message }
+            finally { busy = false; confirmProject = null; confirmChat = null }
+        }
+    }
+    confirmProject?.let { project ->
+        val count = chats.count { it.body["projectId"]?.jsonPrimitive?.contentOrNull == project.id }
+        AlertDialog(
+            onDismissRequest = { if (!busy) confirmProject = null },
+            title = { Text(stringResource(R.string.chat_workspace_delete_project_title)) },
+            text = { Text(stringResource(R.string.chat_workspace_delete_project_text, project.title, count)) },
+            confirmButton = {
+                TextButton(enabled = !busy, onClick = {
+                    remove({ api.deleteAssistantProject(project.id) }) {
+                        if (selectedProject == project.id) selectedProject = null
+                        if (viewedId == project.id) viewedId = null
+                        editor = false
+                    }
+                }) { Text(stringResource(R.string.assistant_delete_chat), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(enabled = !busy, onClick = { confirmProject = null }) { Text(stringResource(R.string.assistant_cancel)) } },
+        )
+    }
+    confirmChat?.let { chat ->
+        AlertDialog(
+            onDismissRequest = { if (!busy) confirmChat = null },
+            title = { Text(stringResource(R.string.assistant_delete_chat_title)) },
+            text = { Text(stringResource(R.string.assistant_delete_chat_text, chat.title)) },
+            confirmButton = {
+                TextButton(enabled = !busy, onClick = { remove({ api.deleteAssistantApiChat(chat.id) }) {} }) {
+                    Text(stringResource(R.string.assistant_delete_chat), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(enabled = !busy, onClick = { confirmChat = null }) { Text(stringResource(R.string.assistant_cancel)) } },
+        )
+    }
     Surface(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TextButton(enabled = !busy, onClick = { goBack() }) { Text("← " + stringResource(R.string.chat_workspace_back)) }
@@ -165,7 +212,12 @@ fun ChatWorkspaceScreen(
                     }) { Text(stringResource(R.string.chat_workspace_save)) }
                     TextButton(enabled = !busy, onClick = { editor = false }) { Text(stringResource(R.string.chat_workspace_back)) }
                 }
-                editing?.let { resource ->
+                if (collection == "projects") editing?.let { resource ->
+                    TextButton(enabled = !busy, onClick = { confirmProject = resource }) {
+                        Text(stringResource(R.string.chat_workspace_delete_project), color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                if (collection != "projects") editing?.let { resource ->
                     TextButton(enabled = !busy, onClick = {
                         scope.launch {
                             busy = true; error = null
@@ -223,6 +275,9 @@ fun ChatWorkspaceScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(enabled = !busy, onClick = { edit(viewed) }) { Text(stringResource(R.string.chat_workspace_edit)) }
                         if (isProject) TextButton(enabled = !busy, onClick = { collection = "sources" }) { Text(stringResource(R.string.chat_workspace_sources)) }
+                        if (isProject) TextButton(enabled = !busy, onClick = { confirmProject = viewed }) {
+                            Text(stringResource(R.string.chat_workspace_delete_project), color = MaterialTheme.colorScheme.error)
+                        }
                     }
                     Text(stringResource(R.string.chat_workspace_conversations), style = MaterialTheme.typography.titleMedium)
                     val related = chats.filter { resource ->
@@ -231,7 +286,16 @@ fun ChatWorkspaceScreen(
                         (isProject || selectedProject == null || resource.body["projectId"]?.jsonPrimitive?.contentOrNull == selectedProject)
                     }
                     if (related.isEmpty() && !busy) Text(stringResource(R.string.chat_workspace_empty_chats))
-                    related.forEach { resource -> TextButton(enabled = !busy, onClick = { onChat(resource) }) { Text(resource.title) } }
+                    related.forEach { resource ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            TextButton(enabled = !busy, onClick = { onChat(resource) }, modifier = Modifier.weight(1f)) {
+                                Text(resource.title, Modifier.fillMaxWidth(), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            }
+                            IconButton(enabled = !busy, onClick = { confirmChat = resource }) {
+                                Icon(Icons.Outlined.Delete, stringResource(R.string.assistant_delete_chat))
+                            }
+                        }
+                    }
                 }
 
             }
