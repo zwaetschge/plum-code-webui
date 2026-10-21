@@ -6,6 +6,7 @@ import { LIBRARY_PARAM, LIBRARY_SECTIONS, libraryHref } from './libraryNav';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bot,
+  Folder,
   FolderOpen,
   ChevronDown,
   Library,
@@ -37,6 +38,8 @@ function historyGroup(time: string, todayStart: number): HistoryGroup {
  * Chat mode of the sidebar: model chats and earlier agent chats in one history,
  * grouped Heute / Gestern / Älter, then the library. Agent chats keep their
  * session row (run state, unread count, overflow menu) via `renderSession`.
+ * As in ChatGPT, project chats live in their project folder, not in the
+ * history; a search still finds them.
  */
 export function ChatSidebarResources({
   search,
@@ -68,16 +71,22 @@ export function ChatSidebarResources({
   });
   const [renaming, setRenaming] = useState('');
   const query = search.trim().toLocaleLowerCase();
+  const projectChats = (projectId: string) =>
+    (chats.data ?? [])
+      .filter((chat) => chat.body.projectId === projectId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const entries: HistoryEntry[] = [
-    ...(chats.data ?? []).map(
-      (chat): HistoryEntry => ({
-        kind: 'model',
-        id: chat.id,
-        title: chat.title,
-        time: chat.updatedAt,
-        chat,
-      })
-    ),
+    ...(chats.data ?? [])
+      .filter((chat) => query || !chat.body.projectId)
+      .map(
+        (chat): HistoryEntry => ({
+          kind: 'model',
+          id: chat.id,
+          title: chat.title,
+          time: chat.updatedAt,
+          chat,
+        })
+      ),
     ...chatSessions.map(
       (session): HistoryEntry => ({
         kind: 'session',
@@ -97,6 +106,50 @@ export function ChatSidebarResources({
     items: entries.filter((entry) => historyGroup(entry.time, today.getTime()) === label),
   })).filter((group) => group.items.length > 0);
   const row = 'sidebar-nav-item flex items-center gap-3 px-3 py-2 text-xs min-w-0';
+  const modelRow = (chat: AssistantResource, nested = false) => (
+    <div
+      key={`model-${chat.id}`}
+      className={cn(
+        'sidebar-session-row group/session relative flex items-center',
+        nested && 'sidebar-project-chat'
+      )}
+    >
+      {renaming === chat.id && !collapsed ? (
+        <ModelChatRename chat={chat} onDone={() => setRenaming('')} />
+      ) : (
+        <>
+          <NavLink
+            to={`/chat/model/${chat.id}`}
+            onClick={(event) => {
+              // Between model chats the pane swaps through a view transition.
+              const to = `/chat/model/${chat.id}`;
+              if (
+                isPlainClick(event) &&
+                location.pathname !== to &&
+                transitionPane(() => navigate(to))
+              )
+                event.preventDefault();
+              onNavigate();
+            }}
+            title={chat.title}
+            className={({ isActive }) =>
+              cn(row, isActive && 'is-active', collapsed && 'justify-center')
+            }
+          >
+            <MessageCircle className="h-4 w-4 shrink-0" />
+            {!collapsed && <span className="truncate">{chat.title}</span>}
+          </NavLink>
+          {!collapsed && (
+            <ModelChatMenu
+              chat={chat}
+              projects={projects.data ?? []}
+              onRename={() => setRenaming(chat.id)}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
 
   return (
     <>
@@ -120,54 +173,41 @@ export function ChatSidebarResources({
           {!collapsed && 'Projekte'}
         </NavLink>
       </nav>
+      {!collapsed && !!projects.data?.length && (
+        <nav aria-label="Projektordner" className="sidebar-projects">
+          {projects.data.map((project) => {
+            const items = projectChats(project.id);
+            const to = `/chat/projects/${project.id}`;
+            const inside = items.some((chat) => location.pathname === `/chat/model/${chat.id}`);
+            return (
+              <details key={project.id} className="sidebar-project" open={inside || undefined}>
+                <summary className={cn(row, location.pathname === to && 'is-active')}>
+                  <Folder className="h-4 w-4 shrink-0" />
+                  <span className="flex-1 truncate">{project.title}</span>
+                  {!!items.length && (
+                    <ChevronDown className="sidebar-library-chevron h-3 w-3 shrink-0" />
+                  )}
+                </summary>
+                <Link
+                  to={to}
+                  onClick={onNavigate}
+                  className={cn(row, 'sidebar-project-chat text-muted-foreground')}
+                >
+                  <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">Projekt öffnen</span>
+                </Link>
+                {items.map((chat) => modelRow(chat, true))}
+              </details>
+            );
+          })}
+        </nav>
+      )}
       <nav aria-label="Gesprächsverlauf" className="sidebar-chat-history">
         {groups.map((group) => (
           <div key={group.label} className="sidebar-session-group">
             {!collapsed && <div className="sidebar-section-label px-3 py-1.5">{group.label}</div>}
             {group.items.map((entry) =>
-              entry.kind === 'session' ? (
-                renderSession(entry.session)
-              ) : (
-                <div
-                  key={`model-${entry.id}`}
-                  className="sidebar-session-row group/session relative flex items-center"
-                >
-                  {renaming === entry.id && !collapsed ? (
-                    <ModelChatRename chat={entry.chat} onDone={() => setRenaming('')} />
-                  ) : (
-                    <>
-                      <NavLink
-                        to={`/chat/model/${entry.id}`}
-                        onClick={(event) => {
-                          // Between model chats the pane swaps through a view transition.
-                          const to = `/chat/model/${entry.id}`;
-                          if (
-                            isPlainClick(event) &&
-                            location.pathname !== to &&
-                            transitionPane(() => navigate(to))
-                          )
-                            event.preventDefault();
-                          onNavigate();
-                        }}
-                        title={entry.title}
-                        className={({ isActive }) =>
-                          cn(row, isActive && 'is-active', collapsed && 'justify-center')
-                        }
-                      >
-                        <MessageCircle className="h-4 w-4 shrink-0" />
-                        {!collapsed && <span className="truncate">{entry.title}</span>}
-                      </NavLink>
-                      {!collapsed && (
-                        <ModelChatMenu
-                          chat={entry.chat}
-                          projects={projects.data ?? []}
-                          onRename={() => setRenaming(entry.id)}
-                        />
-                      )}
-                    </>
-                  )}
-                </div>
-              )
+              entry.kind === 'session' ? renderSession(entry.session) : modelRow(entry.chat)
             )}
           </div>
         ))}

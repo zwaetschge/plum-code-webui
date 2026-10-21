@@ -68,12 +68,14 @@ export function AssistantSidebar({
         path: `/chat/session/${s.id}`,
         time: String(s.updatedAt || s.createdAt || ''),
       })),
-    ...(chats.data ?? []).map((c) => ({
-      id: c.id,
-      title: c.title,
-      path: `/chat/model/${c.id}`,
-      time: c.updatedAt,
-    })),
+    ...(chats.data ?? [])
+      .filter((c) => search || !c.body.projectId)
+      .map((c) => ({
+        id: c.id,
+        title: c.title,
+        path: `/chat/model/${c.id}`,
+        time: c.updatedAt,
+      })),
   ]
     .filter((c) => c.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
     .sort((a, b) => b.time.localeCompare(a.time));

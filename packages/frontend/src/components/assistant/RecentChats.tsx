@@ -24,7 +24,9 @@ export function RecentChats() {
       (await api.get<{ data: AssistantResource[] }>('/api/assistant/api-chats')).data.data,
     refetchInterval: 30000,
   });
-  const recent = [...(chats.data ?? [])]
+  // Project chats stay in their project folder, as in the sidebar history.
+  const recent = (chats.data ?? [])
+    .filter((chat) => !chat.body.projectId)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, RECENT_LIMIT);
   if (!recent.length) return null;

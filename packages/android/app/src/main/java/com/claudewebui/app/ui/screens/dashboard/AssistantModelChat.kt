@@ -861,10 +861,12 @@ fun ModelChatHistoryList(
                     Text(stringResource(R.string.assistant_new_chat))
                 }
             }
-            if (loaded && chats.isEmpty()) Text(stringResource(R.string.assistant_no_chats), color = palette.muted, modifier = Modifier.padding(vertical = 16.dp, horizontal = 4.dp))
+            // As in ChatGPT, project chats live in their project folder; a search still finds them.
+            val shown = if (search.isNotEmpty()) chats else chats.filter { it.body["projectId"]?.jsonPrimitive?.contentOrNull == null }
+            if (loaded && shown.isEmpty()) Text(stringResource(R.string.assistant_no_chats), color = palette.muted, modifier = Modifier.padding(vertical = 16.dp, horizontal = 4.dp))
             LazyColumn(listModifier, contentPadding = contentPadding, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 // Grouped by day like the chat apps: Heute, Gestern, Diese Woche, Älter.
-                chats.groupBy { chatBucket(it.updatedAt) }.toSortedMap().forEach { (bucket, group) ->
+                shown.groupBy { chatBucket(it.updatedAt) }.toSortedMap().forEach { (bucket, group) ->
                     item(key = "bucket_$bucket") {
                         Text(stringResource(CHAT_BUCKETS[bucket]), style = MaterialTheme.typography.labelMedium, color = palette.muted, modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 4.dp))
                     }
@@ -1016,7 +1018,7 @@ private fun RecentChatsBlock(owner: String, api: ApiClient, enabled: Boolean, on
     val context = LocalContext.current
     var chats by remember(owner) { mutableStateOf<List<AssistantResource>>(emptyList()) }
     LaunchedEffect(owner) {
-        chats = runCatching { api.getAssistantResources("api-chats", 0, null).data.orEmpty().take(5) }.getOrDefault(emptyList())
+        chats = runCatching { api.getAssistantResources("api-chats", 0, null).data.orEmpty().filter { it.body["projectId"]?.jsonPrimitive?.contentOrNull == null }.take(5) }.getOrDefault(emptyList())
     }
     if (chats.isEmpty()) return
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {

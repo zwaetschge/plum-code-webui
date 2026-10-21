@@ -8967,6 +8967,24 @@ html.dark .chat-composer-form.glass-chrome {
 .sidebar-library[open] .sidebar-library-chevron {
   transform: rotate(180deg);
 }
+.sidebar-projects {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 4px;
+}
+.sidebar-project > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.sidebar-project > summary::-webkit-details-marker {
+  display: none;
+}
+.sidebar-project[open] .sidebar-library-chevron {
+  transform: rotate(180deg);
+}
+.sidebar-project-chat {
+  padding-left: 18px;
+}
 .sidebar-library-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
