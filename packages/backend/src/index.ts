@@ -1,5 +1,6 @@
 import { resolveAuthenticatedUserId } from './middleware/auth.js';
 import { startMemoryWorker } from './services/assistant/memory.js';
+import { relocateMissingSessionDirectories } from './services/claude/sessionRelocation.js';
 import express from 'express';
 import fs from 'fs';
 import { createServer } from 'http';
@@ -263,6 +264,13 @@ async function main() {
   await reconcileAssistantTasks();
   startSourceObservation();
   startMemoryWorker();
+  // Sessions follow project folders that moved to or from the Unraid array.
+  const relocate = () =>
+    void relocateMissingSessionDirectories().catch((error) =>
+      console.error('[SESSION] Project folder check failed:', error)
+    );
+  relocate();
+  setInterval(relocate, 60 * 60 * 1000).unref();
   startTemporaryRetention(async (id, userId) => {
     const { getProcessManager } = await import('./websocket/index.js');
     await getProcessManager().stopSession(id, userId);

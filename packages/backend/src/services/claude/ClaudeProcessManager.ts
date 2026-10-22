@@ -87,6 +87,8 @@ import {
   type OpenCodeUsageCounters,
 } from '../opencode/OpencodeServer.js';
 import { resolveConfigHome } from '../../utils/configPaths.js';
+import { rebasePath } from '../../utils/projectRelocation.js';
+import { relocateSessionDirectories } from './sessionRelocation.js';
 import { listSkillLibrary } from '../../utils/skillLibrary.js';
 import { buildSessionStyleContextFromSelection } from '../../utils/styleContext.js';
 import { scanProject, formatProjectContext } from '../../utils/projectScanner.js';
@@ -4959,10 +4961,20 @@ Discord Main Gateway:
     }
     await assertRunnerAccess(userId);
 
-    // A session whose working directory has since been deleted or unmounted
-    // would otherwise fail deep in spawn() as a cryptic "<provider> process
-    // error: spawn … ENOENT". Surface the real cause so the session can be
-    // pointed at an existing folder.
+    // A project folder that moved (plum-mover tiering, or a manual move to the
+    // Unraid array) is found again and the session follows it. Otherwise the
+    // spawn fails as a cryptic "<provider> process error: spawn … ENOENT".
+    if (!fsSync.existsSync(session.working_directory)) {
+      const moved = await relocateSessionDirectories(userId, session.working_directory);
+      if (moved) {
+        session.working_directory = moved.to;
+        session.allowed_directories = JSON.stringify(
+          safeJsonParse<string[]>(session.allowed_directories, []).map((dir) =>
+            rebasePath(dir, moved.from, moved.to)
+          )
+        );
+      }
+    }
     if (!fsSync.existsSync(session.working_directory)) {
       throw new Error(
         `Projektordner nicht gefunden: ${session.working_directory}. Der Ordner wurde verschoben, gelöscht oder ist nicht eingehängt. Ordner wiederherstellen oder im Menü der Sitzung ein anderes Arbeitsverzeichnis wählen.`
