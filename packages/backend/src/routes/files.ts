@@ -211,6 +211,40 @@ function getExtension(filename: string): string | undefined {
   return ext ? ext.slice(1) : undefined;
 }
 
+/**
+ * Unraid share names are case-sensitive ("eBooks"), but people type them
+ * from memory. A path that does not exist as typed resolves segment by
+ * segment to the single folder whose name matches case-insensitively.
+ */
+async function resolveCaseInsensitive(resolvedPath: string): Promise<string> {
+  if (
+    await fs.stat(resolvedPath).then(
+      () => true,
+      () => false
+    )
+  )
+    return resolvedPath;
+  let current = '/';
+  for (const segment of resolvedPath.split('/').filter(Boolean)) {
+    const exact = path.join(current, segment);
+    if (
+      await fs.stat(exact).then(
+        () => true,
+        () => false
+      )
+    ) {
+      current = exact;
+      continue;
+    }
+    const entries = await fs.readdir(current).catch(() => [] as string[]);
+    const matches = entries.filter((name) => name.toLowerCase() === segment.toLowerCase());
+    const [only] = matches.length === 1 ? matches : [];
+    if (!only) return resolvedPath;
+    current = path.join(current, only);
+  }
+  return isAllowedBasePath(current) ? current : resolvedPath;
+}
+
 // List directory contents
 router.get('/', requireAuth, async (req, res) => {
   const dirPath = req.query.path as string;
@@ -219,7 +253,7 @@ router.get('/', requireAuth, async (req, res) => {
     throw new AppError('Path is required', 400, 'MISSING_PATH');
   }
 
-  const resolvedPath = validatePath(dirPath);
+  const resolvedPath = await resolveCaseInsensitive(validatePath(dirPath));
 
   try {
     const entries = await fs.readdir(resolvedPath, { withFileTypes: true });

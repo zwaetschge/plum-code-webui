@@ -101,9 +101,19 @@ export function FolderBrowser({ value, onChange, onClose, showFiles = false }: F
   }, [homeInfo, value, currentPath]);
 
   const navigateTo = (path: string) => {
-    setCurrentPath(path);
-    setManualPath(path);
+    // Trailing slashes would otherwise make "/a/" and "/a" different folders.
+    const clean = path.trim().replace(/\/+$/, '') || '/';
+    setCurrentPath(clean);
+    setManualPath(clean);
   };
+
+  // The server resolves case-insensitive names ("ebooks" -> "eBooks"); follow it.
+  useEffect(() => {
+    if (contents?.path && contents.path !== currentPath) {
+      setCurrentPath(contents.path);
+      setManualPath(contents.path);
+    }
+  }, [contents?.path, currentPath]);
 
   const navigateUp = () => {
     const parentPath = currentPath.split('/').slice(0, -1).join('/') || '/';
@@ -308,7 +318,12 @@ export function FolderBrowser({ value, onChange, onClose, showFiles = false }: F
               Cancel
             </Button>
           )}
-          <Button size="sm" onClick={handleSelect} className="gap-1">
+          <Button
+            size="sm"
+            onClick={handleSelect}
+            className="gap-1"
+            disabled={!contents || !!error || isLoading}
+          >
             <Check className="h-3 w-3" />
             Select
           </Button>
