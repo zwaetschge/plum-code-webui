@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 import { SHOW_CHAT_HISTORY_EVENT } from '@/lib/chatHistory';
 import { normalizeUsageSnapshot } from '@plum-code-webui/shared';
 import { GlobalMessageSearchDialog } from '@/components/search/GlobalMessageSearchDialog';
+import { SessionFolderDialog } from '@/lib/changeSessionFolder';
 
 // Socket events and mutation invalidations keep the session shell current during
 // normal use. This slower poll is only a recovery path for missed events or
@@ -285,6 +286,7 @@ export function Layout() {
       >
         {/* Background effects */}
         <AppBackground animation={backgroundAnimation} />
+        <SessionFolderDialog />
         {assistantSurface && <AmbientBackdrop />}
         <div className="absolute inset-0 pattern-bg pointer-events-none" />
         {isFullBleed && !assistantSurface && (
