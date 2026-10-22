@@ -4959,6 +4959,16 @@ Discord Main Gateway:
     }
     await assertRunnerAccess(userId);
 
+    // A session whose working directory has since been deleted or unmounted
+    // would otherwise fail deep in spawn() as a cryptic "<provider> process
+    // error: spawn … ENOENT". Surface the real cause so the session can be
+    // pointed at an existing folder.
+    if (!fsSync.existsSync(session.working_directory)) {
+      throw new Error(
+        `Projektordner nicht gefunden: ${session.working_directory}. Der Ordner wurde verschoben, gelöscht oder ist nicht eingehängt. Ordner wiederherstellen oder im Menü der Sitzung ein anderes Arbeitsverzeichnis wählen.`
+      );
+    }
+
     if (this.processes.has(sessionId)) {
       return;
     }
