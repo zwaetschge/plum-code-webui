@@ -14,7 +14,7 @@ import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import path from 'path';
 import fs from 'fs/promises';
-import { createReadStream } from 'fs';
+import fsSync, { createReadStream } from 'fs';
 import os from 'os';
 import multer from 'multer';
 import {
@@ -1345,6 +1345,13 @@ router.put('/:id', requireAuth, async (req, res) => {
 
   if (resolvedWorkingDirectory && !validateWorkingDirectory(resolvedWorkingDirectory)) {
     throw new AppError('Working directory not allowed', 400, 'INVALID_PATH');
+  }
+  if (resolvedWorkingDirectory && !fsSync.existsSync(resolvedWorkingDirectory)) {
+    throw new AppError(
+      `Ordner nicht gefunden: ${resolvedWorkingDirectory}`,
+      400,
+      'WORKING_DIRECTORY_MISSING'
+    );
   }
 
   const updates: string[] = [];
