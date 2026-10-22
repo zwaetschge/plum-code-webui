@@ -605,6 +605,14 @@ class DashboardViewModel(
         }
     }
 
+    fun changeSessionFolder(id: String, path: String) {
+        viewModelScope.launch {
+            sessionRepository.updateSession(id = id, workingDirectory = path)
+                .onSuccess { loadSessions() }
+                .onFailure { error -> _events.send(DashboardEvent.ShowError(error.message ?: appContext.getString(R.string.dashboard_change_folder_failed))) }
+        }
+    }
+
     fun moveSessionsToSurface(ids: List<String>, surface: String) {
         if (surface !in listOf("task", "code") || ids.isEmpty()) return
         viewModelScope.launch {

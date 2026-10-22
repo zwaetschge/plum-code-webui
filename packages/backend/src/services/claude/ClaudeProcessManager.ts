@@ -4977,7 +4977,7 @@ Discord Main Gateway:
     }
     if (!fsSync.existsSync(session.working_directory)) {
       throw new Error(
-        `Projektordner nicht gefunden: ${session.working_directory}. Der Ordner wurde verschoben, gelöscht oder ist nicht eingehängt. Ordner wiederherstellen oder im Menü der Sitzung ein anderes Arbeitsverzeichnis wählen.`
+        `Projektordner nicht gefunden: ${session.working_directory}. Der Ordner wurde verschoben, gelöscht oder ist nicht eingehängt. Mit «Ordner ändern» den neuen Pfad eintragen.`
       );
     }
 

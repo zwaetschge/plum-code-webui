@@ -47,6 +47,7 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import { useSessionMenu } from './SessionMenuContext';
+import { changeSessionFolder } from '@/lib/changeSessionFolder';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -568,30 +569,6 @@ export function Sidebar({
     }
   };
 
-  // Sessions keep their folder path; after a manual move (e.g. to the Unraid
-  // array) the folder is pointed at its new location here.
-  const handleChangeFolder = async (session: Session) => {
-    const next = window.prompt(
-      'Neuer Arbeitsordner für diese Session (vollständiger Pfad, z. B. /mnt/user/…):',
-      session.workingDirectory
-    );
-    const trimmed = next?.trim();
-    if (!trimmed || trimmed === session.workingDirectory) return;
-    try {
-      await api.put(`/api/sessions/${session.id}`, { workingDirectory: trimmed });
-      updateSession(session.id, { workingDirectory: trimmed });
-      toast({ title: 'Arbeitsordner geändert', description: trimmed });
-    } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : 'Ändern fehlgeschlagen';
-      toast({ title: 'Arbeitsordner nicht geändert', description: msg, variant: 'destructive' });
-    }
-  };
-
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Session «${name}» löschen? Das lässt sich nicht rückgängig machen.`)) return;
     try {
@@ -972,7 +949,7 @@ export function Sidebar({
                 Umbenennen
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => void handleChangeFolder(session)}
+                onClick={() => void changeSessionFolder(session.id, session.workingDirectory)}
                 className="cursor-pointer"
               >
                 <FolderOpen className="mr-2 h-3.5 w-3.5" />

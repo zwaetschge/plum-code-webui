@@ -20,6 +20,9 @@ import type { SessionChatSync } from '@/lib/sessionChatSync';
 import { useAuthStore } from '@/stores/authStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import { toast } from '@/hooks/use-toast';
+import { createElement } from 'react';
+import { ToastAction, type ToastActionElement } from '@/components/ui/toast';
+import { changeSessionFolder } from '@/lib/changeSessionFolder';
 import { notificationService } from './notifications';
 import { api, ApiError } from './api';
 import {
@@ -318,10 +321,22 @@ class SocketService {
 
     this.socket.on('session:error', (data) => {
       console.error('Session error:', data.error);
+      // A moved project folder is fixed right from the message.
+      const missing = /^Projektordner nicht gefunden: (.+?)\. /.exec(data.error ?? '');
       toast({
-        title: 'Session action failed',
+        title: missing ? 'Projektordner nicht gefunden' : 'Session action failed',
         description: data.error,
         variant: 'destructive',
+        ...(missing && {
+          action: createElement(
+            ToastAction,
+            {
+              altText: 'Arbeitsordner ändern',
+              onClick: () => void changeSessionFolder(data.sessionId, missing[1]),
+            },
+            'Ordner ändern'
+          ) as unknown as ToastActionElement,
+        }),
       });
     });
 

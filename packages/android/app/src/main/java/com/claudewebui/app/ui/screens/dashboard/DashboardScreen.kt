@@ -341,6 +341,7 @@ internal fun DashboardListScreen(
     var showNotifications by remember { mutableStateOf(false) }
     var showCategoryManager by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Session?>(null) }
+    var folderTarget by remember { mutableStateOf<Session?>(null) }
     var categoryTarget by remember { mutableStateOf<Session?>(null) }
     var deleteTarget by remember { mutableStateOf<Session?>(null) }
 
@@ -791,6 +792,7 @@ internal fun DashboardListScreen(
             onStar = { viewModel.toggleStar(current.id) },
             onArchive = { close(); viewModel.clearSelection(); viewModel.toggleSessionSelection(current.id); viewModel.bulkAction(if (state.showArchived) "unarchive" else "archive") },
             onRename = { close(); renameTarget = current },
+            onChangeFolder = { close(); folderTarget = current },
             onMove = { close(); categoryTarget = current },
             onMoveSurface = { close(); viewModel.moveSessionsToSurface(listOf(current.id), if (assistantArea == "task") "code" else "task") },
             onSelect = { close(); selectMode = true; viewModel.toggleSessionSelection(current.id) },
@@ -805,6 +807,16 @@ internal fun DashboardListScreen(
             onRename = { name ->
                 renameTarget = null
                 viewModel.renameSession(target.id, name)
+            },
+        )
+    }
+    folderTarget?.let { target ->
+        ChangeFolderDialog(
+            session = target,
+            onDismiss = { folderTarget = null },
+            onSave = { path ->
+                folderTarget = null
+                viewModel.changeSessionFolder(target.id, path)
             },
         )
     }
@@ -870,6 +882,34 @@ private fun RenameSessionDialog(
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(screenResources.getString(R.string.dashboard_cancel_77dfd)) } },
+    )
+}
+
+/** Points a session at its folder's new location, e.g. after a move to the Unraid array. */
+@Composable
+private fun ChangeFolderDialog(
+    session: Session,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var path by remember(session.id) { mutableStateOf(session.workingDirectory) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(androidx.compose.ui.res.stringResource(R.string.dashboard_change_folder)) },
+        text = {
+            OutlinedTextField(
+                value = path,
+                onValueChange = { path = it },
+                label = { Text(androidx.compose.ui.res.stringResource(R.string.dashboard_change_folder_hint)) },
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(path.trim()) }, enabled = path.isNotBlank() && path.trim() != session.workingDirectory) {
+                Text(androidx.compose.ui.res.stringResource(R.string.dashboard_save_efc00))
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(androidx.compose.ui.res.stringResource(R.string.dashboard_cancel_77dfd)) } },
     )
 }
 

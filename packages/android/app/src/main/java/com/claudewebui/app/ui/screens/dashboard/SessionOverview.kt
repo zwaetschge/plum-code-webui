@@ -437,6 +437,7 @@ internal fun SessionPreviewSheet(
     onStar: () -> Unit,
     onArchive: () -> Unit,
     onRename: () -> Unit,
+    onChangeFolder: () -> Unit,
     onMove: () -> Unit,
     onMoveSurface: () -> Unit,
     onSelect: () -> Unit,
@@ -477,6 +478,7 @@ internal fun SessionPreviewSheet(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = onArchive) { Text(stringResource(if (archived) R.string.action_restore else R.string.action_archive)) }
                 TextButton(onClick = onRename) { Text(stringResource(R.string.dashboard_rename_d3f4c)) }
+                TextButton(onClick = onChangeFolder) { Text(stringResource(R.string.dashboard_change_folder)) }
                 TextButton(onClick = onMove) { Text(stringResource(R.string.dashboard_move_to_category_8999f)) }
                 TextButton(onClick = onMoveSurface) { Text(stringResource(if (session.surface == "task") R.string.assistant_move_to_code else R.string.assistant_move_to_task)) }
                 TextButton(onClick = onSelect) { Text(stringResource(R.string.action_select)) }
