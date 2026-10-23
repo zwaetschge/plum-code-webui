@@ -72,7 +72,9 @@ export const WEBUI_DEFAULT_MCP_SERVERS: Record<string, ClaudeMcpServer> = {
       GHIDRA_INSTALL_DIR: `${REA_NATIVE}/ghidra_12.1.4_PUBLIC`,
       JAVA_HOME: REA_JDK,
       REA_JADX_MCP_JAR: `${REA_NATIVE}/jadx/jadx-headless-mcp-0.7.1-all.jar`,
-      PATH: `${REA_JDK}/bin:${REA_NATIVE}/procps/bin:/home/node/.local/bin:/home/node/.npm-global/bin:/opt/plum-cli/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+      // Open alternatives to Hopper and IDA: Kuna as a deep provider, Rizin CLI tools.
+      REA_KUNA_COMMAND: `${REA_NATIVE}/kuna/kuna-v1.833-linux-x86_64-musl/kuna`,
+      PATH: `${REA_JDK}/bin:${REA_NATIVE}/procps/bin:${REA_NATIVE}/rizin/bin:/home/node/.local/bin:/home/node/.npm-global/bin:/opt/plum-cli/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
     },
   },
 };
