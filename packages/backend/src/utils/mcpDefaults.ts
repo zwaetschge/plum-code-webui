@@ -35,6 +35,9 @@ export const CLAUDE_PROVIDER_OVERRIDE_ENV_KEYS = [
   'CLAUDE_CODE_SUBAGENT_MODEL',
 ] as const;
 
+const REA_NATIVE = '/home/node/.npm-global/tools/rea-native';
+const REA_JDK = `${REA_NATIVE}/zulu21.52.203-ca-jdk21.0.12.1-linux_musl_x64`;
+
 export const WEBUI_DEFAULT_MCP_SERVERS: Record<string, ClaudeMcpServer> = {
   assistant: { type: 'stdio', command: 'node', args: ['/app/scripts/mcp-servers/assistant.mjs'] },
   godot: {
@@ -60,9 +63,17 @@ export const WEBUI_DEFAULT_MCP_SERVERS: Record<string, ClaudeMcpServer> = {
   rea: {
     type: 'stdio',
     command: 'npx',
-    args: ['--yes', 'rea-agents@6.3.0', 'mcp'],
-    // The npm-global volume survives rebuilds; cache the pinned release there.
-    env: { npm_config_cache: '/home/node/.npm-global/cache' },
+    args: ['--yes', 'rea-agents@6.7.0', 'mcp'],
+    // The npm-global volume survives rebuilds; the pinned release is cached
+    // there and its engines live under tools/rea-native. `rea setup` refuses
+    // Alpine, so Ghidra, the musl JDK and the JADX bridge are wired here.
+    env: {
+      npm_config_cache: '/home/node/.npm-global/cache',
+      GHIDRA_INSTALL_DIR: `${REA_NATIVE}/ghidra_12.1.4_PUBLIC`,
+      JAVA_HOME: REA_JDK,
+      REA_JADX_MCP_JAR: `${REA_NATIVE}/jadx/jadx-headless-mcp-0.7.1-all.jar`,
+      PATH: `${REA_JDK}/bin:${REA_NATIVE}/procps/bin:/home/node/.local/bin:/home/node/.npm-global/bin:/opt/plum-cli/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+    },
   },
 };
 
