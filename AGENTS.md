@@ -6,6 +6,8 @@ Plum Code WebUI: pnpm monorepo (`packages/backend|frontend|shared|android|deskto
 
 - **Language:** visible German uses umlauts (ä ö ü), Swiss spelling `ss`; keep ASCII for identifiers, slugs, env vars, filenames.
 - **Parity:** every feature ships in WebUI (`packages/frontend`) **and** Android (`packages/android`) in the same pass; check it is mounted/reachable (`grep -rl "<Component"`).
+- **No crutch copy:** cut taglines, helper text and secondary labels. If a screen needs them to make sense, fix the layout.
+- **UX, DX, AX:** make the decision that elevates user, developer and agent experience together, without breaking anything.
 - **Chat / Task / Code:** model and thinking depth are settable in all three, in both clients. Chat = API model chat (`reasoningEffort` per turn), Task/Code = CLI sessions. Reasoning levels must match `reasoningOptions` (SessionPage) and Android `ReasoningLevel.forProvider`.
 - **Short sessions:** every prompt rereads the whole context. One topic per session; hand over via `session-*.md` in memory; run long builds/polling and screenshot checks in subagents or background tasks, not in the main context. Do not poll in loops.
 - **Secrets** are write-only in both clients (`*Configured` flags, `clear*` to remove).
