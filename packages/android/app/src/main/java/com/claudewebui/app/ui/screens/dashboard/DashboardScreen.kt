@@ -194,7 +194,13 @@ fun DashboardScreen(
     val drawerContext = androidx.compose.ui.platform.LocalContext.current
     androidx.activity.compose.BackHandler(enabled = historyDrawer.isOpen) { historyScope.launch { historyDrawer.close() } }
     LaunchedEffect(Unit) {
-        DashboardMenuBus.events.collect { command -> if (command == DashboardMenuCommand.HISTORY) historyDrawer.open() }
+        DashboardMenuBus.events.collect { command ->
+            when (command) {
+                DashboardMenuCommand.HISTORY -> historyDrawer.open()
+                DashboardMenuCommand.PROJECTS, DashboardMenuCommand.ASSISTANTS -> historyDrawer.close()
+                else -> Unit
+            }
+        }
     }
     androidx.compose.material3.ModalNavigationDrawer(
         drawerState = historyDrawer,

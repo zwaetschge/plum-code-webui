@@ -37,7 +37,7 @@ import com.claudewebui.app.ui.components.common.PlumSurfaceStrong
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 /** Header-menu commands for the screen that owns the state; HISTORY goes the other way (start page → history). */
-enum class DashboardMenuCommand { VOICE_MODE, VOICE, WRITING_STYLE, SELECT_SESSIONS, HISTORY }
+enum class DashboardMenuCommand { VOICE_MODE, VOICE, WRITING_STYLE, SELECT_SESSIONS, HISTORY, PROJECTS, ASSISTANTS, CHAT }
 
 /** Carries header-menu commands to the screen that owns the state (chat sheets, list selection). */
 object DashboardMenuBus {

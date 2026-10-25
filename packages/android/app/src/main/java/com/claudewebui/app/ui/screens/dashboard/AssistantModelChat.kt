@@ -137,6 +137,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var projectId by rememberSaveable { mutableStateOf<String?>(null) }
     var showWorkspace by remember { mutableStateOf(false) }
     var workspaceCollection by rememberSaveable { mutableStateOf("projects") }
+    var workspaceNavigation by remember { mutableIntStateOf(0) }
     var sourceIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var imageIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var documentIds by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -377,9 +378,17 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     // Voice and writing style from the ≡ header menu. Without voice features the
     // voice sheet opens, which has the switch to turn them on.
     val voiceAllowed by rememberUpdatedState(voiceEnabled)
+    val dismissHistory by rememberUpdatedState(onHistoryDismiss)
     LaunchedEffect(owner) {
         DashboardMenuBus.events.collect { command ->
             when (command) {
+                DashboardMenuCommand.CHAT -> showWorkspace = false
+                DashboardMenuCommand.PROJECTS, DashboardMenuCommand.ASSISTANTS -> {
+                    workspaceCollection = if (command == DashboardMenuCommand.PROJECTS) "projects" else "profiles"
+                    workspaceNavigation++
+                    showWorkspace = true
+                    dismissHistory()
+                }
                 DashboardMenuCommand.VOICE_MODE -> { if (voiceAllowed) openVoiceMode() else showVoiceSheet = true }
                 DashboardMenuCommand.VOICE -> showVoiceSheet = true
                 DashboardMenuCommand.WRITING_STYLE -> showStyleSheet = true
@@ -468,20 +477,6 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         onDismiss = { showAdvanced = false },
     )
     if (!showWorkspace) Column(Modifier.fillMaxSize().padding(top = topInset).navigationBarsPadding().imePadding().padding(horizontal = 16.dp)) {
-        val boundProfile = if (chat == null) profileId else chat?.body?.get("profileId")?.jsonPrimitive?.contentOrNull
-        val boundProject = if (chat == null) projectId else chat?.body?.get("projectId")?.jsonPrimitive?.contentOrNull
-        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(enabled = !busy && !running, onClick = { workspaceCollection = "projects"; showWorkspace = true }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
-                Icon(androidx.compose.material.icons.Icons.Outlined.FolderOpen, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(projects.firstOrNull { it.id == boundProject }?.title ?: stringResource(R.string.chat_workspace_projects), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            }
-            OutlinedButton(enabled = !busy && !running, onClick = { workspaceCollection = "profiles"; showWorkspace = true }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
-                Icon(androidx.compose.material.icons.Icons.Outlined.SmartToy, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(profiles.firstOrNull { it.id == boundProfile }?.title ?: stringResource(R.string.chat_workspace_assistants), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-            }
-        }
         // Switching chats: the old conversation leaves quickly, the new one
         // settles in. Each slot renders its own snapshot, so the leaving chat
         // never shows the arriving chat's title or turns.
@@ -778,7 +773,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         }
     }
     if (showVoiceSheet) VoicePickerSheet(api) { showVoiceSheet = false }
-    if (showWorkspace) ChatWorkspaceScreen(
+    if (showWorkspace) key(workspaceCollection, workspaceNavigation) { ChatWorkspaceScreen(
         modifier = Modifier.padding(top = topInset).navigationBarsPadding().imePadding(),
         owner = owner, api = api, providers = providers,
         initialCollection = workspaceCollection,
@@ -826,7 +821,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                 finally { busy = false }
             }
         },
-    )
+    ) }
     LaunchedEffect(voiceEnabled) { if (!voiceEnabled) voiceMode = false }
     if (voiceMode) AssistantVoiceMode(
         owner = owner, api = api,
@@ -1083,6 +1078,22 @@ fun ModelChatHistoryList(
             val shown = if (search.isNotEmpty()) chats else chats.filter { it.body["projectId"]?.jsonPrimitive?.contentOrNull == null }
             if (loaded && shown.isEmpty() && (search.isNotBlank() || projects.isEmpty())) Text(stringResource(R.string.assistant_no_chats), color = palette.muted, modifier = Modifier.padding(vertical = 16.dp, horizontal = 4.dp))
             LazyColumn(listModifier, contentPadding = contentPadding, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                item(key = "workspace_navigation") {
+                    Column {
+                        TextButton(enabled = enabled, onClick = { DashboardMenuBus.send(DashboardMenuCommand.ASSISTANTS) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Icon(androidx.compose.material.icons.Icons.Outlined.SmartToy, null, Modifier.size(20.dp), tint = palette.muted)
+                                Text(stringResource(R.string.chat_workspace_assistants), Modifier.padding(start = 12.dp), color = palette.text)
+                            }
+                        }
+                        TextButton(enabled = enabled, onClick = { DashboardMenuBus.send(DashboardMenuCommand.PROJECTS) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Icon(androidx.compose.material.icons.Icons.Outlined.FolderOpen, null, Modifier.size(20.dp), tint = palette.muted)
+                                Text(stringResource(R.string.chat_workspace_projects), Modifier.padding(start = 12.dp), color = palette.text)
+                            }
+                        }
+                    }
+                }
                 if (search.isBlank()) projects.forEach { project ->
                     val expanded = project.id in expandedProjects
                     item(key = "project_${project.id}") {

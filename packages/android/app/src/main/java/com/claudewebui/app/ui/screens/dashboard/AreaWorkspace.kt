@@ -138,6 +138,7 @@ class AreaWorkspaceState internal constructor(
     fun markSettled(area: String) { if (area !in settledAreas) settledAreas.add(area) }
 
     fun select(area: String, id: String?, messageId: String? = null, chatId: String? = null) {
+        if (area == "chat") DashboardMenuBus.send(DashboardMenuCommand.CHAT)
         if (id == null) selected.remove(area) else selected[area] = id
         markSettled(area)
         messageSessionId = if (messageId != null) id else null

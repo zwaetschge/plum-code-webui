@@ -1,17 +1,28 @@
-# Android project folders — 2026-10-25
+# Android project navigation — 2026-10-25
 
-User clarified: only functional Open WebUI replacement matters; importing old chats, folders/configuration is unnecessary. Current request: project chats belong in project folders like WebUI, and projects/assistants must be visible in Android.
+The user wants functional Open WebUI parity, without importing old data. Projects and assistants belong in the left sidebar in both clients. Project chats belong inside expandable project folders, separate from ordinary history.
 
-Implemented pending release1.9.3 vc55:
-- Native history renders expandable project folders and keeps project chats out of the ordinary date groups. Search still finds all chats. Selected project opens automatically; open folders survive UI recreation. Existing rename/archive/delete actions remain available in both locations.
-- Folder content uses project-scoped pagination, not only the globally recent100 chats. Android AssistantApi adds optionalprojectId; generic backend list query now accepts this already-supported resource filter. Native also checks returned project ownership binding before displaying rows.
-- Replaced ambiguous top text link with48dp outlined Projects/Assistants controls. Each opens its own list through ChatWorkspaceScreen.initialCollection. Existing project/assistant CRUD and contextual chat selection stay mounted. Removed redundant workspace tagline.
-- WebUI already had matching project folders. Agentproject_web_parity verified desktop1440/mobile390 using rendered productionassets and syntheticAPI: collapsed/expanded, no duplicate flat projectchat, standalonehistory, search, projects/assistantsnavigation. Evidence `.logs/project-folders-web.json` and `.screenshots/project-folders-web-*`.
+## Implementation
 
-Androidbuild started18:41:28UTC through MCP, project796aa064-f0bb-4031-bbf2-2da83a4bca94. Source digest4ba18f8d9389bc62f214f3a0096efe9e52d8122affb3f90ce6a253ecfdb4ff94, copiedAt1792953688.4546583, `.logs/project-folders-source.json`. Backgroundeventmonitor `.logs/project-folders-monitor.mjs` writes compiler anddone JSON. No simultaneous builds. Verify only with `.logs/verify-project-folders-apk.py` after freshmtime and completion; destination `/mnt/user/Zwischenspeicher/plum-1.9.3.apk`. Need install/test on selected Fold8 serial192.168.1.106:40781, no rawadb/Gradle and no user data reset. Launch via MCPadb_shell fully-qualifiedactivity (android_launch helper mangles package).
+- Android history now renders expandable project folders before the normal date groups. Search finds all chats; the selected project's folder opens automatically. Expanded state survives UI recreation, and existing rename/archive/delete actions remain available.
+- Folder contents use project-scoped pagination, independently of the globally recent 100 chats. Android AssistantApi sends `projectId`; the backend generic resource query now accepts the existing scoped filter. Native code checks each result's project binding.
+- Assistenten and Projekte are full-width navigation entries in the same history component used by the permanent left column and compact left drawer. The extra controls above the chat were removed. Each entry opens its own workspace list, including when switching between the two lists. The compact drawer closes after navigation. Selecting a chat (including the same chat or a fresh empty chat) explicitly leaves the workspace through the shared chat selection path. This fixes the device-observed case where the project list stayed on screen after selecting a conversation.
+- WebUI already has matching sidebar navigation and expandable folders. Rendered desktop (1440 px) and mobile (390 px) checks passed: collapsed/expanded folders, no duplicate project chat in ordinary history, search, standalone history, and both workspace routes. Evidence: `.logs/project-folders-web.json`, `.screenshots/project-folders-web-*`.
 
-Backendtypecheck/build pass. Official external repair-bot rollout is running on Geekom for one additive routequeryfield. Log `.logs/project-folders-rollout.log`, execsession90396 (may die on main restart; check persistent repair-bot status). Sourcebackup `/srv/plum/deploy/backups/project-folders-assistant-before.ts`. Public targetGeekom192.168.1.124:4545 through/mobile. Read-only publiccheck afterready must show `/api/assistant/api-chats?projectId=<fixture>` returns onlyfixtureprojectchat, randomprojectIDreturnsnone. No modelcall needed.
+## Deployment and verification
 
-Synthetic ownedfixturescreated throughpublicAPI (no chat turns/LLMcalls): project29987910-3357-4ceb-ac83-320bd28a6e7b `Plum Ordnertest`; projectchat1ef98dd3-9031-43f1-af58-5a9988ed1788 `Projektgespräch Test`; standalone6d013867-443c-4bb0-a626-7ccf92e912bb `Normaler Verlauf Test` (use exactID from `.logs/project-folders-fixtures.log`, not manually transcribed ID here if mismatch). Need actualdevice QA: projectchat hiddenflat/collapsed, expands nestedonce; standaloneflat; searchfindsprojectchat; projectselectionautoexpands; ProjectsandAssistantsbuttonsopenmatchinglists oncover/open. Test projecteditor/create form reachable without saving additionaldata. ThenarchiveexactfixturesandreturnNewChatGLM.
+The additive backend query change is deployed on production Geekom through the official repair-bot. Backend typecheck/build passed. The authenticated public API returns only the expected project chat; a later empty page and an unknown project return no chats. Evidence: `.logs/project-folders-public-api-check.log`.
 
-Publicationprepared `.logs/project-folders-publish.py` (takes verifiedSHA, backup+atomicAPK/metadata) and `.logs/project-folders-public-check.mjs` (authenticatedpublicmetadata/downloadSHA+GLMdefault). Do notpublish untildevicepasses; overwritependingAPKwithverified1.9.3 first. Currentpublicrelease1.9.2vc54 remains installed/available until then. Preserve unrelatedAGENTS.md, backendutils/piConfig.ts and swarmcoordinatorGate.ts edits.
+Android 1.9.3, versionCode 55, is being built through android-builder MCP project `796aa064-f0bb-4031-bbf2-2da83a4bca94`. The corrected sidebar source digest is `f79803753be3f7321ec3fb0053040e817b202dadecb7af3442e7c73e05fc2d17`, staged at 19:07:05 UTC. Source/freshness evidence: `.logs/project-folders-source.json`. The earlier APK with header controls is obsolete. Verify the final artifact using `.logs/verify-project-folders-apk.py`; it verifies manifest, ZIP CRC, bundled Web assets, fresh mtime and the SHA-256 of the copy at `/mnt/user/Zwischenspeicher/plum-1.9.3.apk`.
+
+Pending: verify the final build and unit results, install on the selected Fold8 `192.168.1.106:40781`, inspect real open/cover layouts and navigation, publish the exact verified APK with `.logs/project-folders-publish.py`, verify the public download using `.logs/project-folders-public-check.mjs`, and archive the temporary fixtures. Device-state override must always be reset. No raw adb/Gradle, uninstall/data reset or Claude API calls. GLM 5.3 Flash remains the default.
+
+## Temporary fixtures
+
+Created through the authenticated API with no chat turns/model calls:
+
+- Project `29987910-3357-4ceb-ac83-320bd28a6e7b`: Plum Ordnertest.
+- Project chat `1ef98dd3-9031-43f1-af58-5a9988ed1788`: Projektgespräch Test.
+- Ordinary chat `6d013867-443c-4bb0-a626-7ccf92e912bb`: Normaler Verlauf Test.
+
+Read exact IDs from `.logs/project-folders-fixtures.log` before cleanup; archive only those fixtures. Preserve the user's Image Gen project and unrelated AGENTS.md, piConfig.ts and coordinatorGate.ts changes.
