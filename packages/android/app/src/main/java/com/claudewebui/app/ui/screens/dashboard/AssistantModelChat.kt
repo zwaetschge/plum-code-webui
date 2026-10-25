@@ -148,6 +148,9 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var prompt by rememberSaveable { mutableStateOf("") }
     var title by rememberSaveable { mutableStateOf("") }
     var temporary by rememberSaveable { mutableStateOf(false) }
+    var memoryRead by rememberSaveable { mutableStateOf(true) }
+    var memoryLearn by rememberSaveable { mutableStateOf(true) }
+    var showMemory by remember { mutableStateOf(false) }
     var research by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -317,6 +320,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                         put("title", prompt.trim().take(80).ifEmpty { "Neues Gespräch" }); put("providerId", providerId); put("model", model)
                         profileId?.let { put("profileId", it) }; put("projectId", if (temporary) JsonNull else projectId?.let(::JsonPrimitive) ?: JsonNull)
                         put("sourceIds", JsonArray(sourceIds.map(::JsonPrimitive))); put("temporary", temporary); put("chatOptions", newChatOptions)
+                        put("memoryRead", !temporary && memoryRead); put("memoryLearn", !temporary && memoryLearn)
                         if (newChatStyleSet) put("writingStyleSkill", newChatStyle?.let(::JsonPrimitive) ?: JsonNull)
                     }, context.getString(R.string.assistant_new), null)
                     checkOwner(); accept("/api/assistant/api-chats", created); target = requireNotNull(chat)
@@ -436,6 +440,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                     put("title", text.take(48)); put("providerId", providerId); put("model", model)
                     profileId?.let { put("profileId", it) }; put("sourceIds", JsonArray(sourceIds.map(::JsonPrimitive)))
                     put("temporary", temporary); put("chatOptions", newChatOptions)
+                        put("memoryRead", !temporary && memoryRead); put("memoryLearn", !temporary && memoryLearn)
                     if (research && !temporary) put("workflow", "research")
                     put("projectId", projectId?.let(::JsonPrimitive) ?: JsonNull)
                     if (newChatStyleSet) put("writingStyleSkill", newChatStyle?.let(::JsonPrimitive) ?: JsonNull)
@@ -701,6 +706,10 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                         IconButton(onClick = { plusOpen = true }, interactionSource = plusSource, modifier = Modifier.pressScale(plusSource)) { Icon(androidx.compose.material.icons.Icons.Outlined.Add, stringResource(R.string.assistant_add), tint = palette.text) }
                         DropdownMenu(plusOpen, { plusOpen = false }) {
                             DropdownMenuItem(text = { Text("Chat-Werkzeuge") }, enabled = !busy, onClick = { plusOpen = false; showAdvanced = true })
+                            if (chat?.body?.get("temporary")?.jsonPrimitive?.booleanOrNull != true && (chat != null || !temporary)) DropdownMenuItem(
+                                text = { Text("Gedächtnis") }, enabled = !busy && !running,
+                                onClick = { plusOpen = false; showMemory = true },
+                            )
                             if (chat == null) DropdownMenuItem(text = { Text(if (temporary) "Temporärer Chat ✓" else "Temporärer Chat") }, enabled = !busy, onClick = { temporary = !temporary; if (temporary) research = false; plusOpen = false })
                             DropdownMenuItem(
                                 text = { Text("Dateien anhängen") },
@@ -832,6 +841,50 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         stopTurn = { turns.lastOrNull { it.status == "running" }?.let { turn -> command("/api/assistant/api-chats/$chatId/turns/${turn.id}/stop", buildJsonObject {}, context.getString(R.string.assistant_stop)) } },
         onClose = { reason -> voiceMode = false; reason?.let { notice = it } },
     )
+    if (showMemory) key(chat?.id, chat?.revision) {
+        var read by remember { mutableStateOf(if (chat == null) memoryRead else chat?.body?.get("memoryRead")?.jsonPrimitive?.booleanOrNull != false) }
+        var learn by remember { mutableStateOf(if (chat == null) memoryLearn else chat?.body?.get("memoryLearn")?.jsonPrimitive?.booleanOrNull != false) }
+        AlertDialog(
+            onDismissRequest = { if (!busy) showMemory = false },
+            title = { Text("Gedächtnis für dieses Gespräch") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("Frühere Erinnerungen und Chats verwenden", Modifier.weight(1f))
+                        Switch(checked = read, onCheckedChange = { read = it }, enabled = !busy)
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("Aus diesem Gespräch lernen", Modifier.weight(1f))
+                        Switch(checked = learn, onCheckedChange = { learn = it }, enabled = !busy)
+                    }
+                }
+            },
+            dismissButton = { TextButton(enabled = !busy, onClick = { showMemory = false }) { Text("Abbrechen") } },
+            confirmButton = {
+                TextButton(enabled = !busy && !running, onClick = {
+                    val current = chat
+                    if (current == null) { memoryRead = read; memoryLearn = learn; showMemory = false }
+                    else scope.launch {
+                        busy = true; error = null
+                        try {
+                            checkOwner()
+                            val response = api.updateAssistantApiChat(owner, current.id, buildJsonObject {
+                                put("title", current.title); put("expectedRevision", current.revision)
+                                put("providerId", current.body.getValue("providerId")); put("model", current.body.getValue("model"))
+                                put("profileId", current.body["profileId"] ?: JsonNull)
+                                put("sourceIds", current.body["sourceIds"] ?: JsonArray(emptyList()))
+                                put("memoryRead", read); put("memoryLearn", learn)
+                            })
+                            checkOwner(); check(response.success) { response.error?.message.orEmpty() }
+                            if (chat?.id == current.id) { chat = requireNotNull(response.data); refresh++; showMemory = false }
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (failure: Exception) { checkOwner(); error = failure.message }
+                        finally { if (TokenStore.assistantOwnerKey() == owner) busy = false }
+                    }
+                }) { Text("Speichern") }
+            },
+        )
+    }
     if (showStyleSheet) WritingStyleSheet(
         styles = writingStyles,
         selected = activeWritingStyle,

@@ -68,6 +68,8 @@ export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
     artifactEdit: ARTIFACT_EDIT_INPUT.optional(),
     workflow: z.literal('research').optional(),
     temporary: z.boolean().default(false),
+    memoryRead: z.boolean().optional(),
+    memoryLearn: z.boolean().optional(),
     expiresAt: date,
     /** Writing-style preset (style-library baseName); null = explicitly none. */
     writingStyleSkill: z.string().min(1).max(100).nullable().optional(),

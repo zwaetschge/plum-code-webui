@@ -1,3 +1,4 @@
+import { ChatMemoryControls } from '@/components/assistant/ChatMemoryControls';
 import { ChatImport } from '@/components/assistant/ChatWorkbench';
 import { usePersonalization } from '@/components/assistant/usePersonalization';
 import { useEffect, useRef, useState } from 'react';
@@ -74,6 +75,8 @@ function ChatAccountPage({ owner }: { owner?: string }) {
     [error, setError] = useState('');
   const [sources, setSources] = useState<string[]>([]),
     [research, setResearch] = useState(false);
+  const [memoryRead, setMemoryRead] = useState(true);
+  const [memoryLearn, setMemoryLearn] = useState(true);
   const [created, setCreated] = useState<AssistantResource | null>(null);
   const [effort, setEffort] = useEffortChoice();
   // undefined = account default from the personalisation, null = no style.
@@ -133,6 +136,8 @@ function ChatAccountPage({ owner }: { owner?: string }) {
                 profileId: profile || null,
                 projectId: temporary ? null : project || null,
                 temporary,
+                memoryRead: !temporary && memoryRead,
+                memoryLearn: !temporary && memoryLearn,
                 sourceIds: sources,
                 ...(research ? { workflow: 'research' } : {}),
                 ...(writingStyle !== undefined ? { writingStyleSkill: writingStyle } : {}),
@@ -439,6 +444,15 @@ function ChatAccountPage({ owner }: { owner?: string }) {
                 Temporäres Gespräch
               </label>
             </div>
+            {!temporary && (
+              <ChatMemoryControls
+                read={memoryRead}
+                learn={memoryLearn}
+                onRead={setMemoryRead}
+                onLearn={setMemoryLearn}
+                disabled={busy || !!created}
+              />
+            )}
             {temporary && (
               <p className="text-xs text-muted-foreground">
                 Ohne persönliches Gedächtnis. Plum löscht den lokalen Verlauf nach 24 Stunden; beim

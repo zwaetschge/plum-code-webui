@@ -15,6 +15,7 @@ import { ResourcePicker } from './ResourcePicker';
 import { AssistantOutbox } from './AssistantOutbox';
 import { ChatImageInput, uploadChatAttachments } from './ChatImages';
 import { LiveImageCapture } from './LiveImageCapture';
+import { ChatMemoryControls } from './ChatMemoryControls';
 
 export function ApiChatStarter({
   artifactEdit,
@@ -52,6 +53,8 @@ export function ApiChatStarter({
     [created, setCreated] = useState<AssistantResource | null>(null);
   const [research, setResearch] = useState(false);
   const [temporary, setTemporary] = useState(false);
+  const [memoryRead, setMemoryRead] = useState(true);
+  const [memoryLearn, setMemoryLearn] = useState(true);
   const [images, setImages] = useState<File[]>([]);
   const [optionsOpen, setOptionsOpen] = useState(!compact);
   const chosen = providers.data?.find((item) => item.id === provider) ?? providers.data?.[0];
@@ -78,6 +81,8 @@ export function ApiChatStarter({
               ...(artifactEdit ? { artifactEdit } : {}),
               ...(research ? { workflow: 'research' } : {}),
               temporary,
+              memoryRead: !temporary && memoryRead,
+              memoryLearn: !temporary && memoryLearn,
             },
             'Modellchat erstellen'
           )) as { data: { data: AssistantResource } }
@@ -257,6 +262,15 @@ export function ApiChatStarter({
               />
               Temporäres Modellgespräch (24 Stunden)
             </label>
+          )}
+          {!temporary && !created && (
+            <ChatMemoryControls
+              read={memoryRead}
+              learn={memoryLearn}
+              onRead={setMemoryRead}
+              onLearn={setMemoryLearn}
+              disabled={busy}
+            />
           )}
           {temporary && (
             <p className="text-sm text-muted-foreground">

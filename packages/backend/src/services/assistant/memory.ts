@@ -94,14 +94,17 @@ export async function memorySource(
   const db = tx ?? { get };
   if (type === 'api') {
     const row = await db.get(
-      `SELECT t.prompt,t.created_at,r.body_json FROM assistant_api_turns t JOIN assistant_resources r ON r.id=t.chat_id WHERE t.id=? AND r.id=? AND r.user_id=? AND r.archived=0 AND t.status='completed'`,
+      `SELECT t.prompt,t.created_at,t.profile_json,r.body_json FROM assistant_api_turns t JOIN assistant_resources r ON r.id=t.chat_id WHERE t.id=? AND r.id=? AND r.user_id=? AND r.archived=0 AND t.status='completed'`,
       turnId,
       id,
       userId
     );
     if (!row) return null;
     const body = JSON.parse(row.body_json);
-    if (body.temporary) return null;
+    const turnContext = JSON.parse(row.profile_json);
+    // Both turn-time permission and current permission must still allow learning.
+    if (body.temporary || body.memoryLearn === false || turnContext.memoryLearn === false)
+      return null;
     const profile = body.profileId
       ? await db.get(
           `SELECT v.body_json FROM assistant_resource_revisions v JOIN assistant_resources r ON r.id=v.resource_id WHERE r.id=? AND r.user_id=? AND r.archived=0 AND v.revision=?`,

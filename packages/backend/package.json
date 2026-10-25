@@ -34,7 +34,7 @@
     "test:session-relocation": "tsx --conditions=development scripts/session-relocation-tests.ts",
     "test:chat-workbench": "tsx --conditions=development scripts/chat-workbench-regression-tests.ts",
     "test:assistant-realtime": "tsx --conditions=development scripts/realtime-voice-regression-tests.ts",
-    "test:assistant-api-chat": "tsx --conditions=development scripts/assistant-api-chat-regression-tests.ts",
+    "test:assistant-api-chat": "tsx --conditions=development scripts/assistant-api-chat-regression-tests.ts && tsx --conditions=development scripts/chat-memory-controls-regression-tests.ts",
     "test:assistant-voice": "tsx --conditions=development scripts/assistant-voice-regression-tests.ts",
     "test:assistant-sheet": "tsx --conditions=development scripts/assistant-sheet-regression-tests.ts",
     "test:assistant-office": "python3 scripts/assistant-office-tests.py",

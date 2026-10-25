@@ -1,3 +1,4 @@
+import { ChatMemoryControls } from '@/components/assistant/ChatMemoryControls';
 import { RealtimeVoice } from '@/components/assistant/RealtimeVoice';
 import { ChatWorkbench, ChatTurnDetails } from '@/components/assistant/ChatWorkbench';
 import { ChatRichText } from '@/components/assistant/ChatRichText';
@@ -137,6 +138,8 @@ export function ApiChatPage() {
       profile: string[];
       project: string[];
       sources: string[];
+      memoryRead: boolean;
+      memoryLearn: boolean;
     } | null>(null);
   const scope = `${owner}:${id}`,
     scopeRef = useRef(scope);
@@ -494,6 +497,8 @@ export function ApiChatPage() {
       profile: chat.body.profileId ? [String(chat.body.profileId)] : [],
       project: chat.body.projectId ? [String(chat.body.projectId)] : [],
       sources: (chat.body.sourceIds ?? []) as string[],
+      memoryRead: chat.body.memoryRead !== false,
+      memoryLearn: chat.body.memoryLearn !== false,
     });
   };
   return (
@@ -578,6 +583,8 @@ export function ApiChatPage() {
                         profileId: configuration.profile[0] ?? null,
                         projectId: configuration.project[0] ?? null,
                         sourceIds: configuration.sources,
+                        memoryRead: configuration.memoryRead,
+                        memoryLearn: configuration.memoryLearn,
                         expectedRevision: chat.revision,
                       });
                       if (scopeRef.current === scope) {
@@ -647,6 +654,15 @@ export function ApiChatPage() {
                       value={configuration.project}
                       maximum={1}
                       onChange={(project) => setConfiguration({ ...configuration, project })}
+                    />
+                  )}
+                  {!chat.body.temporary && (
+                    <ChatMemoryControls
+                      read={configuration.memoryRead}
+                      learn={configuration.memoryLearn}
+                      onRead={(memoryRead) => setConfiguration({ ...configuration, memoryRead })}
+                      onLearn={(memoryLearn) => setConfiguration({ ...configuration, memoryLearn })}
+                      disabled={busy || !!running}
                     />
                   )}
                   <p className="text-xs text-muted-foreground">
@@ -1085,7 +1101,12 @@ export function ApiChatPage() {
           )}
           {voiceOpen && preferences.voiceChat && (
             <div className="px-4 pb-3 space-y-2">
-              <RealtimeVoice chatId={chat.id} onSaved={() => { void latest.refetch(); }} />
+              <RealtimeVoice
+                chatId={chat.id}
+                onSaved={() => {
+                  void latest.refetch();
+                }}
+              />
               <VoiceComposer
                 scopeKey={scope}
                 voice={speechVoice(profile.data?.body.voice)}

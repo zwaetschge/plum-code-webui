@@ -174,7 +174,7 @@ try {
       enabled: true,
       apiKey: safeEncrypt('fixture-key-alice')!,
       baseUrl: 'https://api-chat.fixture.invalid',
-      models: ['claude-sonnet-4-6'],
+      models: ['claude-sonnet-4-6', 'claude-haiku-4-5'],
       createdAt: stamp,
       updatedAt: stamp,
     },
@@ -878,6 +878,17 @@ try {
       sharedMemories: 'LIVE EXPERT NOTES',
     })
   );
+  const disabledWorkspace = (await systemContext('api-alice', workspaceChat, 'SIBLING')).system;
+  assert(
+    !disabledWorkspace.includes('SHARED SIBLING FACT'),
+    'legacy profile off blocks project history'
+  );
+  assert(!disabledWorkspace.includes('LIVE EXPERT NOTES'), 'legacy notes obey memory off');
+  const { updatePersonalization } = await import('../src/services/assistant/personalization.js');
+  await updatePersonalization('api-alice', {
+    expectedRevision: 0,
+    preferences: { memoryEnabled: true, chatHistory: true },
+  });
   const sharedContext = (await systemContext('api-alice', workspaceChat, 'SIBLING')).system;
   assert(sharedContext.includes('PINNED EXPERT PROMPT'));
   assert(!sharedContext.includes('NEW UNPINNED PROMPT'));
@@ -964,6 +975,31 @@ try {
   );
   console.log(
     'PASS: ChatGPT project memory (default vs project-only) for saved memories and history; project chats reference each other in both modes; owner, archive, temporary and cross-project exclusion; legacy expert notes and separate mode'
+  );
+  const voiceChat = await createApiChat('api-alice', {
+    ...input,
+    commandId: randomUUID(),
+    profileId: null,
+    projectId: null,
+  });
+  const spoken = await startApiTurn('api-alice', voiceChat.id, {
+    commandId: randomUUID(),
+    expectedRevision: voiceChat.revision,
+    prompt: 'Antworte bitte kurz.',
+    voice: true,
+  });
+  const spokenDone = await settled('api-alice', voiceChat.id, spoken.id);
+  assert.equal(spokenDone.status, 'completed');
+  assert.equal(
+    spokenDone.providerId,
+    'openai',
+    'voice keeps selected provider despite configured Haiku'
+  );
+  assert.equal(spokenDone.model, input.model);
+  assert.equal(requests.at(-1)?.body.model, input.model);
+  assert(JSON.stringify(requests.at(-1)?.body.messages?.[0]).includes('Voice conversation:'));
+  console.log(
+    'PASS: voice uses selected provider/model even when an Anthropic Haiku is configured'
   );
   // ChatGPT-style regenerate/edit in place with a version switcher, and real deletion.
   const { activateApiTurnVersion, deleteApiChat, updateApiChatMeta } =
