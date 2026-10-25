@@ -46,4 +46,5 @@
     <string name="chat_workspace_delete_project">Delete project</string>
     <string name="chat_workspace_delete_project_title">Delete project?</string>
     <string name="chat_workspace_delete_project_text">This permanently deletes «%1$s» with all %2$d chats, sources and project memories. Personal memories are kept.</string>
+    <string name="chat_workspace_load_chats_error">Conversations could not be loaded.</string>
 </resources>

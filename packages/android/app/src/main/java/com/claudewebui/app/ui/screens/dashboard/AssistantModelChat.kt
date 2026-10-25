@@ -56,6 +56,10 @@ import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Stop
@@ -132,6 +136,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var profileId by rememberSaveable { mutableStateOf<String?>(null) }
     var projectId by rememberSaveable { mutableStateOf<String?>(null) }
     var showWorkspace by remember { mutableStateOf(false) }
+    var workspaceCollection by rememberSaveable { mutableStateOf("projects") }
     var sourceIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var imageIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var documentIds by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -463,11 +468,19 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         onDismiss = { showAdvanced = false },
     )
     if (!showWorkspace) Column(Modifier.fillMaxSize().padding(top = topInset).navigationBarsPadding().imePadding().padding(horizontal = 16.dp)) {
-        TextButton(enabled = !busy && !running, onClick = { showWorkspace = true }) {
-            val boundProfile = if (chat == null) profileId else chat?.body?.get("profileId")?.jsonPrimitive?.contentOrNull
-            val boundProject = if (chat == null) projectId else chat?.body?.get("projectId")?.jsonPrimitive?.contentOrNull
-            val labels = listOfNotNull(projects.firstOrNull { it.id == boundProject }?.title, profiles.firstOrNull { it.id == boundProfile }?.title)
-            Text(if (labels.isEmpty()) stringResource(R.string.chat_workspace_title) else labels.joinToString(" · "), maxLines = 2)
+        val boundProfile = if (chat == null) profileId else chat?.body?.get("profileId")?.jsonPrimitive?.contentOrNull
+        val boundProject = if (chat == null) projectId else chat?.body?.get("projectId")?.jsonPrimitive?.contentOrNull
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(enabled = !busy && !running, onClick = { workspaceCollection = "projects"; showWorkspace = true }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
+                Icon(androidx.compose.material.icons.Icons.Outlined.FolderOpen, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(projects.firstOrNull { it.id == boundProject }?.title ?: stringResource(R.string.chat_workspace_projects), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+            OutlinedButton(enabled = !busy && !running, onClick = { workspaceCollection = "profiles"; showWorkspace = true }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) {
+                Icon(androidx.compose.material.icons.Icons.Outlined.SmartToy, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(profiles.firstOrNull { it.id == boundProfile }?.title ?: stringResource(R.string.chat_workspace_assistants), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
         }
         // Switching chats: the old conversation leaves quickly, the new one
         // settles in. Each slot renders its own snapshot, so the leaving chat
@@ -768,6 +781,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     if (showWorkspace) ChatWorkspaceScreen(
         modifier = Modifier.padding(top = topInset).navigationBarsPadding().imePadding(),
         owner = owner, api = api, providers = providers,
+        initialCollection = workspaceCollection,
         initialProfile = if (chat == null) profileId else chat?.body?.get("profileId")?.jsonPrimitive?.contentOrNull,
         initialProject = if (chat == null) projectId else chat?.body?.get("projectId")?.jsonPrimitive?.contentOrNull,
         onDismiss = { showWorkspace = false; refreshWorkspaceResources() },
@@ -937,6 +951,12 @@ fun ModelChatHistoryList(
         var search by remember { mutableStateOf("") }
         var offset by remember { mutableIntStateOf(0) }
         var chats by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
+        var projects by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
+        var expandedProjects by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
+        val projectChats = remember { mutableStateMapOf<String, List<AssistantResource>>() }
+        val projectOffsets = remember { mutableStateMapOf<String, Int>() }
+        val projectMore = remember { mutableStateMapOf<String, Boolean>() }
+        val projectErrors = remember { mutableStateMapOf<String, String>() }
         var hasMore by remember { mutableStateOf(false) }
         var loaded by remember { mutableStateOf(false) }
         var refreshList by remember { mutableIntStateOf(0) }
@@ -952,6 +972,9 @@ fun ModelChatHistoryList(
                         val page = response.data.orEmpty()
                         chats = if (offset == 0) page else (chats + page).distinctBy { it.id }
                         hasMore = page.size == 100
+                        val folders = api.getAssistantResources("projects")
+                        if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed")
+                        if (folders.success) projects = folders.data.orEmpty()
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { }
                     loaded = true
@@ -959,6 +982,92 @@ fun ModelChatHistoryList(
                     delay(10_000)
                 }
             }
+        }
+        val selectedProject = (chats.firstOrNull { it.id == selectedChatId }
+            ?: projectChats.values.asSequence().flatten().firstOrNull { it.id == selectedChatId })?.body?.get("projectId")?.jsonPrimitive?.contentOrNull
+        LaunchedEffect(selectedChatId, selectedProject) {
+            if (selectedProject != null && selectedProject !in expandedProjects) expandedProjects = expandedProjects + selectedProject
+        }
+        val folderOffsets = projectOffsets.toMap()
+        LaunchedEffect(owner, expandedProjects, folderOffsets, selectedChatId, refreshList, search) {
+            if (search.isNotBlank() || expandedProjects.isEmpty()) return@LaunchedEffect
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (isActive) {
+                    for (id in expandedProjects) {
+                        try {
+                            val offsetForProject = folderOffsets[id] ?: 0
+                            val result = api.getAssistantResources("api-chats", offset = offsetForProject, projectId = id)
+                            if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed")
+                            check(result.success) { result.error?.message.orEmpty() }
+                            val rawPage = result.data.orEmpty()
+                            val page = rawPage.filter { it.body["projectId"]?.jsonPrimitive?.contentOrNull == id }
+                            projectChats[id] = if (offsetForProject == 0) page else (projectChats[id].orEmpty() + page).distinctBy { it.id }
+                            projectMore[id] = rawPage.size == 100
+                            projectErrors.remove(id)
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { projectErrors[id] = "load" }
+                    }
+                    delay(10_000)
+                }
+            }
+        }
+        @Composable
+        fun HistoryRow(resource: AssistantResource, nested: Boolean = false) {
+            val active = resource.id == selectedChatId
+            var rowMenu by remember { mutableStateOf(false) }
+            var renaming by remember { mutableStateOf<String?>(null) }
+            var confirmDelete by remember { mutableStateOf(false) }
+            val rowScope = rememberCoroutineScope()
+            fun manage(remove: Boolean = true, action: suspend () -> Unit) { rowScope.launch {
+                try { action(); if (remove) {
+                    chats = chats.filter { it.id != resource.id }
+                    projectChats.keys.toList().forEach { id -> projectChats[id] = projectChats[id].orEmpty().filter { it.id != resource.id } }
+                }; offset = 0; refreshList++ }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { }
+            } }
+            Box(Modifier.padding(start = if (nested) 20.dp else 0.dp)) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                    .background(if (active) palette.controlSurface else androidx.compose.ui.graphics.Color.Transparent)
+                    .semantics { selected = active }
+                    .combinedClickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onLongClick = { rowMenu = true }) { RecentModelChats.put(resource); onSelect(resource) }
+                    .padding(vertical = 12.dp, horizontal = 12.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Text(
+                    resource.title, Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (active) palette.text else palette.text.copy(alpha = .86f),
+                    fontWeight = if (active) FontWeight.SemiBold else null,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+                Text(chatTime(resource.updatedAt, LocalContext.current), style = MaterialTheme.typography.labelSmall, color = palette.muted, modifier = Modifier.padding(start = 8.dp))
+            }
+            // Long press: ChatGPT's chat menu (rename, archive, delete).
+            DropdownMenu(rowMenu, { rowMenu = false }) {
+                DropdownMenuItem(text = { Text(stringResource(R.string.assistant_rename_chat)) }, onClick = { rowMenu = false; renaming = resource.title })
+                DropdownMenuItem(text = { Text(stringResource(R.string.assistant_archive_chat)) }, onClick = { rowMenu = false; manage { check(api.archiveAssistantResource("api-chats", resource.id, resource.revision).success) } })
+                DropdownMenuItem(text = { Text(stringResource(R.string.assistant_delete_chat), color = MaterialTheme.colorScheme.error) }, onClick = { rowMenu = false; confirmDelete = true })
+            }
+            }
+            renaming?.let { title ->
+                AlertDialog(
+                    onDismissRequest = { renaming = null },
+                    title = { Text(stringResource(R.string.assistant_rename_chat)) },
+                    text = { OutlinedTextField(title, { renaming = it.take(200) }, singleLine = true, modifier = Modifier.fillMaxWidth()) },
+                    confirmButton = { TextButton(enabled = title.isNotBlank(), onClick = { manage(remove = false) { check(api.updateAssistantApiChatMeta(resource.id, buildJsonObject { put("expectedRevision", resource.revision); put("title", title.trim()) }).success) }; renaming = null }) { Text(stringResource(R.string.assistant_save)) } },
+                    dismissButton = { TextButton(onClick = { renaming = null }) { Text(stringResource(R.string.assistant_cancel)) } },
+                )
+            }
+            if (confirmDelete) AlertDialog(
+                onDismissRequest = { confirmDelete = false },
+                title = { Text(stringResource(R.string.assistant_delete_chat_title)) },
+                text = { Text(stringResource(R.string.assistant_delete_chat_text, resource.title)) },
+                confirmButton = { TextButton(onClick = { confirmDelete = false; manage { check(api.deleteAssistantApiChat(resource.id).success); if (active) onNewChat?.invoke() } }) { Text(stringResource(R.string.assistant_delete_chat), color = MaterialTheme.colorScheme.error) } },
+                dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.assistant_cancel)) } },
+            )
         }
         Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(search, { search = it; offset = 0 }, placeholder = { Text(stringResource(R.string.assistant_search_chats)) }, singleLine = true, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth())
@@ -972,67 +1081,39 @@ fun ModelChatHistoryList(
             }
             // As in ChatGPT, project chats live in their project folder; a search still finds them.
             val shown = if (search.isNotEmpty()) chats else chats.filter { it.body["projectId"]?.jsonPrimitive?.contentOrNull == null }
-            if (loaded && shown.isEmpty()) Text(stringResource(R.string.assistant_no_chats), color = palette.muted, modifier = Modifier.padding(vertical = 16.dp, horizontal = 4.dp))
+            if (loaded && shown.isEmpty() && (search.isNotBlank() || projects.isEmpty())) Text(stringResource(R.string.assistant_no_chats), color = palette.muted, modifier = Modifier.padding(vertical = 16.dp, horizontal = 4.dp))
             LazyColumn(listModifier, contentPadding = contentPadding, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                if (search.isBlank()) projects.forEach { project ->
+                    val expanded = project.id in expandedProjects
+                    item(key = "project_${project.id}") {
+                        Row(
+                            Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                                .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button) {
+                                    expandedProjects = if (expanded) expandedProjects - project.id else expandedProjects + project.id
+                                    if (!expanded) projectOffsets[project.id] = 0
+                                }.padding(horizontal = 12.dp, vertical = 12.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        ) {
+                            Icon(if (expanded) androidx.compose.material.icons.Icons.Outlined.FolderOpen else androidx.compose.material.icons.Icons.Outlined.Folder, null, tint = palette.muted, modifier = Modifier.size(20.dp))
+                            Text(project.title, Modifier.weight(1f).padding(horizontal = 10.dp), color = palette.text, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            Icon(if (expanded) androidx.compose.material.icons.Icons.Outlined.ExpandMore else androidx.compose.material.icons.Icons.Outlined.ChevronRight, stringResource(if (expanded) R.string.component_collapse else R.string.component_expand), tint = palette.muted, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    if (expanded) {
+                        val folderChats = projectChats[project.id] ?: chats.filter { it.body["projectId"]?.jsonPrimitive?.contentOrNull == project.id }
+                        items(folderChats.sortedByDescending { it.updatedAt }, key = { "project_chat_${it.id}" }) { resource -> HistoryRow(resource, nested = true) }
+                        if (projectErrors.containsKey(project.id)) item(key = "project_error_${project.id}") { Text(stringResource(R.string.chat_workspace_load_chats_error), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(start = 32.dp, bottom = 8.dp)) }
+                        else if (!projectChats.containsKey(project.id)) item(key = "project_loading_${project.id}") { LinearProgressIndicator(Modifier.fillMaxWidth().padding(start = 32.dp)) }
+                        else if (folderChats.isEmpty()) item(key = "project_empty_${project.id}") { Text(stringResource(R.string.assistant_no_chats), color = palette.muted, modifier = Modifier.padding(start = 32.dp, bottom = 8.dp)) }
+                        if (projectMore[project.id] == true) item(key = "project_more_${project.id}") { TextButton(onClick = { projectOffsets[project.id] = (projectOffsets[project.id] ?: 0) + 100 }, modifier = Modifier.padding(start = 20.dp)) { Text(stringResource(R.string.assistant_more)) } }
+                    }
+                }
                 // Grouped by day like the chat apps: Heute, Gestern, Diese Woche, Älter.
                 shown.groupBy { chatBucket(it.updatedAt) }.toSortedMap().forEach { (bucket, group) ->
                     item(key = "bucket_$bucket") {
                         Text(stringResource(CHAT_BUCKETS[bucket]), style = MaterialTheme.typography.labelMedium, color = palette.muted, modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 4.dp))
                     }
-                    items(group, key = { it.id }) { resource ->
-                        val active = resource.id == selectedChatId
-                        var rowMenu by remember { mutableStateOf(false) }
-                        var renaming by remember { mutableStateOf<String?>(null) }
-                        var confirmDelete by remember { mutableStateOf(false) }
-                        val rowScope = rememberCoroutineScope()
-                        fun manage(remove: Boolean = true, action: suspend () -> Unit) { rowScope.launch {
-                            try { action(); if (remove) chats = chats.filter { it.id != resource.id }; offset = 0; refreshList++ }
-                            catch (cancelled: CancellationException) { throw cancelled }
-                            catch (_: Exception) { }
-                        } }
-                        Box {
-                        Row(
-                            Modifier.fillMaxWidth()
-                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-                                .background(if (active) palette.controlSurface else androidx.compose.ui.graphics.Color.Transparent)
-                                .semantics { selected = active }
-                                .combinedClickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onLongClick = { rowMenu = true }) { RecentModelChats.put(resource); onSelect(resource) }
-                                .padding(vertical = 12.dp, horizontal = 12.dp),
-                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                resource.title, Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = if (active) palette.text else palette.text.copy(alpha = .86f),
-                                fontWeight = if (active) FontWeight.SemiBold else null,
-                                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            )
-                            Text(chatTime(resource.updatedAt, LocalContext.current), style = MaterialTheme.typography.labelSmall, color = palette.muted, modifier = Modifier.padding(start = 8.dp))
-                        }
-                        // Long press: ChatGPT's chat menu (rename, archive, delete).
-                        DropdownMenu(rowMenu, { rowMenu = false }) {
-                            DropdownMenuItem(text = { Text(stringResource(R.string.assistant_rename_chat)) }, onClick = { rowMenu = false; renaming = resource.title })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.assistant_archive_chat)) }, onClick = { rowMenu = false; manage { check(api.archiveAssistantResource("api-chats", resource.id, resource.revision).success) } })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.assistant_delete_chat), color = MaterialTheme.colorScheme.error) }, onClick = { rowMenu = false; confirmDelete = true })
-                        }
-                        }
-                        renaming?.let { title ->
-                            AlertDialog(
-                                onDismissRequest = { renaming = null },
-                                title = { Text(stringResource(R.string.assistant_rename_chat)) },
-                                text = { OutlinedTextField(title, { renaming = it.take(200) }, singleLine = true, modifier = Modifier.fillMaxWidth()) },
-                                confirmButton = { TextButton(enabled = title.isNotBlank(), onClick = { manage(remove = false) { check(api.updateAssistantApiChatMeta(resource.id, buildJsonObject { put("expectedRevision", resource.revision); put("title", title.trim()) }).success) }; renaming = null }) { Text(stringResource(R.string.assistant_save)) } },
-                                dismissButton = { TextButton(onClick = { renaming = null }) { Text(stringResource(R.string.assistant_cancel)) } },
-                            )
-                        }
-                        if (confirmDelete) AlertDialog(
-                            onDismissRequest = { confirmDelete = false },
-                            title = { Text(stringResource(R.string.assistant_delete_chat_title)) },
-                            text = { Text(stringResource(R.string.assistant_delete_chat_text, resource.title)) },
-                            confirmButton = { TextButton(onClick = { confirmDelete = false; manage { check(api.deleteAssistantApiChat(resource.id).success); if (active) onNewChat?.invoke() } }) { Text(stringResource(R.string.assistant_delete_chat), color = MaterialTheme.colorScheme.error) } },
-                            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.assistant_cancel)) } },
-                        )
-                    }
+                    items(group, key = { it.id }) { resource -> HistoryRow(resource) }
                 }
                 if (hasMore) item { TextButton(onClick = { offset += 100 }) { Text(stringResource(R.string.assistant_more)) } }
             }

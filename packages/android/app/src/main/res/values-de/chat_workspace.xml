@@ -46,4 +46,5 @@
     <string name="chat_workspace_delete_project">Projekt löschen</string>
     <string name="chat_workspace_delete_project_title">Projekt löschen?</string>
     <string name="chat_workspace_delete_project_text">Dadurch wird «%1$s» endgültig gelöscht, mit allen Chats (%2$d), Quellen und Projekt-Erinnerungen. Persönliche Erinnerungen bleiben erhalten.</string>
+    <string name="chat_workspace_load_chats_error">Gespräche konnten nicht geladen werden.</string>
 </resources>

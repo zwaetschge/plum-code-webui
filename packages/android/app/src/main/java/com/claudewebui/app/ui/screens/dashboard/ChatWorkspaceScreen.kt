@@ -34,6 +34,7 @@ fun ChatWorkspaceScreen(
     modifier: Modifier = Modifier,
     onChat: (AssistantResource) -> Unit,
     onDismiss: () -> Unit,
+    initialCollection: String? = null,
 ) {
     val scope = rememberCoroutineScope()
     var profiles by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
@@ -42,8 +43,8 @@ fun ChatWorkspaceScreen(
     var chats by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
     var selectedProfile by remember { mutableStateOf(initialProfile) }
     var selectedProject by remember { mutableStateOf(initialProject) }
-    var collection by remember { mutableStateOf(if (initialProject != null) "projects" else if (initialProfile != null) "profiles" else "projects") }
-    var viewedId by remember { mutableStateOf(initialProject ?: initialProfile) }
+    var collection by remember { mutableStateOf(initialCollection ?: if (initialProject != null) "projects" else if (initialProfile != null) "profiles" else "projects") }
+    var viewedId by remember { mutableStateOf(if (initialCollection != null) null else initialProject ?: initialProfile) }
     var editing by remember { mutableStateOf<AssistantResource?>(null) }
     var editor by remember { mutableStateOf(false) }
     var title by remember { mutableStateOf("") }
@@ -247,7 +248,6 @@ fun ChatWorkspaceScreen(
                     }
                 } else if (viewed == null) {
                     Text(stringResource(if (collection == "projects") R.string.chat_workspace_projects else R.string.chat_workspace_assistants), style = MaterialTheme.typography.headlineSmall)
-                    Text(stringResource(R.string.chat_workspace_description), style = MaterialTheme.typography.bodyMedium)
                     OutlinedButton(enabled = !busy, onClick = { edit(null) }) { Text(stringResource(if (collection == "projects") R.string.chat_workspace_new_project else R.string.chat_workspace_new_assistant)) }
                     val resources = if (collection == "projects") projects else profiles
                     if (resources.isEmpty() && !busy) Text(stringResource(R.string.chat_workspace_empty))

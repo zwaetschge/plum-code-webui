@@ -188,6 +188,7 @@ const envelope = z
   })
   .strict();
 const params = z.object({
+  projectId: z.string().min(1).max(200).optional(),
   search: z.string().max(200).optional(),
   offset: z.coerce.number().int().min(0).max(100000).default(0),
   limit: z.coerce.number().int().min(1).max(100).default(50),

@@ -25,7 +25,7 @@ interface AssistantApi {
     suspend fun shareModelChat(id: String): ApiResponse<JsonObject>
     suspend fun revokeModelChatShare(id: String): ApiResponse<JsonObject>
     suspend fun importModelChats(owner: String, providerId: String, model: String, bytes: ByteArray): ApiResponse<JsonObject>
-    suspend fun getAssistantResources(collection: String, offset: Int = 0, search: String? = null, status: String? = null, sort: String? = null): ApiResponse<List<AssistantResource>>
+    suspend fun getAssistantResources(collection: String, offset: Int = 0, search: String? = null, status: String? = null, sort: String? = null, projectId: String? = null): ApiResponse<List<AssistantResource>>
     suspend fun getAssistantPersonalization(): ApiResponse<AssistantPersonalization>
     suspend fun updateAssistantPersonalization(owner: String, input: JsonObject): ApiResponse<AssistantPersonalization>
     suspend fun getAssistantReferencePhoto(slot: String): ByteArray
@@ -100,7 +100,7 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
         require(value.matches(Regex("[A-Za-z0-9_-]+"))) { "Invalid assistant resource identifier" }
         return value
     }
-    override suspend fun getAssistantResources(collection: String, offset: Int, search: String?, status: String?, sort: String?): ApiResponse<List<AssistantResource>> = http.get("/api/assistant/${checked(collection)}") { url { parameters.append("limit", "100"); parameters.append("offset",offset.coerceAtLeast(0).toString()); search?.let { parameters.append("search", it) }; status?.takeIf { it.isNotBlank() }?.let { parameters.append("status", it) }; sort?.let { parameters.append("sort", it) } } }
+    override suspend fun getAssistantResources(collection: String, offset: Int, search: String?, status: String?, sort: String?, projectId: String?): ApiResponse<List<AssistantResource>> = http.get("/api/assistant/${checked(collection)}") { url { parameters.append("limit", "100"); parameters.append("offset",offset.coerceAtLeast(0).toString()); search?.let { parameters.append("search", it) }; status?.takeIf { it.isNotBlank() }?.let { parameters.append("status", it) }; sort?.let { parameters.append("sort", it) }; projectId?.let { parameters.append("projectId", it) } } }
     override suspend fun getAssistantPersonalization(): ApiResponse<AssistantPersonalization> = http.get("/api/assistant/personalization")
     override suspend fun updateAssistantPersonalization(owner: String, input: JsonObject): ApiResponse<AssistantPersonalization> = http.put("/api/assistant/personalization") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun getAssistantReferencePhoto(slot: String): ByteArray { require(slot in setOf("portrait", "fullBody")); return http.get("/api/assistant/personalization/photos/$slot") }
