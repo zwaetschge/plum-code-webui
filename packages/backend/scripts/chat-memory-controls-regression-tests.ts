@@ -8,7 +8,7 @@ const { run, get } = await import('../src/db/pg.js');
 const { createResource, BODY_SCHEMAS } = await import('../src/services/assistant/resources.js');
 const { updatePersonalization } = await import('../src/services/assistant/personalization.js');
 const { systemContext, updateApiChat } = await import('../src/services/assistant/apiChats.js');
-const { enqueueMemory, memorySource, processMemoryJob } =
+const { enqueueMemory, memorySource, processMemoryJob, forgetMemory } =
   await import('../src/services/assistant/memory.js');
 const { safeEncrypt } = await import('../src/utils/encryption.js');
 const { writeOpenCodeProvidersForUser } = await import('../src/utils/opencodeProviderKeys.js');
@@ -286,6 +286,60 @@ try {
   assert(!(await get('SELECT id FROM assistant_memory_history WHERE source_id=?', inFlight.id)));
   console.log(
     'PASS: disabling learning while extraction runs prevents both fact and summary commit'
+  );
+  const forgetProject = await createResource(
+    user,
+    'project',
+    'Vergessen',
+    BODY_SCHEMAS.project.parse({ memoryMode: 'project-only' })
+  );
+  const originalChat = await createResource(
+    user,
+    'api-chat',
+    'Original bleibt',
+    BODY_SCHEMAS['api-chat'].parse({
+      providerId: 'fixture',
+      model: 'fixture',
+      projectId: forgetProject.id,
+    })
+  );
+  const originalTurn = await insertTurn(originalChat.id);
+  const laterChat = await createResource(
+    user,
+    'api-chat',
+    'Später',
+    BODY_SCHEMAS['api-chat'].parse({
+      providerId: 'fixture',
+      model: 'fixture',
+      projectId: forgetProject.id,
+    })
+  );
+  const remembered = await createResource(
+    user,
+    'memory',
+    'Wird vergessen',
+    BODY_SCHEMAS.memory.parse({
+      text: 'SIBLING HISTORY FACT',
+      scope: 'project',
+      projectId: forgetProject.id,
+      origins: [
+        { type: 'api', id: originalChat.id, turnId: originalTurn, quote: 'SIBLING HISTORY FACT' },
+      ],
+    })
+  );
+  assert((await systemContext(user, laterChat, 'SIBLING')).system.includes('SIBLING HISTORY FACT'));
+  await forgetMemory(user, remembered.id, remembered.revision);
+  assert(
+    !(await systemContext(user, laterChat, 'SIBLING')).system.includes('SIBLING HISTORY FACT'),
+    'forgotten origin must not return through project excerpts'
+  );
+  assert.equal(
+    (await get('SELECT prompt FROM assistant_api_turns WHERE id=?', originalTurn)).prompt,
+    'SIBLING HISTORY FACT',
+    'forgetting preserves original user chat'
+  );
+  console.log(
+    'PASS: forgotten origins stay out of automatic project recall; original chat remains intact'
   );
   const temporary = await createResource(
     user,

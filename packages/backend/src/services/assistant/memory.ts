@@ -768,6 +768,11 @@ export async function projectChatReferences(
        AND r.body_json::jsonb->>'projectId'=?
        AND COALESCE((r.body_json::jsonb->>'temporary')::boolean,false)=false
        AND t.status='completed' AND t.hidden_by IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM assistant_memory_forgotten f
+         WHERE f.user_id=r.user_id AND f.fingerprint='source:' ||
+           encode(sha256(convert_to('api:' || r.id || ':' || t.id,'UTF8')),'hex')
+       )
      ORDER BY relevance DESC,t.created_at DESC,t.id DESC LIMIT 8`,
     terms,
     terms || 'unusedtoken',
