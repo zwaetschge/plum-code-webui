@@ -47,8 +47,8 @@ import com.claudewebui.app.ui.components.common.PlumText
 
 /**
  * Per-session settings beyond the chat bar: presentation presets, mesh peers,
- * templates and allowed directories. Provider, model, thinking depth and mode
- * are chips in the composer.
+ * templates and allowed directories. Provider, model and thinking depth
+ * are chips in the composer; execution mode lives in the session tools.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -86,7 +86,7 @@ fun SessionSettingsSheet(
         ) {
             Text(stringResource(R.string.component_session_settings), color = PlumText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
 
-            // Mode, provider, model and thinking depth are chat-bar chips; the design
+            // Provider, model and thinking depth are chat-bar chips; the design
             // preset sits in ⋯ → Darstellung, the Task writing style in the composer `+`.
 
             if (meshPeers.isNotEmpty()) {

@@ -4,6 +4,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Tune
+import com.claudewebui.app.data.model.SessionMode
+import com.claudewebui.app.ui.components.common.localizedLabel
 import androidx.compose.material.icons.outlined.Cable
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Preview
@@ -26,6 +31,8 @@ import com.claudewebui.app.ui.theme.PlumTheme
 internal fun SessionToolsMenu(
     surface: String,
     previewRunning: Boolean,
+    mode: SessionMode,
+    onModeChange: (SessionMode) -> Unit,
     onFiles: () -> Unit,
     onPreview: () -> Unit,
     onConnections: () -> Unit,
@@ -37,6 +44,7 @@ internal fun SessionToolsMenu(
         verticalArrangement = Arrangement.spacedBy(t.spacing.xs),
     ) {
         Text(stringResource(R.string.chat_tools), style = MaterialTheme.typography.titleLarge)
+        SessionModeMenu(mode, onModeChange)
         ToolRow(Icons.Outlined.FolderOpen, stringResource(R.string.chat_files), onClick = onFiles)
         if (isCode && previewRunning) {
             ToolRow(
@@ -73,6 +81,31 @@ private fun ToolRow(
                 }
             }
             if (badge > 0) Badge { Text(badge.toString()) }
+        }
+    }
+}
+
+/** Execution mode stays with the session tools, outside the composer. */
+@Composable
+private fun SessionModeMenu(mode: SessionMode, onModeChange: (SessionMode) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(Icons.Outlined.Tune, contentDescription = null, modifier = Modifier.size(20.dp))
+                Text(stringResource(R.string.chat_mode_chip_title), style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text(mode.localizedLabel(), style = MaterialTheme.typography.labelMedium)
+                Icon(Icons.Outlined.ExpandMore, contentDescription = null, modifier = Modifier.size(16.dp))
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            listOf(SessionMode.PLANNING, SessionMode.MANUAL, SessionMode.AUTO_ACCEPT, SessionMode.DANGER).forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.localizedLabel()) },
+                    trailingIcon = { if (option == mode) Icon(Icons.Outlined.Check, null) },
+                    onClick = { expanded = false; if (option != mode) onModeChange(option) },
+                )
+            }
         }
     }
 }

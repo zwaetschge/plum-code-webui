@@ -2,7 +2,7 @@ import {
   SessionModelPicker,
   type SessionModelGroup,
 } from '@/components/assistant/ModelEffortPicker';
-import { SessionModeChip } from '@/components/session/SessionModeChip';
+import { SessionModeMenu } from '@/components/session/SessionModeMenu';
 import { RuntimeSelect } from '@/components/session/RuntimeSelect';
 import { ConversationControls } from '@/components/assistant/ConversationControls';
 import { createPortal } from 'react-dom';
@@ -3142,7 +3142,6 @@ export function SessionPage() {
               : undefined
           }
         />
-        <SessionModeChip value={sessionMode} onChange={handleModeChange} />
       </>
     );
   }, [
@@ -3168,8 +3167,6 @@ export function SessionPage() {
     isClaudeTransportSession,
     handleComposerSubagentModel,
     subagentModelPending,
-    sessionMode,
-    handleModeChange,
   ]);
 
   /** Task sessions pick their writing style from the composer's `+`. */
@@ -3896,8 +3893,8 @@ export function SessionPage() {
     </label>
   );
 
-  // Model, provider, thinking depth and mode live in the chat bar now (chips in
-  // the composer); the session menu only keeps the CLI tool and status light.
+  // Model, provider and thinking depth stay in the composer. Execution mode
+  // is available in the session side menu; runtime extras keep CLI tools and status light.
   const hasSessionRuntimeExtras = Boolean(
     (cliTools && cliTools.length > 0) || homeAssistantSettings?.configured
   );
@@ -4283,6 +4280,9 @@ export function SessionPage() {
             icon: <MessageSquare className="h-4 w-4" />,
             onClick: () => openView('chat'),
           })}
+        {sessionSurfaceKind !== 'chat' && (
+          <SessionModeMenu value={sessionMode} onChange={handleModeChange} />
+        )}
         <div className="session-primary-tools">
           {renderSideMenuItem({
             id: 'files',

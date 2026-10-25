@@ -409,8 +409,6 @@ fun ChatScreen(
                     listOfNotNull(level, fast).joinToString(" · ").ifBlank { null }
                 },
                 onModelEffort = if (displaySession != null) ({ viewModel.loadAvailableModels(); showModelEffort = true }) else null,
-                mode = uiState.sessionMode.takeIf { displaySession?.surface?.let { it != "chat" } == true },
-                onModeChange = viewModel::setMode,
                 // Task: writing style as `+` preset; Code has none (design only via ⋯ → Darstellung).
                 presetLabel = uiState.writingStyles.presetName(displaySession?.writingStyleSkill),
                 onOpenPreset = if (displaySession?.surface == "task") ({ showWritingStyle = true }) else null,
@@ -560,6 +558,8 @@ fun ChatScreen(
             SessionToolsMenu(
                 surface = displaySession?.surface ?: "code",
                 previewRunning = displayUiState.previewRunning,
+                mode = uiState.sessionMode,
+                onModeChange = viewModel::setMode,
                 onFiles = { showToolsMenu = false; onNavigateToFiles(workingDirectory) },
                 // The dev tools screen opens on its preview tab.
                 onPreview = { showToolsMenu = false; onNavigateToDevTools(workingDirectory) },

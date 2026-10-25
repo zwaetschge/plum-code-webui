@@ -9,41 +9,36 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
-/** Execution modes in the order the chat bar offers them. */
+/** Execution modes available in the session side menu. */
 export const SESSION_MODE_CHOICES: Array<{
   value: SessionMode;
   label: string;
-  description: string;
   icon: typeof Brain;
 }> = [
   {
     value: 'planning',
     label: 'Planen',
-    description: 'Durchdenken, ohne etwas zu ändern',
     icon: Brain,
   },
   {
     value: 'manual',
     label: 'Manuell',
-    description: 'Vor jedem Werkzeug nachfragen',
     icon: Hand,
   },
   {
     value: 'auto-accept',
     label: 'Auto-Accept',
-    description: 'Sichere Schritte ohne Rückfrage ausführen',
     icon: CheckCircle,
   },
   {
     value: 'danger',
     label: 'YOLO',
-    description: 'Alle Freigaben überspringen',
     icon: Zap,
   },
 ];
 
-/** Chat-bar chip for the execution mode of a Task or Code session. */
-export function SessionModeChip({
+/** Execution mode control for the side menu of a Task or Code session. */
+export function SessionModeMenu({
   value,
   onChange,
   disabled,
@@ -60,16 +55,20 @@ export function SessionModeChip({
       <DropdownMenuTrigger asChild disabled={disabled}>
         <button
           type="button"
-          className={cn('plum-model-trigger plum-chip plum-mode-chip', `is-${current.value}`)}
+          className="session-side-menu-item"
           aria-label={`Ausführungsmodus: ${current.label}`}
-          title={current.description}
         >
-          <CurrentIcon size={14} aria-hidden />
-          <span className="plum-model-trigger-name">{current.label}</span>
-          <ChevronDown size={14} aria-hidden />
+          <span className="session-side-menu-icon">
+            <CurrentIcon size={16} aria-hidden />
+          </span>
+          <span className="session-side-menu-label">Ausführung</span>
+          <span className="flex items-center gap-1 text-xs">
+            {current.label}
+            <ChevronDown size={14} aria-hidden />
+          </span>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" side="top" className="plum-model-menu">
+      <DropdownMenuContent align="start" className="plum-model-menu">
         <DropdownMenuLabel className="plum-model-group">Ausführungsmodus</DropdownMenuLabel>
         {SESSION_MODE_CHOICES.map((option) => {
           const Icon = option.icon;
@@ -88,7 +87,6 @@ export function SessionModeChip({
                 <Icon size={15} aria-hidden className="mt-0.5 shrink-0" />
                 <span className="min-w-0">
                   <span className="block truncate">{option.label}</span>
-                  <span className="block text-xs text-muted-foreground">{option.description}</span>
                 </span>
               </span>
               {active && <Check size={15} aria-hidden />}
