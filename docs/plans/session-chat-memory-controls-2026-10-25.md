@@ -28,7 +28,7 @@ Der ursprüngliche Browseraudit ist nach Nutzer-Fortsetzen wieder freigegeben. G
 
 Implementierung `5700571`; zusätzlicher Kontextfenster-Hinweis aus den tatsächlichen Chatoptionen statt fest 20 Turns: `b19e0bb`, synthetisch geprüft.
 
-Für den abgestimmten Repair-Bot-Rollout liegt das vollständige Paket der sieben betroffenen Web-/Backend-Quelldateien unter `.probe/chat-memory-controls/source.tar`; SHA-256-Vorherstände und Paketmanifest unter `.probe/chat-memory-controls/manifest.json`. Es wurde kein Container neu gestartet und kein Produktionspfad überschrieben.
+Für den abgestimmten Repair-Bot-Rollout liegt der aktuelle vollständige Stand der acht betroffenen Web-/Backend-Quelldateien unter `.probe/chat-memory-controls/7b275566.tar`; SHA-256-Vorherstände und Paketmanifest unter `.probe/chat-memory-controls/7b275566-manifest.json`. Frühere Pakete bleiben als Historie erhalten; dieses Paket enthält auch den Integrationsfix `7b27556` und den Vergessen-Filter `77d378a`. Es wurde kein Container neu gestartet und kein Produktionspfad überschrieben.
 
 ## Integrationsabsturz aus der Kontoprüfung
 
