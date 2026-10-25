@@ -56,48 +56,54 @@ internal fun ChatCodeSheet(code: String, language: String, sources: List<Assista
     DisposableEffect(Unit) { onDispose { view?.apply { stopLoading(); loadUrl("about:blank"); destroy() }; view = null } }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight(.9f)) {
-        val editorHeight = if (maxHeight < 400.dp) 80.dp else 160.dp
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(if (python) "Python" else "Vorschau", style = MaterialTheme.typography.titleLarge)
-            OutlinedTextField(edited, { edited = it }, label = { Text("Code") }, modifier = Modifier.fillMaxWidth().heightIn(max = editorHeight), minLines = 2, maxLines = 5)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(enabled = !busy, onClick = { execute() }) { Text(if (python) "Ausführen" else "Aktualisieren") }
-                OutlinedButton(onClick = { view?.loadUrl("about:blank"); payload = null }) { Text("Stoppen") }
-            }
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            if (payload != null) key(generation) {
-                AndroidView(modifier = Modifier.fillMaxWidth().weight(1f), factory = { ctx ->
-                    WebView(ctx).apply {
-                        view?.destroy(); view = this
-                        settings.javaScriptEnabled = true
-                        settings.allowFileAccess = false; settings.allowContentAccess = false; settings.domStorageEnabled = false
-                        settings.javaScriptCanOpenWindowsAutomatically = false; settings.setSupportMultipleWindows(false)
-                        var delivered = false
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(v: WebView?, r: WebResourceRequest) = true
-                            override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest): WebResourceResponse {
-                                val asset = r.url.path.orEmpty().removePrefix("/")
-                                if (r.isForMainFrame && r.url.host == "plum-sandbox.invalid" && asset == "chat-sandbox.html") {
-                                    return WebResourceResponse("text/html", "UTF-8", context.assets.open("plum-web/chat-sandbox.html"))
+            val editorHeight = if (maxHeight < 400.dp) 80.dp else 160.dp
+            Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(if (python) "Python" else "Vorschau", style = MaterialTheme.typography.titleLarge)
+                OutlinedTextField(edited, { edited = it }, label = { Text("Code") }, modifier = Modifier.fillMaxWidth().heightIn(max = editorHeight), minLines = 2, maxLines = 5)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = !busy, onClick = { execute() }) { Text(if (python) "Ausführen" else "Aktualisieren") }
+                    OutlinedButton(onClick = { view?.loadUrl("about:blank"); payload = null }) { Text("Stoppen") }
+                }
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (payload != null) key(generation) {
+                    AndroidView(modifier = Modifier.fillMaxWidth().weight(1f), factory = { ctx ->
+                        val executedCode = JSONObject(requireNotNull(payload)).getString("code")
+                        WebView(ctx).apply {
+                            view?.destroy(); view = this
+                            settings.javaScriptEnabled = true
+                            settings.allowFileAccess = false; settings.allowContentAccess = false; settings.domStorageEnabled = false
+                            settings.javaScriptCanOpenWindowsAutomatically = false; settings.setSupportMultipleWindows(false)
+                            var delivered = false
+                            webViewClient = object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(v: WebView?, r: WebResourceRequest) = true
+                                override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest): WebResourceResponse {
+                                    val asset = r.url.path.orEmpty().removePrefix("/")
+                                    if (r.isForMainFrame && r.url.host == "plum-sandbox.invalid" && asset == "chat-sandbox.html") {
+                                        if (python) return WebResourceResponse("text/html", "UTF-8", context.assets.open("plum-web/chat-sandbox.html"))
+                                        // This WebView already is the isolated HTML surface. A nested
+                                        // srcdoc frame is unnecessary and is blocked on some WebViews.
+                                        return WebResourceResponse("text/html", "UTF-8", 200, "OK", mapOf(
+                                            "Content-Security-Policy" to "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; base-uri 'none'; form-action 'none'"
+                                        ), ByteArrayInputStream(executedCode.toByteArray(Charsets.UTF_8)))
+                                    }
+                                    if (python && r.url.host == "plum-sandbox.invalid" && asset in setOf("python-runtime/pyodide.js", "python-runtime/pyodide.asm.mjs", "python-runtime/pyodide.asm.wasm", "python-runtime/python_stdlib.zip", "python-runtime/pyodide-lock.json")) {
+                                        val mime = when { asset.endsWith(".wasm") -> "application/wasm"; asset.endsWith(".zip") -> "application/zip"; asset.endsWith(".json") -> "application/json"; else -> "application/javascript" }
+                                        return WebResourceResponse(mime, "UTF-8", 200, "OK", mapOf("Access-Control-Allow-Origin" to "*", "Cross-Origin-Resource-Policy" to "cross-origin"), context.assets.open("plum-web/$asset"))
+                                    }
+                                    return WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                                 }
-                                if (r.url.host == "plum-sandbox.invalid" && asset in setOf("python-runtime/pyodide.js", "python-runtime/pyodide.asm.mjs", "python-runtime/pyodide.asm.wasm", "python-runtime/python_stdlib.zip", "python-runtime/pyodide-lock.json")) {
-                                    val mime = when { asset.endsWith(".wasm") -> "application/wasm"; asset.endsWith(".zip") -> "application/zip"; asset.endsWith(".json") -> "application/json"; else -> "application/javascript" }
-                                    return WebResourceResponse(mime, "UTF-8", 200, "OK", mapOf("Access-Control-Allow-Origin" to "*", "Cross-Origin-Resource-Policy" to "cross-origin"), context.assets.open("plum-web/$asset"))
+                                override fun onPageFinished(v: WebView, url: String?) {
+                                    if (!python || delivered || url == "about:blank") return
+                                    delivered = true
+                                    val encoded = JSONObject.quote(payload)
+                                    v.evaluateJavascript("(()=>{const p=JSON.parse($encoded);p.files=p.files.map(f=>({name:f.name,data:Uint8Array.from(atob(f.data),c=>c.charCodeAt(0))}));window.postMessage(p,'*');})()", null)
                                 }
-                                return WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
                             }
-                            override fun onPageFinished(v: WebView, url: String?) {
-                                if (delivered || url == "about:blank") return
-                                delivered = true
-                                val encoded = JSONObject.quote(payload)
-                                v.evaluateJavascript("(()=>{const p=JSON.parse($encoded);p.files=p.files.map(f=>({name:f.name,data:Uint8Array.from(atob(f.data),c=>c.charCodeAt(0))}));window.postMessage(p,'*');})()", null)
-                            }
+                            loadUrl("https://plum-sandbox.invalid/chat-sandbox.html")
                         }
-                        loadUrl("https://plum-sandbox.invalid/chat-sandbox.html")
-                    }
-                })
-            }
+                    })
+                }
         }
         }
     }
