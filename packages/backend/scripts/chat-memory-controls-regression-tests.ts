@@ -135,6 +135,10 @@ try {
   console.log(
     'PASS: all four read/learn combinations; project history, memories and legacy notes obey read; instructions remain; jobs obey learn'
   );
+  const budgetChat = { ...sibling, body: { ...sibling.body, chatOptions: { contextTurns: 7 } } };
+  assert(
+    (await systemContext(user, budgetChat)).system.includes('latest 7 turns and 64000 characters')
+  );
   const enabled = await createResource(
     user,
     'api-chat',
