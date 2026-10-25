@@ -1,0 +1,115 @@
+/* The workspace uses the same surfaces and controls as the assistant shell. */
+.chat-workspace-page {
+  color: hsl(var(--foreground));
+  scrollbar-gutter: stable;
+}
+.chat-workspace-page > div {
+  max-width: 840px;
+}
+.workspace-panel,
+.workspace-resource-card {
+  background: var(--assistant-glass, hsl(var(--card) / 0.64));
+  border: 1px solid var(--assistant-glass-edge, hsl(var(--border)));
+  box-shadow:
+    inset 0 1px 0 var(--assistant-glass-edge, hsl(var(--border))),
+    var(--assistant-glass-shadow, none);
+  border-radius: 20px;
+}
+.workspace-back {
+  margin-bottom: -12px;
+}
+.workspace-back a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 48px;
+  border-radius: 50%;
+  background: hsl(var(--muted) / 0.6);
+  border: 1px solid var(--assistant-glass-edge, hsl(var(--border)));
+}
+.workspace-action {
+  min-height: 48px;
+  border-radius: 999px;
+}
+.workspace-field {
+  background: hsl(var(--muted) / 0.36);
+  border-color: var(--assistant-glass-edge, hsl(var(--border)));
+  color: hsl(var(--foreground));
+  min-height: 48px;
+}
+.workspace-field:focus-visible,
+.chat-workspace-page a:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 3px;
+}
+.workspace-resource-list {
+  display: grid;
+  gap: 12px;
+}
+.workspace-resource-card {
+  padding: 0 16px;
+}
+.workspace-resource-card > a {
+  min-height: 88px;
+}
+.workspace-resource-card:hover {
+  border-color: hsl(var(--primary) / 0.5);
+}
+.workspace-resource-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  flex: none;
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.12);
+  border-radius: 14px;
+}
+.workspace-content-tabs {
+  width: fit-content;
+  padding: 4px;
+  border-radius: 999px;
+  background: hsl(var(--muted) / 0.5);
+}
+.workspace-content-tabs a {
+  padding: 10px 16px;
+  border-radius: 999px;
+  min-height: 44px;
+}
+.workspace-content-tabs [aria-current='page'] {
+  background: var(--assistant-glass, hsl(var(--card)));
+  box-shadow: 0 1px 4px hsl(var(--shadow-color) / 0.12);
+}
+.workspace-editor {
+  padding: 24px;
+}
+.workspace-editor-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+}
+.workspace-memory {
+  background: hsl(var(--muted) / 0.25);
+}
+.workspace-memory:has(input:checked) {
+  border-color: hsl(var(--primary) / 0.5);
+  background: hsl(var(--primary) / 0.1);
+}
+.workspace-memory input {
+  accent-color: hsl(var(--primary));
+}
+@media (max-width: 600px) {
+  .workspace-editor {
+    padding: 16px;
+  }
+  .chat-workspace-page header h1 {
+    font-size: 24px;
+  }
+}
+
+.workspace-panel {
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+}

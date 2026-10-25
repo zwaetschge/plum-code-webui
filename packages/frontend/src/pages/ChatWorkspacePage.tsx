@@ -6,6 +6,7 @@ import type { AssistantApiProvider, AssistantResource } from '@plum-code-webui/s
 import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Button, buttonVariants } from '@/components/ui/button';
+import './chat-workspace.css';
 import { ResourcePicker } from '@/components/assistant/ResourcePicker';
 import { ModelChatMenu, ModelChatRename, ProjectMenu } from '@/components/layout/ModelChatMenu';
 import {
@@ -16,8 +17,8 @@ import {
 } from '@/components/assistant/projectMemory';
 
 type Collection = 'profiles' | 'projects' | 'sources';
-const field = 'w-full rounded-xl border bg-background p-3 text-base';
-const action = buttonVariants({ variant: 'outline' });
+const field = 'workspace-field w-full rounded-2xl border p-3 text-base';
+const action = buttonVariants({ variant: 'outline', className: 'workspace-action' });
 const rowOptions =
   'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground';
 function useResources(collection: Collection | 'api-chats', owner?: string) {
@@ -78,27 +79,15 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
   const projectSources = sources.data?.filter((s) => s.body.projectId === id) ?? [];
   const sourceResource = projectSources.find((s) => s.id === source);
   return (
-    <main className="h-full overflow-y-auto p-4 sm:p-8">
+    <main className="chat-workspace-page h-full overflow-y-auto p-4 sm:p-8">
       <div className="mx-auto w-full max-w-4xl space-y-7 pb-10">
-        <nav aria-label="Chat-Arbeitsbereiche" className="flex flex-wrap gap-4 text-sm">
-          <Link to="/chat" className="flex items-center gap-1 text-muted-foreground">
-            <ArrowLeft size={15} /> Chat
-          </Link>
-          <Link
-            aria-current={!isProject ? 'page' : undefined}
-            className={!isProject ? 'font-semibold' : 'text-muted-foreground'}
-            to="/chat/assistants"
-          >
-            Assistenten
-          </Link>
-          <Link
-            aria-current={isProject ? 'page' : undefined}
-            className={isProject ? 'font-semibold' : 'text-muted-foreground'}
-            to="/chat/projects"
-          >
-            Projekte
-          </Link>
-        </nav>
+        {!editor && (
+          <nav aria-label="Zurück" className="workspace-back">
+            <Link to={id ? base : '/chat'} aria-label="Zurück">
+              <ArrowLeft size={20} />
+            </Link>
+          </nav>
+        )}
         {rows.isPending ? (
           <p role="status">Arbeitsbereich wird geladen …</p>
         ) : rows.isError ? (
@@ -128,15 +117,13 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
             <header className="flex flex-wrap items-start justify-between gap-4">
               <div className="space-y-2">
                 <h1 className="text-3xl font-semibold tracking-tight">
-                  {isProject ? 'Deine Projekte' : 'Deine Assistenten'}
+                  {isProject ? 'Projekte' : 'Assistenten'}
                 </h1>
-                <p className="max-w-xl text-muted-foreground">
-                  {isProject
-                    ? 'Ein Ort für deine Gespräche, Experten und Quellen. Du entscheidest, ob Chats ihren Kontext teilen.'
-                    : 'Prompt-Experten mit eigenen Anweisungen, Wissen, Modell und Gedächtnis-Einstellung. In jedem Projekt einsetzbar.'}
-                </p>
               </div>
-              <Link className={buttonVariants()} to={base + '/new'}>
+              <Link
+                className={buttonVariants({ className: 'workspace-action' })}
+                to={base + '/new'}
+              >
                 <Plus size={16} className="mr-2" />
                 {isProject ? 'Neues Projekt' : 'Neuer Assistent'}
               </Link>
@@ -150,27 +137,26 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                 placeholder={isProject ? 'Projekt suchen …' : 'Assistent suchen …'}
               />
             </label>
-            <div className="divide-y rounded-2xl border px-4">
+            <div className="workspace-resource-list">
               {rows.data
                 ?.filter((r) => r.title.toLocaleLowerCase().includes(query))
                 .map((r) => {
                   const Icon = isProject ? FolderOpen : Bot;
                   return (
-                    <div key={r.id} className="flex items-center gap-2">
+                    <div key={r.id} className="workspace-resource-card flex items-center gap-2">
                       <Link
                         to={base + '/' + r.id}
                         className="flex min-h-24 min-w-0 flex-1 items-center gap-4 py-4 hover:text-primary"
                       >
-                        <Icon className="h-6 w-6 shrink-0 text-muted-foreground" />
+                        <span className="workspace-resource-icon">
+                          <Icon className="h-6 w-6 shrink-0" />
+                        </span>
                         <div className="min-w-0 flex-1">
                           <h2 className="break-words text-lg font-medium">{r.title}</h2>
                           <p className="line-clamp-2 text-sm text-muted-foreground">
                             {isProject
-                              ? String(
-                                  r.body.description ||
-                                    PROJECT_MEMORY[projectMemoryMode(r.body)].label
-                                )
-                              : String(r.body.instructions || 'Eigener Prompt-Experte')}
+                              ? String(r.body.description || '')
+                              : String(r.body.instructions || '')}
                           </p>
                         </div>
                         <ArrowUpRight size={18} className="shrink-0" />
@@ -192,8 +178,8 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                   {query
                     ? 'Keine passenden Arbeitsbereiche.'
                     : isProject
-                      ? 'Lege dein erstes Projekt an und sammle seine Gespräche an einem Ort.'
-                      : 'Lege deinen ersten Prompt-Experten an.'}
+                      ? 'Noch keine Projekte.'
+                      : 'Noch keine Assistenten.'}
                 </p>
               )}
             </div>
@@ -220,26 +206,15 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                   )}
                 </div>
               </div>
-              <p className="text-muted-foreground">
-                {isProject
-                  ? String(
-                      resource.body.description || 'Deine Gespräche und Experten an einem Ort.'
-                    )
-                  : 'Wähle ein Projekt und starte ein Gespräch mit diesem Experten.'}
-              </p>
+              {!!resource.body.description && isProject && (
+                <p className="text-muted-foreground">{String(resource.body.description)}</p>
+              )}
               {isProject && (
                 <p className="text-sm">
                   <strong>{PROJECT_MEMORY[projectMemoryMode(resource.body)].label}</strong>
-                  <span className="text-muted-foreground">
-                    {' · '}
-                    {PROJECT_MEMORY[projectMemoryMode(resource.body)].hint}{' '}
-                    <Link className="underline underline-offset-4" to="/chat/personalization">
-                      Gedächtnis-Einstellungen
-                    </Link>
-                  </span>
                 </p>
               )}
-              <div className="flex flex-wrap items-end gap-3 rounded-2xl bg-muted/40 p-4">
+              <div className="workspace-panel flex flex-wrap items-end gap-3 rounded-2xl p-4">
                 <label className="grid min-w-0 flex-1 basis-full gap-2 text-sm sm:basis-auto">
                   {isProject ? 'Assistent' : 'Projekt'}
                   <select
@@ -270,7 +245,7 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                 </Link>
               </div>
             </header>
-            <nav aria-label="Projektinhalt" className="flex gap-5 border-b pb-3">
+            <nav aria-label="Projektinhalt" className="workspace-content-tabs flex gap-2">
               <Link
                 aria-current={tab === 'chats' ? 'page' : undefined}
                 className={tab === 'chats' ? 'font-semibold' : 'text-muted-foreground'}
@@ -319,7 +294,7 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                     </Link>
                     {projectSources.map((s) => (
                       <Link
-                        className="block border-b py-4"
+                        className="workspace-resource-card block p-4"
                         key={s.id}
                         to={base + '/' + id + '?tab=sources&source=' + s.id}
                       >
@@ -330,10 +305,7 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                       </Link>
                     ))}
                     {!projectSources.length && !sources.isPending && !sources.isError && (
-                      <p className="text-muted-foreground">
-                        Noch keine Quellen. Projektquellen stehen allen Chats im Projekt zur
-                        Verfügung.
-                      </p>
+                      <p className="text-muted-foreground">Noch keine Quellen.</p>
                     )}
                   </>
                 )}
@@ -388,17 +360,12 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                 {!related.length && !chats.isPending && !chats.isError && (
                   <div className="space-y-3 py-8 text-center">
                     <h2 className="text-lg font-medium">
-                      {query ? 'Kein passendes Gespräch' : 'Hier beginnen deine Gespräche'}
+                      {query ? 'Kein passendes Gespräch' : 'Noch keine Gespräche'}
                     </h2>
-                    <p className="text-sm text-muted-foreground">
-                      {query
-                        ? 'Versuche einen anderen Suchbegriff.'
-                        : 'Wähle oben deinen Experten und starte einen neuen Chat.'}
-                    </p>
                   </div>
                 )}
                 {!isProject && (
-                  <details className="space-y-3 rounded-xl border p-4">
+                  <details className="workspace-panel space-y-3 rounded-2xl p-4">
                     <summary className="cursor-pointer font-medium">
                       Anweisungen und Gedächtnis
                     </summary>
@@ -553,11 +520,11 @@ function WorkspaceEditor({
         e.preventDefault();
         void save();
       }}
-      className="space-y-5"
+      className="workspace-editor workspace-panel space-y-5"
     >
       <header className="space-y-2">
-        <Link to={back} className="text-sm text-muted-foreground">
-          ← Zurück
+        <Link to={back} className="workspace-editor-back text-sm text-muted-foreground">
+          <ArrowLeft size={18} /> Zurück
         </Link>
         <h1 className="text-2xl font-semibold">
           {collection === 'projects'
@@ -600,7 +567,7 @@ function WorkspaceEditor({
               {(Object.keys(PROJECT_MEMORY) as ProjectMemoryMode[]).map((value) => (
                 <label
                   key={value}
-                  className="flex cursor-pointer items-start gap-3 rounded-xl border p-4"
+                  className="workspace-memory flex cursor-pointer items-start gap-3 rounded-2xl border p-4"
                 >
                   <input
                     type="radio"
@@ -617,10 +584,6 @@ function WorkspaceEditor({
                   </span>
                 </label>
               ))}
-              <p className="text-xs text-muted-foreground">
-                Gespeicherte Erinnerungen und frühere Chats folgen deinen Gedächtnis-Einstellungen.
-                Du kannst die Wahl später hier ändern.
-              </p>
             </fieldset>
           </>
         )}
@@ -632,11 +595,6 @@ function WorkspaceEditor({
             maxLength={collection === 'sources' ? 50000 : 30000}
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
-            placeholder={
-              collection === 'profiles'
-                ? 'Welche Aufgabe hat dieser Experte? Wie soll er antworten?'
-                : undefined
-            }
           />
         </label>
         {collection === 'profiles' && (
@@ -646,7 +604,7 @@ function WorkspaceEditor({
               {EXPERT_MEMORY.map(([value, label, hint]) => (
                 <label
                   key={value}
-                  className="flex cursor-pointer items-start gap-3 rounded-xl border p-4"
+                  className="workspace-memory flex cursor-pointer items-start gap-3 rounded-2xl border p-4"
                 >
                   <input
                     type="radio"
@@ -663,7 +621,7 @@ function WorkspaceEditor({
               ))}
             </fieldset>
             <details
-              className="space-y-4 rounded-xl border p-4"
+              className="workspace-panel space-y-4 rounded-2xl p-4"
               open={!!provider || !!sourceIds.length}
             >
               <summary className="cursor-pointer font-medium">Modell und Wissen</summary>
@@ -712,14 +670,12 @@ function WorkspaceEditor({
                 maximum={20}
               />
             </details>
-            <p className="text-xs text-muted-foreground">
-              Anweisungen, Modell und zugewiesenes Wissen gelten für neue Chats. Bestehende Chats
-              behalten ihre Profilrevision, bis du sie dort aktualisierst.
-            </p>
           </>
         )}
         <div className="flex flex-wrap items-center gap-3">
-          <Button disabled={!title.trim()}>Speichern</Button>
+          <Button className="workspace-action" disabled={!title.trim()}>
+            Speichern
+          </Button>
           <Link className={action} to={back}>
             Abbrechen
           </Link>

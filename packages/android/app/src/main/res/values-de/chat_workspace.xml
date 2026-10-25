@@ -25,10 +25,10 @@
     <string name="chat_workspace_new_assistant">Neuer Assistent</string>
     <string name="chat_workspace_new_project">Neues Projekt</string>
     <string name="chat_workspace_new_source">Neue Projektquelle</string>
-    <string name="chat_workspace_empty">Noch keine Einträge. Lege den ersten an.</string>
+    <string name="chat_workspace_empty">Noch keine Einträge.</string>
     <string name="chat_workspace_edit">Bearbeiten</string>
     <string name="chat_workspace_conversations">Gespräche</string>
-    <string name="chat_workspace_empty_chats">Noch keine Gespräche. Wähle das Projekt und sende deine erste Nachricht.</string>
+    <string name="chat_workspace_empty_chats">Noch keine Gespräche.</string>
     <string name="chat_workspace_new_chat">Neuer Chat</string>
     <string name="chat_workspace_all_experts">Alle · neuer Chat mit Plum</string>
     <string name="chat_workspace_memory">Gedächtnis</string>

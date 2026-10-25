@@ -2,6 +2,21 @@ package com.claudewebui.app.ui.screens.dashboard
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
+import com.claudewebui.app.ui.components.common.PlumContentWidth
+import com.claudewebui.app.ui.components.common.PlumIconButton
+import com.claudewebui.app.ui.theme.PlumGlassCard
+import com.claudewebui.app.ui.theme.PlumTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
@@ -36,6 +51,8 @@ fun ChatWorkspaceScreen(
     onDismiss: () -> Unit,
     initialCollection: String? = null,
 ) {
+    val palette = PlumTheme.palette
+    val tokens = PlumTheme.tokens
     val scope = rememberCoroutineScope()
     var profiles by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
     var projects by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
@@ -116,7 +133,7 @@ fun ChatWorkspaceScreen(
             title = { Text(stringResource(R.string.chat_workspace_delete_project_title)) },
             text = { Text(stringResource(R.string.chat_workspace_delete_project_text, project.title, count)) },
             confirmButton = {
-                TextButton(enabled = !busy, onClick = {
+                TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = {
                     remove({ api.deleteAssistantProject(project.id) }) {
                         if (selectedProject == project.id) selectedProject = null
                         if (viewedId == project.id) viewedId = null
@@ -124,7 +141,7 @@ fun ChatWorkspaceScreen(
                     }
                 }) { Text(stringResource(R.string.assistant_delete_chat), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(enabled = !busy, onClick = { confirmProject = null }) { Text(stringResource(R.string.assistant_cancel)) } },
+            dismissButton = { TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { confirmProject = null }) { Text(stringResource(R.string.assistant_cancel)) } },
         )
     }
     confirmChat?.let { chat ->
@@ -133,183 +150,241 @@ fun ChatWorkspaceScreen(
             title = { Text(stringResource(R.string.assistant_delete_chat_title)) },
             text = { Text(stringResource(R.string.assistant_delete_chat_text, chat.title)) },
             confirmButton = {
-                TextButton(enabled = !busy, onClick = { remove({ api.deleteAssistantApiChat(chat.id) }) {} }) {
+                TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { remove({ api.deleteAssistantApiChat(chat.id) }) {} }) {
                     Text(stringResource(R.string.assistant_delete_chat), color = MaterialTheme.colorScheme.error)
                 }
             },
-            dismissButton = { TextButton(enabled = !busy, onClick = { confirmChat = null }) { Text(stringResource(R.string.assistant_cancel)) } },
+            dismissButton = { TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { confirmChat = null }) { Text(stringResource(R.string.assistant_cancel)) } },
         )
     }
-    Surface(modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            TextButton(enabled = !busy, onClick = { goBack() }) { Text("← " + stringResource(R.string.chat_workspace_back)) }
-            Text(stringResource(R.string.chat_workspace_title), style = MaterialTheme.typography.titleLarge)
-            if (!editor) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(enabled = !busy, onClick = { collection = "projects"; viewedId = null }) { Text(stringResource(R.string.chat_workspace_projects)) }
-                TextButton(enabled = !busy, onClick = { collection = "profiles"; viewedId = null }) { Text(stringResource(R.string.chat_workspace_assistants)) }
-            }
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            if (editor) {
-                OutlinedTextField(title, { title = it.take(200) }, label = { Text(stringResource(R.string.chat_workspace_name)) }, enabled = !busy, modifier = Modifier.fillMaxWidth())
-                if (collection == "projects") OutlinedTextField(description, { description = it.take(30000) }, label = { Text(stringResource(R.string.chat_workspace_project_description)) }, enabled = !busy, modifier = Modifier.fillMaxWidth())
-                if (collection == "projects") {
-                    Text(stringResource(R.string.chat_workspace_memory), style = MaterialTheme.typography.titleSmall)
-                    listOf(
-                        Triple("default", R.string.chat_workspace_memory_default, R.string.chat_workspace_memory_default_hint),
-                        Triple("project-only", R.string.chat_workspace_memory_project, R.string.chat_workspace_memory_project_hint),
-                    ).forEach { (value, label, hint) -> MemoryOption(memoryMode == value, stringResource(label), stringResource(hint), !busy) { memoryMode = value } }
-                    Text(stringResource(R.string.chat_workspace_memory_settings_hint), style = MaterialTheme.typography.bodySmall)
-                }
-                OutlinedTextField(instructions, { instructions = it.take(if (collection == "sources") 50000 else 30000) }, label = { Text(stringResource(if (collection == "sources") R.string.chat_workspace_source_text else R.string.chat_workspace_instructions)) }, minLines = 4, enabled = !busy, modifier = Modifier.fillMaxWidth())
-                if (collection == "profiles") {
-                    Text(stringResource(R.string.chat_workspace_memory), style = MaterialTheme.typography.titleSmall)
-                    listOf(
-                        Triple("off", R.string.chat_workspace_expert_memory_off, R.string.chat_workspace_expert_memory_off_hint),
-                        Triple("read", R.string.chat_workspace_expert_memory_read, R.string.chat_workspace_expert_memory_read_hint),
-                        Triple("read-write", R.string.chat_workspace_expert_memory_learn, R.string.chat_workspace_expert_memory_learn_hint),
-                    ).forEach { (value, label, hint) -> MemoryOption(expertMemory == value, stringResource(label), stringResource(hint), !busy) { expertMemory = value } }
-                    WorkspaceChoice(stringResource(R.string.chat_workspace_provider), provider, listOf("" to stringResource(R.string.chat_workspace_keep_model)) + providers.map { it.id to it.name }, !busy) { provider = it; model = "" }
-                    if (provider.isNotEmpty()) WorkspaceChoice(stringResource(R.string.chat_workspace_model), model, listOf("" to stringResource(R.string.chat_workspace_default)) + providers.firstOrNull { it.id == provider }?.models.orEmpty().map { it to it }, !busy) { model = it }
-                    Text(stringResource(R.string.chat_workspace_knowledge), style = MaterialTheme.typography.titleSmall)
-                    sources.forEach { source ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Checkbox(source.id in sourceIds, enabled = !busy && (source.id in sourceIds || sourceIds.size < 20), onCheckedChange = { checked -> sourceIds = if (checked) sourceIds + source.id else sourceIds - source.id })
-                            Text(source.title, Modifier.weight(1f).padding(top = 12.dp))
+    val viewed = (if (collection == "projects") projects else profiles).firstOrNull { it.id == viewedId }
+    val newLabel = stringResource(when (collection) {
+        "projects" -> R.string.chat_workspace_new_project
+        "sources" -> R.string.chat_workspace_new_source
+        else -> R.string.chat_workspace_new_assistant
+    })
+    val heading = if (editor) editing?.title ?: newLabel else if (collection == "sources") stringResource(R.string.chat_workspace_sources)
+        else viewed?.title ?: stringResource(if (collection == "projects") R.string.chat_workspace_projects else R.string.chat_workspace_assistants)
+    CompositionLocalProvider(LocalContentColor provides palette.text) {
+        Box(modifier.fillMaxSize()) {
+            PlumContentWidth(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = tokens.spacing.screenHorizontal), max = 840.dp) {
+                Column(Modifier.fillMaxWidth().padding(top = tokens.spacing.lg, bottom = tokens.spacing.xxl), verticalArrangement = Arrangement.spacedBy(tokens.spacing.lg)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(tokens.spacing.md), verticalAlignment = Alignment.CenterVertically) {
+                        PlumIconButton(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.chat_workspace_back), { goBack() })
+                        Text(heading, Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        if (!editor && (viewed == null || collection == "sources")) FilledTonalIconButton(enabled = !busy, onClick = { edit(null) }, modifier = Modifier.size(tokens.sizing.touchTarget)) {
+                            Icon(Icons.Outlined.Add, newLabel)
                         }
                     }
-                    Text(stringResource(R.string.chat_workspace_revision_hint), style = MaterialTheme.typography.bodySmall)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(enabled = !busy && title.isNotBlank() && (collection != "sources" || instructions.isNotBlank()), onClick = {
-                        scope.launch {
-                            busy = true; error = null
-                            try {
-                                checkOwner()
-                                val body = buildJsonObject {
-                                    editing?.body?.forEach { (k,v) -> if ((collection != "profiles" || k !in setOf("apiProviderId", "sharedMemories")) && (collection != "projects" || k != "contextMode")) put(k,v) }
-                                    put(if (collection == "sources") "text" else "instructions", instructions)
-                                    if (collection == "sources") put("projectId", requireNotNull(selectedProject))
-                                    if (collection == "projects") { put("description", description); put("memoryMode", memoryMode) }
-                                    if (collection == "profiles") {
-                                        put("memory", expertMemory)
-                                        put("sourceIds", JsonArray(sourceIds.map(::JsonPrimitive)))
-                                        put("model", model.ifBlank { null }?.let(::JsonPrimitive) ?: JsonNull)
-                                        if (provider.isNotEmpty()) put("apiProviderId", provider)
+                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (editor) {
+                        PlumGlassCard(Modifier.fillMaxWidth(), shape = tokens.radius.panelShape, contentPadding = tokens.spacing.section) {
+                            Column(verticalArrangement = Arrangement.spacedBy(tokens.spacing.lg)) {
+                                WorkspaceField(title, { title = it.take(200) }, label = stringResource(R.string.chat_workspace_name), enabled = !busy, modifier = Modifier.fillMaxWidth())
+                                if (collection == "projects") WorkspaceField(description, { description = it.take(30000) }, label = stringResource(R.string.chat_workspace_project_description), enabled = !busy, modifier = Modifier.fillMaxWidth())
+                                if (collection == "projects") {
+                                    Text(stringResource(R.string.chat_workspace_memory), style = MaterialTheme.typography.titleSmall)
+                                    listOf(
+                                    Triple("default", R.string.chat_workspace_memory_default, R.string.chat_workspace_memory_default_hint),
+                                    Triple("project-only", R.string.chat_workspace_memory_project, R.string.chat_workspace_memory_project_hint),
+                                    ).forEach { (value, label, hint) -> MemoryOption(memoryMode == value, stringResource(label), stringResource(hint), !busy) { memoryMode = value } }
+                                }
+                                WorkspaceField(instructions, { instructions = it.take(if (collection == "sources") 50000 else 30000) }, label = stringResource(if (collection == "sources") R.string.chat_workspace_source_text else R.string.chat_workspace_instructions), minLines = 4, enabled = !busy, modifier = Modifier.fillMaxWidth())
+                                if (collection == "profiles") {
+                                    Text(stringResource(R.string.chat_workspace_memory), style = MaterialTheme.typography.titleSmall)
+                                    listOf(
+                                    Triple("off", R.string.chat_workspace_expert_memory_off, R.string.chat_workspace_expert_memory_off_hint),
+                                    Triple("read", R.string.chat_workspace_expert_memory_read, R.string.chat_workspace_expert_memory_read_hint),
+                                    Triple("read-write", R.string.chat_workspace_expert_memory_learn, R.string.chat_workspace_expert_memory_learn_hint),
+                                    ).forEach { (value, label, hint) -> MemoryOption(expertMemory == value, stringResource(label), stringResource(hint), !busy) { expertMemory = value } }
+                                    WorkspaceChoice(stringResource(R.string.chat_workspace_provider), provider, listOf("" to stringResource(R.string.chat_workspace_keep_model)) + providers.map { it.id to it.name }, !busy) { provider = it; model = "" }
+                                    if (provider.isNotEmpty()) WorkspaceChoice(stringResource(R.string.chat_workspace_model), model, listOf("" to stringResource(R.string.chat_workspace_default)) + providers.firstOrNull { it.id == provider }?.models.orEmpty().map { it to it }, !busy) { model = it }
+                                    Text(stringResource(R.string.chat_workspace_knowledge), style = MaterialTheme.typography.titleSmall)
+                                    sources.forEach { source ->
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Checkbox(source.id in sourceIds, enabled = !busy && (source.id in sourceIds || sourceIds.size < 20), onCheckedChange = { checked -> sourceIds = if (checked) sourceIds + source.id else sourceIds - source.id })
+                                            Text(source.title, Modifier.weight(1f).padding(top = 12.dp))
+                                        }
                                     }
                                 }
-                                val input = AssistantResourceInput(title.trim(), body, editing?.revision)
-                                val response = editing?.let { api.updateAssistantResource(collection, it.id, input) } ?: api.createAssistantResource(collection, input)
-                                checkOwner(); check(response.success) { response.error?.message.orEmpty() }
-                                val saved = requireNotNull(response.data)
-                                if (collection == "profiles") selectedProfile = saved.id
-                                if (collection == "projects") selectedProject = saved.id
-                                load(); editor = false
-                                if (collection != "sources") viewedId = saved.id
-                            } catch (cancelled: CancellationException) { throw cancelled }
-                            catch (failure: Exception) { error = failure.message }
-                            finally { busy = false }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(modifier = Modifier.heightIn(min = tokens.sizing.touchTarget), enabled = !busy && title.isNotBlank() && (collection != "sources" || instructions.isNotBlank()), onClick = {
+                                        scope.launch {
+                                            busy = true; error = null
+                                            try {
+                                                checkOwner()
+                                                val body = buildJsonObject {
+                                                    editing?.body?.forEach { (k,v) -> if ((collection != "profiles" || k !in setOf("apiProviderId", "sharedMemories")) && (collection != "projects" || k != "contextMode")) put(k,v) }
+                                                    put(if (collection == "sources") "text" else "instructions", instructions)
+                                                    if (collection == "sources") put("projectId", requireNotNull(selectedProject))
+                                                    if (collection == "projects") { put("description", description); put("memoryMode", memoryMode) }
+                                                    if (collection == "profiles") {
+                                                        put("memory", expertMemory)
+                                                        put("sourceIds", JsonArray(sourceIds.map(::JsonPrimitive)))
+                                                        put("model", model.ifBlank { null }?.let(::JsonPrimitive) ?: JsonNull)
+                                                        if (provider.isNotEmpty()) put("apiProviderId", provider)
+                                                    }
+                                                }
+                                                val input = AssistantResourceInput(title.trim(), body, editing?.revision)
+                                                val response = editing?.let { api.updateAssistantResource(collection, it.id, input) } ?: api.createAssistantResource(collection, input)
+                                                checkOwner(); check(response.success) { response.error?.message.orEmpty() }
+                                                val saved = requireNotNull(response.data)
+                                                if (collection == "profiles") selectedProfile = saved.id
+                                                if (collection == "projects") selectedProject = saved.id
+                                                load(); editor = false
+                                                if (collection != "sources") viewedId = saved.id
+                                            } catch (cancelled: CancellationException) { throw cancelled }
+                                            catch (failure: Exception) { error = failure.message }
+                                            finally { busy = false }
+                                        }
+                                    }) { Text(stringResource(R.string.chat_workspace_save)) }
+                                    TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { editor = false }) { Text(stringResource(R.string.chat_workspace_back)) }
+                                }
+                                if (collection == "projects") editing?.let { resource ->
+                                    TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { confirmProject = resource }) {
+                                        Text(stringResource(R.string.chat_workspace_delete_project), color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                                if (collection != "projects") editing?.let { resource ->
+                                    TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = {
+                                        scope.launch {
+                                            busy = true; error = null
+                                            try {
+                                                checkOwner(); val response = api.archiveAssistantResource(collection, resource.id, resource.revision)
+                                                checkOwner(); check(response.success) { response.error?.message.orEmpty() }
+                                                if (selectedProfile == resource.id) selectedProfile = null
+                                                if (selectedProject == resource.id) selectedProject = null
+                                                if (viewedId == resource.id) viewedId = null
+                                                load(); editor = false
+                                            } catch (cancelled: CancellationException) { throw cancelled }
+                                            catch (failure: Exception) { error = failure.message }
+                                            finally { busy = false }
+                                        }
+                                    }) { Text(stringResource(R.string.chat_workspace_archive)) }
+                                }
+                            }
                         }
-                    }) { Text(stringResource(R.string.chat_workspace_save)) }
-                    TextButton(enabled = !busy, onClick = { editor = false }) { Text(stringResource(R.string.chat_workspace_back)) }
-                }
-                if (collection == "projects") editing?.let { resource ->
-                    TextButton(enabled = !busy, onClick = { confirmProject = resource }) {
-                        Text(stringResource(R.string.chat_workspace_delete_project), color = MaterialTheme.colorScheme.error)
-                    }
-                }
-                if (collection != "projects") editing?.let { resource ->
-                    TextButton(enabled = !busy, onClick = {
-                        scope.launch {
-                            busy = true; error = null
-                            try {
-                                checkOwner(); val response = api.archiveAssistantResource(collection, resource.id, resource.revision)
-                                checkOwner(); check(response.success) { response.error?.message.orEmpty() }
-                                if (selectedProfile == resource.id) selectedProfile = null
-                                if (selectedProject == resource.id) selectedProject = null
-                                if (viewedId == resource.id) viewedId = null
-                                load(); editor = false
-                            } catch (cancelled: CancellationException) { throw cancelled }
-                            catch (failure: Exception) { error = failure.message }
-                            finally { busy = false }
-                        }
-                    }) { Text(stringResource(R.string.chat_workspace_archive)) }
-                }
-            } else {
-                val viewed = (if (collection == "projects") projects else profiles).firstOrNull { it.id == viewedId }
-                if (collection == "sources") {
-                    Text(projects.firstOrNull { it.id == selectedProject }?.title.orEmpty(), style = MaterialTheme.typography.headlineSmall)
-                    Text(stringResource(R.string.chat_workspace_sources), style = MaterialTheme.typography.titleMedium)
-                    OutlinedButton(enabled = !busy, onClick = { edit(null) }) { Text(stringResource(R.string.chat_workspace_new_source)) }
-                    val projectSources = sources.filter { it.body["projectId"]?.jsonPrimitive?.contentOrNull == selectedProject }
-                    if (projectSources.isEmpty() && !busy) Text(stringResource(R.string.chat_workspace_empty))
-                    projectSources.forEach { resource ->
-                        TextButton(enabled = !busy, onClick = { edit(resource) }) { Text(resource.title) }
-                    }
-                } else if (viewed == null) {
-                    Text(stringResource(if (collection == "projects") R.string.chat_workspace_projects else R.string.chat_workspace_assistants), style = MaterialTheme.typography.headlineSmall)
-                    OutlinedButton(enabled = !busy, onClick = { edit(null) }) { Text(stringResource(if (collection == "projects") R.string.chat_workspace_new_project else R.string.chat_workspace_new_assistant)) }
-                    val resources = if (collection == "projects") projects else profiles
-                    if (resources.isEmpty() && !busy) Text(stringResource(R.string.chat_workspace_empty))
-                    resources.forEach { resource ->
-                        OutlinedButton(modifier = Modifier.fillMaxWidth(), enabled = !busy, onClick = {
-                            viewedId = resource.id
-                            if (collection == "projects") selectedProject = resource.id else selectedProfile = resource.id
-                        }) { Text(resource.title) }
-                    }
-                } else {
-                    val isProject = collection == "projects"
-                    Text(viewed.title, style = MaterialTheme.typography.headlineMedium)
-                    if (isProject) {
-                        val sealed = projectMemoryMode(viewed.body) == "project-only"
-                        Text(stringResource(if (sealed) R.string.chat_workspace_memory_project else R.string.chat_workspace_memory_default), style = MaterialTheme.typography.titleSmall)
-                        Text(stringResource(if (sealed) R.string.chat_workspace_memory_project_hint else R.string.chat_workspace_memory_default_hint), style = MaterialTheme.typography.bodySmall)
-                        viewed.body["description"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { Text(it) }
-                        WorkspaceChoice(stringResource(R.string.chat_workspace_assistant), selectedProfile.orEmpty(), listOf("" to stringResource(R.string.chat_workspace_all_experts)) + profiles.map { it.id to it.title }, !busy) { selectedProfile = it.ifBlank { null } }
                     } else {
-                        Text(viewed.body["instructions"]?.jsonPrimitive?.contentOrNull.orEmpty(), maxLines = 4)
-                        WorkspaceChoice(stringResource(R.string.chat_workspace_project), selectedProject.orEmpty(), listOf("" to stringResource(R.string.chat_workspace_no_project)) + projects.map { it.id to it.title }, !busy) { selectedProject = it.ifBlank { null } }
-                    }
-                    Button(enabled = !busy, onClick = { onNewChat(profiles.firstOrNull { it.id == selectedProfile }, selectedProject) }) { Text(stringResource(R.string.chat_workspace_new_chat)) }
-                    TextButton(enabled = !busy, onClick = { onApply(profiles.firstOrNull { it.id == selectedProfile }, selectedProject) }) { Text(stringResource(R.string.chat_workspace_apply)) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(enabled = !busy, onClick = { edit(viewed) }) { Text(stringResource(R.string.chat_workspace_edit)) }
-                        if (isProject) TextButton(enabled = !busy, onClick = { collection = "sources" }) { Text(stringResource(R.string.chat_workspace_sources)) }
-                        if (isProject) TextButton(enabled = !busy, onClick = { confirmProject = viewed }) {
-                            Text(stringResource(R.string.chat_workspace_delete_project), color = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                    Text(stringResource(R.string.chat_workspace_conversations), style = MaterialTheme.typography.titleMedium)
-                    val related = chats.filter { resource ->
-                        (if (isProject) resource.body["projectId"]?.jsonPrimitive?.contentOrNull == viewed.id else resource.body["profileId"]?.jsonPrimitive?.contentOrNull == viewed.id) &&
-                        (!isProject || selectedProfile == null || resource.body["profileId"]?.jsonPrimitive?.contentOrNull == selectedProfile) &&
-                        (isProject || selectedProject == null || resource.body["projectId"]?.jsonPrimitive?.contentOrNull == selectedProject)
-                    }
-                    if (related.isEmpty() && !busy) Text(stringResource(R.string.chat_workspace_empty_chats))
-                    related.forEach { resource ->
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            TextButton(enabled = !busy, onClick = { onChat(resource) }, modifier = Modifier.weight(1f)) {
-                                Text(resource.title, Modifier.fillMaxWidth(), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        if (collection == "sources") {
+                            Text(projects.firstOrNull { it.id == selectedProject }?.title.orEmpty(), style = MaterialTheme.typography.headlineSmall)
+                            val projectSources = sources.filter { it.body["projectId"]?.jsonPrimitive?.contentOrNull == selectedProject }
+                            if (projectSources.isEmpty() && !busy) Text(stringResource(R.string.chat_workspace_empty))
+                            projectSources.forEach { resource ->
+                                WorkspaceResourceRow(resource.title, resource.body["text"]?.jsonPrimitive?.contentOrNull.orEmpty(), Icons.Outlined.FolderOpen, !busy) { edit(resource) }
                             }
-                            IconButton(enabled = !busy, onClick = { confirmChat = resource }) {
-                                Icon(Icons.Outlined.Delete, stringResource(R.string.assistant_delete_chat))
+                        } else if (viewed == null) {
+                            val resources = if (collection == "projects") projects else profiles
+                            if (resources.isEmpty() && !busy) PlumGlassCard(Modifier.fillMaxWidth()) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(tokens.spacing.md)) {
+                                    WorkspaceIcon(if (collection == "projects") Icons.Outlined.FolderOpen else Icons.Outlined.SmartToy)
+                                    Text(stringResource(R.string.chat_workspace_empty), color = palette.muted)
+                                }
+                            }
+                            resources.forEach { resource ->
+                                WorkspaceResourceRow(resource.title, resource.body[if (collection == "projects") "description" else "instructions"]?.jsonPrimitive?.contentOrNull.orEmpty(), if (collection == "projects") Icons.Outlined.FolderOpen else Icons.Outlined.SmartToy, !busy) {
+                                    viewedId = resource.id
+                                    if (collection == "projects") selectedProject = resource.id else selectedProfile = resource.id
+                                }
+                            }
+                        } else {
+                            val isProject = collection == "projects"
+                            PlumGlassCard(Modifier.fillMaxWidth(), shape = tokens.radius.panelShape, contentPadding = tokens.spacing.section) {
+                                Column(verticalArrangement = Arrangement.spacedBy(tokens.spacing.lg)) {
+                                    if (isProject) {
+                                        val sealed = projectMemoryMode(viewed.body) == "project-only"
+                                        Text(stringResource(if (sealed) R.string.chat_workspace_memory_project else R.string.chat_workspace_memory_default), style = MaterialTheme.typography.titleSmall)
+                                        viewed.body["description"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }?.let { Text(it) }
+                                        WorkspaceChoice(stringResource(R.string.chat_workspace_assistant), selectedProfile.orEmpty(), listOf("" to stringResource(R.string.chat_workspace_all_experts)) + profiles.map { it.id to it.title }, !busy) { selectedProfile = it.ifBlank { null } }
+                                    } else {
+                                        Text(viewed.body["instructions"]?.jsonPrimitive?.contentOrNull.orEmpty(), maxLines = 4)
+                                        WorkspaceChoice(stringResource(R.string.chat_workspace_project), selectedProject.orEmpty(), listOf("" to stringResource(R.string.chat_workspace_no_project)) + projects.map { it.id to it.title }, !busy) { selectedProject = it.ifBlank { null } }
+                                    }
+                                    Button(modifier = Modifier.heightIn(min = tokens.sizing.touchTarget), enabled = !busy, onClick = { onNewChat(profiles.firstOrNull { it.id == selectedProfile }, selectedProject) }) { Text(stringResource(R.string.chat_workspace_new_chat)) }
+                                    TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { onApply(profiles.firstOrNull { it.id == selectedProfile }, selectedProject) }) { Text(stringResource(R.string.chat_workspace_apply)) }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { edit(viewed) }) { Text(stringResource(R.string.chat_workspace_edit)) }
+                                        if (isProject) TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { collection = "sources" }) { Text(stringResource(R.string.chat_workspace_sources)) }
+                                        if (isProject) TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { confirmProject = viewed }) {
+                                            Text(stringResource(R.string.chat_workspace_delete_project), color = MaterialTheme.colorScheme.error)
+                                        }
+                                    }
+                                }
+                            }
+                            Text(stringResource(R.string.chat_workspace_conversations), style = MaterialTheme.typography.titleMedium)
+                            val related = chats.filter { resource ->
+                                (if (isProject) resource.body["projectId"]?.jsonPrimitive?.contentOrNull == viewed.id else resource.body["profileId"]?.jsonPrimitive?.contentOrNull == viewed.id) &&
+                                (!isProject || selectedProfile == null || resource.body["profileId"]?.jsonPrimitive?.contentOrNull == selectedProfile) &&
+                                (isProject || selectedProject == null || resource.body["projectId"]?.jsonPrimitive?.contentOrNull == selectedProject)
+                            }
+                            if (related.isEmpty() && !busy) Text(stringResource(R.string.chat_workspace_empty_chats))
+                            related.forEach { resource ->
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { onChat(resource) }, modifier = Modifier.weight(1f).heightIn(min = tokens.sizing.touchTarget)) {
+                                        Text(resource.title, Modifier.fillMaxWidth(), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    IconButton(enabled = !busy, onClick = { confirmChat = resource }) {
+                                        Icon(Icons.Outlined.Delete, stringResource(R.string.assistant_delete_chat))
+                                    }
+                                }
                             }
                         }
+
                     }
                 }
-
             }
         }
     }
 }
 
 @Composable
+private fun WorkspaceIcon(icon: ImageVector) {
+    val tokens = PlumTheme.tokens
+    Box(Modifier.size(tokens.sizing.touchTarget).background(PlumTheme.palette.accent.copy(alpha = .12f), tokens.radius.rowShape), contentAlignment = Alignment.Center) {
+        Icon(icon, null, tint = PlumTheme.palette.accent, modifier = Modifier.size(tokens.sizing.iconLg))
+    }
+}
+
+@Composable
+private fun WorkspaceResourceRow(title: String, description: String, icon: ImageVector, enabled: Boolean, onClick: () -> Unit) {
+    val tokens = PlumTheme.tokens
+    PlumGlassCard(Modifier.fillMaxWidth(), shape = tokens.radius.panelShape, onClick = if (enabled) onClick else null) {
+        Row(horizontalArrangement = Arrangement.spacedBy(tokens.spacing.md), verticalAlignment = Alignment.CenterVertically) {
+            WorkspaceIcon(icon)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(tokens.spacing.xs)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (description.isNotBlank()) Text(description, style = MaterialTheme.typography.bodyMedium, color = PlumTheme.palette.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Icon(Icons.Outlined.ChevronRight, null, tint = PlumTheme.palette.muted)
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceField(value: String, onValueChange: (String) -> Unit, label: String, enabled: Boolean, modifier: Modifier = Modifier, minLines: Int = 1) {
+    val palette = PlumTheme.palette
+    OutlinedTextField(value, onValueChange, label = { Text(label) }, enabled = enabled, modifier = modifier, minLines = minLines,
+        shape = PlumTheme.tokens.radius.cardShape,
+        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = palette.accent, unfocusedBorderColor = palette.borderSoft, focusedContainerColor = palette.controlSurface, unfocusedContainerColor = palette.controlSurface, focusedTextColor = palette.text, unfocusedTextColor = palette.text))
+}
+
+@Composable
 private fun WorkspaceChoice(label: String, value: String, options: List<Pair<String,String>>, enabled: Boolean, onSelect: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxWidth()) {
-        OutlinedButton(modifier = Modifier.fillMaxWidth(), enabled = enabled, onClick = { expanded = true }) { Text("$label: ${options.firstOrNull { it.first == value }?.second ?: value}") }
-        DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { (id, name) -> DropdownMenuItem(text = { Text(name) }, onClick = { expanded = false; onSelect(id) }) }
+    val palette = PlumTheme.palette
+    val tokens = PlumTheme.tokens
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(tokens.spacing.sm)) {
+        Text(label, style = MaterialTheme.typography.labelLarge, color = palette.muted)
+        Box {
+            Surface(onClick = { expanded = true }, enabled = enabled, color = palette.controlSurface, contentColor = palette.text, shape = tokens.radius.cardShape, border = androidx.compose.foundation.BorderStroke(tokens.border.hairline, palette.borderSoft)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = tokens.sizing.touchTarget).padding(horizontal = tokens.spacing.lg, vertical = tokens.spacing.md), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(tokens.spacing.sm)) {
+                    Text(options.firstOrNull { it.first == value }?.second ?: value, Modifier.weight(1f))
+                    Icon(Icons.Outlined.ExpandMore, null)
+                }
+            }
+            DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { (id, name) -> DropdownMenuItem(text = { Text(name) }, onClick = { expanded = false; onSelect(id) }) }
+            }
         }
     }
 }
@@ -323,11 +398,13 @@ internal fun projectMemoryMode(body: Map<String, kotlinx.serialization.json.Json
 
 @Composable
 private fun MemoryOption(selected: Boolean, label: String, hint: String, enabled: Boolean, onSelect: () -> Unit) {
-    Row(Modifier.fillMaxWidth().selectable(selected, enabled = enabled, role = Role.RadioButton, onClick = onSelect).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val palette = PlumTheme.palette
+    val tokens = PlumTheme.tokens
+    Row(Modifier.fillMaxWidth().background(if (selected) palette.accent.copy(alpha = .10f) else palette.controlSurface, tokens.radius.cardShape).border(tokens.border.hairline, if (selected) palette.accent.copy(alpha = .45f) else palette.borderSoft, tokens.radius.cardShape).selectable(selected, enabled = enabled, role = Role.RadioButton, onClick = onSelect).heightIn(min = tokens.sizing.touchTarget).padding(tokens.spacing.md), horizontalArrangement = Arrangement.spacedBy(tokens.spacing.sm)) {
         RadioButton(selected, onClick = null, enabled = enabled)
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge)
-            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = palette.muted)
         }
     }
 }

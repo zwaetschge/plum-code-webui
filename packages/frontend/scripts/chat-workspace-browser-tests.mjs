@@ -235,8 +235,8 @@ try {
       step = 'open assistants';
       await page.goto(url + '/chat/assistants');
       await expectVisible(
-        page.getByRole('heading', { name: 'Deine Assistenten', exact: true }),
-        'heading Deine Assistenten'
+        page.getByRole('heading', { name: 'Assistenten', exact: true }),
+        'heading Assistenten'
       );
       await expectCount(page.getByRole('dialog'), 0, 'dialog');
 
@@ -467,8 +467,8 @@ try {
       await page.goto(url + '/chat/assistants/profiles-1/edit');
       await page.getByRole('button', { name: 'Archivieren', exact: true }).click();
       await expectVisible(
-        page.getByRole('heading', { name: 'Deine Assistenten', exact: true }),
-        'heading Deine Assistenten'
+        page.getByRole('heading', { name: 'Assistenten', exact: true }),
+        'heading Assistenten'
       );
       assert.ok(!state.profiles.some((r) => r.id === 'profiles-1'));
 
