@@ -61,6 +61,8 @@ class AndroidQualityTest {
             com.claudewebui.app.ui.screens.chat.SessionToolsMenu(
                 surface = "code",
                 previewRunning = running,
+                mode = com.claudewebui.app.data.model.SessionMode.AUTO_ACCEPT,
+                onModeChange = {},
                 onFiles = { destination = "files" },
                 onPreview = { destination = "preview" },
                 onConnections = { destination = "connections" },
