@@ -78,18 +78,18 @@ def api(route):
     elif req.method=='DELETE' and path.endswith('/share-fixture'): shares=[]
     elif path=='/auth/me': data=USER
     elif path=='/api/basic-auth/status': data={'enabled':False}
-    elif path=='/api/assistant/personalization': data={'revision':0,'nickname':'','voiceChat':False,'suggestedPrompts':False,'referencePhotos':{'portrait':None,'fullBody':None}}
+    elif path=='/api/assistant/personalization': data={'revision':0,'nickname':'','voiceChat':True,'suggestedPrompts':False,'referencePhotos':{'portrait':None,'fullBody':None}}
     elif path=='/api/assistant/overview':data={'counts':{},'recent':[],'tasks':[],'agents':[]}
     elif path=='/api/assistant/api-chat-providers':data=PROVIDERS
     elif path=='/api/assistant/api-chats':data=[chat]
     elif path.endswith('/turns'):data={'chat':chat,'turns':turns}
-    elif path=='/api/mcp':data=[{'id':'read-mcp','name':'Lesender MCP','enabled':True}]
+    elif path=='/api/mcp-servers':data=[{'id':'read-mcp','name':'Lesender MCP','enabled':True}]
     elif path.endswith('/shares'): data=shares
     elif path.endswith('/file'):route.fulfill(body='Originalbeleg',content_type='text/plain',headers={'Content-Disposition':'attachment; filename="originalbeleg.txt"'});return
     route.fulfill(content_type='application/json',body=json.dumps({'success':True,'data':data}))
 
 with sync_playwright() as p:
-    browser=p.chromium.launch(executable_path='/usr/local/bin/plum-chromium',headless=True)
+    browser=p.chromium.launch(executable_path='/usr/local/bin/plum-chromium',headless=True,args=['--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream'])
     page=browser.new_page(viewport={'width':1440,'height':1000})
     page.expose_binding('captureSandboxMessage',lambda binding,data:sandbox_messages.append(data))
     page.add_init_script("if (window !== window.top) window.addEventListener('message', e => { if (e.source === parent) window.captureSandboxMessage({keys:Object.keys(e.data),serialized:JSON.stringify(e.data),fileNames:(e.data.files||[]).map(f=>f.name)}); });")
@@ -98,6 +98,16 @@ with sync_playwright() as p:
     page.on('console',lambda m: print('BROWSER:',m.text) if m.type=='error' else None)
     page.on('request',lambda r:runtime_requests.append(r.url) if '/python-runtime/' in r.url else None)
     page.route('**/api/**',api);page.route('**/auth/me',api);page.route('**/socket.io/**',lambda r:r.abort())
+    realtime_messages=[]
+    def realtime_socket(ws):
+        ws.send('0'+json.dumps({'sid':'fixture-engine','upgrades':[],'pingInterval':25000,'pingTimeout':20000,'maxPayload':1000000}))
+        def receive(message):
+            if isinstance(message,str) and message.startswith('40/realtime,'):
+                realtime_messages.append(json.loads(message.split(',',1)[1]))
+                ws.send('40/realtime,'+json.dumps({'sid':'fixture-realtime'}))
+                ws.send('42/realtime,'+json.dumps(['problem','Kein Realtime-Anbieter eingerichtet.']))
+        ws.on_message(receive)
+    page.route_web_socket('**/socket.io/**',realtime_socket)
     page.route('https://network-probe.invalid/**',lambda r:(blocked.append(r.request.url),r.abort()))
     initial=page.goto(URL+'/chat/model/'+chat['id'])
     if production_dist: assert "script-src 'self';" in initial.headers['content-security-policy']
@@ -109,6 +119,17 @@ with sync_playwright() as p:
     assert not page.evaluate('document.documentElement.scrollWidth>innerWidth')
     page.screenshot(path=str(OUT/'chat-workbench-mobile.png'),full_page=True)
     print('PASS: desktop and mobile real rich response, table and formula; screenshots saved',flush=True)
+    page.get_by_role('button',name='Sprache',exact=True).click()
+    expect(page.get_by_role('button',name='Realtime-Sprache',exact=True)).to_be_visible()
+    page.screenshot(path=str(OUT/'chat-completion-realtime-entry-mobile.png'))
+    page.get_by_role('button',name='Realtime-Sprache',exact=True).click()
+    expect(page.get_by_role('alert')).to_have_text('Kein Realtime-Anbieter eingerichtet.',timeout=15000)
+    assert len(realtime_messages)==1 and realtime_messages[0]['chatId']==chat['id'] and realtime_messages[0]['token']=='workbench-browser-fixture'
+    expect(page.get_by_role('button',name='Stummschalten',exact=True)).to_be_disabled()
+    page.screenshot(path=str(OUT/'chat-completion-realtime-provider-error-mobile.png'))
+    page.get_by_role('button',name='Beenden',exact=True).click()
+    page.get_by_role('button',name='Sprache',exact=True).click()
+    print('PASS: real Realtime voice entry, microphone capture and authenticated Socket.IO handshake; missing-provider error visible and closable',flush=True)
     page.get_by_role('button',name='Originalbeleg.txt · S. 2',exact=True).click()
     dialog=page.get_by_role('dialog');expect(dialog.get_by_text(source['text'],exact=True)).to_be_visible();expect(dialog.get_by_text('Revision 3 · Seite 2 · Hybride Suche',exact=True)).to_be_visible()
     page.screenshot(path=str(OUT/'chat-workbench-source-mobile.png'));page.keyboard.press('Escape')

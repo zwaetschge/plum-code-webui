@@ -143,7 +143,7 @@ export function ChatWorkbench({
     queryKey: ['chat-mcp-servers', owner],
     enabled: open,
     queryFn: async () =>
-      (await api.get<{ data: Array<{ id: string; name: string; enabled: boolean }> }>('/api/mcp'))
+      (await api.get<{ data: Array<{ id: string; name: string; enabled: boolean }> }>('/api/mcp-servers'))
         .data.data,
   });
   const shares = useQuery({

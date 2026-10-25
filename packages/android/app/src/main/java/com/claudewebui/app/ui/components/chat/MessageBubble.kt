@@ -721,6 +721,7 @@ fun MarkdownContent(
     text: String,
     modifier: Modifier = Modifier,
     isStreaming: Boolean = false,
+    onRunCode: ((String, String) -> Unit)? = null,
 ) {
     val componentTokens = PlumTheme.tokens
     val parsed = remember(text) { parseMarkdown(text) }
@@ -756,6 +757,11 @@ fun MarkdownContent(
                         code = block.code,
                         language = block.language,
                     )
+                    if (onRunCode != null && block.language?.lowercase() in listOf("python", "py", "html", "svg")) {
+                        androidx.compose.material3.TextButton(onClick = { onRunCode(block.code, block.language.orEmpty()) }) {
+                            androidx.compose.material3.Text(if (block.language?.lowercase() in listOf("python", "py")) "Python ausführen" else "Vorschau")
+                        }
+                    }
                 }
                 is MarkdownBlock.Blockquote -> {
                     Row(

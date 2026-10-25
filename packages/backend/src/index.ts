@@ -21,6 +21,7 @@ import { initDatabase } from './db/index.js';
 import { refreshOpenCodeModelsCache } from './utils/opencodeCatalog.js';
 import { setupPassport } from './auth/passport.js';
 import { setupWebSocket } from './websocket/index.js';
+import { setupRealtimeVoice } from './services/assistant/realtimeVoice.js';
 import { errorHandler, requestIdMiddleware } from './middleware/errorHandler.js';
 import { modelRouter } from './services/modelRouterInstance.js';
 import { mobileGatewayAuth } from './middleware/mobileGateway.js';
@@ -261,6 +262,7 @@ async function main() {
 
   // Setup WebSocket
   const io = setupWebSocket(httpServer);
+  setupRealtimeVoice(io);
   await reconcileAssistantTasks();
   startSourceObservation();
   startMemoryWorker();

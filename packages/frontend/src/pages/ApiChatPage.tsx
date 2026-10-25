@@ -1,3 +1,4 @@
+import { RealtimeVoice } from '@/components/assistant/RealtimeVoice';
 import { ChatWorkbench, ChatTurnDetails } from '@/components/assistant/ChatWorkbench';
 import { ChatRichText } from '@/components/assistant/ChatRichText';
 import { DynamicUiStateStore } from '@/components/assistant/dynamic-ui/state';
@@ -1083,7 +1084,8 @@ export function ApiChatPage() {
             </div>
           )}
           {voiceOpen && preferences.voiceChat && (
-            <div className="px-4 pb-3">
+            <div className="px-4 pb-3 space-y-2">
+              <RealtimeVoice chatId={chat.id} onSaved={() => { void latest.refetch(); }} />
               <VoiceComposer
                 scopeKey={scope}
                 voice={speechVoice(profile.data?.body.voice)}

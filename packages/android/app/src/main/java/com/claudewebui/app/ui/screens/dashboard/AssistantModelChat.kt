@@ -136,7 +136,9 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var imageIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var documentIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var documentNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var realtimeVoice by remember { mutableStateOf(false) }
     var showAdvanced by remember { mutableStateOf(false) }
+    var newChatOptions by remember { mutableStateOf(buildJsonObject {}) }
     var prompt by remember { mutableStateOf("") }
     var title by remember { mutableStateOf("") }
     var temporary by remember { mutableStateOf(false) }
@@ -144,6 +146,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var openedCode by remember { mutableStateOf<Triple<String, String, List<AssistantChatSource>>?>(null) }
     var openedSource by remember { mutableStateOf<AssistantChatSource?>(null) }
     var sourceDownload by remember { mutableStateOf<ByteArray?>(null) }
     val sourceSave = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -297,7 +300,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                     val created = outbox.send("/api/assistant/api-chats", buildJsonObject {
                         put("title", prompt.trim().take(80).ifEmpty { "Neues Gespräch" }); put("providerId", providerId); put("model", model)
                         profileId?.let { put("profileId", it) }; put("projectId", if (temporary) JsonNull else projectId?.let(::JsonPrimitive) ?: JsonNull)
-                        put("sourceIds", JsonArray(sourceIds.map(::JsonPrimitive))); put("temporary", temporary)
+                        put("sourceIds", JsonArray(sourceIds.map(::JsonPrimitive))); put("temporary", temporary); put("chatOptions", newChatOptions)
                         if (newChatStyleSet) put("writingStyleSkill", newChatStyle?.let(::JsonPrimitive) ?: JsonNull)
                     }, context.getString(R.string.assistant_new), null)
                     checkOwner(); accept("/api/assistant/api-chats", created); target = requireNotNull(chat)
@@ -344,6 +347,13 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     // but leaves the typed draft alone.
     val voicePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) voiceMode = true else error = context.getString(R.string.voice_mode_permission)
+    }
+    val realtimePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) realtimeVoice = true else error = context.getString(R.string.voice_mode_permission)
+    }
+    fun openRealtime() {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) realtimeVoice = true
+        else realtimePermission.launch(android.Manifest.permission.RECORD_AUDIO)
     }
     fun openVoiceMode() {
         if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) voiceMode = true
@@ -401,7 +411,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                 val created = outbox.send("/api/assistant/api-chats", buildJsonObject {
                     put("title", text.take(48)); put("providerId", providerId); put("model", model)
                     profileId?.let { put("profileId", it) }; put("sourceIds", JsonArray(sourceIds.map(::JsonPrimitive)))
-                    put("temporary", temporary)
+                    put("temporary", temporary); put("chatOptions", newChatOptions)
                     if (research && !temporary) put("workflow", "research")
                     put("projectId", projectId?.let(::JsonPrimitive) ?: JsonNull)
                     if (newChatStyleSet) put("writingStyleSkill", newChatStyle?.let(::JsonPrimitive) ?: JsonNull)
@@ -420,6 +430,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val researchChat = chat?.body?.get("workflow")?.jsonPrimitive?.contentOrNull == "research"
     val activeWritingStyle = chat?.let { it.body["writingStyleSkill"]?.jsonPrimitive?.contentOrNull }
         ?: if (chat != null) null else if (newChatStyleSet) newChatStyle else personalization?.defaultWritingStyle?.ifBlank { null }
+    openedCode?.let { (code, language, sources) -> ChatCodeSheet(code, language, sources, api) { openedCode = null } }
     openedSource?.let { source ->
         AlertDialog(onDismissRequest = { openedSource = null }, title = { Text(source.title) }, text = {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -434,16 +445,13 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             finally { if (TokenStore.assistantOwnerKey() == owner) busy = false }
         } }) { Text("Originaldatei") } }, dismissButton = { TextButton(onClick = { openedSource = null }) { Text("Schliessen") } })
     }
-    if (showAdvanced) {
-        AssistantWebWorkspace(
-            path = chat?.id?.let { "/chat/model/$it?workbench=1" } ?: "/chat",
-            area = "chat", onAreaSelect = onAreaSelect, onClose = { showAdvanced = false; refresh++ },
-            onPersonalize = { showAdvanced = false; onAreaSelect("settings") },
-            onNavigateToChat = { selected -> currentOnChatSelected(selected); showAdvanced = false; refresh++ },
-            onNativeChat = { showAdvanced = false; refresh++ }, standaloneTitle = "Chat-Werkzeuge",
-        )
-        return
-    }
+    if (realtimeVoice && chat != null) RealtimeVoiceSheet(owner, chat!!.id, { refresh++ }) { realtimeVoice = false; refresh++ }
+    if (showAdvanced) ChatWorkbenchSheet(
+        owner, api, chat, providers, newChatOptions,
+        onSaved = { options, resource -> newChatOptions = options; resource?.let { chat = it }; refresh++ },
+        onImported = { id -> scope.launch { try { val loaded = api.getAssistantApiTurns(id); checkOwner(); loaded.data?.chat?.let { showChat(it); currentOnChatSelected(it.id) }; showAdvanced = false } catch (failure: Exception) { error = failure.message } } },
+        onDismiss = { showAdvanced = false },
+    )
     if (!showWorkspace) Column(Modifier.fillMaxSize().padding(top = topInset).navigationBarsPadding().imePadding().padding(horizontal = 16.dp)) {
         TextButton(enabled = !busy && !running, onClick = { showWorkspace = true }) {
             val boundProfile = if (chat == null) profileId else chat?.body?.get("profileId")?.jsonPrimitive?.contentOrNull
@@ -562,7 +570,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                         val thinkingLabel = stringResource(R.string.component_thinking)
                                         ThinkingDots(palette.accent, Modifier.padding(vertical = 8.dp).semantics { contentDescription = thinkingLabel })
                                     } else if (turn.response.isNotEmpty() || (turn.ui == null && !turn.uiPending)) {
-                                        MarkdownContent(turn.response, Modifier.fillMaxWidth(), isStreaming = streaming)
+                                        MarkdownContent(turn.response, Modifier.fillMaxWidth(), isStreaming = streaming, onRunCode = { code, language -> openedCode = Triple(code, language, turn.sources) })
                                     }
                                     // Dynamic UI: an interactive view below the text, rendered natively.
                                     if (turn.uiPending && turn.ui == null) DynamicUiPending()
@@ -579,7 +587,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                     Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, palette.border)) {
                                         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Text(candidate.model, style = MaterialTheme.typography.labelMedium, color = palette.muted)
-                                            MarkdownContent(candidate.response.ifEmpty { candidate.error ?: "Antwortet …" }, Modifier.fillMaxWidth(), isStreaming = candidate.status == "running")
+                                            MarkdownContent(candidate.response.ifEmpty { candidate.error ?: "Antwortet …" }, Modifier.fillMaxWidth(), isStreaming = candidate.status == "running", onRunCode = { code, language -> openedCode = Triple(code, language, turn.sources) })
                                         }
                                     }
                                 }
@@ -686,6 +694,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                 enabled = !busy && !running,
                                 onClick = { plusOpen = false; showStyleSheet = true },
                             )
+                            DropdownMenuItem(text = { Text("Realtime-Sprache") }, enabled = chat != null && !busy && !running, onClick = { plusOpen = false; openRealtime() })
                             if (voiceEnabled) DropdownMenuItem(
                                 text = { Text(stringResource(R.string.voice_mode_title)) },
                                 enabled = !busy && !running && !researchChat && (chat != null || providers.isNotEmpty()),

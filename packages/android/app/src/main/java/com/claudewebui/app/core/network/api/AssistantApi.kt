@@ -18,6 +18,13 @@ import io.ktor.client.request.forms.formData
 import io.ktor.client.plugins.timeout
 
 interface AssistantApi {
+    suspend fun getChatToolServers(): ApiResponse<List<JsonObject>>
+    suspend fun saveChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource>
+    suspend fun exportModelChat(id: String): ByteArray
+    suspend fun getModelChatShares(id: String): ApiResponse<List<JsonObject>>
+    suspend fun shareModelChat(id: String): ApiResponse<JsonObject>
+    suspend fun revokeModelChatShare(id: String): ApiResponse<JsonObject>
+    suspend fun importModelChats(owner: String, providerId: String, model: String, bytes: ByteArray): ApiResponse<JsonObject>
     suspend fun getAssistantResources(collection: String, offset: Int = 0, search: String? = null, status: String? = null, sort: String? = null): ApiResponse<List<AssistantResource>>
     suspend fun getAssistantPersonalization(): ApiResponse<AssistantPersonalization>
     suspend fun updateAssistantPersonalization(owner: String, input: JsonObject): ApiResponse<AssistantPersonalization>
@@ -74,6 +81,21 @@ interface AssistantApi {
 }
 
 class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
+    override suspend fun getChatToolServers(): ApiResponse<List<JsonObject>> = http.get("/api/mcp-servers")
+    override suspend fun saveChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource> = http.put("/api/assistant/api-chats/${checked(id)}/options") { attributes.put(AssistantAccountKey, owner); setBody(input) }
+    override suspend fun exportModelChat(id: String): ByteArray = http.get("/api/assistant/api-chats/${checked(id)}/export")
+    override suspend fun getModelChatShares(id: String): ApiResponse<List<JsonObject>> = http.get("/api/assistant/api-chats/${checked(id)}/shares")
+    override suspend fun shareModelChat(id: String): ApiResponse<JsonObject> = http.post("/api/assistant/api-chats/${checked(id)}/share") { setBody(kotlinx.serialization.json.buildJsonObject {}) }
+    override suspend fun revokeModelChatShare(id: String): ApiResponse<JsonObject> = http.delete("/api/assistant/shares/${checked(id)}")
+    override suspend fun importModelChats(owner: String, providerId: String, model: String, bytes: ByteArray): ApiResponse<JsonObject> {
+        require(owner == TokenStore.assistantOwnerKey())
+        require(bytes.size <= 25 * 1024 * 1024)
+        val form = MultiPartFormDataContent(formData {
+            append("providerId", providerId); append("model", model)
+            append("file", bytes, Headers.build { append(HttpHeaders.ContentType, "application/json"); append(HttpHeaders.ContentDisposition, "filename=\"chat-import.json\"") })
+        })
+        return http.client.post("${http.baseUrl}/api/assistant/api-chats/import") { attributes.put(AssistantAccountKey, owner); setBody(form) }.body()
+    }
     private fun checked(value: String): String {
         require(value.matches(Regex("[A-Za-z0-9_-]+"))) { "Invalid assistant resource identifier" }
         return value

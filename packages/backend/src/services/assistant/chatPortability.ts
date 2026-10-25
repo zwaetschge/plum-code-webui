@@ -215,9 +215,11 @@ export async function importChats(
   userId: string,
   buffer: Buffer,
   providerId: string,
-  model: string
+  model: string,
+  migration?: { historicalOnly: boolean }
 ) {
-  await apiChatEndpoint(userId, providerId, model);
+  // Internal offline migration can restore read-only history before an account configures its model.
+  if (!migration?.historicalOnly) await apiChatEndpoint(userId, providerId, model);
   let value: unknown;
   try {
     value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(buffer));
