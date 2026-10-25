@@ -207,7 +207,7 @@ export async function chatToolset(userId: string, options: ChatOptions, signal: 
       async (args) => {
         const query = z.string().trim().min(1).max(500).parse(args.query);
         const page = await fetchPublicSource(
-          'https://www.bing.com/search?q=' + encodeURIComponent(query)
+          'https://www.bing.com/search?q=' + encodeURIComponent(query) + '&setlang=en&cc=us'
         );
         const decode = (text: string) =>
           text
