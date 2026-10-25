@@ -17,7 +17,7 @@ NS = {
     'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
 }
 REL = 'http://schemas.openxmlformats.org/package/2006/relationships'
-MAX_TEXT = 50000
+MAX_TEXT = 500000
 warnings = ['Textimport: Layout, Bilder, Animationen und Formatvorlagen bleiben nur im Original erhalten.']
 truncated = False
 include_images = False

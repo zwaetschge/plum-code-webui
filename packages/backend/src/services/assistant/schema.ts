@@ -75,6 +75,7 @@ export const ASSISTANT_SCHEMA = [
     resource_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
     revision BIGINT NOT NULL, chunk_index BIGINT NOT NULL, start_offset BIGINT NOT NULL,
     end_offset BIGINT NOT NULL, page BIGINT, text TEXT NOT NULL,
+    embedding DOUBLE PRECISION[], embedding_model TEXT,
     PRIMARY KEY(resource_id,revision,chunk_index),
     FOREIGN KEY(resource_id,revision) REFERENCES assistant_resource_revisions(resource_id,revision) ON DELETE CASCADE
   )`,
@@ -88,6 +89,7 @@ export const ASSISTANT_SCHEMA = [
   `CREATE INDEX IF NOT EXISTS assistant_source_watches_due ON assistant_source_watches(enabled,next_check_at)`,
   `CREATE TABLE IF NOT EXISTS assistant_api_turns (
     id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    workbench_json TEXT NOT NULL DEFAULT '{}',
     seq BIGINT NOT NULL, payload_hash TEXT NOT NULL, prompt TEXT NOT NULL, response TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL, error TEXT, model TEXT NOT NULL, profile_json TEXT NOT NULL,
     source_versions TEXT NOT NULL DEFAULT '[]', image_asset_ids TEXT NOT NULL DEFAULT '[]', usage_json TEXT,
@@ -139,6 +141,6 @@ export const ASSISTANT_SCHEMA = [
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     resource_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
     revision BIGINT NOT NULL, token_hash TEXT UNIQUE NOT NULL, expires_at TEXT NOT NULL,
-    revoked BIGINT NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+    revoked BIGINT NOT NULL DEFAULT 0, created_at TEXT NOT NULL, snapshot_json TEXT
   )`,
 ];

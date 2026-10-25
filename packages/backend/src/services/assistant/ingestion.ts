@@ -11,9 +11,13 @@ import { createResource, findResource, reviseResource } from './resources.js';
 
 const exec = promisify(execFile);
 const PDF_EXTRACT = `import fitz,json,sys
-doc=fitz.open(sys.argv[1]); result=[]; budget=48000
+doc=fitz.open(sys.argv[1]); result=[]; budget=480000
 for index in range(min(len(doc),500)):
- text=doc[index].get_text(); usable=text[:budget]; budget-=len(usable)
+ page=doc[index]; text=page.get_text()
+ if len(text.strip())<20:
+  try: text=page.get_text(textpage=page.get_textpage_ocr(language="deu+eng",dpi=150,full=True))
+  except Exception: pass
+ usable=text[:budget]; budget-=len(usable)
  if usable.strip(): result.append({"page":index+1,"text":usable})
  if budget<=0: break
 print(json.dumps({"pages":result,"pageCount":len(doc),"truncated":budget<=0 or len(doc)>500},ensure_ascii=False))`;
@@ -22,7 +26,8 @@ export async function ingestSource(
   userId: string,
   file: { buffer: Buffer; originalname: string; mimetype: string },
   projectId?: string,
-  replacement?: { id: string; expectedRevision: number }
+  replacement?: { id: string; expectedRevision: number },
+  context?: { temporaryChatId: string }
 ) {
   const current = replacement ? await findResource(userId, replacement.id) : null;
   if (current && current.kind !== 'source')
@@ -50,7 +55,7 @@ export async function ingestSource(
       const extracted = await exec(
         process.env.PLUM_PYTHON_BIN || '/usr/local/bin/plum-python',
         ['-c', PDF_EXTRACT, input],
-        { timeout: 45000, maxBuffer: 1024 * 1024 }
+        { timeout: 90000, maxBuffer: 8 * 1024 * 1024 }
       );
       const result = JSON.parse(extracted.stdout) as {
         pages: typeof pages;
@@ -61,8 +66,8 @@ export async function ingestSource(
       pageCount = result.pageCount;
       truncated = result.truncated;
       const combined = pages.map((page) => `[Seite ${page.page}]\n${page.text}`).join('\n\n');
-      truncated ||= combined.length > 50000;
-      text = combined.slice(0, 50000);
+      truncated ||= combined.length > 500000;
+      text = combined.slice(0, 500000);
       if (!text.trim())
         throw new AppError(
           'Das PDF enthält keinen auslesbaren Text; OCR ist für diese Quelle erforderlich',
@@ -95,8 +100,8 @@ export async function ingestSource(
         !['docx', 'xlsx', 'pptx'].includes(String(office.kind))
       )
         throw new Error('Invalid Office extraction');
-      text = office.text.slice(0, 50000);
-      truncated = office.truncated === true || office.text.length > 50000;
+      text = office.text.slice(0, 500000);
+      truncated = office.truncated === true || office.text.length > 500000;
       detectedMime = `application/vnd.openxmlformats-officedocument.${office.kind === 'docx' ? 'wordprocessingml.document' : office.kind === 'xlsx' ? 'spreadsheetml.sheet' : 'presentationml.presentation'}`;
     } catch {
       throw new AppError(
@@ -119,11 +124,22 @@ export async function ingestSource(
     }
     if (text.includes('\0'))
       throw new AppError('Binäre Datei ist keine Textquelle', 415, 'SOURCE_TYPE_UNSUPPORTED');
-    truncated = text.length > 50000;
-    text = text.slice(0, 50000);
+    truncated = text.length > 500000;
+    text = text.slice(0, 500000);
   }
   if (!text.trim()) throw new AppError('Die Quelle enthält keinen Text', 422, 'SOURCE_EMPTY');
   return transaction(async (tx) => {
+    if (context) {
+      await tx.get('SELECT id FROM users WHERE id=? FOR UPDATE', userId);
+      const parent = await tx.get(
+        "SELECT id FROM assistant_resources WHERE id=? AND user_id=? AND kind='api-chat' AND archived=0 AND body_json::jsonb->>'temporary'='true' AND (body_json::jsonb->>'expiresAt')>?",
+        context.temporaryChatId,
+        userId,
+        new Date().toISOString()
+      );
+      if (!parent)
+        throw new AppError('Temporäres Gespräch ist abgelaufen', 410, 'TEMPORARY_EXPIRED');
+    }
     const asset = await tx.get(
       `INSERT INTO assistant_assets (id,user_id,filename,mime_type,sha256,bytes,created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id,sha256) DO UPDATE SET sha256 = excluded.sha256 RETURNING id`,
@@ -137,6 +153,7 @@ export async function ingestSource(
     );
     const body = {
       text,
+      ...(context ? { temporaryChatId: context.temporaryChatId } : {}),
       citation: filename,
       mimeType: detectedMime,
       ...(office ? { office } : {}),

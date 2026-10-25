@@ -1,3 +1,4 @@
+import { CHAT_OPTIONS } from './chatOptions.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { AssistantResource, AssistantResourceKind } from '@plum-code-webui/shared';
@@ -55,6 +56,7 @@ export const RESOURCE_KINDS = {
 
 export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
   'api-chat': z.object({
+    chatOptions: CHAT_OPTIONS.optional(),
     providerId: z.string().min(1).max(200),
     model: z.string().min(1).max(200),
     profileId: optionalId,
@@ -108,7 +110,7 @@ export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
   }),
   source: z.object({
     projectId: optionalId,
-    text: text,
+    text: z.string().trim().min(1).max(500000),
     url: z.string().url().max(2000).optional(),
     citation: z.string().max(2000).default(''),
     mimeType: z.string().max(100).default('text/plain'),
@@ -311,7 +313,17 @@ export async function findResource(
     userId
   )) as Row | undefined;
   if (!row) throw new AppError('Eintrag nicht gefunden', 404, 'NOT_FOUND');
-  return resourceFromRow(row);
+  const resource = resourceFromRow(row);
+  if (resource.kind === 'source' && resource.body.temporaryChatId) {
+    const parent = await (tx ?? { get }).get(
+      "SELECT id FROM assistant_resources WHERE id=? AND user_id=? AND archived=0 AND (body_json::jsonb->>'expiresAt')>?",
+      resource.body.temporaryChatId,
+      userId,
+      new Date().toISOString()
+    );
+    if (!parent) throw new AppError('Temporäre Quelle ist abgelaufen', 410, 'TEMPORARY_EXPIRED');
+  }
+  return resource;
 }
 export async function listResources(
   userId: string,
@@ -326,7 +338,11 @@ export async function listResources(
     sort?: 'updated' | 'priority' | 'deadline';
   } = {}
 ): Promise<AssistantResource[]> {
-  const conditions = ['user_id = ?', 'archived = 0'];
+  const conditions = [
+    'user_id = ?',
+    'archived = 0',
+    "(kind <> 'source' OR body_json::jsonb->>'temporaryChatId' IS NULL)",
+  ];
   const args: unknown[] = [userId];
   if (kind) {
     conditions.push('kind = ?');

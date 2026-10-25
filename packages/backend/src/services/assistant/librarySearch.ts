@@ -33,7 +33,7 @@ export async function searchAssistantLibrary(
       COALESCE(r.body_json::jsonb->>'text',r.body_json::jsonb->>'content',r.body_json::jsonb->>'goal',r.body_json::jsonb->>'transcript',r.body_json::jsonb->>'description',r.body_json::jsonb->>'instructions','') AS text,
       CASE WHEN r.kind='api-chat' THEN 'chats' ELSE 'library' END AS category,
       NULL::text AS parent_id,NULL::text AS chat_id,NULL::bigint AS seq
-    FROM assistant_resources r WHERE r.user_id=? AND r.archived=0 AND r.kind<>'connection'
+    FROM assistant_resources r WHERE r.user_id=? AND r.archived=0 AND r.kind<>'connection' AND r.body_json::jsonb->>'temporaryChatId' IS NULL
       AND NOT (r.kind='api-chat' AND COALESCE(r.body_json::jsonb->>'temporary','false')='true')
     UNION ALL
     SELECT 'api-turn',t.id,'api-chat',r.title,r.revision,t.updated_at,t.prompt || E'\n' || t.response,'chats',r.id,NULL::text,t.seq

@@ -29,6 +29,30 @@ export interface AssistantApiTurn {
   profileRevision: number | null;
   sourceVersions: Array<{ id: string; revision: number }>;
   imageAssetIds?: string[];
+  documentSourceIds?: string[];
+  sources?: Array<{
+    id: string;
+    revision: number;
+    title: string;
+    text: string;
+    citation: string;
+    page: number | null;
+    excerptStart: number;
+    retrieval?: string;
+  }>;
+  toolEvents?: Array<{
+    id: string;
+    name: string;
+    status: 'running' | 'completed' | 'failed';
+    result?: string;
+  }>;
+  comparisons?: Array<{
+    providerId: string;
+    model: string;
+    response: string;
+    status: 'running' | 'completed' | 'failed';
+    error?: string;
+  }>;
   /** All versions of this turn (regenerated or edited in place), oldest first. */
   versions?: string[];
   /** Validated interactive view the model attached to this answer (Dynamic UI v1). */

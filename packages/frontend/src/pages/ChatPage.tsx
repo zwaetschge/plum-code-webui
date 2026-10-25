@@ -1,3 +1,4 @@
+import { ChatImport } from '@/components/assistant/ChatWorkbench';
 import { usePersonalization } from '@/components/assistant/usePersonalization';
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
@@ -7,7 +8,7 @@ import type { AssistantApiProvider, AssistantResource } from '@plum-code-webui/s
 import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 import { deliverAssistant } from '@/services/assistantOutbox';
-import { uploadChatImages } from '@/components/assistant/ChatImages';
+import { uploadChatAttachments } from '@/components/assistant/ChatImages';
 import { VoiceComposer } from '@/components/assistant/VoiceComposer';
 import { ResourcePicker } from '@/components/assistant/ResourcePicker';
 import { AssistantOutbox } from '@/components/assistant/AssistantOutbox';
@@ -141,7 +142,10 @@ function ChatAccountPage({ owner }: { owner?: string }) {
           ).data.data;
         if (useAuthStore.getState().user?.id !== owner) return;
         setCreated(resource);
-        const imageAssetIds = await uploadChatImages(resource.id, files);
+        const { imageAssetIds, documentSourceIds } = await uploadChatAttachments(
+          resource.id,
+          files
+        );
         if (useAuthStore.getState().user?.id !== owner) return;
         await deliverAssistant(
           `/api/assistant/api-chats/${resource.id}/turns`,
@@ -149,6 +153,7 @@ function ChatAccountPage({ owner }: { owner?: string }) {
             expectedRevision: resource.revision,
             prompt: draft.trim(),
             imageAssetIds,
+            documentSourceIds,
             ...effortPayload(effort),
           },
           'Erste Nachricht',
@@ -232,6 +237,12 @@ function ChatAccountPage({ owner }: { owner?: string }) {
           }}
         />
         <RecentChats />
+        <ChatImport
+          providers={providers.data ?? []}
+          onImported={() => {
+            void cache.invalidateQueries({ queryKey: ['assistant'] });
+          }}
+        />
         <AssistantOutbox />
       </div>
       <div className={cn('plum-api-footer plum-start-footer', leaving && 'is-leaving')}>
@@ -318,7 +329,7 @@ function ChatAccountPage({ owner }: { owner?: string }) {
                 ref={fileInput}
                 type="file"
                 multiple
-                accept="image/png,image/jpeg,image/webp"
+                accept="image/png,image/jpeg,image/webp,.pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json,.py,.html"
                 hidden
                 onChange={(e) => {
                   const selectedFiles = Array.from(e.target.files ?? []);

@@ -1,3 +1,4 @@
+import { ChatRichText } from '@/components/assistant/ChatRichText';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/services/api';
@@ -30,7 +31,22 @@ export function SharedAssistantPage() {
               Geteilte Momentaufnahme · Revision {share.data.revision}
             </p>
             <h1 className="text-2xl font-semibold">{share.data.title}</h1>
-            {share.data.kind === 'artifact' ? (
+            {share.data.kind === 'api-chat' ? (
+              <div className="space-y-6">
+                {(
+                  (share.data.body.turns as Array<{
+                    prompt: string;
+                    response: string;
+                    model: string;
+                  }>) ?? []
+                ).map((turn, index) => (
+                  <section key={index} className="space-y-3">
+                    <p className="whitespace-pre-wrap rounded-xl border p-3">{turn.prompt}</p>
+                    <ChatRichText text={turn.response} />
+                  </section>
+                ))}
+              </div>
+            ) : share.data.kind === 'artifact' ? (
               <ArtifactViewer
                 artifact={share.data}
                 onSaved={() => {}}

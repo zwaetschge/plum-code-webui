@@ -13,7 +13,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/button';
 import { ResourcePicker } from './ResourcePicker';
 import { AssistantOutbox } from './AssistantOutbox';
-import { ChatImageInput, uploadChatImages } from './ChatImages';
+import { ChatImageInput, uploadChatAttachments } from './ChatImages';
 import { LiveImageCapture } from './LiveImageCapture';
 
 export function ApiChatStarter({
@@ -84,12 +84,17 @@ export function ApiChatStarter({
         ).data.data;
       if (useAuthStore.getState().user?.id !== captured) return;
       setCreated(resource);
-      const imageAssetIds = await uploadChatImages(resource.id, images);
+      const { imageAssetIds, documentSourceIds } = await uploadChatAttachments(resource.id, images);
       if (useAuthStore.getState().user?.id !== captured) return;
       if (prompt.trim())
         await deliverAssistant(
           `/api/assistant/api-chats/${resource.id}/turns`,
-          { expectedRevision: resource.revision, prompt: prompt.trim(), imageAssetIds },
+          {
+            expectedRevision: resource.revision,
+            prompt: prompt.trim(),
+            imageAssetIds,
+            documentSourceIds,
+          },
           'Erste Nachricht im Modellchat',
           { expiresAt: resource.body.temporary ? String(resource.body.expiresAt) : undefined }
         );

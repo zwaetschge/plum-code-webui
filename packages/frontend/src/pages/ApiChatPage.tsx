@@ -1,3 +1,5 @@
+import { ChatWorkbench, ChatTurnDetails } from '@/components/assistant/ChatWorkbench';
+import { ChatRichText } from '@/components/assistant/ChatRichText';
 import { DynamicUiStateStore } from '@/components/assistant/dynamic-ui/state';
 import { orderChatApiProviders } from '@/lib/chatApiProviders';
 import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
@@ -46,8 +48,6 @@ import {
 import '@/components/assistant/dynamic-ui/dynamic-ui.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type {
   AssistantApiProvider,
   AssistantApiTurn,
@@ -72,7 +72,7 @@ import { ResearchPreview } from '@/components/assistant/ResearchPreview';
 import {
   ChatImageInput,
   ChatImageStrip,
-  uploadChatImages,
+  uploadChatAttachments,
 } from '@/components/assistant/ChatImages';
 import { PROJECT_MEMORY, projectMemoryMode } from '@/components/assistant/projectMemory';
 
@@ -347,7 +347,8 @@ export function ApiChatPage() {
   const transmit = async (text: string, voice = false) => {
     if (!chat) throw new Error('Gespräch ist nicht verfügbar');
     const captured = scope;
-    const imageAssetIds = [...existingImages, ...(await uploadChatImages(chat.id, images))];
+    const attachments = await uploadChatAttachments(chat.id, images);
+    const imageAssetIds = [...existingImages, ...attachments.imageAssetIds];
     if (scopeRef.current !== captured) throw new Error('Das Gespräch wurde gewechselt');
     const result = await deliverAssistant(
       `/api/assistant/api-chats/${chat.id}/turns`,
@@ -355,6 +356,7 @@ export function ApiChatPage() {
         expectedRevision: chat.revision,
         prompt: text.trim(),
         imageAssetIds,
+        documentSourceIds: attachments.documentSourceIds,
         ...(voice ? { voice: true } : effortPayload(effort)),
       },
       'Nachricht im Modellchat',
@@ -521,7 +523,15 @@ export function ApiChatPage() {
           )}
         </nav>
       )}
-      <h1 className="sr-only">{chat.title}</h1>
+      <div className="flex shrink-0 items-center justify-between gap-2 px-4 py-1">
+        <h1 className="truncate text-sm font-medium">{chat.title}</h1>
+        <ChatWorkbench
+          chat={chat}
+          providers={providers.data ?? []}
+          disabled={busy || !!running}
+          onSaved={() => latest.refetch()}
+        />
+      </div>
       <div
         ref={scroll}
         className="plum-api-scroll"
@@ -782,11 +792,10 @@ export function ApiChatPage() {
                   ) : item.status === 'running' && !item.response && !item.uiPending ? (
                     <ThinkingDots />
                   ) : item.response || (!item.ui && !item.uiPending) ? (
-                    <div className="prose prose-sm max-w-none break-words dark:prose-invert">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {item.response || 'Keine Antwort'}
-                      </ReactMarkdown>
-                    </div>
+                    <ChatRichText
+                      text={item.response || 'Keine Antwort'}
+                      sourceVersions={item.sourceVersions}
+                    />
                   ) : null}
                   {item.uiPending && !item.ui && (
                     <div className="dui-pending" role="status">
@@ -820,6 +829,24 @@ export function ApiChatPage() {
                       {item.error}
                     </p>
                   )}
+                  <ChatTurnDetails
+                    turn={item}
+                    disabled={busy || !!running}
+                    onMerge={() =>
+                      void invoke(async () => {
+                        await deliverAssistant(
+                          `/api/assistant/api-chats/${chat.id}/turns`,
+                          {
+                            expectedRevision: chat.revision,
+                            prompt: item.prompt,
+                            mergeTurnId: item.id,
+                            ...effortPayload(effort),
+                          },
+                          'Antworten zusammenführen'
+                        );
+                      })
+                    }
+                  />
                   {item.usage && (
                     <details className="text-xs text-muted-foreground mt-3">
                       <summary className="cursor-pointer">Modell und Verbrauch</summary>

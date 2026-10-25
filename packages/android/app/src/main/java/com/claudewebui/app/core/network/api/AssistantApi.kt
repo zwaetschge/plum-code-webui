@@ -43,7 +43,9 @@ interface AssistantApi {
     /** Permanently delete a project with its chats, sources and project memory. */
     suspend fun deleteAssistantProject(id: String): ApiResponse<JsonObject>
     suspend fun getAssistantApiImage(id: String, assetId: String): ByteArray
+    suspend fun getAssistantSourceFile(id: String, revision: Long): ByteArray
     suspend fun uploadAssistantApiImage(owner: String, id: String, filename: String, mimeType: String, bytes: ByteArray): ApiResponse<AssistantApiImage>
+    suspend fun uploadAssistantApiDocument(owner: String, id: String, filename: String, mimeType: String, bytes: ByteArray): ApiResponse<JsonObject>
     /** Whisper through Vocarium; dictation sends AAC, the voice mode 16 kHz WAV. */
     suspend fun transcribeAssistantAudio(owner: String, bytes: ByteArray, fileName: String = "dictation.m4a", mimeType: String = "audio/mp4"): ApiResponse<JsonObject>
     suspend fun speakAssistantText(owner: String, text: String, voice: String, language: String): ByteArray
@@ -120,6 +122,7 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
     override suspend fun updateAssistantApiChatMeta(id: String, meta: JsonObject): ApiResponse<AssistantResource> = http.post("/api/assistant/api-chats/${checked(id)}/meta") { setBody(meta) }
     override suspend fun deleteAssistantApiChat(id: String): ApiResponse<JsonObject> = http.post("/api/assistant/api-chats/${checked(id)}/delete") { setBody(kotlinx.serialization.json.buildJsonObject {}) }
     override suspend fun deleteAssistantProject(id: String): ApiResponse<JsonObject> = http.post("/api/assistant/projects/${checked(id)}/delete") { setBody(kotlinx.serialization.json.buildJsonObject {}) }
+    override suspend fun getAssistantSourceFile(id: String, revision: Long): ByteArray = http.get("/api/assistant/sources/${checked(id)}/file?revision=$revision")
     override suspend fun getAssistantApiImage(id: String, assetId: String): ByteArray = http.get("/api/assistant/api-chats/${checked(id)}/images/${checked(assetId)}")
     override suspend fun uploadAssistantApiImage(owner: String, id: String, filename: String, mimeType: String, bytes: ByteArray): ApiResponse<AssistantApiImage> {
         require(owner == TokenStore.assistantOwnerKey())
@@ -135,6 +138,26 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
             })
         })
         return http.client.post("$server/api/assistant/api-chats/${checked(id)}/images") {
+            attributes.put(AssistantAccountKey, owner)
+            header(HttpHeaders.Authorization, "Bearer $token")
+            header(HttpHeaders.ContentType, multipart.contentType.toString())
+            setBody(multipart)
+        }.body()
+    }
+    override suspend fun uploadAssistantApiDocument(owner: String, id: String, filename: String, mimeType: String, bytes: ByteArray): ApiResponse<JsonObject> {
+        require(owner == TokenStore.assistantOwnerKey())
+        require(bytes.isNotEmpty() && bytes.size <= 25 * 1024 * 1024)
+        val server = requireNotNull(TokenStore.getServerUrl()).trimEnd('/')
+        val token = requireNotNull(TokenStore.getToken())
+        val safeName = filename.replace(Regex("[^A-Za-z0-9._-]"), "_").take(180).ifEmpty { "image" }
+        val multipart = MultiPartFormDataContent(formData {
+            append("file", bytes, Headers.build {
+                append(HttpHeaders.ContentType, ContentType.parse(mimeType).toString())
+                append(HttpHeaders.ContentDisposition, "filename=\"$safeName\"")
+            })
+        })
+        return http.client.post("$server/api/assistant/api-chats/${checked(id)}/documents") {
+            timeout { requestTimeoutMillis = 120_000; socketTimeoutMillis = 120_000 }
             attributes.put(AssistantAccountKey, owner)
             header(HttpHeaders.Authorization, "Bearer $token")
             header(HttpHeaders.ContentType, multipart.contentType.toString())

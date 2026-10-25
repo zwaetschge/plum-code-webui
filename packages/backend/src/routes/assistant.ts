@@ -1,3 +1,4 @@
+import { chatWorkbenchRouter } from './chatWorkbench.js';
 import {
   nativeMemoryList,
   importNativeMemory,
@@ -239,6 +240,7 @@ router.get(
   })
 );
 router.use(requireAuth, requireActive);
+router.use(chatWorkbenchRouter);
 router.use('/memory-system', (_req, res, next) => {
   res.setHeader('Cache-Control', 'private, no-store');
   next();
@@ -2179,7 +2181,7 @@ router.get(
   '/shared/:token',
   handle(async (req, res) => {
     const row = await get(
-      `SELECT s.id, r.kind, v.title, v.body_json, v.revision FROM assistant_shares s JOIN assistant_resources r ON r.id = s.resource_id
+      `SELECT s.id, s.snapshot_json, r.kind, v.title, v.body_json, v.revision FROM assistant_shares s JOIN assistant_resources r ON r.id = s.resource_id
     JOIN assistant_resource_revisions v ON v.resource_id = s.resource_id AND v.revision = s.revision
     WHERE s.token_hash = ? AND s.revoked = 0 AND s.expires_at > ? AND r.archived = 0`,
       createHash('sha256').update(String(req.params.token)).digest('hex'),
@@ -2190,10 +2192,11 @@ router.get(
       success: true,
       data: {
         id: row.id,
+        ...(row.snapshot_json ? JSON.parse(row.snapshot_json) : {}),
         kind: row.kind,
         title: row.title,
         revision: Number(row.revision),
-        body: JSON.parse(row.body_json),
+        body: row.snapshot_json ? JSON.parse(row.snapshot_json).body : JSON.parse(row.body_json),
       },
     });
   })

@@ -104,6 +104,8 @@ export interface ApiStreamResult {
   model: string;
   usage: ApiUsage | null;
   warning: string | null;
+  toolCalls?: ApiToolCall[];
+  nativeBlocks?: unknown[];
 }
 /** Thinking depth a client may request per turn; mapped to each protocol's own knob. */
 export const API_REASONING_EFFORTS = ['low', 'medium', 'high', 'max', 'ultra'] as const;
@@ -122,8 +124,27 @@ const GEMINI_THINKING_BUDGET: Record<ApiReasoningEffort, number> = {
   max: 24576,
   ultra: 32768,
 };
+export interface ApiTool {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+export interface ApiToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+export interface ApiGeneration {
+  tools?: ApiTool[];
+  temperature?: number;
+  maxOutputTokens?: number;
+}
 export interface ApiMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'tool';
+  toolCallId?: string;
+  name?: string;
+  toolCalls?: ApiToolCall[];
+  nativeBlocks?: unknown[];
   content: string;
   images?: Array<{ mimeType: string; data: string }>;
 }
@@ -135,7 +156,8 @@ export async function streamApiChat(
   signal: AbortSignal,
   onText: (text: string) => Promise<void>,
   /** 'auto' lets the model decide how long to think (voice turns). */
-  effort?: ApiReasoningEffort | 'auto'
+  effort?: ApiReasoningEffort | 'auto',
+  generation: ApiGeneration = {}
 ): Promise<ApiStreamResult> {
   const anthropic = endpoint.protocol === 'anthropic',
     gemini = endpoint.protocol === 'gemini';
@@ -146,26 +168,50 @@ export async function streamApiChat(
       409,
       'API_MODEL_UNAVAILABLE'
     );
-  const wireMessages = messages.map((message) => ({
-    role: message.role,
-    content: message.images?.length
+  const outputLimit = generation.maxOutputTokens ?? 8192;
+  const wireMessages = messages.map((message) =>
+    message.role === 'tool'
       ? anthropic
-        ? [
-            ...message.images.map((image) => ({
-              type: 'image',
-              source: { type: 'base64', media_type: image.mimeType, data: image.data },
-            })),
-            { type: 'text', text: message.content },
-          ]
-        : [
-            { type: 'text', text: message.content },
-            ...message.images.map((image) => ({
-              type: 'image_url',
-              image_url: { url: `data:${image.mimeType};base64,${image.data}` },
-            })),
-          ]
-      : message.content,
-  }));
+        ? {
+            role: 'user',
+            content: [
+              { type: 'tool_result', tool_use_id: message.toolCallId, content: message.content },
+            ],
+          }
+        : { role: 'tool', tool_call_id: message.toolCallId, content: message.content }
+      : {
+          role: message.role,
+          ...(!anthropic && message.toolCalls?.length
+            ? {
+                tool_calls: message.toolCalls.map((c) => ({
+                  id: c.id,
+                  type: 'function',
+                  function: { name: c.name, arguments: c.arguments },
+                })),
+              }
+            : {}),
+          content:
+            anthropic && message.nativeBlocks
+              ? message.nativeBlocks
+              : message.images?.length
+                ? anthropic
+                  ? [
+                      ...message.images.map((image) => ({
+                        type: 'image',
+                        source: { type: 'base64', media_type: image.mimeType, data: image.data },
+                      })),
+                      { type: 'text', text: message.content },
+                    ]
+                  : [
+                      { type: 'text', text: message.content },
+                      ...message.images.map((image) => ({
+                        type: 'image_url',
+                        image_url: { url: `data:${image.mimeType};base64,${image.data}` },
+                      })),
+                    ]
+                : message.content,
+        }
+  );
   const base = new URL(endpoint.baseUrl);
   if (gemini) {
     const prefix = base.pathname.replace(/\/$/, '');
@@ -204,17 +250,45 @@ export async function streamApiChat(
             systemInstruction: { parts: [{ text: system }] },
             contents: messages.map((message) => ({
               role: message.role === 'assistant' ? 'model' : 'user',
-              parts: [
-                { text: message.content },
-                ...(message.images ?? []).map((image) => ({
-                  inlineData: { mimeType: image.mimeType, data: image.data },
-                })),
-              ],
+              parts:
+                message.nativeBlocks ??
+                (message.role === 'tool'
+                  ? [
+                      {
+                        functionResponse: {
+                          name: message.name,
+                          response: { result: message.content },
+                        },
+                      },
+                    ]
+                  : [
+                      { text: message.content },
+                      ...(message.images ?? []).map((image) => ({
+                        inlineData: { mimeType: image.mimeType, data: image.data },
+                      })),
+                    ]),
             })),
+            ...(generation.tools?.length
+              ? {
+                  tools: [
+                    {
+                      functionDeclarations: generation.tools.map((t) => ({
+                        name: t.name,
+                        description: t.description,
+                        parameters: t.parameters,
+                      })),
+                    },
+                  ],
+                }
+              : {}),
             generationConfig: {
               candidateCount: 1,
+              ...(generation.temperature !== undefined
+                ? { temperature: generation.temperature }
+                : {}),
               maxOutputTokens:
-                8192 + (effort === 'auto' ? 8192 : effort ? GEMINI_THINKING_BUDGET[effort] : 0),
+                outputLimit +
+                (effort === 'auto' ? 8192 : effort ? GEMINI_THINKING_BUDGET[effort] : 0),
               ...(effort === 'auto'
                 ? { thinkingConfig: { thinkingBudget: -1 } }
                 : effort
@@ -227,9 +301,22 @@ export async function streamApiChat(
               model,
               system,
               messages: wireMessages,
+              ...(generation.tools?.length
+                ? {
+                    tools: generation.tools.map((t) => ({
+                      name: t.name,
+                      description: t.description,
+                      input_schema: t.parameters,
+                    })),
+                  }
+                : {}),
+              ...(!effort && generation.temperature !== undefined
+                ? { temperature: generation.temperature }
+                : {}),
               // The thinking budget counts against max_tokens, so the answer keeps its 8k.
               max_tokens:
-                8192 + (effort === 'auto' ? 8192 : effort ? ANTHROPIC_THINKING_BUDGET[effort] : 0),
+                outputLimit +
+                (effort === 'auto' ? 8192 : effort ? ANTHROPIC_THINKING_BUDGET[effort] : 0),
               stream: true,
               // Adaptive thinking: the model thinks only as long as the question needs.
               ...(effort === 'auto'
@@ -248,6 +335,15 @@ export async function streamApiChat(
               messages: [{ role: 'system', content: system }, ...wireMessages],
               stream: true,
               stream_options: { include_usage: true },
+              ...(generation.tools?.length
+                ? { tools: generation.tools.map((t) => ({ type: 'function', function: t })) }
+                : {}),
+              ...(endpoint.id === 'openai'
+                ? { max_completion_tokens: outputLimit }
+                : { max_tokens: outputLimit }),
+              ...(!effort && generation.temperature !== undefined
+                ? { temperature: generation.temperature }
+                : {}),
               // OpenAI-style APIs know low/medium/high; max and ultra are the highest of those.
               ...(effort && effort !== 'auto'
                 ? { reasoning_effort: effort === 'max' || effort === 'ultra' ? 'high' : effort }
@@ -280,6 +376,8 @@ export async function streamApiChat(
     served = model,
     usage: ApiUsage | null = null,
     warning: string | null = null;
+  const calls = new Map<number, ApiToolCall>();
+  const blocks: Array<Record<string, unknown>> = [];
   const count = (value: unknown) =>
     typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 10000000
       ? value
@@ -324,12 +422,17 @@ export async function streamApiChat(
       for (const candidate of item.candidates ?? []) {
         if ((candidate.index ?? 0) !== 0) continue;
         for (const part of candidate.content?.parts ?? []) {
-          if (part.functionCall || part.executableCode || part.codeExecutionResult)
-            throw new AppError(
-              'Das Modell verlangt Werkzeuge, die dieser Modellchat nicht bereitstellt.',
-              502,
-              'API_TOOL_UNSUPPORTED'
-            );
+          if (part.functionCall) {
+            if (!generation.tools?.length)
+              throw new AppError('Werkzeuge sind nicht aktiviert', 502, 'API_TOOL_UNSUPPORTED');
+            const index = calls.size;
+            calls.set(index, {
+              id: `gemini_${index}`,
+              name: String(part.functionCall.name),
+              arguments: JSON.stringify(part.functionCall.args ?? {}),
+            });
+            blocks.push(part);
+          } else if (part.text || part.thoughtSignature) blocks.push(part);
           if (typeof part.text === 'string' && part.thought !== true) await onText(part.text);
         }
         if (candidate.finishReason && candidate.finishReason !== 'FINISH_REASON_UNSPECIFIED') {
@@ -350,28 +453,33 @@ export async function streamApiChat(
             cacheWrite: count(u.cache_creation_input_tokens),
           };
       }
-      if (
-        item.type === 'content_block_start' &&
-        item.content_block?.type === 'text' &&
-        typeof item.content_block.text === 'string'
-      )
-        await onText(item.content_block.text);
-      if (
-        item.type === 'content_block_delta' &&
-        item.delta?.type === 'text_delta' &&
-        typeof item.delta.text === 'string'
-      )
-        await onText(item.delta.text);
+      if (item.type === 'content_block_start') {
+        const block = item.content_block;
+        blocks[item.index] = { ...block };
+        if (block?.type === 'text' && typeof block.text === 'string') await onText(block.text);
+        if (block?.type === 'tool_use') {
+          if (!generation.tools?.length)
+            throw new AppError('Werkzeuge sind nicht aktiviert', 502, 'API_TOOL_UNSUPPORTED');
+          calls.set(item.index, { id: String(block.id), name: String(block.name), arguments: '' });
+        }
+      }
+      if (item.type === 'content_block_delta') {
+        const block = blocks[item.index];
+        if (item.delta?.type === 'text_delta' && typeof item.delta.text === 'string') {
+          await onText(item.delta.text);
+          if (block) block.text = String(block.text ?? '') + item.delta.text;
+        } else if (item.delta?.type === 'input_json_delta') {
+          const call = calls.get(item.index);
+          if (call) call.arguments += item.delta.partial_json ?? '';
+        } else if (item.delta?.type === 'thinking_delta' && block)
+          block.thinking = String(block.thinking ?? '') + item.delta.thinking;
+        else if (item.delta?.type === 'signature_delta' && block)
+          block.signature = String(block.signature ?? '') + item.delta.signature;
+      }
       if (item.type === 'message_delta') {
         if (usage && item.usage) usage.output = count(item.usage.output_tokens);
         if (item.delta?.stop_reason === 'max_tokens')
           warning = 'Die API hat die Ausgabe an ihrer Token-Grenze beendet.';
-        if (item.delta?.stop_reason === 'tool_use')
-          throw new AppError(
-            'Das Modell verlangt Werkzeuge, die dieser Modellchat nicht bereitstellt.',
-            502,
-            'API_TOOL_UNSUPPORTED'
-          );
       }
       if (item.type === 'message_stop') done = true;
     } else {
@@ -387,12 +495,18 @@ export async function streamApiChat(
       }
       for (const choice of item.choices ?? []) {
         if (choice.index !== 0) continue;
-        if (choice.delta?.tool_calls)
-          throw new AppError(
-            'Das Modell verlangt Werkzeuge, die dieser Modellchat nicht bereitstellt.',
-            502,
-            'API_TOOL_UNSUPPORTED'
-          );
+        for (const delta of choice.delta?.tool_calls ?? []) {
+          if (!generation.tools?.length)
+            throw new AppError('Werkzeuge sind nicht aktiviert', 502, 'API_TOOL_UNSUPPORTED');
+          const index = Number(delta.index ?? 0),
+            prior = calls.get(index) ?? { id: '', name: '', arguments: '' };
+          prior.id += delta.id ?? '';
+          prior.name += delta.function?.name ?? '';
+          prior.arguments += delta.function?.arguments ?? '';
+          if (prior.arguments.length > 64000 || calls.size > 32)
+            throw new AppError('Werkzeugaufruf zu gross', 502, 'API_TOOL_LIMIT');
+          calls.set(index, prior);
+        }
         const text = choice.delta?.content ?? choice.delta?.refusal;
         if (typeof text === 'string') await onText(text);
         else if (Array.isArray(text)) {
@@ -404,7 +518,7 @@ export async function streamApiChat(
         }
         if (choice.finish_reason) {
           finish = true;
-          if (choice.finish_reason !== 'stop')
+          if (!['stop', 'tool_calls'].includes(choice.finish_reason))
             warning = `Die API hat die Ausgabe mit «${String(choice.finish_reason).slice(0, 40)}» beendet.`;
         }
       }
@@ -437,7 +551,20 @@ export async function streamApiChat(
         502,
         'API_STREAM_INTERRUPTED'
       );
-    return { model: served, usage, warning };
+    const toolCalls = [...calls.values()].map((call) => ({
+      ...call,
+      arguments: call.arguments || '{}',
+    }));
+    if (anthropic)
+      for (const [index, call] of calls)
+        if (blocks[index]) blocks[index]!.input = JSON.parse(call.arguments || '{}');
+    return {
+      model: served,
+      usage,
+      warning,
+      toolCalls,
+      nativeBlocks: (anthropic || gemini) && blocks.length ? blocks : undefined,
+    };
   } finally {
     await reader.cancel().catch(() => {});
     reader.releaseLock();

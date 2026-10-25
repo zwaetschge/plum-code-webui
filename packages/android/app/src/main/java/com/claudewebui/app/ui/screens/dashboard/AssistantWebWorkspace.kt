@@ -59,6 +59,7 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
     val origin = "${uri.scheme}://${uri.rawAuthority}"
     val prefix = uri.rawPath.orEmpty().trimEnd('/')
     var webView by remember { mutableStateOf<WebView?>(null) }
+    var nativePort by remember { mutableStateOf<WebMessagePort?>(null) }
     var loading by remember { mutableStateOf(true) }
     var failure by remember { mutableStateOf<String?>(null) }
     var selectedFiles by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
@@ -89,8 +90,8 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
         }
     }
     val downloads = remember(owner) { object {
-        @JavascriptInterface fun logout() { handler.post { if (current()) { TokenStore.clearAll(); com.claudewebui.app.core.security.AuthEvents.notifySessionExpired() } } }
-        @JavascriptInterface fun offer(encoded: String, filename: String) {
+        fun logout() { handler.post { if (current()) { TokenStore.clearAll(); com.claudewebui.app.core.security.AuthEvents.notifySessionExpired() } } }
+        fun offer(encoded: String, filename: String) {
             if (!current() || encoded.length > 44 * 1024 * 1024) return
             val bytes = runCatching { Base64.decode(encoded, Base64.DEFAULT) }.getOrNull() ?: return
             if (bytes.size > 32 * 1024 * 1024) return
@@ -104,6 +105,12 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
         val prelude = """
             <script>
             window.__PLUM_ANDROID__=$config;
+            window.addEventListener('message',function(event){
+                if(event.source!==null||event.data!=='plum-native'||!event.ports[0])return;
+                const port=event.ports[0];
+                const host={logout:()=>port.postMessage(JSON.stringify({action:'logout'})),offer:(encoded,filename)=>port.postMessage(JSON.stringify({action:'download',encoded:String(encoded),filename:String(filename)}))};
+                window.PlumDownloads=host;window.PlumHost=host;
+            });
             const plumFitViewport=()=>{const h=window.innerHeight;if(h>0)document.documentElement.style.setProperty('--plum-native-height',h+'px');};
             plumFitViewport();window.addEventListener('resize',plumFitViewport);window.addEventListener('load',plumFitViewport);
             const plumStreams=new Set();if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia){const gum=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);navigator.mediaDevices.getUserMedia=async function(c){const s=await gum(c);plumStreams.add(s);s.getTracks().forEach(t=>t.addEventListener('ended',()=>{if(s.getTracks().every(t=>t.readyState==='ended'))plumStreams.delete(s);}));return s;};}
@@ -128,10 +135,10 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
         val clean = if (prefix.isNotEmpty() && raw.startsWith("$prefix/")) raw.removePrefix(prefix) else raw
         if (".." in clean || '%' in clean || '\\' in clean) return null
         val asset = clean.removePrefix("/")
-        if (asset.startsWith("backgrounds/") || asset.startsWith("assets/") || asset.startsWith("logos/") || asset.startsWith("fonts/") || asset.startsWith("icons/") || asset in setOf("favicon.svg", "favicon.ico", "claude-logo.png", "manifest.json")) {
+        if (asset.startsWith("python-runtime/") || asset.startsWith("backgrounds/") || asset.startsWith("assets/") || asset.startsWith("logos/") || asset.startsWith("fonts/") || asset.startsWith("icons/") || asset in setOf("favicon.svg", "favicon.ico", "claude-logo.png", "manifest.json", "chat-sandbox.html")) {
             return runCatching {
-                val mime = when (asset.substringAfterLast('.')) { "js" -> "application/javascript"; "css" -> "text/css"; "svg" -> "image/svg+xml"; "json" -> "application/json"; else -> java.net.URLConnection.guessContentTypeFromName(asset) ?: "application/octet-stream" }
-                WebResourceResponse(mime, "UTF-8", context.assets.open("plum-web/$asset"))
+                val mime = when (asset.substringAfterLast('.')) { "js", "mjs" -> "application/javascript"; "wasm" -> "application/wasm"; "css" -> "text/css"; "svg" -> "image/svg+xml"; "json" -> "application/json"; "html" -> "text/html"; else -> java.net.URLConnection.guessContentTypeFromName(asset) ?: "application/octet-stream" }
+                WebResourceResponse(mime, "UTF-8", 200, "OK", if (asset.startsWith("python-runtime/")) mapOf("Access-Control-Allow-Origin" to "*", "Cross-Origin-Resource-Policy" to "cross-origin") else emptyMap(), context.assets.open("plum-web/$asset"))
             }.getOrElse { WebResourceResponse("text/plain", "UTF-8", 404, "Asset unavailable", emptyMap(), ByteArrayInputStream(ByteArray(0))) }
         }
         if (request.method != "GET" || !current()) return null
@@ -161,7 +168,7 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
         onDispose {
         lifecycle.removeObserver(observer)
         alive.set(false); selectedFiles?.onReceiveValue(null); selectedFiles = null; permission?.deny(); permission = null; download = null
-        webView?.apply { stopLoading(); removeJavascriptInterface("PlumDownloads"); removeJavascriptInterface("PlumHost"); loadUrl("about:blank"); clearCache(true); destroy() }; webView = null
+        webView?.apply { stopLoading(); nativePort?.close(); nativePort = null; loadUrl("about:blank"); clearCache(true); destroy() }; webView = null
         disposeWorkspaceHttpClient(client)
     } }
     PlumBackdrop {
@@ -186,8 +193,6 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
                     settings.javaScriptCanOpenWindowsAutomatically = false; settings.setSupportMultipleWindows(false)
                     settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
-                    addJavascriptInterface(downloads, "PlumDownloads")
-                    addJavascriptInterface(downloads, "PlumHost")
                     webViewClient = object : WebViewClient() {
                         override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest): WebResourceResponse? = localAsset(request)
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest): Boolean {
@@ -207,7 +212,24 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
                             if (request.hasGesture() && target.scheme in listOf("https", "http")) context.startActivity(Intent(Intent.ACTION_VIEW, target))
                             return true
                         }
-                        override fun onPageFinished(view: WebView?, url: String?) { if (current()) loading = false }
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            if (!current() || view == null) return
+                            loading = false; nativePort?.close()
+                            val ports = view.createWebMessageChannel(); nativePort = ports[0]
+                            ports[0].setWebMessageCallback(object : WebMessagePort.WebMessageCallback() {
+                                override fun onMessage(port: WebMessagePort?, message: WebMessage?) {
+                                    if (!current()) return
+                                    runCatching {
+                                        val data = JSONObject(message?.data.orEmpty())
+                                        when (data.optString("action")) {
+                                            "logout" -> downloads.logout()
+                                            "download" -> downloads.offer(data.optString("encoded"), data.optString("filename"))
+                                        }
+                                    }
+                                }
+                            })
+                            view.postWebMessage(WebMessage("plum-native", arrayOf(ports[1])), Uri.parse(origin))
+                        }
                     }
                     webChromeClient = object : WebChromeClient() {
                         override fun onShowFileChooser(view: WebView?, callback: ValueCallback<Array<Uri>>?, params: FileChooserParams?): Boolean {

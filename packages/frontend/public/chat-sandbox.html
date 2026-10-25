@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Plum Code</title>
+  </head>
+  <body>
+    <script>
+      (() => {
+        const runtime = new URL('./python-runtime/', location.href).href;
+        const policy = document.createElement('meta');
+        policy.httpEquiv = 'Content-Security-Policy';
+        policy.content = `default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' blob: ${runtime}; worker-src blob:; connect-src ${runtime}; frame-src about:; img-src data: blob:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'`;
+        document.head.append(policy);
+        const style = document.createElement('style');
+        style.textContent =
+          'body{margin:0;font:14px monospace;white-space:pre-wrap;color:#182018;background:#fff}pre{padding:16px;white-space:pre-wrap;overflow-wrap:anywhere}button{margin:8px;padding:8px}iframe{width:100%;height:100vh;border:0}';
+        document.head.append(style);
+        let accepted = false;
+        window.addEventListener('message', (event) => {
+          if (
+            event.source !== parent ||
+            accepted ||
+            !event.data ||
+            typeof event.data.code !== 'string'
+          )
+            return;
+          accepted = true;
+          const data = event.data;
+          if (data.kind === 'html') {
+            const frame = document.createElement('iframe');
+            frame.title = 'HTML-Ergebnis';
+            frame.sandbox = 'allow-scripts';
+            frame.referrerPolicy = 'no-referrer';
+            frame.srcdoc =
+              "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;base-uri 'none';form-action 'none'\">" +
+              data.code;
+            document.body.append(frame);
+            return;
+          }
+          const stop = document.createElement('button');
+          stop.textContent = 'Stoppen';
+          stop.id = 'stop';
+          const out = document.createElement('pre');
+          out.id = 'out';
+          out.textContent = 'Python wird geladen …';
+          document.body.append(stop, out);
+          const workerCode = `importScripts(${JSON.stringify(runtime + 'pyodide.js')});self.onmessage=async e=>{try{let output='';const write=s=>{output=(output+s+'\\n').slice(-64000);};const py=await loadPyodide({indexURL:${JSON.stringify(runtime)},stdout:write,stderr:write});for(const f of e.data.files||[])py.FS.writeFile(f.name,new Uint8Array(f.data));const result=await py.runPythonAsync(e.data.code);if(result!==undefined)write(String(result));postMessage(output||'Fertig');}catch(e){postMessage(String(e));}};`;
+          const workerUrl = URL.createObjectURL(
+            new Blob([workerCode], { type: 'application/javascript' })
+          );
+          const worker = new Worker(workerUrl);
+          URL.revokeObjectURL(workerUrl);
+          const timer = setTimeout(() => {
+            worker.terminate();
+            out.textContent += '\nZeitlimit erreicht';
+          }, 60000);
+          worker.onmessage = (e) => {
+            clearTimeout(timer);
+            out.textContent = String(e.data);
+            worker.terminate();
+          };
+          worker.onerror = () => {
+            clearTimeout(timer);
+            out.textContent = 'Python konnte nicht geladen werden';
+            worker.terminate();
+          };
+          stop.onclick = () => {
+            worker.terminate();
+            clearTimeout(timer);
+            out.textContent += '\nGestoppt';
+          };
+          worker.postMessage(data);
+        });
+      })();
+    </script>
+  </body>
+</html>

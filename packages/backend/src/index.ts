@@ -553,6 +553,21 @@ async function main() {
     app.use(
       express.static(productionFrontendPath, {
         setHeaders: (res, filePath) => {
+          if (filePath === path.join(productionFrontendPath, 'chat-sandbox.html')) {
+            const scheme = res.req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+            const origin = new URL(`${scheme}://${res.req.headers.host || 'localhost'}`).origin;
+            const prefix = res.req.headers['x-plum-mobile-gateway'] === '1' ? '/mobile' : '';
+            const runtime = origin + prefix + '/python-runtime/';
+            res.setHeader(
+              'Content-Security-Policy',
+              `default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' blob: ${runtime}; worker-src blob:; connect-src ${runtime}; frame-src about:; img-src data: blob:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`
+            );
+            res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+          }
+          if (filePath.startsWith(path.join(productionFrontendPath, 'python-runtime') + path.sep)) {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+          }
           if (filePath.startsWith(path.join(productionFrontendPath, 'assets') + path.sep)) {
             res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           } else if (filePath.endsWith('.html')) {

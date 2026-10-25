@@ -82,6 +82,7 @@ import com.claudewebui.app.data.model.*
 import kotlinx.coroutines.*
 import kotlinx.serialization.json.*
 import org.koin.compose.koinInject
+import com.claudewebui.app.ui.components.chat.MarkdownContent
 import com.claudewebui.app.ui.components.chat.WritingStyleSheet
 import com.claudewebui.app.ui.components.chat.presetName
 import com.claudewebui.app.ui.components.dynamicui.DynamicUi
@@ -133,6 +134,9 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var showWorkspace by remember { mutableStateOf(false) }
     var sourceIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var imageIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var documentIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var documentNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var showAdvanced by remember { mutableStateOf(false) }
     var prompt by remember { mutableStateOf("") }
     var title by remember { mutableStateOf("") }
     var temporary by remember { mutableStateOf(false) }
@@ -140,6 +144,15 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var openedSource by remember { mutableStateOf<AssistantChatSource?>(null) }
+    var sourceDownload by remember { mutableStateOf<ByteArray?>(null) }
+    val sourceSave = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val bytes = sourceDownload; sourceDownload = null
+        if (uri != null && bytes != null) scope.launch {
+            try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } } }
+            catch (failure: Exception) { error = failure.message }
+        }
+    }
     var refresh by remember { mutableIntStateOf(0) }
     var pendingReview by remember { mutableStateOf<AssistantPendingCommand?>(null) }
     var voiceBusy by remember { mutableStateOf(false) }
@@ -189,7 +202,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         }
     }
     val currentOnChatSelected by rememberUpdatedState(onChatSelected)
-    fun showChat(resource: AssistantResource?) { chat = resource; turns = emptyList(); prompt = ""; imageIds = emptyList() }
+    fun showChat(resource: AssistantResource?) { chat = resource; turns = emptyList(); prompt = ""; imageIds = emptyList(); documentIds = emptyList(); documentNames = emptyMap() }
     // The workspace picked another conversation (history column, restored
     // selection, "new chat"): follow it. Internal switches report back through
     // currentOnChatSelected, so both sides agree and this stays a no-op.
@@ -219,7 +232,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         } else if (path == "/api/assistant/api-chats/${chat?.id}/turns") {
             if (!keepDraft) prompt = ""
             // A regenerated version replaces part of the thread: reload it whole.
-            if (result["versionOf"] != null || regenerating) { turns = emptyList(); regenerating = false } else imageIds = emptyList()
+            if (result["versionOf"] != null || regenerating) { turns = emptyList(); regenerating = false } else { imageIds = emptyList(); documentIds = emptyList(); documentNames = emptyMap() }
         }
         else if (path.endsWith("/results")) notice = context.getString(R.string.assistant_result_saved)
         refresh++
@@ -275,30 +288,44 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         }
     }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val target = chat
-        if (uri != null && target != null && !busy && imageIds.size < 4) scope.launch {
+        if (uri != null && !busy && imageIds.size + documentIds.size < 4) scope.launch {
             busy = true; error = null
             try {
+                var target = chat
+                if (target == null) {
+                    require(providerId.isNotBlank() && model.isNotBlank()) { "Modell auswählen" }
+                    val created = outbox.send("/api/assistant/api-chats", buildJsonObject {
+                        put("title", prompt.trim().take(80).ifEmpty { "Neues Gespräch" }); put("providerId", providerId); put("model", model)
+                        profileId?.let { put("profileId", it) }; put("projectId", if (temporary) JsonNull else projectId?.let(::JsonPrimitive) ?: JsonNull)
+                        put("sourceIds", JsonArray(sourceIds.map(::JsonPrimitive))); put("temporary", temporary)
+                        if (newChatStyleSet) put("writingStyleSkill", newChatStyle?.let(::JsonPrimitive) ?: JsonNull)
+                    }, context.getString(R.string.assistant_new), null)
+                    checkOwner(); accept("/api/assistant/api-chats", created); target = requireNotNull(chat)
+                }
+                val destination = requireNotNull(target)
                 val resolver = context.contentResolver
-                val mime = resolver.getType(uri) ?: kotlin.error("Image type unavailable")
+                val mime = resolver.getType(uri) ?: "application/octet-stream"
+                val isImage = mime.startsWith("image/")
+                val limit = (if (isImage) 5 else 25) * 1024 * 1024
+                val filename = resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null } ?: "Datei"
                 val bytes = withContext(Dispatchers.IO) {
                     resolver.openInputStream(uri)?.use { input ->
-                        val output = java.io.ByteArrayOutputStream()
-                        val buffer = ByteArray(8192)
-                        while (output.size() <= 5 * 1024 * 1024) {
-                            val length = input.read(buffer, 0, minOf(buffer.size, 5 * 1024 * 1024 + 1 - output.size()))
-                            if (length < 0) break
-                            output.write(buffer, 0, length)
-                        }
-                        output.toByteArray()
-                    } ?: kotlin.error("Image unavailable")
+                        val output = java.io.ByteArrayOutputStream(); val buffer = ByteArray(8192)
+                        while (output.size() <= limit) { val length = input.read(buffer, 0, minOf(buffer.size, limit + 1 - output.size())); if (length < 0) break; output.write(buffer, 0, length) }
+                        require(output.size() <= limit) { "Datei ist zu gross" }; output.toByteArray()
+                    } ?: kotlin.error("Datei nicht verfügbar")
                 }
                 checkOwner()
-                val response = api.uploadAssistantApiImage(owner, target.id, "image.${mime.substringAfter('/')}", mime, bytes)
-                checkOwner()
-                if (!response.success) kotlin.error(response.error?.message ?: "Image upload failed")
-                val image = requireNotNull(response.data)
-                if (chat?.id == target.id) imageIds = (imageIds + image.id).distinct()
+                if (isImage) {
+                    val response = api.uploadAssistantApiImage(owner, destination.id, filename, mime, bytes)
+                    checkOwner(); require(response.success) { response.error?.message ?: "Upload fehlgeschlagen" }
+                    if (chat?.id == destination.id) imageIds = (imageIds + requireNotNull(response.data).id).distinct()
+                } else {
+                    val response = api.uploadAssistantApiDocument(owner, destination.id, filename, mime, bytes)
+                    checkOwner(); require(response.success) { response.error?.message ?: "Upload fehlgeschlagen" }
+                    val id = requireNotNull(response.data?.get("id")?.jsonPrimitive?.content)
+                    if (chat?.id == destination.id) { documentIds = (documentIds + id).distinct(); documentNames = documentNames + (id to filename) }
+                }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { checkOwner(); error = failure.message }
             finally { if (TokenStore.assistantOwnerKey() == owner) busy = false }
@@ -367,13 +394,15 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         if (text.isEmpty() || busy || running) return
         val current = chat
         if (current != null) {
-            command("/api/assistant/api-chats/${current.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", current.revision); put("imageAssetIds", JsonArray(if (voice) emptyList() else imageIds.map(::JsonPrimitive))); if (voice) put("voice", true) else effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send), keepDraft = override != null)
+            command("/api/assistant/api-chats/${current.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", current.revision); put("imageAssetIds", JsonArray(if (voice) emptyList() else imageIds.map(::JsonPrimitive))); put("documentSourceIds", JsonArray(if (voice) emptyList() else documentIds.map(::JsonPrimitive))); if (voice) put("voice", true) else effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send), keepDraft = override != null)
         } else if ((override == null || voice) && providerId.isNotBlank() && model.isNotBlank()) scope.launch {
             busy = true; error = null
             try {
                 val created = outbox.send("/api/assistant/api-chats", buildJsonObject {
                     put("title", text.take(48)); put("providerId", providerId); put("model", model)
-                    profileId?.let { put("profileId", it) }; put("sourceIds", JsonArray(emptyList()))
+                    profileId?.let { put("profileId", it) }; put("sourceIds", JsonArray(sourceIds.map(::JsonPrimitive)))
+                    put("temporary", temporary)
+                    if (research && !temporary) put("workflow", "research")
                     put("projectId", projectId?.let(::JsonPrimitive) ?: JsonNull)
                     if (newChatStyleSet) put("writingStyleSkill", newChatStyle?.let(::JsonPrimitive) ?: JsonNull)
                 }, context.getString(R.string.assistant_new), null)
@@ -391,6 +420,30 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val researchChat = chat?.body?.get("workflow")?.jsonPrimitive?.contentOrNull == "research"
     val activeWritingStyle = chat?.let { it.body["writingStyleSkill"]?.jsonPrimitive?.contentOrNull }
         ?: if (chat != null) null else if (newChatStyleSet) newChatStyle else personalization?.defaultWritingStyle?.ifBlank { null }
+    openedSource?.let { source ->
+        AlertDialog(onDismissRequest = { openedSource = null }, title = { Text(source.title) }, text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Revision ${source.revision}" + (source.page?.let { " · Seite $it" } ?: ""), style = MaterialTheme.typography.labelSmall)
+                Text(source.text, style = MaterialTheme.typography.bodyMedium)
+            }
+        }, confirmButton = { TextButton(enabled = !busy, onClick = { scope.launch {
+            busy = true; error = null
+            try { val bytes = api.getAssistantSourceFile(source.id, source.revision); checkOwner(); sourceDownload = bytes; sourceSave.launch(source.title.replace(Regex("[\\/\\p{Cntrl}]"), "_")); openedSource = null }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { checkOwner(); error = failure.message }
+            finally { if (TokenStore.assistantOwnerKey() == owner) busy = false }
+        } }) { Text("Originaldatei") } }, dismissButton = { TextButton(onClick = { openedSource = null }) { Text("Schliessen") } })
+    }
+    if (showAdvanced) {
+        AssistantWebWorkspace(
+            path = chat?.id?.let { "/chat/model/$it?workbench=1" } ?: "/chat",
+            area = "chat", onAreaSelect = onAreaSelect, onClose = { showAdvanced = false; refresh++ },
+            onPersonalize = { showAdvanced = false; onAreaSelect("settings") },
+            onNavigateToChat = { selected -> currentOnChatSelected(selected); showAdvanced = false; refresh++ },
+            onNativeChat = { showAdvanced = false; refresh++ }, standaloneTitle = "Chat-Werkzeuge",
+        )
+        return
+    }
     if (!showWorkspace) Column(Modifier.fillMaxSize().padding(top = topInset).navigationBarsPadding().imePadding().padding(horizontal = 16.dp)) {
         TextButton(enabled = !busy && !running, onClick = { showWorkspace = true }) {
             val boundProfile = if (chat == null) profileId else chat?.body?.get("profileId")?.jsonPrimitive?.contentOrNull
@@ -508,18 +561,32 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                     if (thinking) {
                                         val thinkingLabel = stringResource(R.string.component_thinking)
                                         ThinkingDots(palette.accent, Modifier.padding(vertical = 8.dp).semantics { contentDescription = thinkingLabel })
-                                    } else if (streaming) {
-                                        Text(
-                                            buildAnnotatedString { append(turn.response); append(' '); appendInlineContent(CARET_ID, "▍") },
-                                            inlineContent = mapOf(CARET_ID to InlineTextContent(Placeholder(4.sp, 16.sp, PlaceholderVerticalAlign.TextCenter)) { StreamingCaret(palette.accent) }),
-                                            style = MaterialTheme.typography.bodyLarge, color = palette.text,
-                                        )
-                                    } else if (turn.response.isNotEmpty() || (turn.ui == null && !turn.uiPending)) Text(turn.response, style = MaterialTheme.typography.bodyLarge, color = palette.text)
+                                    } else if (turn.response.isNotEmpty() || (turn.ui == null && !turn.uiPending)) {
+                                        MarkdownContent(turn.response, Modifier.fillMaxWidth(), isStreaming = streaming)
+                                    }
                                     // Dynamic UI: an interactive view below the text, rendered natively.
                                     if (turn.uiPending && turn.ui == null) DynamicUiPending()
                                     turn.ui?.let { spec -> DynamicUi(spec, stateStore = dynamicUiState, stateKey = turn.id, busy = busy || running || !live, onSendMessage = if (live) ({ text: String -> send(text) }) else null) }
                                     turn.uiError?.let { note -> if (turn.status != "running") DynamicUiNote(note) }
                                 }
+                                if (turn.toolEvents.isNotEmpty()) {
+                                    Text(turn.toolEvents.joinToString(" · ") { event -> "${if (event.name == "web_search") "Websuche" else if (event.name == "web_fetch") "Seitenabruf" else event.name}: ${if (event.status == "running") "Läuft …" else if (event.status == "failed") "Fehlgeschlagen" else "Fertig"}" }, style = MaterialTheme.typography.labelSmall, color = palette.muted)
+                                }
+                                if (turn.sources.isNotEmpty()) Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    turn.sources.forEach { source -> AssistChip(onClick = { openedSource = source }, label = { Text(source.title + (source.page?.let { " · S. $it" } ?: "")) }) }
+                                }
+                                turn.comparisons.forEach { candidate ->
+                                    Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, palette.border)) {
+                                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text(candidate.model, style = MaterialTheme.typography.labelMedium, color = palette.muted)
+                                            MarkdownContent(candidate.response.ifEmpty { candidate.error ?: "Antwortet …" }, Modifier.fillMaxWidth(), isStreaming = candidate.status == "running")
+                                        }
+                                    }
+                                }
+                                if (turn.comparisons.any { it.status == "completed" }) TextButton(enabled = live && !busy && !running, onClick = {
+                                    val current = chat ?: return@TextButton
+                                    command("/api/assistant/api-chats/${current.id}/turns", buildJsonObject { put("expectedRevision", current.revision); put("prompt", turn.prompt); put("mergeTurnId", turn.id); effort?.let { put("reasoningEffort", it) } }, "Antworten zusammenführen", keepDraft = true)
+                                }) { Text("Antworten zusammenführen") }
                                 turn.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
                                 if (turn.status != "running" && (turn.response.isNotBlank() || turn.versions.size > 1)) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                     if (turn.versions.size > 1) {
@@ -578,10 +645,13 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         if (imageIds.isNotEmpty()) Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             imageIds.forEach { id -> val chipSource = remember { MutableInteractionSource() }; InputChip(selected = true, onClick = { imageIds = imageIds - id }, label = { Text(stringResource(R.string.assistant_remove_image)) }, interactionSource = chipSource, modifier = Modifier.pressScale(chipSource)) }
         }
-        androidx.compose.animation.AnimatedVisibility(showAttach && chat != null && !researchChat) {
+        if (documentIds.isNotEmpty()) Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            documentIds.forEach { id -> InputChip(selected = true, onClick = { documentIds = documentIds - id }, label = { Text(documentNames[id] ?: "Dokument") }) }
+        }
+        androidx.compose.animation.AnimatedVisibility(showAttach && !researchChat) {
             Column(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(enabled = !busy && !cameraBusy && !running && imageIds.size < 4, onClick = { imagePicker.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/gif")) }) { Text(stringResource(R.string.assistant_attach_image)) }
-                key(owner, chatId) { AssistantCamera(owner, chatId!!, api, !busy && !running && imageIds.size < 4, { id -> imageIds = (imageIds + id).distinct() }, { cameraBusy = it }) }
+                OutlinedButton(enabled = !busy && !cameraBusy && !running && imageIds.size < 4, onClick = { imagePicker.launch(arrayOf("*/*")) }) { Text("Dateien anhängen") }
+                if (chatId != null) key(owner, chatId) { AssistantCamera(owner, chatId, api, !busy && !running && imageIds.size < 4, { id -> imageIds = (imageIds + id).distinct() }, { cameraBusy = it }) }
                 key(owner, chatId) { AssistantDictation(owner, api, voiceEnabled && !busy && !running, { text -> prompt = (prompt + (if (prompt.isBlank()) "" else "\n") + text).take(20000) }, { voiceBusy = it }) }
             }
         }
@@ -604,9 +674,11 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                         val plusSource = remember { MutableInteractionSource() }
                         IconButton(onClick = { plusOpen = true }, interactionSource = plusSource, modifier = Modifier.pressScale(plusSource)) { Icon(androidx.compose.material.icons.Icons.Outlined.Add, stringResource(R.string.assistant_add), tint = palette.text) }
                         DropdownMenu(plusOpen, { plusOpen = false }) {
+                            DropdownMenuItem(text = { Text("Chat-Werkzeuge") }, enabled = !busy, onClick = { plusOpen = false; showAdvanced = true })
+                            if (chat == null) DropdownMenuItem(text = { Text(if (temporary) "Temporärer Chat ✓" else "Temporärer Chat") }, enabled = !busy, onClick = { temporary = !temporary; if (temporary) research = false; plusOpen = false })
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.assistant_attach_image)) },
-                                enabled = chat != null && !researchChat,
+                                text = { Text("Dateien anhängen") },
+                                enabled = !researchChat && !busy,
                                 onClick = { plusOpen = false; showAttach = !showAttach },
                             )
                             DropdownMenuItem(
@@ -766,9 +838,27 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     if (showModelSheet) ModelEffortSheet(
         models = providers.flatMap { p -> p.models.map { m -> ModelOption(p.id, p.name, m) } },
         selectedGroup = providerId, selectedModel = model,
-        onSelectModel = { providerId = it.groupId; model = it.model },
+        onSelectModel = { option ->
+            val current = chat
+            if (current == null) { providerId = option.groupId; model = option.model }
+            else if (!busy && !running) scope.launch {
+                busy = true; error = null
+                try {
+                    val response = api.updateAssistantApiChat(owner, current.id, buildJsonObject {
+                        put("expectedRevision", current.revision); put("title", current.title)
+                        put("providerId", option.groupId); put("model", option.model)
+                        put("profileId", current.body["profileId"] ?: JsonNull)
+                        put("sourceIds", current.body["sourceIds"] ?: JsonArray(emptyList()))
+                    })
+                    checkOwner(); require(response.success) { response.error?.message ?: "Modellwechsel fehlgeschlagen" }
+                    chat = requireNotNull(response.data); providerId = option.groupId; model = option.model
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { checkOwner(); error = failure.message }
+                finally { if (TokenStore.assistantOwnerKey() == owner) busy = false }
+            }
+        },
         stops = effortStops, effort = effort, onEffort = { effort = it },
-        onDismiss = { showModelSheet = false }, showModels = chat == null,
+        onDismiss = { showModelSheet = false }, showModels = true,
     )
     if (showHistory) ModalBottomSheet(onDismissRequest = onHistoryDismiss) {
         ModelChatHistoryList(

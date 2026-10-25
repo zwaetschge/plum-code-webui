@@ -220,6 +220,15 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS assistant_api_turns_versions ON assistant_api_turns(chat_id,version_of)`,
     ],
   },
+  {
+    id: '019-api-chat-workbench',
+    statements: [
+      `ALTER TABLE assistant_shares ADD COLUMN IF NOT EXISTS snapshot_json TEXT`,
+      `ALTER TABLE assistant_api_turns ADD COLUMN IF NOT EXISTS workbench_json TEXT NOT NULL DEFAULT '{}'`,
+      `ALTER TABLE assistant_source_chunks ADD COLUMN IF NOT EXISTS embedding DOUBLE PRECISION[]`,
+      `ALTER TABLE assistant_source_chunks ADD COLUMN IF NOT EXISTS embedding_model TEXT`,
+    ],
+  },
 ];
 
 async function ensureTable(): Promise<void> {

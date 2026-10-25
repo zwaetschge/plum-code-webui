@@ -1,6 +1,7 @@
 import type { TransactionScope } from '../../db/pg.js';
 import { findResource } from './resources.js';
-import { get } from '../../db/pg.js';
+import { all, get, run } from '../../db/pg.js';
+import { embedMemory, embeddingModel } from './memorySemantic.js';
 import { AppError } from '../../middleware/errorHandler.js';
 export async function captureTaskSources(
   tx: TransactionScope,
@@ -43,7 +44,8 @@ export async function taskOriginContext(
 export async function taskSourceContext(
   userId: string,
   versions: Array<{ id: string; revision: number }>,
-  query?: string
+  query?: string,
+  fullDocuments = false
 ) {
   const sources: Array<{
     id: string;
@@ -54,8 +56,22 @@ export async function taskSourceContext(
     excerptOnly: boolean;
     excerptStart: number;
     page: number | null;
+    retrieval?: string;
   }> = [];
-  let budget = 16000;
+  let budget = fullDocuments ? 96000 : 32000;
+  // Local embeddings share the existing private embedding service, never a new cloud key.
+  const queryVector =
+    query && !fullDocuments
+      ? await Promise.race([
+          embedMemory([query])
+            .then((v) => v[0])
+            .catch(() => null),
+          new Promise<null>((resolve) => {
+            const t = setTimeout(() => resolve(null), 1800);
+            t.unref();
+          }),
+        ])
+      : null;
   const selected = versions.slice(0, 20);
   for (const [index, item] of selected.entries()) {
     const source = await findResource(userId, item.id).catch(() => null);
@@ -68,44 +84,89 @@ export async function taskSourceContext(
     if (!version) continue;
     const body = JSON.parse(version.body_json),
       text = String(body.text ?? '');
-    let start = 0;
     const terms = [
-      ...new Set((query ?? '').toLocaleLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? []),
+      ...new Set((query ?? '').toLocaleLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []),
     ].slice(0, 40);
-    if (terms.length) {
-      // Retrieval stays on the exact input revision, including when a file is replaced mid-turn.
-      const chunks = await get(
-        `SELECT start_offset,text FROM assistant_source_chunks WHERE resource_id=? AND revision=? ORDER BY (${terms.map(() => '(CASE WHEN text ILIKE ? THEN 1 ELSE 0 END)').join('+')}) DESC,chunk_index LIMIT 1`,
-        source.id,
-        item.revision,
-        ...terms.map((term) => '%' + term + '%')
-      );
-      if (chunks) {
-        const lower = String(chunks.text).toLocaleLowerCase(),
-          positions = terms.map((term) => lower.indexOf(term)).filter((position) => position >= 0);
-        start =
-          Number(chunks.start_offset) +
-          Math.max(0, (positions.length ? Math.min(...positions) : 0) - 200);
-      }
+    const chunks = fullDocuments
+      ? []
+      : await all(
+          'SELECT chunk_index,start_offset,end_offset,page,text,embedding,embedding_model FROM assistant_source_chunks WHERE resource_id=? AND revision=? ORDER BY chunk_index LIMIT 300',
+          source.id,
+          item.revision
+        );
+    // Index only immutable, owned source revisions. A failed embedding service leaves lexical retrieval usable.
+    if (queryVector && chunks.some((c) => !c.embedding || c.embedding_model !== embeddingModel())) {
+      const missing = chunks.filter((c) => !c.embedding || c.embedding_model !== embeddingModel());
+      const vectors = await Promise.race([
+        embedMemory(missing.map((c) => String(c.text))).catch(() => null),
+        new Promise<null>((resolve) => {
+          const t = setTimeout(() => resolve(null), 4000);
+          t.unref();
+        }),
+      ]);
+      if (vectors)
+        for (const [i, chunk] of missing.entries()) {
+          chunk.embedding = vectors[i];
+          chunk.embedding_model = embeddingModel();
+          await run(
+            'UPDATE assistant_source_chunks SET embedding=?::double precision[],embedding_model=? WHERE resource_id=? AND revision=? AND chunk_index=?',
+            vectors[i],
+            embeddingModel(),
+            source.id,
+            item.revision,
+            chunk.chunk_index
+          );
+        }
     }
-    const length = Math.min(query ? Math.floor(budget / (selected.length - index)) : 2000, budget);
-    start = Math.min(start, Math.max(0, text.length - length));
-    const excerpt = text.slice(start, start + length);
-    const marker =
-      body.pageCount && !body.textEdited
-        ? [...text.slice(0, start + 1).matchAll(/\[Seite (\d+)\]/g)].at(-1)
-        : null;
-    budget -= excerpt.length;
-    sources.push({
-      id: source.id,
-      revision: item.revision,
-      title: String(version.title),
-      citation: String(body.citation ?? ''),
-      text: excerpt,
-      excerptOnly: excerpt.length < text.length,
-      excerptStart: start,
-      page: marker ? Number(marker[1]) : null,
-    });
+    const ranked = chunks
+      .map((c) => {
+        const lower = String(c.text).toLocaleLowerCase();
+        const lexical = terms.filter((t) => lower.includes(t)).length / Math.max(1, terms.length);
+        const vector = c.embedding as number[] | null;
+        const semantic =
+          queryVector &&
+          vector?.length === queryVector.length &&
+          c.embedding_model === embeddingModel()
+            ? vector.reduce((sum, v, i) => sum + v * queryVector[i]!, 0)
+            : 0;
+        return { ...c, score: lexical * 0.5 + semantic, semantic: !!(queryVector && vector) };
+      })
+      .sort((a, b) => b.score - a.score || Number(a.chunk_index) - Number(b.chunk_index));
+    const allowance = Math.floor(budget / Math.max(1, selected.length - index));
+    const chosen =
+      fullDocuments || !ranked.length
+        ? [{ text, start_offset: 0, page: null, semantic: false }]
+        : ranked
+            .filter(
+              (c, i, list) =>
+                !list
+                  .slice(0, i)
+                  .some((p) => Math.abs(Number(p.start_offset) - Number(c.start_offset)) < 3500)
+            )
+            .slice(0, 4);
+    let remaining = allowance;
+    for (const chunk of chosen) {
+      if (remaining <= 0) break;
+      const start = Number(chunk.start_offset),
+        excerpt = String(chunk.text).slice(0, remaining);
+      remaining -= excerpt.length;
+      budget -= excerpt.length;
+      const marker =
+        body.pageCount && !body.textEdited
+          ? [...text.slice(0, start + 1).matchAll(/\[Seite (\d+)\]/g)].at(-1)
+          : null;
+      sources.push({
+        id: source.id,
+        revision: item.revision,
+        title: String(version.title),
+        citation: String(body.citation ?? ''),
+        text: excerpt,
+        excerptOnly: excerpt.length < text.length,
+        excerptStart: start,
+        page: body.textEdited ? null : Number(chunk.page ?? marker?.[1]) || null,
+        retrieval: fullDocuments ? 'full' : chunk.semantic ? 'hybrid' : 'lexical',
+      });
+    }
     if (budget <= 0) break;
   }
   return sources;

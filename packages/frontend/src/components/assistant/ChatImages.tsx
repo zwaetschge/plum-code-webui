@@ -4,20 +4,25 @@ import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/button';
 
-export async function uploadChatImages(id: string, files: File[]) {
+export async function uploadChatAttachments(id: string, files: File[]) {
   const owner = useAuthStore.getState().user?.id,
-    result: string[] = [];
+    result: string[] = [],
+    documents: string[] = [];
   for (const file of files) {
     if (useAuthStore.getState().user?.id !== owner) throw new Error('Das Konto wurde gewechselt');
     const form = new FormData();
     form.append('file', file);
+    const isImage = file.type.startsWith('image/');
     const image = (
-      await api.post<{ data: AssistantApiImage }>(`/api/assistant/api-chats/${id}/images`, form)
+      await api.post<{ data: AssistantApiImage }>(
+        `/api/assistant/api-chats/${id}/${isImage ? 'images' : 'documents'}`,
+        form
+      )
     ).data.data;
     if (useAuthStore.getState().user?.id !== owner) throw new Error('Das Konto wurde gewechselt');
-    result.push(image.id);
+    (isImage ? result : documents).push(image.id);
   }
-  return result;
+  return { imageAssetIds: result, documentSourceIds: documents };
 }
 export function ChatImageInput({
   files,
@@ -34,23 +39,27 @@ export function ChatImageInput({
   return (
     <div className="space-y-2">
       <label className="inline-flex cursor-pointer items-center rounded-md border px-3 py-2 text-sm">
-        Bilder anhängen
+        Dateien anhängen
         <input
           disabled={disabled}
           type="file"
           multiple
-          accept="image/png,image/jpeg,image/webp,image/gif"
+          accept="image/png,image/jpeg,image/webp,image/gif,.pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json,.ts,.py,.html,.css,.js"
           className="sr-only"
-          aria-label="Bilder anhängen"
+          aria-label="Dateien anhängen"
           onChange={(event) => {
             const chosen = Array.from(event.target.files ?? []);
             event.target.value = '';
             if (files.length + chosen.length > remaining) {
-              setError('Höchstens vier Bilder pro Nachricht auswählen');
+              setError('Höchstens vier Dateien pro Nachricht auswählen');
               return;
             }
-            if (chosen.some((file) => file.size > 5 * 1024 * 1024)) {
-              setError('Ein Bild darf höchstens 5 MB gross sein');
+            if (
+              chosen.some(
+                (file) => file.size > (file.type.startsWith('image/') ? 5 : 25) * 1024 * 1024
+              )
+            ) {
+              setError('Bilder: höchstens 5 MB. Dokumente: höchstens 25 MB.');
               return;
             }
             setError('');
@@ -72,10 +81,6 @@ export function ChatImageInput({
           </Button>
         </div>
       ))}
-      <p className="text-xs text-muted-foreground">
-        PNG, JPEG, WebP oder GIF, höchstens vier Bilder à 5 MB. Wähle ein Modell mit Bildeingabe;
-        die API-Verbindung erhält die ausgewählten Bilder zusammen mit deiner Nachricht.
-      </p>
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

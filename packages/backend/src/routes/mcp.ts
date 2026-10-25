@@ -105,7 +105,7 @@ function parseClaudeSettingsMcpServer(
   userId: string,
   createdAt: string,
   includeEnv = false
-): McpServer | null {
+): (McpServer & { requestHeaders?: Record<string, string> }) | null {
   const env = stringRecord(server.env);
   const common = {
     id: getClaudeSettingsMcpId(name),
@@ -117,6 +117,7 @@ function parseClaudeSettingsMcpServer(
     readOnly: true,
     env: includeEnv ? env : {},
     envKeys: Object.keys(env).sort(),
+    ...(includeEnv ? { requestHeaders: stringRecord(server.headers) } : {}),
   };
 
   if (typeof server.command === 'string' && server.command.trim().length > 0) {
@@ -169,7 +170,10 @@ async function getDatabaseMcpServers(userId: string): Promise<McpServer[]> {
   return rows.map(parseMcpServer);
 }
 
-async function getMcpServerForRequest(serverId: string, userId: string): Promise<McpServer | null> {
+export async function getMcpServerForRequest(
+  serverId: string,
+  userId: string
+): Promise<(McpServer & { requestHeaders?: Record<string, string> }) | null> {
   const claudeSettingsName = decodeClaudeSettingsMcpId(serverId);
   if (claudeSettingsName) {
     const { servers, mtimeIso } = readClaudeSettingsMcpServers();
@@ -219,7 +223,9 @@ router.get('/:id', requireAuth, async (req, res) => {
     throw new AppError('MCP server not found', 404, 'NOT_FOUND');
   }
 
-  const responseServer = server.readOnly ? { ...server, env: {} } : server;
+  const { requestHeaders: _requestHeaders, ...publicServer } = server;
+  void _requestHeaders;
+  const responseServer = server.readOnly ? { ...publicServer, env: {} } : publicServer;
   res.json({ success: true, data: responseServer });
 });
 
