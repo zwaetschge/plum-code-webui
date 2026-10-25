@@ -54,6 +54,7 @@
     "test:session-icon-thumbnails": "tsx scripts/session-icon-thumbnail-regression-tests.ts",
     "test:chat-media": "pnpm --filter @plum-code-webui/shared run build && tsx scripts/chat-media-regression-tests.ts",
     "test:message-pagination": "tsx scripts/message-pagination-regression-tests.ts",
+    "test:integration-settings": "tsx --conditions=development scripts/integration-settings-regression-tests.ts",
     "test:analytics-settings": "pnpm --filter @plum-code-webui/shared run build && tsx scripts/analytics-settings-regression-tests.ts",
     "clean": "rm -rf dist",
     "db:migrate": "tsx src/db/migrate.ts",

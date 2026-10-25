@@ -1533,17 +1533,17 @@ const integrationsSchema = z.object({
   loraTesterUrl: z.string().trim().url().or(z.literal('')).nullable().optional(),
 });
 
-router.get('/integrations', requireAuth, (_req, res) => {
+router.get('/integrations', requireAuth, async (_req, res) => {
   res.json({
     success: true,
     data: {
-      comfyuiUrl: getAppConfig('comfyui_url') ?? '',
-      loraTesterUrl: getAppConfig('lora_tester_url') ?? '',
+      comfyuiUrl: (await getAppConfig('comfyui_url')) ?? '',
+      loraTesterUrl: (await getAppConfig('lora_tester_url')) ?? '',
     },
   });
 });
 
-router.put('/integrations', requireAuth, requireAdmin, (req, res) => {
+router.put('/integrations', requireAuth, requireAdmin, async (req, res) => {
   const parsed = integrationsSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new AppError('Invalid input', 400, 'VALIDATION_ERROR');
@@ -1552,17 +1552,17 @@ router.put('/integrations', requireAuth, requireAdmin, (req, res) => {
   const { comfyuiUrl, loraTesterUrl } = parsed.data;
 
   if (comfyuiUrl !== undefined) {
-    setAppConfig('comfyui_url', (comfyuiUrl ?? '').trim());
+    await setAppConfig('comfyui_url', (comfyuiUrl ?? '').trim());
   }
   if (loraTesterUrl !== undefined) {
-    setAppConfig('lora_tester_url', (loraTesterUrl ?? '').trim());
+    await setAppConfig('lora_tester_url', (loraTesterUrl ?? '').trim());
   }
 
   res.json({
     success: true,
     data: {
-      comfyuiUrl: getAppConfig('comfyui_url') ?? '',
-      loraTesterUrl: getAppConfig('lora_tester_url') ?? '',
+      comfyuiUrl: (await getAppConfig('comfyui_url')) ?? '',
+      loraTesterUrl: (await getAppConfig('lora_tester_url')) ?? '',
     },
   });
 });

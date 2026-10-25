@@ -29,3 +29,11 @@ Der ursprüngliche Browseraudit ist nach Nutzer-Fortsetzen wieder freigegeben. G
 Implementierung `5700571`; zusätzlicher Kontextfenster-Hinweis aus den tatsächlichen Chatoptionen statt fest 20 Turns: `b19e0bb`, synthetisch geprüft.
 
 Für den abgestimmten Repair-Bot-Rollout liegt das vollständige Paket der sieben betroffenen Web-/Backend-Quelldateien unter `.probe/chat-memory-controls/source.tar`; SHA-256-Vorherstände und Paketmanifest unter `.probe/chat-memory-controls/manifest.json`. Es wurde kein Container neu gestartet und kein Produktionspfad überschrieben.
+
+## Integrationsabsturz aus der Kontoprüfung
+
+Produktiv beobachtet: `/settings?tab=integrations` landet in der ErrorBoundary mit `it.trim is not a function`. Der minifizierte Bezeichner ist `comfyuiUrlInput`. Ursache: GET/PUT `/api/settings/integrations` hatten die nach Postgresumstellung asynchronen `getAppConfig`/`setAppConfig` nicht abgewartet. JSON enthielt deshalb `{}` statt URL-Text, Antworten konnten vor dem Schreiben zurückkehren.
+
+Die acht fehlenden Await-/Handler-Anpassungen korrigieren den API-Vertrag. Es gibt keine clientseitige Umdeutung kaputter Daten. `test:integration-settings` prüft echte HTTP-Routen und isoliertes PostgreSQL: Defaultstrings, vor Antwort abgeschlossene Writes, Rollen/Auth, Teilupdates/Entfernen, ungültige Typen und Web→Android→Web-URL-Abgleich. ComfyUI-Erreichbarkeit wird nur als Fixture beantwortet; keine echten Modell-/ComfyUI-Aufrufe. Backend-Typecheck und gezieltes ESLint bestanden. Lokale gerenderte Integrationsseite bei 1440/390 px ohne ErrorBoundary geprüft; `.probe/chat-memory-controls/integrations-render.py`, Screenshots `.screenshots/integrations-repaired-*.png`. Die ersten Render-Fixtures waren unvollständig (Kategorie-Liste als Objekt); korrigierte Fixture besteht. Native ComfyUI-Einstellungen nutzen bereits den korrekt asynchronen `/api/comfyui/settings`-Vertrag, kein neuer Androidbuild dafür nötig.
+
+Die Produktionsansicht bleibt bis zum abgestimmten Rollout als beobachteter Absturz dokumentiert; lokale erfolgreiche Tests sind kein Produktivnachweis.
