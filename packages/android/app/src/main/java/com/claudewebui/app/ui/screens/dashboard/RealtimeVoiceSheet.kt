@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.media.*
 import android.media.audiofx.AcousticEchoCanceler
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -24,7 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 @SuppressLint("MissingPermission")
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun RealtimeVoiceSheet(owner: String, chatId: String, onSaved: () -> Unit, onDismiss: () -> Unit) {
     val context=LocalContext.current
@@ -97,13 +99,15 @@ internal fun RealtimeVoiceSheet(owner: String, chatId: String, onSaved: () -> Un
         }
     }
     ModalBottomSheet(onDismissRequest=onDismiss,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true)) {
-        Column(Modifier.fillMaxWidth().padding(20.dp).padding(bottom=24.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.fillMaxWidth().heightIn(max=androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * .85f).padding(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             Text("Realtime-Sprache",style=MaterialTheme.typography.headlineSmall)
             Text(status)
-            if(heard.isNotBlank())Text(heard,style=MaterialTheme.typography.bodyMedium)
-            if(answer.isNotBlank())Text(answer,style=MaterialTheme.typography.bodyLarge)
-            error?.let { Text(it,color=MaterialTheme.colorScheme.error) }
-            Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxWidth().weight(1f, fill=false).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                if(heard.isNotBlank())Text(heard,style=MaterialTheme.typography.bodyMedium)
+                if(answer.isNotBlank())Text(answer,style=MaterialTheme.typography.bodyLarge)
+                error?.let { Text(it,color=MaterialTheme.colorScheme.error) }
+            }
+            FlowRow(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(enabled=error==null,onClick={muted=!muted;mute.set(muted)}) { Text(if(muted)"Mikrofon einschalten" else "Stummschalten") }
                 Button(onClick=onDismiss) { Text("Beenden") }
             }

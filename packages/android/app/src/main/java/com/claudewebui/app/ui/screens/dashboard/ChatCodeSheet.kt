@@ -8,6 +8,7 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -21,12 +22,12 @@ import java.io.ByteArrayInputStream
 
 /** Code has a separate WebView, a fixed asset allowlist and no token/native bridge. */
 @SuppressLint("SetJavaScriptEnabled")
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun ChatCodeSheet(code: String, language: String, sources: List<AssistantChatSource>, api: ApiClient, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var edited by remember { mutableStateOf(code) }
+    var edited by rememberSaveable(code) { mutableStateOf(code) }
     var payload by remember { mutableStateOf<String?>(null) }
     var generation by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
@@ -54,17 +55,19 @@ internal fun ChatCodeSheet(code: String, language: String, sources: List<Assista
     LaunchedEffect(Unit) { execute() }
     DisposableEffect(Unit) { onDispose { view?.apply { stopLoading(); loadUrl("about:blank"); destroy() }; view = null } }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        BoxWithConstraints(Modifier.fillMaxWidth().fillMaxHeight(.9f)) {
+        val editorHeight = if (maxHeight < 400.dp) 80.dp else 160.dp
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(if (python) "Python" else "Vorschau", style = MaterialTheme.typography.titleLarge)
-            OutlinedTextField(edited, { edited = it }, label = { Text("Code") }, modifier = Modifier.fillMaxWidth().heightIn(max = 180.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(edited, { edited = it }, label = { Text("Code") }, modifier = Modifier.fillMaxWidth().heightIn(max = editorHeight), minLines = 2, maxLines = 5)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(enabled = !busy, onClick = { execute() }) { Text(if (python) "Ausführen" else "Aktualisieren") }
                 OutlinedButton(onClick = { view?.loadUrl("about:blank"); payload = null }) { Text("Stoppen") }
             }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (payload != null) key(generation) {
-                AndroidView(modifier = Modifier.fillMaxWidth().height(360.dp), factory = { ctx ->
+                AndroidView(modifier = Modifier.fillMaxWidth().weight(1f), factory = { ctx ->
                     WebView(ctx).apply {
                         view?.destroy(); view = this
                         settings.javaScriptEnabled = true
@@ -75,6 +78,9 @@ internal fun ChatCodeSheet(code: String, language: String, sources: List<Assista
                             override fun shouldOverrideUrlLoading(v: WebView?, r: WebResourceRequest) = true
                             override fun shouldInterceptRequest(v: WebView?, r: WebResourceRequest): WebResourceResponse {
                                 val asset = r.url.path.orEmpty().removePrefix("/")
+                                if (r.isForMainFrame && r.url.host == "plum-sandbox.invalid" && asset == "chat-sandbox.html") {
+                                    return WebResourceResponse("text/html", "UTF-8", context.assets.open("plum-web/chat-sandbox.html"))
+                                }
                                 if (r.url.host == "plum-sandbox.invalid" && asset in setOf("python-runtime/pyodide.js", "python-runtime/pyodide.asm.mjs", "python-runtime/pyodide.asm.wasm", "python-runtime/python_stdlib.zip", "python-runtime/pyodide-lock.json")) {
                                     val mime = when { asset.endsWith(".wasm") -> "application/wasm"; asset.endsWith(".zip") -> "application/zip"; asset.endsWith(".json") -> "application/json"; else -> "application/javascript" }
                                     return WebResourceResponse(mime, "UTF-8", 200, "OK", mapOf("Access-Control-Allow-Origin" to "*", "Cross-Origin-Resource-Policy" to "cross-origin"), context.assets.open("plum-web/$asset"))
@@ -88,11 +94,11 @@ internal fun ChatCodeSheet(code: String, language: String, sources: List<Assista
                                 v.evaluateJavascript("(()=>{const p=JSON.parse($encoded);p.files=p.files.map(f=>({name:f.name,data:Uint8Array.from(atob(f.data),c=>c.charCodeAt(0))}));window.postMessage(p,'*');})()", null)
                             }
                         }
-                        val html = context.assets.open("plum-web/chat-sandbox.html").bufferedReader().use { it.readText() }
-                        loadDataWithBaseURL("https://plum-sandbox.invalid/chat-sandbox.html", html, "text/html", "UTF-8", null)
+                        loadUrl("https://plum-sandbox.invalid/chat-sandbox.html")
                     }
                 })
             }
+        }
         }
     }
 }

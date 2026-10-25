@@ -14,6 +14,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -616,11 +617,11 @@ private fun SplitPane(
     list: @Composable () -> Unit,
     detail: @Composable () -> Unit,
 ) {
-    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-    val listWidth = (configuration.screenWidthDp * .34f).coerceIn(264f, 320f).dp
-    val density = LocalDensity.current
-    val listPx = with(density) { listWidth.toPx() }
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // Use the workspace width, including multi-window and the navigation rail.
+        val listWidth = (maxWidth * .32f).coerceIn(240.dp, 300.dp)
+        val density = LocalDensity.current
+        val listPx = with(density) { listWidth.toPx() }
         val target = if (listTarget) 1f else 0f
         Box(
             Modifier.fillMaxSize()

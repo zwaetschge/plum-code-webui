@@ -1,4 +1,4 @@
-import type { AssistantApiProvider } from '@plum-code-webui/shared';
+import { orderChatApiProviders, type AssistantApiProvider } from '@plum-code-webui/shared';
 import { readOpenCodeProvidersForUser } from '../../utils/opencodeProviderKeys.js';
 import { getOpenCodeProviderCatalog } from '../../utils/opencodeCatalog.js';
 import { safeDecrypt } from '../../utils/encryption.js';
@@ -77,12 +77,14 @@ async function endpoints(userId: string): Promise<Endpoint[]> {
   });
 }
 export async function apiChatProviders(userId: string): Promise<AssistantApiProvider[]> {
-  return (await endpoints(userId)).map(({ id, name, protocol, models }) => ({
-    id,
-    name,
-    protocol,
-    models,
-  }));
+  return orderChatApiProviders(
+    (await endpoints(userId)).map(({ id, name, protocol, models }) => ({
+      id,
+      name,
+      protocol,
+      models,
+    }))
+  );
 }
 export async function apiChatEndpoint(userId: string, providerId: string, model: string) {
   const endpoint = (await endpoints(userId)).find((item) => item.id === providerId);

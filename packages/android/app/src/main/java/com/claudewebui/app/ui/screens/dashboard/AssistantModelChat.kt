@@ -127,10 +127,10 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var turns by remember { mutableStateOf<List<AssistantApiTurn>>(emptyList()) }
     val dynamicUiState = rememberSaveable(chat?.id, saver = DynamicUiStateStore.StateSaver) { DynamicUiStateStore() }
     var pending by remember { mutableStateOf<List<AssistantPendingCommand>>(emptyList()) }
-    var providerId by remember { mutableStateOf("") }
-    var model by remember { mutableStateOf("") }
-    var profileId by remember { mutableStateOf<String?>(null) }
-    var projectId by remember { mutableStateOf<String?>(null) }
+    var providerId by rememberSaveable { mutableStateOf("") }
+    var model by rememberSaveable { mutableStateOf("") }
+    var profileId by rememberSaveable { mutableStateOf<String?>(null) }
+    var projectId by rememberSaveable { mutableStateOf<String?>(null) }
     var showWorkspace by remember { mutableStateOf(false) }
     var sourceIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var imageIds by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -139,10 +139,10 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var realtimeVoice by remember { mutableStateOf(false) }
     var showAdvanced by remember { mutableStateOf(false) }
     var newChatOptions by remember { mutableStateOf(buildJsonObject {}) }
-    var prompt by remember { mutableStateOf("") }
-    var title by remember { mutableStateOf("") }
-    var temporary by remember { mutableStateOf(false) }
-    var research by remember { mutableStateOf(false) }
+    var prompt by rememberSaveable { mutableStateOf("") }
+    var title by rememberSaveable { mutableStateOf("") }
+    var temporary by rememberSaveable { mutableStateOf(false) }
+    var research by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
@@ -164,8 +164,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var personalization by remember { mutableStateOf<AssistantPersonalization?>(null) }
     var writingStyles by remember { mutableStateOf<List<ConfigSkill>>(emptyList()) }
     // New chat: false keeps the account default, true sends newChatStyle (null = none).
-    var newChatStyleSet by remember { mutableStateOf(false) }
-    var newChatStyle by remember { mutableStateOf<String?>(null) }
+    var newChatStyleSet by rememberSaveable { mutableStateOf(false) }
+    var newChatStyle by rememberSaveable { mutableStateOf<String?>(null) }
     var showStyleSheet by remember { mutableStateOf(false) }
     var showVoiceSheet by remember { mutableStateOf(false) }
     var voiceMode by remember { mutableStateOf(false) }
@@ -205,18 +205,24 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         }
     }
     val currentOnChatSelected by rememberUpdatedState(onChatSelected)
-    fun showChat(resource: AssistantResource?) { chat = resource; turns = emptyList(); prompt = ""; imageIds = emptyList(); documentIds = emptyList(); documentNames = emptyMap() }
+    // Reloading the selected chat after recreation must keep its unsent draft.
+    var draftChatId by rememberSaveable { mutableStateOf(selectedChatId) }
+    fun showChat(resource: AssistantResource?, restoring: Boolean = false) {
+        if (!restoring || draftChatId != resource?.id) prompt = ""
+        draftChatId = resource?.id
+        chat = resource; turns = emptyList(); imageIds = emptyList(); documentIds = emptyList(); documentNames = emptyMap()
+    }
     // The workspace picked another conversation (history column, restored
     // selection, "new chat"): follow it. Internal switches report back through
     // currentOnChatSelected, so both sides agree and this stays a no-op.
     LaunchedEffect(owner, selectedChatId) {
         if (selectedChatId == chat?.id) return@LaunchedEffect
-        if (selectedChatId == null) { showChat(null); return@LaunchedEffect }
-        RecentModelChats.get(selectedChatId)?.let { showChat(it); return@LaunchedEffect }
+        if (selectedChatId == null) { showChat(null, restoring = true); return@LaunchedEffect }
+        RecentModelChats.get(selectedChatId)?.let { showChat(it, restoring = true); return@LaunchedEffect }
         try {
             val response = api.getAssistantApiTurns(selectedChatId); checkOwner()
             val loaded = response.data?.chat
-            if (response.success && loaded != null) showChat(loaded) else currentOnChatSelected(chat?.id)
+            if (response.success && loaded != null) showChat(loaded, restoring = true) else currentOnChatSelected(chat?.id)
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { checkOwner(); error = failure.message; currentOnChatSelected(chat?.id) }
     }
@@ -226,9 +232,11 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         checkOwner()
         if (path == "/api/assistant/api-chats") {
             chat = json.decodeFromJsonElement<AssistantResource>(result); turns = emptyList(); imageIds = emptyList()
+            draftChatId = chat?.id
             currentOnChatSelected(chat?.id)
         } else if (path.endsWith("/branches")) {
             chat = json.decodeFromJsonElement<AssistantResource>(result.getValue("chat"))
+            draftChatId = chat?.id
             currentOnChatSelected(chat?.id)
             turns = emptyList(); prompt = result["prompt"]?.jsonPrimitive?.content.orEmpty()
             imageIds = result["imageAssetIds"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
@@ -255,7 +263,9 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             pending = outbox.pending()
             val catalog = api.getAssistantApiProviders(); checkOwner()
             providers = catalog.data.orEmpty()
-            providerId = providers.firstOrNull()?.id.orEmpty(); model = providers.firstOrNull()?.models?.firstOrNull().orEmpty()
+            val selectedProvider = providers.firstOrNull { it.id == providerId } ?: providers.firstOrNull()
+            providerId = selectedProvider?.id.orEmpty()
+            if (model !in selectedProvider?.models.orEmpty()) model = selectedProvider?.models?.firstOrNull().orEmpty()
             val profileResult = api.getAssistantResources("profiles"); checkOwner(); profiles = profileResult.data.orEmpty()
             val projectResult = api.getAssistantResources("projects"); checkOwner(); projects = projectResult.data.orEmpty()
             val sourceResult = api.getAssistantResources("sources"); checkOwner(); sources = sourceResult.data.orEmpty()

@@ -38,3 +38,5 @@ export * from './types/assistant-personal-workspace.js';
 export * from './types/assistant-personalization.js';
 
 export * from './utils/dynamicUiCatalog.js';
+
+export { orderChatApiProviders } from './utils/chatApiProviders.js';

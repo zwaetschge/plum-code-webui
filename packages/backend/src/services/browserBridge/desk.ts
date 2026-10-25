@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { orderChatApiProviders } from '@plum-code-webui/shared';
 import { randomUUID } from 'node:crypto';
 import { apiChatTurns, createApiChat, startApiTurn } from '../assistant/apiChats.js';
 import { apiChatProviders } from '../assistant/apiTransport.js';
@@ -15,15 +16,6 @@ import { AppError } from '../../middleware/errorHandler.js';
  * OmniVoice), listen again. The chat is an ordinary Plum chat and shows up in
  * the chat list. The board authenticates with a `plum_ff_` device token.
  */
-
-/** Same provider order as the WebUI start page (orderChatApiProviders). */
-const PROVIDER_PRIORITY: Record<string, number> = {
-  anthropic: 0,
-  mistral: 1,
-  deepseek: 2,
-  'z-ai': 3,
-  zai: 3,
-};
 
 /**
  * Phrases Whisper invents for noise or silence (subtitle credits from its
@@ -123,9 +115,7 @@ export async function deskTurn(
     });
   }
   if (!chatId) {
-    const providers = (await apiChatProviders(userId))
-      .filter((provider) => provider.models.length)
-      .sort((a, b) => (PROVIDER_PRIORITY[a.id] ?? 4) - (PROVIDER_PRIORITY[b.id] ?? 4));
+    const providers = orderChatApiProviders(await apiChatProviders(userId));
     const provider = providers[0];
     if (!provider)
       throw new AppError('Keine Modellverbindung eingerichtet', 409, 'NO_API_PROVIDER');
