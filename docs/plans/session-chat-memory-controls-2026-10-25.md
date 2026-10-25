@@ -21,6 +21,10 @@ Der Browservergleich hat zwei unabhängig vom laufenden Kontoaudit belegte Vertr
 
 ## Lieferung
 
-Android-Build 1.9.5 / vc57 über android-builder läuft als separater Hintergrundauftrag. Kein raw adb/Gradle. Neue Flags benötigen den Backend-Rollout, bevor die APK veröffentlicht/installiert wird. Hauptrollout ist mit der separaten laufenden Schwarm-Integration abzustimmen; bisher kein paralleler Neustart ausgelöst. Keine Aussage über produktiv ausgelieferte Änderungen, solange Rollout und echte Clients nicht bestätigt sind.
+Android-Build über android-builder erfolgreich: **1.9.5-debug / vc57**, frisches APK vom 25.10.2026 21:55:36 UTC, Builder `built` um 21:58:31 UTC. APK `/mnt/user/Zwischenspeicher/plum-1.9.5.apk`, 51’968’014 Bytes, SHA-256 `2c38f824e9e661f357cf92f97842d59b25c4292e82619f6c9a8f2dee22354ec7` stimmt mit Builderoriginal überein. Kotlin-Quell-/Buildsnapshot SHA-256 `e0c823cf1f39767a6e308dc99292683fbe619263a9e6d18284279e1c78c760a3`. Claim nach Export freigegeben. Keine Installation oder Veröffentlichung; kein nativer Laufzeit-/Screenshotnachweis für diese neuen Schalter. Kein raw adb/Gradle. Neue Flags benötigen den Backend-Rollout, bevor die APK veröffentlicht/installiert wird. Hauptrollout ist mit der separaten laufenden Schwarm-Integration abzustimmen; bisher kein paralleler Neustart ausgelöst. Keine Aussage über produktiv ausgelieferte Änderungen, solange Rollout und echte Clients nicht bestätigt sind.
 
 Der ursprüngliche Browseraudit ist nach Nutzer-Fortsetzen wieder freigegeben. Genau ein Browserführer setzt die übrigen Kontoprüfungen fort; dessen neue Belege liegen unter `research_notes/Plum Chat Browserabschluss/`. Frühere Gesamtberichte sind Zwischenstände. Weitere bestätigte Lücken (Antwortbelege, Themenwissen, Skills/Toolrechte und übrige Arbeitsabläufe) sind damit noch nicht umgesetzt oder vollständig abgenommen.
+
+Implementierung `5700571`; zusätzlicher Kontextfenster-Hinweis aus den tatsächlichen Chatoptionen statt fest 20 Turns: `b19e0bb`, synthetisch geprüft.
+
+Für den abgestimmten Repair-Bot-Rollout liegt das vollständige Paket der sieben betroffenen Web-/Backend-Quelldateien unter `.probe/chat-memory-controls/source.tar`; SHA-256-Vorherstände und Paketmanifest unter `.probe/chat-memory-controls/manifest.json`. Es wurde kein Container neu gestartet und kein Produktionspfad überschrieben.

@@ -29,7 +29,7 @@ Aktueller Stand: Firefox wurde vom Nutzer fortgesetzt, `control` ohne `stopped` 
 - [x] Unabhängige Lese-/Lernschalter pro Chat in Backend, Web und Android einbauen; temporär bleibt gesperrt.
 - [x] Vier Kombinationen, globale Sperren, Lernstornierung und spätere Wiederfreigabe in isolierten Backend-Tests prüfen.
 - [x] Neue und bestehende Webchats bei 1440/390 px gerendert prüfen, Speichern und Reload verifizieren.
-- [ ] Android-Build 1.9.5 abschliessen, APK sichern und SHA-256 prüfen.
+- [x] Android-Build 1.9.5 abschliessen, APK sichern und SHA-256 prüfen — vc57, 51’968’014 Bytes, Builder `built`, Exporthash stimmt; noch nicht installiert/veröffentlicht.
 - [ ] Backend/Web-Rollout mit laufender Schwarm-Integration abstimmen und verifizieren; APK erst danach freigeben.
 - [ ] Weitere bestätigte Lücken nach vollständigem Kontovergleich umsetzen und abnehmen.
 
