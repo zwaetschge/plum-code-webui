@@ -16,11 +16,12 @@ export type AssistantResourceKind =
   | 'api-chat';
 
 export interface AssistantApiTurn {
+  contextReceipt?: import('./chatContextReceipts.js').ChatContextReceipt;
   id: string;
   seq: number;
   prompt: string;
   response: string;
-  status: 'running' | 'completed' | 'cancelled' | 'failed' | 'interrupted';
+  status: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed' | 'interrupted';
   error: string | null;
   createdAt: string;
   model: string;
@@ -43,7 +44,8 @@ export interface AssistantApiTurn {
   toolEvents?: Array<{
     id: string;
     name: string;
-    status: 'running' | 'completed' | 'failed';
+    status: 'running' | 'waiting' | 'completed' | 'failed';
+    arguments?: string;
     result?: string;
   }>;
   comparisons?: Array<{

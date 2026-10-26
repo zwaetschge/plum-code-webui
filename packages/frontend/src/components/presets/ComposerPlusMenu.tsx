@@ -25,7 +25,7 @@ export function ComposerPlusMenu({
   children,
 }: ComposerPlusMenuProps) {
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger
         disabled={disabled}
         aria-label="Anhänge und Vorgaben"

@@ -8,11 +8,13 @@ import {
 } from './apiTransport.js';
 import { chatToolset } from './chatTools.js';
 import type { ChatOptions } from './chatOptions.js';
+import { redactSensitiveText } from '../../utils/sanitize.js';
 
 export interface ChatToolEvent {
   id: string;
   name: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'waiting' | 'completed' | 'failed';
+  arguments?: string;
   result?: string;
 }
 export interface ChatComparison {
@@ -48,6 +50,12 @@ export async function generateChat(options: {
   workbench: ChatWorkbench;
   onText: (text: string) => Promise<void>;
   onUpdate: () => Promise<void>;
+  approveTool?: (
+    callId: string,
+    name: string,
+    args: Record<string, unknown>,
+    onReady: () => Promise<void>
+  ) => Promise<boolean>;
 }): Promise<ApiStreamResult & { costUsd: number | null }> {
   const { userId, signal, workbench, settings } = options;
   const ledger: Array<{ model: string; usage: ApiUsage | null }> = [];
@@ -102,8 +110,23 @@ export async function generateChat(options: {
             const args = JSON.parse(call.arguments);
             if (!args || Array.isArray(args) || typeof args !== 'object')
               throw new Error('Ungültige Werkzeugargumente');
-            event.result = await tools.call(call.name, args);
-            event.status = 'completed';
+            if (tools.requiresApproval(call.name)) {
+              if (!options.approveTool) throw new Error('Werkzeugentscheidung nicht verfügbar');
+              event.status = 'waiting';
+              event.arguments = redactSensitiveText(JSON.stringify(args)).slice(0, 16000);
+              // Create the durable request before publishing its decision controls.
+              if (!(await options.approveTool(call.id, call.name, args, options.onUpdate))) {
+                event.result = 'Werkzeugaufruf vom Nutzer abgelehnt. Keine Ausführung.';
+                event.status = 'failed';
+              } else {
+                signal.throwIfAborted();
+                event.result = await tools.call(call.name, args, true);
+                event.status = 'completed';
+              }
+            } else {
+              event.result = await tools.call(call.name, args);
+              event.status = 'completed';
+            }
           } catch {
             event.result = 'Werkzeugaufruf fehlgeschlagen. Keine Ergebnisse verfügbar.';
             event.status = 'failed';

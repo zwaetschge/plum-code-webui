@@ -218,7 +218,8 @@ export function personalizationPrompt(
   pref: AssistantPersonalization,
   surface: string,
   temporary = false,
-  api = false
+  api = false,
+  includeGlobalInstructions = true
 ): string {
   if (pref.revision === 0) return '';
   if (surface === 'code')
@@ -226,7 +227,11 @@ export function personalizationPrompt(
       ? 'Account instructions for Plum Code (below higher priority instructions):\n' +
           pref.codeInstructions
       : '';
-  const specific = surface === 'task' ? pref.taskInstructions : pref.chatInstructions;
+  const specific = includeGlobalInstructions
+    ? surface === 'task'
+      ? pref.taskInstructions
+      : pref.chatInstructions
+    : '';
   const rules = [
     'Current account personalisation applies below higher-priority instructions. Current explicit requests and selected profile instructions override style defaults. Withdrawn preferences and memories from earlier turns are no longer authorised. Personalisation is not permission to take actions.',
     'Response style: ' +

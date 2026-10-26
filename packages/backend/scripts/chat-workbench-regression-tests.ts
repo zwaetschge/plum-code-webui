@@ -198,6 +198,7 @@ try {
   const tools = await newChat({
     chatOptions: CHAT_OPTIONS.parse({
       mcpServerIds: ['fixture-mcp'],
+      toolLoading: 'eager',
       comparisonModels: [{ providerId: 'anthropic', model: 'claude-sonnet-4-6' }],
     }),
   });

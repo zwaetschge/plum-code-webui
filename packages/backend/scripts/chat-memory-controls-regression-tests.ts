@@ -8,6 +8,7 @@ const { run, get } = await import('../src/db/pg.js');
 const { createResource, BODY_SCHEMAS } = await import('../src/services/assistant/resources.js');
 const { updatePersonalization } = await import('../src/services/assistant/personalization.js');
 const { systemContext, updateApiChat } = await import('../src/services/assistant/apiChats.js');
+const { contextReceipts } = await import('../src/services/assistant/chatContextReceipts.js');
 const { enqueueMemory, memorySource, processMemoryJob, forgetMemory } =
   await import('../src/services/assistant/memory.js');
 const { safeEncrypt } = await import('../src/utils/encryption.js');
@@ -37,7 +38,13 @@ try {
   ]);
   let pref = await updatePersonalization(user, {
     expectedRevision: 0,
-    preferences: { memoryEnabled: true, memoryLearning: true, chatHistory: true },
+    preferences: {
+      memoryEnabled: true,
+      memoryLearning: true,
+      chatHistory: true,
+      chatInstructions: 'ACCOUNT CHAT RULE',
+      nickname: 'Style fixture',
+    },
   });
   const project = await createResource(
     user,
@@ -98,6 +105,62 @@ try {
     return id;
   }
   await insertTurn(sibling.id);
+  const isolatedProject = await createResource(
+    user,
+    'project',
+    'Eigene Anweisungen',
+    BODY_SCHEMAS.project.parse({
+      instructions: 'PROJECT OWN RULE',
+      includeGlobalChatInstructions: false,
+    })
+  );
+  const isolatedChat = await createResource(
+    user,
+    'api-chat',
+    'Isoliert',
+    BODY_SCHEMAS['api-chat'].parse({
+      providerId: 'fixture',
+      model: 'fixture',
+      projectId: isolatedProject.id,
+    })
+  );
+  const isolatedContext = await systemContext(user, isolatedChat);
+  assert(!isolatedContext.system.includes('ACCOUNT CHAT RULE'));
+  assert(isolatedContext.system.includes('PROJECT OWN RULE'));
+  assert(
+    isolatedContext.system.includes('Style fixture'),
+    'instruction opt-out keeps independent personalisation'
+  );
+  const isolatedProfile = await createResource(
+    user,
+    'profile',
+    'Eigener Assistent',
+    BODY_SCHEMAS.profile.parse({
+      instructions: 'PROFILE OWN RULE',
+      includeGlobalChatInstructions: false,
+    })
+  );
+  const profileChat = await createResource(
+    user,
+    'api-chat',
+    'Assistent isoliert',
+    BODY_SCHEMAS['api-chat'].parse({
+      providerId: 'fixture',
+      model: 'fixture',
+      profileId: isolatedProfile.id,
+      profileRevision: isolatedProfile.revision,
+    })
+  );
+  const profileContext = await systemContext(user, profileChat);
+  assert(!profileContext.system.includes('ACCOUNT CHAT RULE'));
+  assert(profileContext.system.includes('PROFILE OWN RULE'));
+  assert(
+    (await systemContext(user, sibling)).system.includes('ACCOUNT CHAT RULE'),
+    'inheritance remains default'
+  );
+  console.log(
+    'PASS: project/profile opt-out removes global Chat instructions only; default inheritance and personalisation remain'
+  );
   for (const memoryRead of [false, true])
     for (const memoryLearn of [false, true]) {
       const chat = await createResource(
@@ -327,8 +390,59 @@ try {
       ],
     })
   );
-  assert((await systemContext(user, laterChat, 'SIBLING')).system.includes('SIBLING HISTORY FACT'));
+  const supplied = await systemContext(user, laterChat, 'SIBLING');
+  assert(supplied.system.includes('SIBLING HISTORY FACT'));
+  assert(
+    supplied.memoryContext.references.some(
+      (ref) =>
+        ref.kind === 'memory' && ref.id === remembered.id && ref.revision === remembered.revision
+    )
+  );
+  assert(
+    supplied.memoryContext.references.some(
+      (ref) =>
+        ref.kind === 'project-chat' && ref.id === originalChat.id && ref.turnId === originalTurn
+    )
+  );
+  const receiptTurn = {
+    id: randomUUID(),
+    status: 'completed',
+    profile_json: JSON.stringify(supplied),
+  };
+  const beforeForget = (await contextReceipts(user, laterChat.id, [receiptTurn])).get(
+    receiptTurn.id
+  )!;
+  assert(
+    beforeForget.references.some(
+      (ref) => ref.id === remembered.id && ref.text === 'SIBLING HISTORY FACT' && ref.available
+    )
+  );
+  assert.equal(
+    (await contextReceipts('another-owner', laterChat.id, [receiptTurn]))
+      .get(receiptTurn.id)!
+      .references.filter((ref) => ref.available).length,
+    0,
+    'receipt resolution remains owner-bound'
+  );
   await forgetMemory(user, remembered.id, remembered.revision);
+  const afterForget = (await contextReceipts(user, laterChat.id, [receiptTurn])).get(
+    receiptTurn.id
+  )!;
+  assert(
+    afterForget.references.every(
+      (ref) => ref.id !== remembered.id || (!ref.available && !ref.text)
+    ),
+    'forget must not re-expose facts through receipts'
+  );
+  assert(
+    afterForget.references.every((ref) => ref.turnId !== originalTurn || !ref.available),
+    'forgotten source tombstones also apply to receipt links'
+  );
+  assert.equal(
+    (await contextReceipts(user, laterChat.id, [{ ...receiptTurn, profile_json: '{}' }])).size,
+    0,
+    'old turns never receive invented context receipts'
+  );
   assert(
     !(await systemContext(user, laterChat, 'SIBLING')).system.includes('SIBLING HISTORY FACT'),
     'forgotten origin must not return through project excerpts'

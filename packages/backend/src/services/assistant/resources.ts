@@ -77,6 +77,7 @@ export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
   profile: z.object({
     /** Legacy hand-written notes; the editor folds them into the instructions. */
     sharedMemories: z.string().max(30000).optional(),
+    includeGlobalChatInstructions: z.boolean().default(true),
     instructions: z.string().max(30000).default(''),
     provider: provider.default('codex'),
     model: z.string().max(200).nullable().optional(),
@@ -104,6 +105,7 @@ export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
     sourceIds: z.array(z.string().max(200)).max(20).default([]),
   }),
   project: z.object({
+    includeGlobalChatInstructions: z.boolean().default(true),
     /** ChatGPT project memory; legacy `contextMode: 'separate'` reads as project-only. */
     memoryMode: z.enum(['default', 'project-only']).optional(),
     contextMode: z.enum(['shared', 'separate']).optional(),

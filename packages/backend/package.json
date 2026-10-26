@@ -33,6 +33,8 @@
     "test:dynamic-ui": "node ../../scripts/generate-dynamic-ui-catalog.mjs --check && tsx --conditions=development scripts/dynamic-ui-regression-tests.ts",
     "test:session-relocation": "tsx --conditions=development scripts/session-relocation-tests.ts",
     "test:chat-workbench": "tsx --conditions=development scripts/chat-workbench-regression-tests.ts",
+    "test:chat-capabilities": "tsx --conditions=development scripts/chat-capabilities-regression-tests.ts",
+    "test:chat-queue": "tsx --conditions=development scripts/chat-queue-regression-tests.ts",
     "test:assistant-realtime": "tsx --conditions=development scripts/realtime-voice-regression-tests.ts",
     "test:assistant-api-chat": "tsx --conditions=development scripts/assistant-api-chat-regression-tests.ts && tsx --conditions=development scripts/chat-memory-controls-regression-tests.ts",
     "test:assistant-voice": "tsx --conditions=development scripts/assistant-voice-regression-tests.ts",

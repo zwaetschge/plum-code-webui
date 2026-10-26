@@ -431,6 +431,9 @@ function WorkspaceEditor({
     projectMemoryMode(resource?.body)
   );
   const [expertMemory, setExpertMemory] = useState(String(resource?.body.memory ?? 'off'));
+  const [includeGlobalChatInstructions, setIncludeGlobalChatInstructions] = useState(
+    resource?.body.includeGlobalChatInstructions !== false
+  );
   const [sourceIds, setSourceIds] = useState<string[]>(
     (resource?.body.sourceIds ?? []) as string[]
   );
@@ -452,6 +455,7 @@ function WorkspaceEditor({
     try {
       const body = {
         ...resource?.body,
+        ...(collection !== 'sources' ? { includeGlobalChatInstructions } : {}),
         ...(collection === 'sources' ? { text: instructions, projectId } : { instructions }),
         ...(collection === 'projects' ? { description, memoryMode, contextMode: undefined } : {}),
         ...(collection === 'profiles'
@@ -541,6 +545,16 @@ function WorkspaceEditor({
         </h1>
       </header>
       <fieldset disabled={busy} className="space-y-5">
+        {collection !== 'sources' && (
+          <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={includeGlobalChatInstructions}
+              onChange={(event) => setIncludeGlobalChatInstructions(event.target.checked)}
+            />
+            Globale Chat-Anweisungen übernehmen
+          </label>
+        )}
         <label className="grid gap-2 text-sm">
           Name
           <input

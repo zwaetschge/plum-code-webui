@@ -192,7 +192,8 @@ const portableWorkbench = z.object({
       z.object({
         id: z.string().max(200),
         name: z.string().max(200),
-        status: z.enum(['running', 'completed', 'failed']),
+        status: z.enum(['running', 'waiting', 'completed', 'failed']),
+        arguments: z.string().max(16000).optional(),
         result: z.string().max(32000).optional(),
       })
     )
@@ -502,7 +503,7 @@ export async function shareChat(userId: string, id: string) {
       'TEMPORARY_RESULT_DISABLED'
     );
   const rows = await all(
-    "SELECT prompt,response,model,workbench_json FROM assistant_api_turns WHERE chat_id=? AND hidden_by IS NULL AND status<>'running' ORDER BY seq LIMIT 1000",
+    "SELECT prompt,response,model,workbench_json FROM assistant_api_turns WHERE chat_id=? AND hidden_by IS NULL AND status NOT IN ('queued','preparing','running') ORDER BY seq LIMIT 1000",
     id
   );
   const snapshot = {

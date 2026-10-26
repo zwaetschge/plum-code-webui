@@ -1,5 +1,6 @@
 import { resolveAuthenticatedUserId } from './middleware/auth.js';
 import { startMemoryWorker } from './services/assistant/memory.js';
+import { startApiChatQueueWorker } from './services/assistant/apiChatQueue.js';
 import { relocateMissingSessionDirectories } from './services/claude/sessionRelocation.js';
 import express from 'express';
 import fs from 'fs';
@@ -266,6 +267,7 @@ async function main() {
   await reconcileAssistantTasks();
   startSourceObservation();
   startMemoryWorker();
+  startApiChatQueueWorker();
   // Sessions follow project folders that moved to or from the Unraid array.
   const relocate = () =>
     void relocateMissingSessionDirectories().catch((error) =>

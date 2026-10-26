@@ -560,15 +560,15 @@ try {
     expectedRevision: 1,
     prompt: 'Langsam',
   });
-  await assert.rejects(
-    () =>
-      startApiTurn('api-alice', chat.id, {
-        commandId: randomUUID(),
-        expectedRevision: 1,
-        prompt: 'Parallel',
-      }),
-    /bereits eine Antwort/
-  );
+  const waiting = await startApiTurn('api-alice', chat.id, {
+    commandId: randomUUID(),
+    expectedRevision: 1,
+    prompt: 'Parallel',
+  });
+  assert.equal(waiting.status, 'queued');
+  assert(waiting.seq > slow.seq);
+  await stopApiTurn('api-alice', chat.id, waiting.id);
+  assert.equal((await settled('api-alice', chat.id, waiting.id)).status, 'cancelled');
   await stopApiTurn('api-alice', chat.id, slow.id);
   release();
   await new Promise((resolve) => setTimeout(resolve, 50));

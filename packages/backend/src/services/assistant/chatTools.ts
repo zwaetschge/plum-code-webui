@@ -7,6 +7,16 @@ import { redactSensitiveText } from '../../utils/sanitize.js';
 import { fetchPublicSource, publicSourceUrl } from './publicSources.js';
 import type { ChatOptions } from './chatOptions.js';
 import type { ApiTool } from './apiTransport.js';
+import { createHash } from 'node:crypto';
+import { readChatSkill } from './chatSkills.js';
+
+export interface ChatToolCatalogItem {
+  key: string;
+  name: string;
+  description: string;
+  readOnly: boolean;
+  permission: 'allow' | 'ask' | 'block';
+}
 
 interface RpcResult {
   result?: unknown;
@@ -187,10 +197,32 @@ export async function chatToolset(userId: string, options: ChatOptions, signal: 
   const connections: McpConnection[] = [],
     tools: ApiTool[] = [];
   const handlers = new Map<string, (args: Record<string, unknown>) => Promise<unknown>>();
+  const catalog: ChatToolCatalogItem[] = [];
+  const deferred = new Map<string, ApiTool>();
+  const approvals = new Set<string>();
   const add = (tool: ApiTool, handler: (args: Record<string, unknown>) => Promise<unknown>) => {
     tools.push(tool);
     handlers.set(tool.name, handler);
   };
+  if (options.skillNames.length)
+    add(
+      {
+        name: 'read_skill',
+        description:
+          'Load an explicitly selected skill instruction or its referenced text file. Follow nextOffset for longer files; this never executes scripts.',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', enum: options.skillNames },
+            file: { type: 'string' },
+            offset: { type: 'integer', minimum: 0 },
+          },
+          required: ['name'],
+          additionalProperties: false,
+        },
+      },
+      (args) => readChatSkill(options.skillNames, args)
+    );
   if (options.webSearch) {
     add(
       {
@@ -273,7 +305,7 @@ export async function chatToolset(userId: string, options: ChatOptions, signal: 
     );
   }
   try {
-    for (const [index, id] of options.mcpServerIds.entries()) {
+    for (const id of options.mcpServerIds) {
       const server = await getMcpServerForRequest(id, userId);
       if (!server?.enabled) throw new Error('Ausgewählter MCP-Server ist nicht verfügbar');
       // Subprocesses and global registrations run with the service account's privileges.
@@ -285,26 +317,107 @@ export async function chatToolset(userId: string, options: ChatOptions, signal: 
       const connection = new McpConnection(server, signal);
       connections.push(connection);
       await connection.open();
-      const list = (await connection.request('tools/list', {})) as { tools?: unknown[] };
-      for (const raw of (list.tools ?? []).slice(0, 60)) {
-        const tool = toolSchema.parse(raw);
-        if (!options.allowToolWrites && tool.annotations?.readOnlyHint !== true) continue;
-        const name = `mcp_${index}_${tool.name.replace(/[^a-zA-Z0-9_-]/g, '_')}`.slice(0, 64);
-        add(
-          {
+      let cursor: string | undefined;
+      const cursors = new Set<string>();
+      let count = 0;
+      do {
+        const list = (await connection.request('tools/list', cursor ? { cursor } : {})) as {
+          tools?: unknown[];
+          nextCursor?: string;
+        };
+        for (const raw of list.tools ?? []) {
+          if (++count > 4000) throw new Error('MCP-Werkzeugkatalog überschreitet 4000 Funktionen');
+          const tool = toolSchema.parse(raw);
+          const key = id + ':' + tool.name;
+          const name =
+            `mcp_${createHash('sha256').update(key).digest('hex').slice(0, 12)}_${tool.name.replace(/[^a-zA-Z0-9_-]/g, '_')}`.slice(
+              0,
+              64
+            );
+          const permission = options.toolPermissions[key] ?? 'allow';
+          catalog.push({
+            key,
+            name: tool.name,
+            description: `${server.name}: ${tool.description ?? tool.name}`.slice(0, 2000),
+            readOnly: tool.annotations?.readOnlyHint === true,
+            permission,
+          });
+          if (
+            permission === 'block' ||
+            (!options.allowToolWrites && tool.annotations?.readOnlyHint !== true)
+          )
+            continue;
+          if (approvals.has(name) || deferred.has(name) || handlers.has(name))
+            throw new Error('Doppelte MCP-Werkzeugkennung');
+          const definition = {
             name,
             description: `${server.name}: ${tool.description ?? tool.name}`.slice(0, 2000),
             parameters: tool.inputSchema,
-          },
-          (args) => connection.request('tools/call', { name: tool.name, arguments: args })
-        );
-      }
+          };
+          const handler = (args: Record<string, unknown>) =>
+            connection.request('tools/call', { name: tool.name, arguments: args });
+          if (permission === 'ask') approvals.add(name);
+          if (options.toolLoading === 'eager') add(definition, handler);
+          else {
+            deferred.set(name, definition);
+            handlers.set(name, handler);
+          }
+        }
+        cursor = list.nextCursor;
+        if (cursor && cursors.has(cursor)) throw new Error('MCP-Katalog wiederholt eine Seite');
+        if (cursor) cursors.add(cursor);
+      } while (cursor);
     }
+    if (deferred.size)
+      add(
+        {
+          name: 'find_tools',
+          description:
+            'Search the selected MCP tool catalog by task or function name and load up to eight matching function definitions for subsequent calls. Blocked functions are excluded.',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string', maxLength: 500 } },
+            required: ['query'],
+            additionalProperties: false,
+          },
+        },
+        async (args) => {
+          const query = z.string().trim().min(1).max(500).parse(args.query).toLocaleLowerCase();
+          const terms = query.split(/\s+/).filter(Boolean);
+          const matches = [...deferred.values()]
+            .map((tool) => ({
+              tool,
+              score: terms.reduce(
+                (n, term) =>
+                  n +
+                  (tool.name.toLocaleLowerCase().includes(term)
+                    ? 3
+                    : tool.description.toLocaleLowerCase().includes(term)
+                      ? 1
+                      : 0),
+                0
+              ),
+            }))
+            .filter((item) => item.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 8);
+          for (const { tool } of matches)
+            if (!tools.some((loaded) => loaded.name === tool.name)) {
+              if (tools.length >= 80) throw new Error('80 Werkzeuge sind bereits geladen');
+              tools.push(tool);
+            }
+          return { matches: matches.map(({ tool }) => tool), catalogSize: deferred.size };
+        }
+      );
     return {
       tools,
-      call: async (name: string, args: Record<string, unknown>) => {
+      catalog,
+      requiresApproval: (name: string) => approvals.has(name),
+      call: async (name: string, args: Record<string, unknown>, approved = false) => {
         const handler = handlers.get(name);
-        if (!handler) throw new Error('Werkzeug ist für diesen Chat nicht freigegeben');
+        if (!handler || !tools.some((tool) => tool.name === name))
+          throw new Error('Werkzeug ist für diesen Chat nicht freigegeben oder noch nicht geladen');
+        if (approvals.has(name) && !approved) throw new Error('Einzelgenehmigung fehlt');
         const result = await handler(args);
         return redactSensitiveText(JSON.stringify(result)).slice(0, 32000);
       },

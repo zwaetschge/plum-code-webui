@@ -82,6 +82,7 @@ import { PROJECT_MEMORY, projectMemoryMode } from '@/components/assistant/projec
 const DynamicUi = lazy(() => import('@/components/assistant/dynamic-ui/DynamicUi'));
 
 const statuses = {
+  queued: 'Vorgemerkt',
   running: 'Antwortet …',
   completed: 'Antwort abgeschlossen',
   cancelled: 'Gestoppt',
@@ -154,7 +155,9 @@ export function ApiChatPage() {
         )
       ).data.data,
     refetchInterval: (query) =>
-      query.state.data?.turns.some((turn) => turn.status === 'running') ? 500 : 5000,
+      query.state.data?.turns.some((turn) => turn.status === 'running' || turn.status === 'queued')
+        ? 500
+        : 5000,
     retry: false,
   });
   useLayoutEffect(() => {
@@ -203,7 +206,7 @@ export function ApiChatPage() {
     turns = [
       ...new Map([...older, ...(latest.data?.turns ?? [])].map((turn) => [turn.id, turn])).values(),
     ].sort((a, b) => a.seq - b.seq),
-    running = turns.find((turn) => turn.status === 'running');
+    running = turns.find((turn) => turn.status === 'running' || turn.status === 'queued');
   // The store lifetime follows the conversation, independent of its revisions.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const dynamicUiState = useMemo(() => new DynamicUiStateStore(), [chat?.id]);
@@ -402,7 +405,7 @@ export function ApiChatPage() {
       setOlder([]);
     });
   const send = async () => {
-    if (!chat || !draft.trim() || running || busy) return;
+    if (!chat || !draft.trim() || busy) return;
     followLatest.current = true;
     const captured = scope,
       text = draft.trim();
@@ -847,6 +850,7 @@ export function ApiChatPage() {
                     </p>
                   )}
                   <ChatTurnDetails
+                    chatId={chat.id}
                     turn={item}
                     disabled={busy || !!running}
                     onMerge={() =>
@@ -906,7 +910,25 @@ export function ApiChatPage() {
                       }
                     />
                   )}
-                  {item.status !== 'running' && (
+                  {item.status === 'queued' && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={() =>
+                        void invoke(async () => {
+                          await api.post(
+                            `/api/assistant/api-chats/${id}/turns/${item.id}/stop`,
+                            {}
+                          );
+                        })
+                      }
+                    >
+                      Wartende Nachricht entfernen
+                    </Button>
+                  )}
+                  {item.status !== 'running' && item.status !== 'queued' && (
                     <div className="plum-message-actions mt-3">
                       {(item.versions?.length ?? 0) > 1 && (
                         <VersionSwitcher
@@ -1044,7 +1066,7 @@ export function ApiChatPage() {
                   window.matchMedia('(min-width: 768px)').matches
                 ) {
                   event.preventDefault();
-                  if (!running && !busy && draft.trim()) {
+                  if (!busy && draft.trim()) {
                     followLatest.current = true;
                     void send();
                   }
@@ -1072,12 +1094,12 @@ export function ApiChatPage() {
               <ChatImageInput
                 files={images}
                 onChange={setImages}
-                disabled={busy || !!running}
+                disabled={busy}
                 remaining={4 - existingImages.length}
               />
               <LiveImageCapture
                 scopeKey={scope}
-                disabled={busy || !!running}
+                disabled={busy}
                 remaining={4 - existingImages.length - images.length}
                 onCapture={(file) =>
                   setImages((current) =>
@@ -1199,17 +1221,38 @@ export function ApiChatPage() {
                   {images.length} Bilder
                 </span>
               )}
-              {/* One button that morphs: send while idle, stop while an answer streams. */}
+              {running && !!draft.trim() && (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  disabled={busy}
+                  aria-label="Antwort stoppen"
+                  onClick={() =>
+                    void invoke(async () => {
+                      await api.post(`/api/assistant/api-chats/${id}/turns/${running.id}/stop`, {});
+                    })
+                  }
+                >
+                  <Square size={12} fill="currentColor" />
+                </Button>
+              )}
               <Button
                 className="plum-send-button"
                 size="icon"
-                type={running ? 'button' : 'submit'}
-                data-mode={running ? 'stop' : 'send'}
-                aria-label={running ? 'Antwort stoppen' : 'Senden'}
-                title={running ? 'Antwort stoppen' : undefined}
-                disabled={running ? busy : busy || !draft.trim()}
+                type={running && !draft.trim() ? 'button' : 'submit'}
+                data-mode={running && !draft.trim() ? 'stop' : 'send'}
+                aria-label={
+                  running && !draft.trim()
+                    ? 'Antwort stoppen'
+                    : running
+                      ? 'Nachricht vormerken'
+                      : 'Senden'
+                }
+                title={running && !draft.trim() ? 'Antwort stoppen' : undefined}
+                disabled={running && !draft.trim() ? busy : busy || !draft.trim()}
                 onClick={
-                  running
+                  running && !draft.trim()
                     ? () =>
                         void invoke(async () => {
                           await api.post(

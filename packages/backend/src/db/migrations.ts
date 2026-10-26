@@ -1,4 +1,5 @@
 import { DEFAULT_CODEX_MODEL } from '@plum-code-webui/shared';
+import { CHAT_CAPABILITIES_SCHEMA } from '../services/assistant/chatCapabilitiesSchema.js';
 import { MEMORY_SCHEMA, MEMORY_COMPLETION_SCHEMA } from '../services/assistant/memorySchema.js';
 import { all as pgAll, get as pgGet, transaction as pgTransaction } from './pg.js';
 import type { TransactionScope } from './pg.js';
@@ -227,6 +228,13 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE assistant_api_turns ADD COLUMN IF NOT EXISTS workbench_json TEXT NOT NULL DEFAULT '{}'`,
       `ALTER TABLE assistant_source_chunks ADD COLUMN IF NOT EXISTS embedding DOUBLE PRECISION[]`,
       `ALTER TABLE assistant_source_chunks ADD COLUMN IF NOT EXISTS embedding_model TEXT`,
+    ],
+  },
+  { id: '020-api-chat-capabilities', statements: CHAT_CAPABILITIES_SCHEMA },
+  {
+    id: '021-api-chat-queue',
+    statements: [
+      "CREATE INDEX IF NOT EXISTS assistant_api_turns_queue ON assistant_api_turns(chat_id,status,seq) WHERE status IN ('queued','preparing','running')",
     ],
   },
 ];

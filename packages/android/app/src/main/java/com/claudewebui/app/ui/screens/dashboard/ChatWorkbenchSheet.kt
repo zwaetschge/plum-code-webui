@@ -34,6 +34,13 @@ internal fun ChatWorkbenchSheet(
     var writes by remember { mutableStateOf(saved["allowToolWrites"]?.jsonPrimitive?.booleanOrNull ?: false) }
     var servers by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
     var selected by remember { mutableStateOf((saved["mcpServerIds"] as? JsonArray)?.map { it.jsonPrimitive.content }.orEmpty()) }
+    var selectedSkills by remember { mutableStateOf((saved["skillNames"] as? JsonArray)?.map { it.jsonPrimitive.content }.orEmpty()) }
+    var skills by remember { mutableStateOf<List<com.claudewebui.app.data.model.ConfigSkill>>(emptyList()) }
+    var skillSearch by remember { mutableStateOf("") }
+    var catalog by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var toolSearch by remember { mutableStateOf("") }
+    var toolLoading by remember { mutableStateOf(saved["toolLoading"]?.jsonPrimitive?.contentOrNull ?: "on-demand") }
+    var permissions by remember { mutableStateOf(saved["toolPermissions"] as? JsonObject ?: JsonObject(emptyMap())) }
     var comparisons by remember { mutableStateOf((saved["comparisonModels"] as? JsonArray)?.map { it.jsonObject }.orEmpty()) }
     var temperature by remember { mutableStateOf(saved["temperature"]?.jsonPrimitive?.content.orEmpty()) }
     var tokens by remember { mutableStateOf(saved["maxOutputTokens"]?.jsonPrimitive?.content ?: "8192") }
@@ -87,6 +94,8 @@ internal fun ChatWorkbenchSheet(
         try {
             val response = api.getChatToolServers(); check(current())
             require(response.success); servers = response.data.orEmpty().filter { it["enabled"]?.jsonPrimitive?.booleanOrNull == true }
+            val skillResponse = api.getConfigSkills("skill"); check(current())
+            require(skillResponse.success); skills = skillResponse.data.orEmpty()
             if (chat != null && chat.body["temporary"]?.jsonPrimitive?.booleanOrNull != true) shares = api.getModelChatShares(chat.id).data.orEmpty()
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { if (current()) error = failure.message }
@@ -94,9 +103,24 @@ internal fun ChatWorkbenchSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Chat-Werkzeuge", style = MaterialTheme.typography.headlineSmall)
+            var showSkills by remember { mutableStateOf(false) }
+            TextButton(onClick = { showSkills = !showSkills }) { Text("Fachliche Skills · ${selectedSkills.size}") }
+            if (showSkills) {
+                OutlinedTextField(skillSearch, { skillSearch = it }, label = { Text("Skills suchen") }, modifier = Modifier.fillMaxWidth())
+                skills.filter { it.presetKey in selectedSkills || "${it.name} ${it.description}".contains(skillSearch, ignoreCase = true) }.take(60).forEach { skill ->
+                    Row(Modifier.fillMaxWidth()) {
+                        Checkbox(skill.presetKey in selectedSkills, { checked -> selectedSkills = if (checked) (selectedSkills + skill.presetKey).distinct().take(12) else selectedSkills - skill.presetKey }, enabled = !busy && (selectedSkills.size < 12 || skill.presetKey in selectedSkills))
+                        Text(skill.name, Modifier.padding(top = 12.dp).weight(1f))
+                    }
+                }
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Websuche und Seitenabruf", Modifier.weight(1f)); Switch(web, { web = it }, enabled = !busy) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Volltext statt Fundstellen", Modifier.weight(1f)); Switch(full, { full = it }, enabled = !busy) }
             Text("MCP-Werkzeuge", style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(toolLoading == "on-demand", { toolLoading = "on-demand" }, label = { Text("Bei Bedarf") })
+                FilterChip(toolLoading == "eager", { toolLoading = "eager" }, label = { Text("Direkt") })
+            }
             servers.forEach { server ->
                 val id = server.getValue("id").jsonPrimitive.content
                 Row(Modifier.fillMaxWidth()) {
@@ -105,6 +129,25 @@ internal fun ChatWorkbenchSheet(
                 }
             }
             Row { Checkbox(writes, { writes = it }, enabled = !busy); Text("Schreibende Werkzeuge erlauben", Modifier.padding(top = 12.dp)) }
+            OutlinedButton(enabled = !busy && selected.isNotEmpty(), onClick = { act {
+                val response = api.getChatToolCatalog(owner, buildJsonObject { put("mcpServerIds", JsonArray(selected.map(::JsonPrimitive))); put("allowToolWrites", writes); put("toolLoading", toolLoading); put("toolPermissions", permissions) })
+                check(current()); require(response.success) { response.error?.message ?: "Funktionen konnten nicht geladen werden" }; catalog = response.data.orEmpty()
+            } }) { Text("Funktionen verwalten") }
+            if (catalog.isNotEmpty()) {
+                OutlinedTextField(toolSearch, { toolSearch = it }, label = { Text("Funktionen suchen") }, modifier = Modifier.fillMaxWidth())
+                catalog.filter { "${it["name"]} ${it["description"]}".contains(toolSearch, ignoreCase = true) }.take(100).forEach { item ->
+                    val key = item.getValue("key").jsonPrimitive.content
+                    Text(item["name"]?.jsonPrimitive?.contentOrNull.orEmpty(), style = MaterialTheme.typography.labelMedium)
+                    var menu by remember(key) { mutableStateOf(false) }
+                    val selectedPermission = permissions[key]?.jsonPrimitive?.contentOrNull ?: "allow"
+                    Box {
+                        OutlinedButton(enabled = !busy, onClick = { menu = true }) { Text(when (selectedPermission) { "ask" -> "Einzeln genehmigen"; "block" -> "Blockieren"; else -> "Auto-Accept" }) }
+                        DropdownMenu(menu, { menu = false }) {
+                            listOf("allow" to "Auto-Accept", "ask" to "Einzeln genehmigen", "block" to "Blockieren").forEach { (value, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { permissions = JsonObject(permissions + (key to JsonPrimitive(value))); menu = false }) }
+                        }
+                    }
+                }
+            }
             Text("Modellvergleich", style = MaterialTheme.typography.titleMedium)
             comparisons.forEachIndexed { index, model -> Row {
                 Text("${model["providerId"]?.jsonPrimitive?.content} · ${model["model"]?.jsonPrimitive?.content}", Modifier.weight(1f))
@@ -128,7 +171,7 @@ internal fun ChatWorkbenchSheet(
             Button(enabled = !busy, modifier = Modifier.fillMaxWidth(), onClick = { act {
                 val maxTokens = tokens.toIntOrNull(); val contextTurns = turns.toIntOrNull(); val temp = temperature.takeIf { it.isNotBlank() }?.toDoubleOrNull()
                 require(maxTokens != null && maxTokens in 128..32768 && contextTurns != null && contextTurns in 1..100 && (temperature.isBlank() || (temp != null && temp in 0.0..2.0))) { "Modellparameter prüfen" }
-                val options = buildJsonObject { put("webSearch", web); put("fullDocuments", full); put("allowToolWrites", writes); put("mcpServerIds", JsonArray(selected.map(::JsonPrimitive))); put("comparisonModels", JsonArray(comparisons)); put("maxOutputTokens", maxTokens); put("contextTurns", contextTurns); temp?.let { put("temperature", it) } }
+                val options = buildJsonObject { put("webSearch", web); put("fullDocuments", full); put("allowToolWrites", writes); put("mcpServerIds", JsonArray(selected.map(::JsonPrimitive))); put("skillNames", JsonArray(selectedSkills.map(::JsonPrimitive))); put("toolLoading", toolLoading); put("toolPermissions", permissions); put("comparisonModels", JsonArray(comparisons)); put("maxOutputTokens", maxTokens); put("contextTurns", contextTurns); temp?.let { put("temperature", it) } }
                 val resource = chat?.let { val response = api.saveChatOptions(owner, it.id, buildJsonObject { put("expectedRevision", it.revision); put("options", options) }); require(response.success) { response.error?.message ?: "Speichern fehlgeschlagen" }; requireNotNull(response.data) }
                 check(current()); onSaved(options, resource); onDismiss()
             } }) { Text(if (busy) "Speichert …" else "Speichern") }

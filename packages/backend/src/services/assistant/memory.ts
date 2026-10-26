@@ -15,6 +15,7 @@ import { readPersonalization, memoryPermission, effectiveMemoryMode } from './pe
 import { apiChatProviders, apiChatEndpoint, streamApiChat } from './apiTransport.js';
 import { BODY_SCHEMAS, createResource, findResource, reviseResource } from './resources.js';
 import { AppError } from '../../middleware/errorHandler.js';
+import type { ChatContextReference } from '@plum-code-webui/shared';
 
 export const MEMORY_EXTRACTION = z
   .object({
@@ -761,7 +762,7 @@ export async function projectChatReferences(
       .map((t) => `'${t.replace(/'/g, '')}'`)
       .join(' | ') ?? '';
   const rows = await all(
-    `SELECT r.id,r.title,t.prompt,t.response,t.created_at,
+    `SELECT r.id,r.title,t.id AS turn_id,t.prompt,t.response,t.created_at,
        CASE WHEN ?='' THEN 0 ELSE ts_rank_cd(to_tsvector('simple',t.prompt||' '||t.response),to_tsquery('simple',?)) END AS relevance
      FROM assistant_api_turns t JOIN assistant_resources r ON r.id=t.chat_id
      WHERE r.user_id=? AND r.kind='api-chat' AND r.archived=0 AND r.id<>?
@@ -782,6 +783,7 @@ export async function projectChatReferences(
   );
   return rows.map((r) => ({
     chatId: r.id,
+    turnId: r.turn_id,
     title: r.title,
     at: r.created_at,
     prompt: String(r.prompt).slice(0, 1200),
@@ -794,7 +796,8 @@ export async function memoryRecall(
   query: string,
   pref: Awaited<ReturnType<typeof readPersonalization>>,
   excludeId?: string,
-  known?: MemoryScope
+  known?: MemoryScope,
+  received?: ChatContextReference[]
 ) {
   const parts: string[] = [];
   if (pref.chatHistory || (pref.writingStyleEnabled && pref.writingStyleLearning)) {
@@ -844,7 +847,14 @@ export async function memoryRecall(
         !memoryPermission(pref, sourceMode(pref, source), false)
       )
         continue;
-      if (pref.chatHistory && row.summary && (row.relevance > 0 || semantic.has(row.id)))
+      if (pref.chatHistory && row.summary && (row.relevance > 0 || semantic.has(row.id))) {
+        received?.push({
+          kind: 'history',
+          id: row.id,
+          sourceId: row.source_id,
+          sourceType: row.source_type,
+          turnId: row.turn_id,
+        });
         parts.push(
           JSON.stringify({
             type: 'earlier-chat',
@@ -855,8 +865,17 @@ export async function memoryRecall(
             userQuote: source.userText.slice(0, 2000),
           })
         );
-      if (pref.writingStyleEnabled && pref.writingStyleLearning && row.writing_style)
+      }
+      if (pref.writingStyleEnabled && pref.writingStyleLearning && row.writing_style) {
+        received?.push({
+          kind: 'writing-style',
+          id: row.id,
+          sourceId: row.source_id,
+          sourceType: row.source_type,
+          turnId: row.turn_id,
+        });
         parts.push(JSON.stringify({ type: 'writing-style', observations: row.writing_style }));
+      }
     }
   }
   return parts.length

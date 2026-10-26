@@ -69,6 +69,7 @@ fun ChatWorkspaceScreen(
     var description by remember { mutableStateOf("") }
     var memoryMode by remember { mutableStateOf("default") }
     var expertMemory by remember { mutableStateOf("off") }
+    var includeGlobalChatInstructions by remember { mutableStateOf(true) }
     var provider by remember { mutableStateOf("") }
     var model by remember { mutableStateOf("") }
     var sourceIds by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -99,6 +100,7 @@ fun ChatWorkspaceScreen(
         description = resource?.body?.get("description")?.jsonPrimitive?.contentOrNull.orEmpty()
         memoryMode = projectMemoryMode(resource?.body)
         expertMemory = resource?.body?.get("memory")?.jsonPrimitive?.contentOrNull ?: "off"
+        includeGlobalChatInstructions = resource?.body?.get("includeGlobalChatInstructions")?.jsonPrimitive?.booleanOrNull != false
         provider = resource?.body?.get("apiProviderId")?.jsonPrimitive?.contentOrNull.orEmpty()
         model = resource?.body?.get("model")?.jsonPrimitive?.contentOrNull.orEmpty()
         sourceIds = (resource?.body?.get("sourceIds") as? JsonArray)?.map { it.jsonPrimitive.content }.orEmpty()
@@ -191,6 +193,10 @@ fun ChatWorkspaceScreen(
                                     ).forEach { (value, label, hint) -> MemoryOption(memoryMode == value, stringResource(label), stringResource(hint), !busy) { memoryMode = value } }
                                 }
                                 WorkspaceField(instructions, { instructions = it.take(if (collection == "sources") 50000 else 30000) }, label = stringResource(if (collection == "sources") R.string.chat_workspace_source_text else R.string.chat_workspace_instructions), minLines = 4, enabled = !busy, modifier = Modifier.fillMaxWidth())
+                                if (collection != "sources") Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(checked = includeGlobalChatInstructions, enabled = !busy, onCheckedChange = { includeGlobalChatInstructions = it })
+                                    Text("Globale Chat-Anweisungen übernehmen", Modifier.weight(1f))
+                                }
                                 if (collection == "profiles") {
                                     Text(stringResource(R.string.chat_workspace_memory), style = MaterialTheme.typography.titleSmall)
                                     listOf(
@@ -217,6 +223,7 @@ fun ChatWorkspaceScreen(
                                                 val body = buildJsonObject {
                                                     editing?.body?.forEach { (k,v) -> if ((collection != "profiles" || k !in setOf("apiProviderId", "sharedMemories")) && (collection != "projects" || k != "contextMode")) put(k,v) }
                                                     put(if (collection == "sources") "text" else "instructions", instructions)
+                                                    if (collection != "sources") put("includeGlobalChatInstructions", includeGlobalChatInstructions)
                                                     if (collection == "sources") put("projectId", requireNotNull(selectedProject))
                                                     if (collection == "projects") { put("description", description); put("memoryMode", memoryMode) }
                                                     if (collection == "profiles") {

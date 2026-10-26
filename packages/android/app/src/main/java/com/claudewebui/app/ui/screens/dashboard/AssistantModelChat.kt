@@ -201,7 +201,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val voiceEnabled = personalization?.voiceChat == true
     LaunchedEffect(voiceEnabled) { if (!voiceEnabled) readText = null }
     val chatId = chat?.id
-    val running = turns.any { it.status == "running" }
+    val running = turns.any { it.status == "running" || it.status == "queued" }
     LaunchedEffect(owner, chatId) { readText = null }
     fun checkOwner() { if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed") }
     fun refreshWorkspaceResources() {
@@ -305,7 +305,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                     pending = outbox.pending()
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (failure: Exception) { checkOwner(); error = failure.message }
-                delay(if (turns.any { it.status == "running" }) 500 else 5_000)
+                delay(if (turns.any { it.status == "running" || it.status == "queued" }) 500 else 5_000)
             }
         }
     }
@@ -429,7 +429,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     }
     fun send(override: String? = null, voice: Boolean = false) {
         val text = (override ?: prompt).trim()
-        if (text.isEmpty() || busy || running) return
+        if (text.isEmpty() || busy || (voice && running)) return
         val current = chat
         if (current != null) {
             command("/api/assistant/api-chats/${current.id}/turns", buildJsonObject { put("prompt", text); put("expectedRevision", current.revision); put("imageAssetIds", JsonArray(if (voice) emptyList() else imageIds.map(::JsonPrimitive))); put("documentSourceIds", JsonArray(if (voice) emptyList() else documentIds.map(::JsonPrimitive))); if (voice) put("voice", true) else effort?.let { put("reasoningEffort", it) } }, context.getString(R.string.assistant_send), keepDraft = override != null)
@@ -587,6 +587,10 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     AnswerHeader(turn.status, palette.muted, palette.accent)
+                                    if (turn.status == "queued") {
+                                        Text("Vorgemerkt", color = palette.muted, style = MaterialTheme.typography.labelMedium)
+                                        TextButton(enabled = !busy && live, onClick = { command("/api/assistant/api-chats/$shownId/turns/${turn.id}/stop", buildJsonObject {}, "Wartende Nachricht entfernen", keepDraft = true) }) { Text("Wartende Nachricht entfernen") }
+                                    }
                                     val thinking = turn.status == "running" && turn.response.isEmpty() && !turn.uiPending
                                     val streaming = turn.status == "running" && turn.response.isNotEmpty()
                                     if (thinking) {
@@ -600,7 +604,16 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                     turn.ui?.let { spec -> DynamicUi(spec, stateStore = dynamicUiState, stateKey = turn.id, busy = busy || running || !live, onSendMessage = if (live) ({ text: String -> send(text) }) else null) }
                                     turn.uiError?.let { note -> if (turn.status != "running") DynamicUiNote(note) }
                                 }
+                                ChatContextReceipt(turn.contextReceipt) { id ->
+                                    scope.launch {
+                                        try {
+                                            val loaded = api.getAssistantApiTurns(id); checkOwner()
+                                            loaded.data?.let { showChat(it.chat); currentOnChatSelected(it.chat.id) }
+                                        } catch (failure: Exception) { error = failure.message }
+                                    }
+                                }
                                 if (turn.toolEvents.isNotEmpty()) {
+                                    turn.toolEvents.filter { it.status == "waiting" }.forEach { event -> ChatToolDecision(owner, api, shownId, turn.id, event) }
                                     Text(turn.toolEvents.joinToString(" · ") { event -> "${if (event.name == "web_search") "Websuche" else if (event.name == "web_fetch") "Seitenabruf" else event.name}: ${if (event.status == "running") "Läuft …" else if (event.status == "failed") "Fehlgeschlagen" else "Fertig"}" }, style = MaterialTheme.typography.labelSmall, color = palette.muted)
                                 }
                                 if (turn.sources.isNotEmpty()) Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -619,7 +632,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                     command("/api/assistant/api-chats/${current.id}/turns", buildJsonObject { put("expectedRevision", current.revision); put("prompt", turn.prompt); put("mergeTurnId", turn.id); effort?.let { put("reasoningEffort", it) } }, "Antworten zusammenführen", keepDraft = true)
                                 }) { Text("Antworten zusammenführen") }
                                 turn.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
-                                if (turn.status != "running" && (turn.response.isNotBlank() || turn.versions.size > 1)) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                if (turn.status != "running" && turn.status != "queued" && (turn.response.isNotBlank() || turn.versions.size > 1)) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                     if (turn.versions.size > 1) {
                                         val index = turn.versions.indexOf(turn.id)
                                         IconButton(onClick = { showVersion(turn.versions[index - 1]) }, enabled = index > 0 && !busy && !running && live) { Icon(androidx.compose.material.icons.Icons.Outlined.ChevronLeft, stringResource(R.string.assistant_previous_version), tint = palette.muted, modifier = Modifier.size(20.dp)) }
@@ -681,7 +694,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         }
         androidx.compose.animation.AnimatedVisibility(showAttach && !researchChat) {
             Column(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton(enabled = !busy && !cameraBusy && !running && imageIds.size < 4, onClick = { imagePicker.launch(arrayOf("*/*")) }) { Text("Dateien anhängen") }
+                OutlinedButton(enabled = !busy && !cameraBusy && imageIds.size < 4, onClick = { imagePicker.launch(arrayOf("*/*")) }) { Text("Dateien anhängen") }
                 if (chatId != null) key(owner, chatId) { AssistantCamera(owner, chatId, api, !busy && !running && imageIds.size < 4, { id -> imageIds = (imageIds + id).distinct() }, { cameraBusy = it }) }
                 key(owner, chatId) { AssistantDictation(owner, api, voiceEnabled && !busy && !running, { text -> prompt = (prompt + (if (prompt.isBlank()) "" else "\n") + text).take(20000) }, { voiceBusy = it }) }
             }
@@ -739,13 +752,14 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                         effortLabel = effortLabel, enabled = !busy, onClick = { showModelSheet = true },
                     )
                     Spacer(Modifier.width(8.dp))
-                    val runningTurn = turns.lastOrNull { it.status == "running" }
-                    val canSend = prompt.isNotBlank() && !busy && !voiceBusy && !cameraBusy && !running
+                    val runningTurn = turns.firstOrNull { it.status == "running" || it.status == "queued" }
+                    val canSend = prompt.isNotBlank() && !busy && !voiceBusy && !cameraBusy
                     // An empty composer offers the voice conversation instead of sending.
                     val canTalk = voiceEnabled && prompt.isBlank() && !busy && !voiceBusy && !cameraBusy && !running && !researchChat && (chat != null || providers.isNotEmpty())
                     // One button that morphs: the arrow cross-fades into the stop square
                     // and the container takes on a stop tint while a reply runs.
-                    val stopping = runningTurn != null
+                    val stopping = runningTurn != null && prompt.isBlank()
+                    if (runningTurn != null && prompt.isNotBlank()) IconButton(enabled = !busy, onClick = { command("/api/assistant/api-chats/$chatId/turns/${runningTurn.id}/stop", buildJsonObject {}, context.getString(R.string.assistant_stop), keepDraft = true) }) { Icon(androidx.compose.material.icons.Icons.Outlined.Stop, stringResource(R.string.assistant_stop)) }
                     val sendSource = remember { MutableInteractionSource() }
                     val sendContainer by animateColorAsState(
                         if (stopping) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
@@ -757,7 +771,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                     )
                     FilledIconButton(
                         enabled = stopping || canSend || canTalk,
-                        onClick = { if (runningTurn != null) command("/api/assistant/api-chats/$chatId/turns/${runningTurn.id}/stop", buildJsonObject {}, context.getString(R.string.assistant_stop)) else if (canSend) send() else openVoiceMode() },
+                        onClick = { if (stopping && runningTurn != null) command("/api/assistant/api-chats/$chatId/turns/${runningTurn.id}/stop", buildJsonObject {}, context.getString(R.string.assistant_stop)) else if (canSend) send() else openVoiceMode() },
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = sendContainer, contentColor = sendContent),
                         interactionSource = sendSource,
                         modifier = Modifier.pressScale(sendSource),

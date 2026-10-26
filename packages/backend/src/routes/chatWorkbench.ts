@@ -9,6 +9,9 @@ import { findResource, reviseResource } from '../services/assistant/resources.js
 import { ingestSource } from '../services/assistant/ingestion.js';
 import { exportChat, importChats, shareChat } from '../services/assistant/chatPortability.js';
 import { apiChatEndpoint } from '../services/assistant/apiTransport.js';
+import { chatToolset } from '../services/assistant/chatTools.js';
+import { decideChatToolApproval } from '../services/assistant/chatToolApprovals.js';
+import { selectedChatSkills } from '../services/assistant/chatSkills.js';
 
 export const chatWorkbenchRouter = Router();
 const router = chatWorkbenchRouter;
@@ -35,6 +38,48 @@ async function chat(userId: string, id: string) {
     throw new AppError('Gespräch abgelaufen', 410, 'TEMPORARY_EXPIRED');
   return resource;
 }
+router.post(
+  '/api-chat-tools/catalog',
+  handle(async (req, res) => {
+    const options = CHAT_OPTIONS.parse(req.body);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000);
+    try {
+      const tools = await chatToolset(
+        owner(req),
+        { ...options, skillNames: [] },
+        controller.signal
+      );
+      try {
+        res.json({ success: true, data: tools.catalog });
+      } finally {
+        tools.close();
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  })
+);
+router.post(
+  '/api-chats/:id/turns/:turn/tools/:call/decision',
+  handle(async (req, res) => {
+    await chat(owner(req), String(req.params.id));
+    const { decision } = z
+      .object({ decision: z.enum(['allow', 'deny']) })
+      .strict()
+      .parse(req.body);
+    res.json({
+      success: true,
+      data: await decideChatToolApproval(
+        owner(req),
+        String(req.params.id),
+        String(req.params.turn),
+        String(req.params.call),
+        decision
+      ),
+    });
+  })
+);
 router.put(
   '/api-chats/:id/options',
   handle(async (req, res) => {
@@ -47,6 +92,7 @@ router.put(
       id = String(req.params.id);
     for (const candidate of input.options.comparisonModels)
       await apiChatEndpoint(userId, candidate.providerId, candidate.model);
+    await selectedChatSkills(input.options.skillNames);
     const updated = await transaction(async (tx) => {
       await tx.get(
         'SELECT id FROM assistant_resources WHERE id=? AND user_id=? FOR UPDATE',

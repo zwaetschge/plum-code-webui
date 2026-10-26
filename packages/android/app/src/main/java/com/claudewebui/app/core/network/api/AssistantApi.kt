@@ -18,6 +18,8 @@ import io.ktor.client.request.forms.formData
 import io.ktor.client.plugins.timeout
 
 interface AssistantApi {
+    suspend fun getChatToolCatalog(owner: String, input: JsonObject): ApiResponse<List<JsonObject>>
+    suspend fun decideChatTool(owner: String, chatId: String, turnId: String, callId: String, decision: String): ApiResponse<JsonObject>
     suspend fun getChatToolServers(): ApiResponse<List<JsonObject>>
     suspend fun saveChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource>
     suspend fun exportModelChat(id: String): ByteArray
@@ -81,6 +83,8 @@ interface AssistantApi {
 }
 
 class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
+    override suspend fun getChatToolCatalog(owner: String, input: JsonObject): ApiResponse<List<JsonObject>> = http.post("/api/assistant/api-chat-tools/catalog") { attributes.put(AssistantAccountKey, owner); setBody(input) }
+    override suspend fun decideChatTool(owner: String, chatId: String, turnId: String, callId: String, decision: String): ApiResponse<JsonObject> = http.post("/api/assistant/api-chats/${checked(chatId)}/turns/${checked(turnId)}/tools/${checked(callId)}/decision") { attributes.put(AssistantAccountKey, owner); setBody(JsonObject(mapOf("decision" to kotlinx.serialization.json.JsonPrimitive(decision)))) }
     override suspend fun getChatToolServers(): ApiResponse<List<JsonObject>> = http.get("/api/mcp-servers")
     override suspend fun saveChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource> = http.put("/api/assistant/api-chats/${checked(id)}/options") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun exportModelChat(id: String): ByteArray = http.get("/api/assistant/api-chats/${checked(id)}/export")

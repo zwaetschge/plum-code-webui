@@ -11,6 +11,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ChatRichText } from './ChatRichText';
+import { ChatContextReceipt } from './ChatContextReceipt';
 
 interface Options {
   webSearch: boolean;
@@ -21,6 +22,9 @@ interface Options {
   maxOutputTokens: number;
   contextTurns: number;
   fullDocuments: boolean;
+  skillNames: string[];
+  toolLoading: 'on-demand' | 'eager';
+  toolPermissions: Record<string, 'allow' | 'ask' | 'block'>;
 }
 const defaults: Options = {
   webSearch: false,
@@ -30,6 +34,9 @@ const defaults: Options = {
   maxOutputTokens: 8192,
   contextTurns: 20,
   fullDocuments: false,
+  skillNames: [],
+  toolLoading: 'on-demand',
+  toolPermissions: {},
 };
 async function saveDownload(path: string, name: string) {
   const response = await api.download(path);
@@ -139,12 +146,30 @@ export function ChatWorkbench({
     [error, setError] = useState(''),
     [link, setLink] = useState('');
   const owner = useAuthStore((s) => s.user?.id);
+  const [skillSearch, setSkillSearch] = useState('');
+  const [catalog, setCatalog] = useState<
+    Array<{ key: string; name: string; description: string; readOnly: boolean }>
+  >([]);
+  const [toolSearch, setToolSearch] = useState('');
+  const skills = useQuery({
+    queryKey: ['chat-functional-skills', owner],
+    enabled: open,
+    queryFn: async () =>
+      (
+        await api.get<{ data: Array<{ baseName: string; name: string; description: string }> }>(
+          '/api/claude-config/skills?provider=codex&library=skill'
+        )
+      ).data.data,
+  });
   const servers = useQuery({
     queryKey: ['chat-mcp-servers', owner],
     enabled: open,
     queryFn: async () =>
-      (await api.get<{ data: Array<{ id: string; name: string; enabled: boolean }> }>('/api/mcp-servers'))
-        .data.data,
+      (
+        await api.get<{ data: Array<{ id: string; name: string; enabled: boolean }> }>(
+          '/api/mcp-servers'
+        )
+      ).data.data,
   });
   const shares = useQuery({
     queryKey: ['chat-shares', owner, chat.id],
@@ -185,6 +210,53 @@ export function ChatWorkbench({
         <DialogContent className="max-w-2xl max-h-[88dvh] overflow-y-auto">
           <DialogTitle>Chat-Werkzeuge</DialogTitle>
           <fieldset disabled={disabled || busy} className="space-y-4">
+            <details>
+              <summary className="cursor-pointer">
+                Fachliche Skills · {options.skillNames.length}
+              </summary>
+              <input
+                className="mt-3 w-full rounded-md border bg-background p-2"
+                aria-label="Skills suchen"
+                placeholder="Skills suchen"
+                value={skillSearch}
+                onChange={(e) => setSkillSearch(e.target.value)}
+              />
+              {skills.isPending && <p role="status">Skills werden geladen …</p>}
+              {skills.isError && <p role="alert">Skills konnten nicht geladen werden</p>}
+              <div className="max-h-64 overflow-auto">
+                {skills.data
+                  ?.filter(
+                    (skill) =>
+                      options.skillNames.includes(skill.baseName) ||
+                      `${skill.name} ${skill.description}`
+                        .toLocaleLowerCase()
+                        .includes(skillSearch.toLocaleLowerCase())
+                  )
+                  .slice(0, 60)
+                  .map((skill) => (
+                    <label key={skill.baseName} className="flex items-start gap-3 py-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={options.skillNames.includes(skill.baseName)}
+                        disabled={
+                          !options.skillNames.includes(skill.baseName) &&
+                          options.skillNames.length >= 12
+                        }
+                        onChange={(e) =>
+                          setOptions((o) => ({
+                            ...o,
+                            skillNames: e.target.checked
+                              ? [...o.skillNames, skill.baseName]
+                              : o.skillNames.filter((name) => name !== skill.baseName),
+                          }))
+                        }
+                      />
+                      <span>{skill.name}</span>
+                    </label>
+                  ))}
+              </div>
+            </details>
             <label className="flex items-center gap-3">
               <input
                 type="checkbox"
@@ -203,6 +275,22 @@ export function ChatWorkbench({
             </label>
             <details>
               <summary className="cursor-pointer">MCP-Werkzeuge</summary>
+              <label className="my-3 grid gap-2 text-sm">
+                Werkzeuge laden
+                <select
+                  className="rounded-md border bg-background p-2"
+                  value={options.toolLoading}
+                  onChange={(e) =>
+                    setOptions((o) => ({
+                      ...o,
+                      toolLoading: e.target.value as Options['toolLoading'],
+                    }))
+                  }
+                >
+                  <option value="on-demand">Bei Bedarf</option>
+                  <option value="eager">Direkt</option>
+                </select>
+              </label>
               <div className="space-y-3 py-3">
                 {servers.isError && <p role="alert">MCP-Server konnten nicht geladen werden</p>}
                 {servers.data
@@ -234,6 +322,65 @@ export function ChatWorkbench({
                   />
                   Schreibende und nicht als lesend gekennzeichnete Werkzeuge erlauben
                 </label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!options.mcpServerIds.length}
+                  onClick={() =>
+                    void act(async () => {
+                      const response = await api.post<{ data: typeof catalog }>(
+                        '/api/assistant/api-chat-tools/catalog',
+                        options
+                      );
+                      setCatalog(response.data.data);
+                    })
+                  }
+                >
+                  Funktionen verwalten
+                </Button>
+                {!!catalog.length && (
+                  <>
+                    <input
+                      className="w-full rounded-md border bg-background p-2"
+                      aria-label="Werkzeugfunktionen suchen"
+                      placeholder="Funktionen suchen"
+                      value={toolSearch}
+                      onChange={(e) => setToolSearch(e.target.value)}
+                    />
+                    <div className="max-h-72 space-y-3 overflow-auto">
+                      {catalog
+                        .filter((item) =>
+                          `${item.name} ${item.description}`
+                            .toLocaleLowerCase()
+                            .includes(toolSearch.toLocaleLowerCase())
+                        )
+                        .slice(0, 100)
+                        .map((item) => (
+                          <label key={item.key} className="grid gap-1 text-sm">
+                            <span className="break-words">{item.name}</span>
+                            <select
+                              aria-label={`Berechtigung für ${item.name}`}
+                              className="rounded-md border bg-background p-2"
+                              value={options.toolPermissions[item.key] ?? 'allow'}
+                              onChange={(e) =>
+                                setOptions((o) => ({
+                                  ...o,
+                                  toolPermissions: {
+                                    ...o.toolPermissions,
+                                    [item.key]: e.target.value as 'allow' | 'ask' | 'block',
+                                  },
+                                }))
+                              }
+                            >
+                              <option value="allow">Auto-Accept</option>
+                              <option value="ask">Einzeln genehmigen</option>
+                              <option value="block">Blockieren</option>
+                            </select>
+                          </label>
+                        ))}
+                    </div>
+                  </>
+                )}
               </div>
             </details>
             <details>
@@ -447,12 +594,62 @@ export function ChatWorkbench({
     </>
   );
 }
+function ChatToolDecision({
+  chatId,
+  turnId,
+  callId,
+  argumentsText,
+}: {
+  chatId: string;
+  turnId: string;
+  callId: string;
+  argumentsText?: string;
+}) {
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  const decide = async (decision: 'allow' | 'deny') => {
+    setBusy(true);
+    setError('');
+    try {
+      await api.post(
+        `/api/assistant/api-chats/${chatId}/turns/${turnId}/tools/${encodeURIComponent(callId)}/decision`,
+        { decision }
+      );
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Entscheidung fehlgeschlagen');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-2 py-2">
+      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs">
+        {argumentsText}
+      </pre>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" disabled={busy} onClick={() => void decide('allow')}>
+          Einmal erlauben
+        </Button>
+        <Button type="button" variant="outline" disabled={busy} onClick={() => void decide('deny')}>
+          Ablehnen
+        </Button>
+      </div>
+      {error && (
+        <p role="alert" className="text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
 export function ChatTurnDetails({
   turn,
+  chatId,
   onMerge,
   disabled,
 }: {
   turn: AssistantApiTurn;
+  chatId: string;
   onMerge: () => void;
   disabled: boolean;
 }) {
@@ -462,11 +659,19 @@ export function ChatTurnDetails({
     [error, setError] = useState('');
   return (
     <div className="space-y-3">
+      <ChatContextReceipt receipt={turn.contextReceipt} />
       {!!turn.toolEvents?.length && (
-        <details className="text-sm">
+        <details
+          className="text-sm"
+          open={turn.toolEvents.some((event) => event.status === 'waiting') || undefined}
+        >
           <summary className="cursor-pointer">Werkzeuge · {turn.toolEvents.length}</summary>
           {turn.toolEvents.map((event, index) => (
-            <details key={event.id + index} className="my-2 rounded-md border p-2">
+            <details
+              key={event.id + index}
+              className="my-2 rounded-md border p-2"
+              open={event.status === 'waiting' || undefined}
+            >
               <summary>
                 {event.name === 'web_search'
                   ? 'Websuche'
@@ -476,10 +681,20 @@ export function ChatTurnDetails({
                 ·{' '}
                 {event.status === 'running'
                   ? 'Läuft …'
-                  : event.status === 'failed'
-                    ? 'Fehlgeschlagen'
-                    : 'Abgeschlossen'}
+                  : event.status === 'waiting'
+                    ? 'Genehmigung erforderlich'
+                    : event.status === 'failed'
+                      ? 'Fehlgeschlagen'
+                      : 'Abgeschlossen'}
               </summary>
+              {event.status === 'waiting' && (
+                <ChatToolDecision
+                  chatId={chatId}
+                  turnId={turn.id}
+                  callId={event.id}
+                  argumentsText={event.arguments}
+                />
+              )}
               <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs">
                 {event.result}
               </pre>
