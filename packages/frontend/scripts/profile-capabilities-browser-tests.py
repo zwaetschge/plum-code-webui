@@ -159,6 +159,7 @@ with sync_playwright() as playwright:
         dialog.get_by_text('Fachliche Skills · 0', exact=True).click()
         dialog.get_by_role('checkbox', name='Datenanalyse', exact=True).check()
         dialog.get_by_text('Modellparameter', exact=True).click()
+        dialog.get_by_role('checkbox', name='Lange Verläufe verdichten', exact=True).uncheck()
         dialog.get_by_role('spinbutton', name='Kontext-Turns', exact=True).fill('50')
         dialog.get_by_role('spinbutton', name='Ausgabetokens', exact=True).fill('2048')
         page.screenshot(path=str(output / f'profile-capabilities-{width}.png'))
@@ -166,10 +167,13 @@ with sync_playwright() as playwright:
         expect(dialog).to_have_count(0)
         assert state['profile']['body']['chatOptions']['skillNames'] == ['fixture-analysis']
         assert state['profile']['body']['chatOptions']['contextTurns'] == 50
+        assert state['profile']['body']['chatOptions']['autoCompact'] is False
         assert state['profile']['body']['chatOptions']['maxOutputTokens'] == 2048
         page.reload()
         page.get_by_role('button', name='Fähigkeiten', exact=True).click()
         expect(page.get_by_role('dialog').get_by_text('Fachliche Skills · 1', exact=True)).to_be_visible()
+        page.get_by_role('dialog').get_by_text('Modellparameter', exact=True).click()
+        expect(page.get_by_role('dialog').get_by_role('checkbox', name='Lange Verläufe verdichten', exact=True)).not_to_be_checked()
         page.get_by_role('dialog').get_by_role('button', name='Close', exact=True).click()
         assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
         assert not errors, errors

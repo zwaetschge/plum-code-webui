@@ -17,6 +17,7 @@ export type AssistantResourceKind =
 
 export interface AssistantApiTurn {
   contextReceipt?: import('./chatContextReceipts.js').ChatContextReceipt;
+  compaction?: import('./chatCompaction.js').ChatCompaction;
   id: string;
   seq: number;
   prompt: string;

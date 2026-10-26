@@ -19,6 +19,7 @@ export const CHAT_OPTIONS = z
     temperature: z.number().min(0).max(2).optional(),
     maxOutputTokens: z.number().int().min(128).max(32768).default(8192),
     contextTurns: z.number().int().min(1).max(100).default(20),
+    autoCompact: z.boolean().default(true),
     fullDocuments: z.boolean().default(false),
   })
   .strict();

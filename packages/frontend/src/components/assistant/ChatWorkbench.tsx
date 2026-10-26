@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ChatRichText } from './ChatRichText';
 import { ChatContextReceipt } from './ChatContextReceipt';
+import { ChatCompactionReceipt } from './ChatCompactionReceipt';
 
 interface Options {
   webSearch: boolean;
@@ -21,6 +22,7 @@ interface Options {
   temperature?: number;
   maxOutputTokens: number;
   contextTurns: number;
+  autoCompact: boolean;
   fullDocuments: boolean;
   skillNames: string[];
   toolLoading: 'on-demand' | 'eager';
@@ -33,6 +35,7 @@ const defaults: Options = {
   comparisonModels: [],
   maxOutputTokens: 8192,
   contextTurns: 20,
+  autoCompact: true,
   fullDocuments: false,
   skillNames: [],
   toolLoading: 'on-demand',
@@ -436,6 +439,14 @@ export function ChatWorkbench({
             </details>
             <details>
               <summary className="cursor-pointer">Modellparameter</summary>
+              <label className="my-3 flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={options.autoCompact}
+                  onChange={(e) => setOptions((o) => ({ ...o, autoCompact: e.target.checked }))}
+                />
+                Lange Verläufe verdichten
+              </label>
               <div className="grid grid-cols-1 gap-3 py-3 sm:grid-cols-3">
                 <label>
                   Temperatur
@@ -671,6 +682,7 @@ export function ChatTurnDetails({
   return (
     <div className="space-y-3">
       <ChatContextReceipt receipt={turn.contextReceipt} />
+      <ChatCompactionReceipt compaction={turn.compaction} />
       {!!turn.toolEvents?.length && (
         <details
           className="text-sm"

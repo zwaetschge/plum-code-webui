@@ -39,6 +39,7 @@ import { readSkillLibraryItem } from '../../utils/skillLibrary.js';
 import { buildSessionStyleContextFromSelection } from '../../utils/styleContext.js';
 import { contextReceipts } from './chatContextReceipts.js';
 import { selectedChatSkills } from './chatSkills.js';
+import { compactChatHistory, hydrateCompactionReceipts } from './chatCompaction.js';
 import { apiTurnHash, enqueueApiTurn, pumpApiChatQueue } from './apiChatQueue.js';
 import { requestChatToolApproval } from './chatToolApprovals.js';
 import type { ChatContextReference } from '@plum-code-webui/shared';
@@ -570,20 +571,19 @@ export async function apiChatTurns(userId: string, id: string, offset = 0, befor
       )
     : [];
   const receipts = await contextReceipts(userId, id, rows);
-  return {
-    chat,
-    turns: rows.reverse().map((row) => {
-      const root = String(row.version_of ?? row.id);
-      const ids = members
-        .filter((m) => String(m.version_of ?? m.id) === root)
-        .map((m) => String(m.id));
-      const result = {
-        ...turn(row),
-        ...(receipts.has(String(row.id)) ? { contextReceipt: receipts.get(String(row.id)) } : {}),
-      };
-      return ids.length > 1 ? { ...result, versions: ids } : result;
-    }),
-  };
+  const turns = rows.reverse().map((row) => {
+    const root = String(row.version_of ?? row.id);
+    const ids = members
+      .filter((m) => String(m.version_of ?? m.id) === root)
+      .map((m) => String(m.id));
+    const result = {
+      ...turn(row),
+      ...(receipts.has(String(row.id)) ? { contextReceipt: receipts.get(String(row.id)) } : {}),
+    };
+    return ids.length > 1 ? { ...result, versions: ids } : result;
+  });
+  await hydrateCompactionReceipts(userId, id, turns);
+  return { chat, turns };
 }
 /** Rename or move a chat between projects without re-pinning its expert or model. */
 export async function updateApiChatMeta(
@@ -816,16 +816,6 @@ export async function executeApiTurn(
     if (!updated.changes)
       throw new AppError('Nachricht wurde inzwischen abgebrochen', 409, 'API_QUEUE_CANCELLED');
     await tx.run('UPDATE assistant_resources SET updated_at=? WHERE id=?', now, id);
-    await tx.run(
-      "INSERT INTO assistant_api_usage(id,user_id,chat_id,provider_id,model,status,created_at,updated_at) VALUES (?,?,?,?,?,'running',?,?)",
-      input.commandId,
-      userId,
-      id,
-      providerId,
-      model,
-      now,
-      now
-    );
     return {
       row: await tx.get('SELECT * FROM assistant_api_turns WHERE id=?', input.commandId),
       created: true,
@@ -854,6 +844,59 @@ export async function executeApiTurn(
         input.commandId
       );
     };
+    const recordCallUsage: NonNullable<Parameters<typeof generateChat>[0]['onUsage']> = async (
+      key,
+      callProviderId,
+      callModel,
+      status,
+      usage
+    ) => {
+      const callId = input.commandId + (key ? ':' + key : '');
+      const now = new Date().toISOString();
+      if (status === 'running') {
+        controller.signal.throwIfAborted();
+        const started = await run(
+          "INSERT INTO assistant_api_usage(id,user_id,chat_id,provider_id,model,status,created_at,updated_at) SELECT ?,?,?,?,?,'running',?,? WHERE EXISTS(SELECT 1 FROM assistant_api_turns WHERE id=? AND status='running') ON CONFLICT(id) DO NOTHING",
+          callId,
+          userId,
+          id,
+          callProviderId,
+          callModel,
+          now,
+          now,
+          input.commandId
+        );
+        if (
+          !started.changes &&
+          !(await get(
+            "SELECT id FROM assistant_api_turns WHERE id=? AND chat_id=? AND status='running'",
+            input.commandId,
+            id
+          ))
+        ) {
+          controller.abort();
+          controller.signal.throwIfAborted();
+        }
+      } else {
+        const price = usage
+          ? estimateModelCost(callModel, {
+              inputTokens: usage.input,
+              outputTokens: usage.output,
+              cacheReadTokens: usage.cached,
+              cacheCreationTokens: usage.cacheWrite,
+            })
+          : null;
+        await run(
+          "UPDATE assistant_api_usage SET status=CASE WHEN status='running' THEN ? ELSE status END,model=?,usage_json=COALESCE(?,usage_json),updated_at=? WHERE id=? AND user_id=?",
+          status,
+          callModel,
+          usage ? JSON.stringify({ ...usage, costUsd: price?.known ? price.cost : null }) : null,
+          now,
+          callId,
+          userId
+        );
+      }
+    };
     const timer = setTimeout(
       () => controller.abort(new Error('timeout')),
       Object.values(settings.toolPermissions).includes('ask') ? 600000 : 180000
@@ -861,7 +904,7 @@ export async function executeApiTurn(
     timer.unref();
     try {
       const rows = await all(
-        "SELECT prompt,response,image_asset_ids FROM assistant_api_turns WHERE chat_id=? AND seq<? AND hidden_by IS NULL AND status IN ('completed','cancelled','failed','interrupted') ORDER BY seq DESC LIMIT ?",
+        "SELECT id,seq,prompt,response,image_asset_ids FROM assistant_api_turns WHERE chat_id=? AND seq<? AND hidden_by IS NULL AND status IN ('completed','cancelled','failed','interrupted') ORDER BY seq DESC LIMIT ?",
         id,
         claimed.row.seq,
         settings.contextTurns
@@ -870,11 +913,19 @@ export async function executeApiTurn(
       let imageBudget =
         20 * 1024 * 1024 - claimed.images.reduce((sum, image) => sum + image.byteLength, 0);
       let budget = 64000;
+      let compactBeforeSeq = Number(claimed.row.seq),
+        clippedThroughSeq = 0;
       for (const row of rows) {
         const answer = budget ? String(row.response).slice(-Math.min(32000, budget)) : '';
         budget -= answer.length;
         const prompt = budget ? String(row.prompt).slice(-Math.min(20000, budget)) : '';
         budget -= prompt.length;
+        if (prompt || answer) compactBeforeSeq = Number(row.seq);
+        if (
+          answer.length < String(row.response).length ||
+          prompt.length < String(row.prompt).length
+        )
+          clippedThroughSeq = Math.max(clippedThroughSeq, Number(row.seq));
         if (answer) messages.unshift({ role: 'assistant', content: answer });
         if (prompt) {
           const ids = JSON.parse(String(row.image_asset_ids ?? '[]')) as string[];
@@ -893,6 +944,25 @@ export async function executeApiTurn(
         }
         if (!budget) break;
       }
+      const compacted = settings.autoCompact
+        ? await compactChatHistory({
+            userId,
+            chatId: id,
+            turnId: input.commandId,
+            beforeSeq: Math.max(compactBeforeSeq, clippedThroughSeq + 1),
+            providerId,
+            model,
+            signal: controller.signal,
+            workbench,
+            onUpdate: saveWorkbench,
+            onUsage: recordCallUsage,
+          })
+        : {
+            summary: '',
+            usage: { input: 0, output: 0, cached: 0, cacheWrite: 0 },
+            costUsd: 0,
+            attempted: false,
+          };
       const dynamicUiBase = JSON.parse(String(claimed.row.profile_json)).dynamicUiBase;
       if (dynamicUiBase && !input.voice && chat.body.workflow !== 'research') {
         messages.push({
@@ -938,7 +1008,10 @@ export async function executeApiTurn(
         providerId,
         model,
         system:
-          context.system + '\nReference sources (bounded excerpts):\n' + JSON.stringify(sources),
+          context.system +
+          (compacted.summary ? '\n' + compacted.summary : '') +
+          '\nReference sources (bounded excerpts):\n' +
+          JSON.stringify(sources),
         messages,
         signal: controller.signal,
         settings:
@@ -955,44 +1028,7 @@ export async function executeApiTurn(
             controller.signal,
             onReady
           ),
-        onUsage: async (key, callProviderId, callModel, status, usage) => {
-          const callId = input.commandId + (key ? ':' + key : '');
-          const now = new Date().toISOString();
-          if (status === 'running') {
-            controller.signal.throwIfAborted();
-            await run(
-              "INSERT INTO assistant_api_usage(id,user_id,chat_id,provider_id,model,status,created_at,updated_at) SELECT ?,?,?,?,?,'running',?,? WHERE EXISTS(SELECT 1 FROM assistant_api_turns WHERE id=? AND status='running') ON CONFLICT(id) DO NOTHING",
-              callId,
-              userId,
-              id,
-              callProviderId,
-              callModel,
-              now,
-              now,
-              input.commandId
-            );
-          } else {
-            const price = usage
-              ? estimateModelCost(callModel, {
-                  inputTokens: usage.input,
-                  outputTokens: usage.output,
-                  cacheReadTokens: usage.cached,
-                  cacheCreationTokens: usage.cacheWrite,
-                })
-              : null;
-            await run(
-              "UPDATE assistant_api_usage SET status=CASE WHEN status='running' THEN ? ELSE status END,model=?,usage_json=COALESCE(?,usage_json),updated_at=? WHERE id=? AND user_id=?",
-              status,
-              callModel,
-              usage
-                ? JSON.stringify({ ...usage, costUsd: price?.known ? price.cost : null })
-                : null,
-              now,
-              callId,
-              userId
-            );
-          }
-        },
+        onUsage: recordCallUsage,
         onText: async (delta) => {
           if (text.length + delta.length > 50000)
             throw new AppError(
@@ -1015,8 +1051,15 @@ export async function executeApiTurn(
         effort: input.voice ? 'auto' : input.reasoningEffort,
       });
       await saveWorkbench();
-      const u = result.usage;
-      const usageJson = u ? JSON.stringify({ ...u, costUsd: result.costUsd }) : null;
+      const u = result.usage ? { ...result.usage } : null;
+      if (u)
+        for (const key of ['input', 'output', 'cached', 'cacheWrite'] as const)
+          u[key] += compacted.usage[key];
+      const costUsd =
+        result.costUsd === null || compacted.costUsd === null
+          ? null
+          : result.costUsd + compacted.costUsd;
+      const usageJson = u ? JSON.stringify({ ...u, costUsd }) : null;
       await transaction(async (tx) => {
         const updated = await tx.run(
           "UPDATE assistant_api_turns SET response=?,status='completed',error=?,model=?,usage_json=?,updated_at=? WHERE id=? AND status='running'",

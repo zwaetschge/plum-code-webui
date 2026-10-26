@@ -913,6 +913,7 @@ export async function forgetMemory(
       'SELECT body_json FROM assistant_resource_revisions WHERE resource_id=?',
       id
     );
+    await tx.run('DELETE FROM assistant_api_compactions WHERE user_id=?', userId);
     for (const version of versions)
       for (const origin of JSON.parse(version.body_json).origins ?? []) {
         if (!['api', 'cli', 'task'].includes(origin.type)) continue;
@@ -1162,6 +1163,7 @@ export async function forgetMemoryHistory(userId: string, id: string, revision: 
       userId,
       'source:' + digest([row.source_type, row.source_id, row.turn_id].join(':'))
     );
+    await tx.run('DELETE FROM assistant_api_compactions WHERE user_id=?', userId);
     await tx.run('DELETE FROM assistant_memory_history WHERE user_id=? AND id=?', userId, id);
     await tx.run(
       "DELETE FROM assistant_memory_vectors WHERE user_id=? AND id=? AND kind='history'",

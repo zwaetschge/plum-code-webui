@@ -445,6 +445,7 @@ router.delete(
         "UPDATE assistant_memory_jobs SET status='cancelled',error=NULL,usage_json=NULL WHERE user_id=?",
         owner(req)
       );
+      await tx.run('DELETE FROM assistant_api_compactions WHERE user_id=?', owner(req));
       await tx.run('DELETE FROM assistant_memory_history WHERE user_id=?', owner(req));
       await tx.run(
         "UPDATE assistant_memory_backfills SET status='cancelled' WHERE user_id=?",

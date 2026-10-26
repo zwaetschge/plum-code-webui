@@ -604,6 +604,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                     turn.ui?.let { spec -> DynamicUi(spec, stateStore = dynamicUiState, stateKey = turn.id, busy = busy || running || !live, onSendMessage = if (live) ({ text: String -> send(text) }) else null) }
                                     turn.uiError?.let { note -> if (turn.status != "running") DynamicUiNote(note) }
                                 }
+                                ChatCompactionReceipt(turn.compaction)
                                 ChatContextReceipt(turn.contextReceipt) { id ->
                                     scope.launch {
                                         try {

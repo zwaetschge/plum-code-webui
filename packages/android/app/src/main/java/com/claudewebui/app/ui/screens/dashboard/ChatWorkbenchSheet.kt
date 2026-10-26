@@ -46,6 +46,7 @@ internal fun ChatWorkbenchSheet(
     var temperature by remember { mutableStateOf(saved["temperature"]?.jsonPrimitive?.content.orEmpty()) }
     var tokens by remember { mutableStateOf(saved["maxOutputTokens"]?.jsonPrimitive?.content ?: "8192") }
     var turns by remember { mutableStateOf(saved["contextTurns"]?.jsonPrimitive?.content ?: "20") }
+    var autoCompact by remember { mutableStateOf(saved["autoCompact"]?.jsonPrimitive?.booleanOrNull ?: true) }
     var shares by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -169,10 +170,11 @@ internal fun ChatWorkbenchSheet(
             OutlinedTextField(temperature, { temperature = it }, label = { Text("Temperatur (0–2)") }, enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(tokens, { tokens = it }, label = { Text("Ausgabetokens (128–32768)") }, enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(turns, { turns = it }, label = { Text("Kontextnachrichten (1–100)") }, enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Row { Checkbox(autoCompact, { autoCompact = it }, enabled = !busy); Text("Lange Verläufe verdichten", Modifier.padding(top = 12.dp)) }
             Button(enabled = !busy, modifier = Modifier.fillMaxWidth(), onClick = { act {
                 val maxTokens = tokens.toIntOrNull(); val contextTurns = turns.toIntOrNull(); val temp = temperature.takeIf { it.isNotBlank() }?.toDoubleOrNull()
                 require(maxTokens != null && maxTokens in 128..32768 && contextTurns != null && contextTurns in 1..100 && (temperature.isBlank() || (temp != null && temp in 0.0..2.0))) { "Modellparameter prüfen" }
-                val options = buildJsonObject { put("webSearch", web); put("fullDocuments", full); put("allowToolWrites", writes); put("mcpServerIds", JsonArray(selected.map(::JsonPrimitive))); put("skillNames", JsonArray(selectedSkills.map(::JsonPrimitive))); put("toolLoading", toolLoading); put("toolPermissions", permissions); put("comparisonModels", JsonArray(comparisons)); put("maxOutputTokens", maxTokens); put("contextTurns", contextTurns); temp?.let { put("temperature", it) } }
+                val options = buildJsonObject { put("autoCompact", autoCompact); put("webSearch", web); put("fullDocuments", full); put("allowToolWrites", writes); put("mcpServerIds", JsonArray(selected.map(::JsonPrimitive))); put("skillNames", JsonArray(selectedSkills.map(::JsonPrimitive))); put("toolLoading", toolLoading); put("toolPermissions", permissions); put("comparisonModels", JsonArray(comparisons)); put("maxOutputTokens", maxTokens); put("contextTurns", contextTurns); temp?.let { put("temperature", it) } }
                 val resource = chat?.let { val payload = buildJsonObject { put("expectedRevision", it.revision); put("options", options) }; val response = if (profileMode) api.saveProfileChatOptions(owner, it.id, payload) else api.saveChatOptions(owner, it.id, payload); require(response.success) { response.error?.message ?: "Speichern fehlgeschlagen" }; requireNotNull(response.data) }
                 check(current()); onSaved(options, resource); onDismiss()
             } }) { Text(if (busy) "Speichert …" else "Speichern") }

@@ -1,4 +1,5 @@
 import { estimateModelCost } from '@plum-code-webui/shared';
+import type { ChatCompaction } from '@plum-code-webui/shared';
 import {
   apiChatEndpoint,
   streamApiChat,
@@ -26,6 +27,7 @@ export interface ChatComparison {
   usage?: ApiUsage | null;
 }
 export interface ChatWorkbench {
+  compaction?: ChatCompaction;
   toolEvents: ChatToolEvent[];
   comparisons: ChatComparison[];
   sources: unknown[];
