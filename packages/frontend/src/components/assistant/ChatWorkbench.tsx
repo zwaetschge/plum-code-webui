@@ -25,6 +25,7 @@ interface Options {
   autoCompact: boolean;
   fullDocuments: boolean;
   skillNames: string[];
+  referenceChatIds: string[];
   toolLoading: 'on-demand' | 'eager';
   toolPermissions: Record<string, 'allow' | 'ask' | 'block'>;
 }
@@ -38,6 +39,7 @@ const defaults: Options = {
   autoCompact: true,
   fullDocuments: false,
   skillNames: [],
+  referenceChatIds: [],
   toolLoading: 'on-demand',
   toolPermissions: {},
 };
@@ -151,6 +153,17 @@ export function ChatWorkbench({
     [link, setLink] = useState('');
   const owner = useAuthStore((s) => s.user?.id);
   const [skillSearch, setSkillSearch] = useState('');
+  const [referenceSearch, setReferenceSearch] = useState('');
+  const referenceChats = useQuery({
+    queryKey: ['chat-reference-selection', owner, referenceSearch],
+    enabled: open,
+    queryFn: async () =>
+      (
+        await api.get<{ data: AssistantResource[] }>(
+          '/api/assistant/api-chats?limit=100&search=' + encodeURIComponent(referenceSearch)
+        )
+      ).data.data,
+  });
   const [catalog, setCatalog] = useState<
     Array<{ key: string; name: string; description: string; readOnly: boolean }>
   >([]);
@@ -214,6 +227,59 @@ export function ChatWorkbench({
         <DialogContent className="max-w-2xl max-h-[88dvh] overflow-y-auto">
           <DialogTitle>{profileMode ? 'Fähigkeiten' : 'Chat-Werkzeuge'}</DialogTitle>
           <fieldset disabled={disabled || busy} className="space-y-4">
+            <details>
+              <summary className="cursor-pointer">
+                Gesprächsreferenzen · {options.referenceChatIds.length}
+                {chat.body.memoryRead === false ? ' · Lesen aus' : ''}
+              </summary>
+              {!!options.referenceChatIds.length && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setOptions((o) => ({ ...o, referenceChatIds: [] }))}
+                >
+                  Referenzen entfernen
+                </Button>
+              )}
+              <input
+                className="my-3 w-full rounded-md border bg-background p-2"
+                aria-label="Gesprächsreferenzen suchen"
+                placeholder="Gespräche suchen"
+                value={referenceSearch}
+                onChange={(e) => setReferenceSearch(e.target.value)}
+              />
+              {referenceChats.isError && (
+                <p role="alert">Gespräche konnten nicht geladen werden.</p>
+              )}
+              <div className="max-h-64 overflow-auto">
+                {referenceChats.data
+                  ?.filter((entry) => entry.id !== chat.id && !entry.body.temporary)
+                  .map((entry) => (
+                    <label key={entry.id} className="flex items-start gap-3 py-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={options.referenceChatIds.includes(entry.id)}
+                        disabled={
+                          chat.body.memoryRead === false ||
+                          (!options.referenceChatIds.includes(entry.id) &&
+                            options.referenceChatIds.length >= 10)
+                        }
+                        onChange={(e) =>
+                          setOptions((o) => ({
+                            ...o,
+                            referenceChatIds: e.target.checked
+                              ? [...o.referenceChatIds, entry.id]
+                              : o.referenceChatIds.filter((id) => id !== entry.id),
+                          }))
+                        }
+                      />
+                      <span>{entry.title}</span>
+                    </label>
+                  ))}
+              </div>
+            </details>
             <details>
               <summary className="cursor-pointer">
                 Fachliche Skills · {options.skillNames.length}

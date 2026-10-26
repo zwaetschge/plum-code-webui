@@ -6,6 +6,7 @@ export const CHAT_OPTIONS = z
     mcpServerIds: z.array(z.string().min(1).max(300)).max(6).default([]),
     allowToolWrites: z.boolean().default(false),
     skillNames: z.array(z.string().min(1).max(150)).max(12).default([]),
+    referenceChatIds: z.array(z.string().min(1).max(200)).max(10).default([]),
     toolLoading: z.enum(['on-demand', 'eager']).default('on-demand'),
     toolPermissions: z.record(z.enum(['allow', 'ask', 'block'])).default({}),
     comparisonModels: z

@@ -35,6 +35,9 @@ internal fun ChatWorkbenchSheet(
     var writes by remember { mutableStateOf(saved["allowToolWrites"]?.jsonPrimitive?.booleanOrNull ?: false) }
     var servers by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
     var selected by remember { mutableStateOf((saved["mcpServerIds"] as? JsonArray)?.map { it.jsonPrimitive.content }.orEmpty()) }
+    var referenceChatIds by remember { mutableStateOf((saved["referenceChatIds"] as? JsonArray)?.map { it.jsonPrimitive.content }.orEmpty()) }
+    var referenceChats by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
+    var referenceSearch by remember { mutableStateOf("") }
     var selectedSkills by remember { mutableStateOf((saved["skillNames"] as? JsonArray)?.map { it.jsonPrimitive.content }.orEmpty()) }
     var skills by remember { mutableStateOf<List<com.claudewebui.app.data.model.ConfigSkill>>(emptyList()) }
     var skillSearch by remember { mutableStateOf("") }
@@ -92,6 +95,12 @@ internal fun ChatWorkbenchSheet(
             if (notice == null) (data["chats"] as? JsonArray)?.firstOrNull()?.jsonObject?.get("id")?.jsonPrimitive?.content?.let(onImported)
         }
     }
+    LaunchedEffect(owner, referenceSearch) {
+        if (referenceSearch.isNotBlank()) delay(250)
+        try { val response = api.getAssistantResources("api-chats", search = referenceSearch); check(current()); require(response.success); referenceChats = response.data.orEmpty() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { if (current()) error = failure.message }
+    }
     LaunchedEffect(owner, chat?.id) {
         try {
             val response = api.getChatToolServers(); check(current())
@@ -105,6 +114,16 @@ internal fun ChatWorkbenchSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(if (profileMode) "Fähigkeiten" else "Chat-Werkzeuge", style = MaterialTheme.typography.headlineSmall)
+            var showReferences by remember { mutableStateOf(false) }
+            TextButton(onClick = { showReferences = !showReferences }) { Text("Gesprächsreferenzen · ${referenceChatIds.size}" + if (chat?.body?.get("memoryRead")?.jsonPrimitive?.booleanOrNull == false) " · Lesen aus" else "") }
+            if (showReferences) {
+                if (referenceChatIds.isNotEmpty()) TextButton(onClick = { referenceChatIds = emptyList() }) { Text("Referenzen entfernen") }
+                OutlinedTextField(referenceSearch, { referenceSearch = it }, label = { Text("Gespräche suchen") }, modifier = Modifier.fillMaxWidth())
+                referenceChats.filter { it.id != chat?.id && it.body["temporary"]?.jsonPrimitive?.booleanOrNull != true && it.title.contains(referenceSearch, ignoreCase = true) }.forEach { entry -> Row(Modifier.fillMaxWidth()) {
+                    Checkbox(entry.id in referenceChatIds, { checked -> referenceChatIds = if (checked) (referenceChatIds + entry.id).distinct().take(10) else referenceChatIds - entry.id }, enabled = !busy && chat?.body?.get("memoryRead")?.jsonPrimitive?.booleanOrNull != false && (entry.id in referenceChatIds || referenceChatIds.size < 10))
+                    Text(entry.title, Modifier.padding(top = 12.dp).weight(1f))
+                } }
+            }
             var showSkills by remember { mutableStateOf(false) }
             TextButton(onClick = { showSkills = !showSkills }) { Text("Fachliche Skills · ${selectedSkills.size}") }
             if (showSkills) {
@@ -174,7 +193,7 @@ internal fun ChatWorkbenchSheet(
             Button(enabled = !busy, modifier = Modifier.fillMaxWidth(), onClick = { act {
                 val maxTokens = tokens.toIntOrNull(); val contextTurns = turns.toIntOrNull(); val temp = temperature.takeIf { it.isNotBlank() }?.toDoubleOrNull()
                 require(maxTokens != null && maxTokens in 128..32768 && contextTurns != null && contextTurns in 1..100 && (temperature.isBlank() || (temp != null && temp in 0.0..2.0))) { "Modellparameter prüfen" }
-                val options = buildJsonObject { put("autoCompact", autoCompact); put("webSearch", web); put("fullDocuments", full); put("allowToolWrites", writes); put("mcpServerIds", JsonArray(selected.map(::JsonPrimitive))); put("skillNames", JsonArray(selectedSkills.map(::JsonPrimitive))); put("toolLoading", toolLoading); put("toolPermissions", permissions); put("comparisonModels", JsonArray(comparisons)); put("maxOutputTokens", maxTokens); put("contextTurns", contextTurns); temp?.let { put("temperature", it) } }
+                val options = buildJsonObject { put("referenceChatIds", JsonArray(referenceChatIds.map(::JsonPrimitive))); put("autoCompact", autoCompact); put("webSearch", web); put("fullDocuments", full); put("allowToolWrites", writes); put("mcpServerIds", JsonArray(selected.map(::JsonPrimitive))); put("skillNames", JsonArray(selectedSkills.map(::JsonPrimitive))); put("toolLoading", toolLoading); put("toolPermissions", permissions); put("comparisonModels", JsonArray(comparisons)); put("maxOutputTokens", maxTokens); put("contextTurns", contextTurns); temp?.let { put("temperature", it) } }
                 val resource = chat?.let { val payload = buildJsonObject { put("expectedRevision", it.revision); put("options", options) }; val response = if (profileMode) api.saveProfileChatOptions(owner, it.id, payload) else api.saveChatOptions(owner, it.id, payload); require(response.success) { response.error?.message ?: "Speichern fehlgeschlagen" }; requireNotNull(response.data) }
                 check(current()); onSaved(options, resource); onDismiss()
             } }) { Text(if (busy) "Speichert …" else "Speichern") }

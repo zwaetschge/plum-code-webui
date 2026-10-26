@@ -35,6 +35,7 @@
     "test:chat-workbench": "tsx --conditions=development scripts/chat-workbench-regression-tests.ts",
     "test:chat-capabilities": "tsx --conditions=development scripts/chat-capabilities-regression-tests.ts",
     "test:chat-queue": "tsx --conditions=development scripts/chat-queue-regression-tests.ts",
+    "test:chat-management": "tsx --conditions=development scripts/chat-management-regression-tests.ts",
     "test:chat-compaction": "tsx --conditions=development scripts/chat-compaction-regression-tests.ts",
     "test:memory-topics": "tsx --conditions=development scripts/memory-topics-regression-tests.ts",
     "test:native-memory-identity": "tsx --conditions=development scripts/native-memory-identity-regression-tests.ts",

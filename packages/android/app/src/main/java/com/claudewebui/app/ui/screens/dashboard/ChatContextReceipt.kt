@@ -43,7 +43,7 @@ internal fun ChatContextReceipt(receipt: JsonObject?, onOpenChat: (String) -> Un
                     TextButton(onClick = { showText = !showText }) { Text(title + (revision?.let { " · Revision $it" } ?: "") + if (!available) " · Nicht mehr verfügbar" else "") }
                     if (showText) {
                         ref["text"]?.jsonPrimitive?.contentOrNull?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                        if (available && ref["kind"]?.jsonPrimitive?.contentOrNull == "project-chat") {
+                        if (available && ref["kind"]?.jsonPrimitive?.contentOrNull in setOf("project-chat", "chat-reference")) {
                             ref["id"]?.jsonPrimitive?.contentOrNull?.let { id -> TextButton(onClick = { onOpenChat(id) }) { Text("Chat öffnen") } }
                         }
                     }

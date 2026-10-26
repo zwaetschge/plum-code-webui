@@ -12,6 +12,9 @@ import { NativeAuthRecovery } from '@/components/NativeAuthRecovery';
 const MemoryTopicsPage = lazy(() =>
   import('@/pages/MemoryTopicsPage').then((m) => ({ default: m.MemoryTopicsPage }))
 );
+const ChatManagerPage = lazy(() =>
+  import('@/pages/ChatManagerPage').then((m) => ({ default: m.ChatManagerPage }))
+);
 
 // Lazy load pages for code splitting
 const AssistantPage = lazy(() =>
@@ -241,6 +244,7 @@ export default function App() {
             >
               <Route index element={<AssistantPage />} />
               <Route path="chat" element={<ChatPage />} />
+              <Route path="chat/history" element={<ChatManagerPage />} />
               <Route path="chat/assistants" element={<ChatWorkspacePage />} />
               <Route path="chat/assistants/:id" element={<ChatWorkspacePage />} />
               <Route path="chat/assistants/:id/edit" element={<ChatWorkspacePage />} />

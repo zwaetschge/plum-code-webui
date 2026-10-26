@@ -1,6 +1,6 @@
 /** A receipt of context actually supplied, rather than a model-authored citation. */
 export interface ChatContextReference {
-  kind: 'memory' | 'history' | 'project-chat' | 'writing-style';
+  kind: 'memory' | 'history' | 'project-chat' | 'chat-reference' | 'writing-style';
   id: string;
   revision?: number;
   turnId?: string;

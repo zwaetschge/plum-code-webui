@@ -14,6 +14,7 @@ const referenceLabels = {
   memory: 'Erinnerung',
   history: 'Chatrückblick',
   'project-chat': 'Projektchat',
+  'chat-reference': 'Gesprächsreferenz',
   'writing-style': 'Schreibstil',
 };
 
@@ -43,7 +44,7 @@ export function ChatContextReceipt({ receipt }: { receipt?: Receipt }) {
               {!ref.available && ' · Nicht mehr verfügbar'}
             </summary>
             {ref.text && <p className="mt-2 whitespace-pre-wrap break-words">{ref.text}</p>}
-            {ref.available && ref.kind === 'project-chat' && (
+            {ref.available && (ref.kind === 'project-chat' || ref.kind === 'chat-reference') && (
               <a
                 className="mt-2 inline-block underline"
                 href={`/chat/model/${encodeURIComponent(ref.id)}`}

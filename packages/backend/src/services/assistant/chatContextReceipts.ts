@@ -22,7 +22,7 @@ export async function contextReceipts(
     refs.filter((r) => r.kind === 'history' || r.kind === 'writing-style').map((r) => r.id)
   );
   const projectTurns = snapshots.flatMap(({ refs }) =>
-    refs.filter((r) => r.kind === 'project-chat').map((r) => r.turnId!)
+    refs.filter((r) => r.kind === 'project-chat' || r.kind === 'chat-reference').map((r) => r.turnId!)
   );
   const [memories, history, project, jobs, learned, learnedHistory] = await Promise.all([
     all(
@@ -94,11 +94,11 @@ export async function contextReceipts(
               : {}),
           };
         }
-        if (ref.kind === 'project-chat') {
+        if (ref.kind === 'project-chat' || ref.kind === 'chat-reference') {
           const chat = project.find((c) => c.id === ref.id && c.turn_id === ref.turnId);
           return {
             ...ref,
-            title: chat?.title ?? 'Nicht mehr verfügbarer Projektchat',
+            title: chat?.title ?? 'Nicht mehr verfügbares Gespräch',
             available: !!chat,
           };
         }

@@ -1025,6 +1025,8 @@ fun ModelChatHistoryList(
         var hasMore by remember { mutableStateOf(false) }
         var loaded by remember { mutableStateOf(false) }
         var refreshList by remember { mutableIntStateOf(0) }
+        var showManager by remember { mutableStateOf(false) }
+        if (showManager) ChatManagerSheet(owner, api, onOpenChat = { resource -> showManager = false; onSelect(resource) }, onChanged = { archived -> refreshList++; if (selectedChatId in archived) onNewChat?.invoke() }, onDismiss = { showManager = false; refreshList++ })
         // Refreshes while visible, and right away when the open conversation
         // changes, so a chat created in the composer shows up in the list.
         LaunchedEffect(owner, search, offset, selectedChatId, refreshList) {
@@ -1135,6 +1137,7 @@ fun ModelChatHistoryList(
             )
         }
         Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(enabled = enabled, onClick = { showManager = true }) { Text("Verlauf verwalten") }
             OutlinedTextField(search, { search = it; offset = 0 }, placeholder = { Text(stringResource(R.string.assistant_search_chats)) }, singleLine = true, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth())
             if (onNewChat != null) {
                 val newSource = remember { MutableInteractionSource() }

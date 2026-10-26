@@ -145,6 +145,10 @@ export function AssistantSidebar({
         Neuer Chat
       </NavLink>
       <div className="assistant-sidebar-content">
+        <NavLink to="/chat/history" onClick={onNavigate} className="assistant-nav-link">
+          <MessageCircle size={15} />
+          Verlauf verwalten
+        </NavLink>
         <nav aria-label="Bibliothek" className="space-y-1">
           <NavLink to="/swarm" onClick={onNavigate} className="assistant-nav-link">
             <Network size={16} />

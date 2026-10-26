@@ -155,6 +155,15 @@ export function ChatSidebarResources({
     <>
       <nav aria-label="Chat-Arbeitsbereiche">
         <NavLink
+          to="/chat/history"
+          onClick={onNavigate}
+          className={({ isActive }) => cn(row, isActive && 'is-active')}
+          title="Verlauf verwalten"
+        >
+          <MessageCircle className="h-4 w-4 shrink-0" />
+          {!collapsed && 'Verlauf verwalten'}
+        </NavLink>
+        <NavLink
           to="/chat/assistants"
           onClick={onNavigate}
           className={({ isActive }) => cn(row, isActive && 'is-active')}

@@ -18,6 +18,11 @@ import {
   forgetMemoryTopic,
 } from '../services/assistant/memoryTopics.js';
 import { resourceRevisionDiff } from '../services/assistant/revisionDiff.js';
+import {
+  BULK_CHAT_INPUT,
+  bulkManageChats,
+  managedChats,
+} from '../services/assistant/chatManagement.js';
 
 export const chatWorkbenchRouter = Router();
 const router = chatWorkbenchRouter;
@@ -37,6 +42,31 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 4 },
 });
+router.get(
+  '/api-chats/manage',
+  handle(async (req, res) => {
+    const input = z
+      .object({
+        archived: z.enum(['true', 'false']).default('false'),
+        search: z.string().max(200).default(''),
+        offset: z.coerce.number().int().min(0).max(100000).default(0),
+      })
+      .parse(req.query);
+    res.json({
+      success: true,
+      data: await managedChats(owner(req), input.archived === 'true', input.search, input.offset),
+    });
+  })
+);
+router.post(
+  '/api-chats/bulk',
+  handle(async (req, res) =>
+    res.json({
+      success: true,
+      data: await bulkManageChats(owner(req), BULK_CHAT_INPUT.parse(req.body)),
+    })
+  )
+);
 router.get(
   '/revision-diff/:collection/:id',
   handle(async (req, res) => {
