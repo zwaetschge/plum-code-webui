@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { AppError } from '../middleware/errorHandler.js';
 import { recordAudit } from '../utils/auditLog.js';
 import { createLogger } from '../utils/logger.js';
+import { MOBILE_GATEWAY_HEADER } from '../middleware/mobileGateway.js';
 
 const log = createLogger('app');
 
@@ -60,7 +61,8 @@ router.get('/version', requireAuth, (req: Request, res: Response) => {
   }
   const exp = Date.now() + DOWNLOAD_TOKEN_TTL_MS;
   const sig = sign(`apk.${metadata.versionCode}.${exp}`);
-  const base = `${req.protocol}://${req.get('host')}`;
+  const prefix = req.get(MOBILE_GATEWAY_HEADER) === '1' ? '/mobile' : '';
+  const base = `${req.protocol}://${req.get('host')}${prefix}`;
   res.json({
     success: true,
     data: {

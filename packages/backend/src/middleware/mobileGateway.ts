@@ -10,6 +10,8 @@ const PUBLIC_MOBILE_ROUTES = new Set([
   'POST /auth/mobile/exchange',
   'GET /api/basic-auth/status',
   'POST /api/basic-auth/login',
+  // DownloadManager has no session header; the app route verifies its expiring HMAC.
+  'GET /api/app/download',
   // Plum Desk authenticates itself with its device token (routes/browserBridge.ts).
   'POST /api/browser-bridge/desk/transcribe',
   'POST /api/browser-bridge/desk/wake',
