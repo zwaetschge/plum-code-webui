@@ -7,7 +7,8 @@ testing.useTestSchema();
 const { run, get } = await import('../src/db/pg.js');
 const { createResource, BODY_SCHEMAS } = await import('../src/services/assistant/resources.js');
 const { updatePersonalization } = await import('../src/services/assistant/personalization.js');
-const { systemContext, updateApiChat } = await import('../src/services/assistant/apiChats.js');
+const { systemContext, updateApiChat, createApiChat, API_CHAT_INPUT } =
+  await import('../src/services/assistant/apiChats.js');
 const { contextReceipts } = await import('../src/services/assistant/chatContextReceipts.js');
 const { enqueueMemory, memorySource, processMemoryJob, forgetMemory } =
   await import('../src/services/assistant/memory.js');
@@ -160,6 +161,39 @@ try {
   );
   console.log(
     'PASS: project/profile opt-out removes global Chat instructions only; default inheritance and personalisation remain'
+  );
+  const bundle = await createResource(
+    user,
+    'profile',
+    'Fähigkeitsbündel',
+    BODY_SCHEMAS.profile.parse({
+      chatOptions: { webSearch: true, contextTurns: 50, maxOutputTokens: 1024, temperature: 0.3 },
+    })
+  );
+  const bundleInput = API_CHAT_INPUT.parse({
+    commandId: randomUUID(),
+    title: 'Geerbt',
+    providerId: 'fixture',
+    model: 'fixture',
+    profileId: bundle.id,
+    chatOptions: {},
+  });
+  const inheritedChat = await createApiChat(user, bundleInput);
+  assert.equal((inheritedChat.body.chatOptions as Record<string, unknown>).contextTurns, 50);
+  assert.equal((inheritedChat.body.chatOptions as Record<string, unknown>).webSearch, true);
+  const overriddenChat = await createApiChat(user, {
+    ...bundleInput,
+    commandId: randomUUID(),
+    chatOptions: { maxOutputTokens: 2048 },
+  });
+  assert.equal((overriddenChat.body.chatOptions as Record<string, unknown>).maxOutputTokens, 2048);
+  assert.equal(
+    (overriddenChat.body.chatOptions as Record<string, unknown>).contextTurns,
+    50,
+    'per-chat overrides preserve other bundle defaults'
+  );
+  console.log(
+    'PASS: profile capability defaults survive an empty client options object; explicit per-chat parameter override preserves inherited values'
   );
   for (const memoryRead of [false, true])
     for (const memoryLearn of [false, true]) {

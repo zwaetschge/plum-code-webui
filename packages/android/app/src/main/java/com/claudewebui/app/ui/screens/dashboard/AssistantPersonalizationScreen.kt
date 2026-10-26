@@ -37,6 +37,11 @@ fun AssistantPersonalizationScreen(
 ) {
     val controller = rememberAssistantSettingsController(api)
     var stackRaw by rememberSaveable { mutableStateOf(startPage) }
+    var showTopics by rememberSaveable { mutableStateOf(false) }
+    if (showTopics) {
+        MemoryTopicsScreen(api, onClose = { showTopics = false }, onOpenFeature = onOpenFeature)
+        return
+    }
     val stack = stackRaw.toStack("assistant")
     fun push(id: String) { stackRaw = (stack + id).toStackString() }
     fun pop() {
@@ -54,7 +59,7 @@ fun AssistantPersonalizationScreen(
                     contentPadding = PaddingValues(0.dp),
                     onBack = ::pop,
                     push = ::push,
-                    openFeature = { path -> controller?.flush(); onOpenFeature(path) },
+                    openFeature = { path -> controller?.flush(); if (path == "/assistant/memory-topics") showTopics = true else onOpenFeature(path) },
                 )
             }
         }

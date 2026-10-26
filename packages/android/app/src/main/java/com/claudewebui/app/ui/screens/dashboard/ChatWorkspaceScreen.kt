@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
 /** The same saved profiles/projects as the WebUI. No provider-specific assistant store. */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChatWorkspaceScreen(
     owner: String, api: ApiClient, providers: List<AssistantApiProvider>,
@@ -77,6 +77,8 @@ fun ChatWorkspaceScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var confirmProject by remember { mutableStateOf<AssistantResource?>(null) }
     var confirmChat by remember { mutableStateOf<AssistantResource?>(null) }
+    var capabilityProfile by remember { mutableStateOf<AssistantResource?>(null) }
+    var compareResource by remember { mutableStateOf<AssistantResource?>(null) }
     fun checkOwner() { if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed") }
     suspend fun load() {
         profiles = api.getAssistantResources("profiles").also { checkOwner(); check(it.success) { it.error?.message.orEmpty() } }.data.orEmpty()
@@ -159,6 +161,8 @@ fun ChatWorkspaceScreen(
             dismissButton = { TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { confirmChat = null }) { Text(stringResource(R.string.assistant_cancel)) } },
         )
     }
+    capabilityProfile?.let { profile -> ChatWorkbenchSheet(owner, api, profile, providers, profile.body["chatOptions"] as? JsonObject ?: JsonObject(emptyMap()), onSaved = { _, resource -> resource?.let { updated -> profiles = profiles.map { if (it.id == updated.id) updated else it } } }, onImported = {}, onDismiss = { capabilityProfile = null }) }
+    compareResource?.let { resource -> ResourceRevisionDiff(owner, api, if (resource.kind == "project") "projects" else "profiles", resource.id, resource.revision) { compareResource = null } }
     val viewed = (if (collection == "projects") projects else profiles).firstOrNull { it.id == viewedId }
     val newLabel = stringResource(when (collection) {
         "projects" -> R.string.chat_workspace_new_project
@@ -309,8 +313,10 @@ fun ChatWorkspaceScreen(
                                     }
                                     Button(modifier = Modifier.heightIn(min = tokens.sizing.touchTarget), enabled = !busy, onClick = { onNewChat(profiles.firstOrNull { it.id == selectedProfile }, selectedProject) }) { Text(stringResource(R.string.chat_workspace_new_chat)) }
                                     TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { onApply(profiles.firstOrNull { it.id == selectedProfile }, selectedProject) }) { Text(stringResource(R.string.chat_workspace_apply)) }
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { edit(viewed) }) { Text(stringResource(R.string.chat_workspace_edit)) }
+                                        if (!isProject) TextButton(enabled = !busy, onClick = { capabilityProfile = viewed }) { Text("Fähigkeiten") }
+                                        TextButton(enabled = !busy, onClick = { compareResource = viewed }) { Text("Änderungen") }
                                         if (isProject) TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { collection = "sources" }) { Text(stringResource(R.string.chat_workspace_sources)) }
                                         if (isProject) TextButton(colors = ButtonDefaults.textButtonColors(contentColor = palette.text), enabled = !busy, onClick = { confirmProject = viewed }) {
                                             Text(stringResource(R.string.chat_workspace_delete_project), color = MaterialTheme.colorScheme.error)

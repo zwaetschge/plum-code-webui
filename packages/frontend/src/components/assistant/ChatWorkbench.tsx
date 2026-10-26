@@ -138,6 +138,7 @@ export function ChatWorkbench({
   onSaved: () => Promise<unknown>;
 }) {
   const [open, setOpen] = useState(new URLSearchParams(window.location.search).has('workbench'));
+  const profileMode = chat.kind === 'profile';
   const [options, setOptions] = useState<Options>({
     ...defaults,
     ...(chat.body.chatOptions as Partial<Options>),
@@ -173,7 +174,7 @@ export function ChatWorkbench({
   });
   const shares = useQuery({
     queryKey: ['chat-shares', owner, chat.id],
-    enabled: open && !chat.body.temporary,
+    enabled: open && !profileMode && !chat.body.temporary,
     queryFn: async () =>
       (
         await api.get<{ data: Array<{ id: string; expiresAt: string; revoked: number }> }>(
@@ -202,13 +203,13 @@ export function ChatWorkbench({
         variant="ghost"
         size="sm"
         onClick={() => setOpen(true)}
-        aria-label="Chat-Werkzeuge"
+        aria-label={profileMode ? 'Fähigkeiten' : 'Chat-Werkzeuge'}
       >
-        Werkzeuge
+        {profileMode ? 'Fähigkeiten' : 'Werkzeuge'}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl max-h-[88dvh] overflow-y-auto">
-          <DialogTitle>Chat-Werkzeuge</DialogTitle>
+          <DialogTitle>{profileMode ? 'Fähigkeiten' : 'Chat-Werkzeuge'}</DialogTitle>
           <fieldset disabled={disabled || busy} className="space-y-4">
             <details>
               <summary className="cursor-pointer">
@@ -487,10 +488,13 @@ export function ChatWorkbench({
             <Button
               onClick={() =>
                 void act(async () => {
-                  await api.put(`/api/assistant/api-chats/${chat.id}/options`, {
-                    expectedRevision: chat.revision,
-                    options,
-                  });
+                  await api.put(
+                    `/api/assistant/${profileMode ? 'profiles' : 'api-chats'}/${chat.id}/options`,
+                    {
+                      expectedRevision: chat.revision,
+                      options,
+                    }
+                  );
                   await onSaved();
                   setOpen(false);
                 })
@@ -499,91 +503,98 @@ export function ChatWorkbench({
               Speichern
             </Button>
           </fieldset>
-          <div className="flex flex-wrap gap-2 border-t pt-4">
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() =>
-                void act(() =>
-                  saveDownload(`/api/assistant/api-chats/${chat.id}/export`, 'plum-chat.json')
-                )
-              }
-            >
-              Chat exportieren
-            </Button>
-            {!!chat.body.importArchiveAssetId && (
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() =>
-                  void act(() =>
-                    saveDownload(
-                      `/api/assistant/api-chats/${chat.id}/import-archive`,
-                      'original-chat-import.json'
-                    )
-                  )
-                }
-              >
-                Originalarchiv
-              </Button>
-            )}
-            {!chat.body.temporary && (
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() =>
-                  void act(async () => {
-                    const result = (
-                      await api.post<{ data: { viewPath: string } }>(
-                        `/api/assistant/api-chats/${chat.id}/share`,
-                        {}
-                      )
-                    ).data.data;
-                    setLink(new URL(result.viewPath, window.location.origin).href);
-                    await shares.refetch();
-                  })
-                }
-              >
-                Chat teilen
-              </Button>
-            )}
-          </div>
-          {link && (
-            <div className="flex gap-2">
-              <input
-                readOnly
-                aria-label="Freigabelink"
-                className="min-w-0 flex-1 rounded-md border bg-background p-2 text-sm"
-                value={link}
-              />
-              <Button variant="outline" onClick={() => void navigator.clipboard.writeText(link)}>
-                Kopieren
-              </Button>
-            </div>
-          )}
-          {shares.data
-            ?.filter((s) => !s.revoked && Date.parse(s.expiresAt) > Date.now())
-            .map((share) => (
-              <div key={share.id} className="flex items-center gap-2 text-sm">
-                <span className="flex-1">
-                  Freigabe bis {new Date(share.expiresAt).toLocaleDateString('de-CH')}
-                </span>
+          {!profileMode && (
+            <>
+              <div className="flex flex-wrap gap-2 border-t pt-4">
                 <Button
-                  size="sm"
-                  variant="ghost"
+                  variant="outline"
                   disabled={busy}
                   onClick={() =>
-                    void act(async () => {
-                      await api.delete('/api/assistant/shares/' + share.id);
-                      await shares.refetch();
-                    })
+                    void act(() =>
+                      saveDownload(`/api/assistant/api-chats/${chat.id}/export`, 'plum-chat.json')
+                    )
                   }
                 >
-                  Widerrufen
+                  Chat exportieren
                 </Button>
+                {!!chat.body.importArchiveAssetId && (
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      void act(() =>
+                        saveDownload(
+                          `/api/assistant/api-chats/${chat.id}/import-archive`,
+                          'original-chat-import.json'
+                        )
+                      )
+                    }
+                  >
+                    Originalarchiv
+                  </Button>
+                )}
+                {!chat.body.temporary && (
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      void act(async () => {
+                        const result = (
+                          await api.post<{ data: { viewPath: string } }>(
+                            `/api/assistant/api-chats/${chat.id}/share`,
+                            {}
+                          )
+                        ).data.data;
+                        setLink(new URL(result.viewPath, window.location.origin).href);
+                        await shares.refetch();
+                      })
+                    }
+                  >
+                    Chat teilen
+                  </Button>
+                )}
               </div>
-            ))}
-          <ChatImport providers={providers} />
+              {link && (
+                <div className="flex gap-2">
+                  <input
+                    readOnly
+                    aria-label="Freigabelink"
+                    className="min-w-0 flex-1 rounded-md border bg-background p-2 text-sm"
+                    value={link}
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => void navigator.clipboard.writeText(link)}
+                  >
+                    Kopieren
+                  </Button>
+                </div>
+              )}
+              {shares.data
+                ?.filter((s) => !s.revoked && Date.parse(s.expiresAt) > Date.now())
+                .map((share) => (
+                  <div key={share.id} className="flex items-center gap-2 text-sm">
+                    <span className="flex-1">
+                      Freigabe bis {new Date(share.expiresAt).toLocaleDateString('de-CH')}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() =>
+                        void act(async () => {
+                          await api.delete('/api/assistant/shares/' + share.id);
+                          await shares.refetch();
+                        })
+                      }
+                    >
+                      Widerrufen
+                    </Button>
+                  </div>
+                ))}
+              <ChatImport providers={providers} />
+            </>
+          )}
           {error && (
             <p role="alert" className="text-sm text-destructive">
               {error}

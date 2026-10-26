@@ -75,6 +75,7 @@ export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
     writingStyleSkill: z.string().min(1).max(100).nullable().optional(),
   }),
   profile: z.object({
+    chatOptions: CHAT_OPTIONS.optional(),
     /** Legacy hand-written notes; the editor folds them into the instructions. */
     sharedMemories: z.string().max(30000).optional(),
     includeGlobalChatInstructions: z.boolean().default(true),

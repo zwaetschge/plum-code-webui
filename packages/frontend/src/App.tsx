@@ -9,6 +9,9 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Toaster } from '@/components/ui/toaster';
 import { nativeShell } from '@/lib/nativeShell';
 import { NativeAuthRecovery } from '@/components/NativeAuthRecovery';
+const MemoryTopicsPage = lazy(() =>
+  import('@/pages/MemoryTopicsPage').then((m) => ({ default: m.MemoryTopicsPage }))
+);
 
 // Lazy load pages for code splitting
 const AssistantPage = lazy(() =>
@@ -250,6 +253,7 @@ export default function App() {
               <Route path="chat/model/:id" element={<ApiChatPage />} />
               <Route path="tasks" element={<TaskSessionsPage />} />
               <Route path="assistant/:section" element={<AssistantPage />} />
+              <Route path="assistant/memory-topics" element={<MemoryTopicsPage />} />
               <Route path="swarm" element={<SwarmPage />} />
               <Route path="shared/:token" element={<SharedAssistantPage />} />
               <Route path="collaborate" element={<CollaborativeDocumentPage />} />

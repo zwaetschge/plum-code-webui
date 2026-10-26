@@ -26,6 +26,7 @@ internal fun ChatWorkbenchSheet(
     initial: JsonObject, onSaved: (JsonObject, AssistantResource?) -> Unit,
     onImported: (String) -> Unit, onDismiss: () -> Unit,
 ) {
+    val profileMode = chat?.kind == "profile"
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val saved = chat?.body?.get("chatOptions") as? JsonObject ?: initial
@@ -96,13 +97,13 @@ internal fun ChatWorkbenchSheet(
             require(response.success); servers = response.data.orEmpty().filter { it["enabled"]?.jsonPrimitive?.booleanOrNull == true }
             val skillResponse = api.getConfigSkills("skill"); check(current())
             require(skillResponse.success); skills = skillResponse.data.orEmpty()
-            if (chat != null && chat.body["temporary"]?.jsonPrimitive?.booleanOrNull != true) shares = api.getModelChatShares(chat.id).data.orEmpty()
+            if (!profileMode && chat != null && chat.body["temporary"]?.jsonPrimitive?.booleanOrNull != true) shares = api.getModelChatShares(chat.id).data.orEmpty()
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { if (current()) error = failure.message }
     }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Chat-Werkzeuge", style = MaterialTheme.typography.headlineSmall)
+            Text(if (profileMode) "Fähigkeiten" else "Chat-Werkzeuge", style = MaterialTheme.typography.headlineSmall)
             var showSkills by remember { mutableStateOf(false) }
             TextButton(onClick = { showSkills = !showSkills }) { Text("Fachliche Skills · ${selectedSkills.size}") }
             if (showSkills) {
@@ -172,9 +173,10 @@ internal fun ChatWorkbenchSheet(
                 val maxTokens = tokens.toIntOrNull(); val contextTurns = turns.toIntOrNull(); val temp = temperature.takeIf { it.isNotBlank() }?.toDoubleOrNull()
                 require(maxTokens != null && maxTokens in 128..32768 && contextTurns != null && contextTurns in 1..100 && (temperature.isBlank() || (temp != null && temp in 0.0..2.0))) { "Modellparameter prüfen" }
                 val options = buildJsonObject { put("webSearch", web); put("fullDocuments", full); put("allowToolWrites", writes); put("mcpServerIds", JsonArray(selected.map(::JsonPrimitive))); put("skillNames", JsonArray(selectedSkills.map(::JsonPrimitive))); put("toolLoading", toolLoading); put("toolPermissions", permissions); put("comparisonModels", JsonArray(comparisons)); put("maxOutputTokens", maxTokens); put("contextTurns", contextTurns); temp?.let { put("temperature", it) } }
-                val resource = chat?.let { val response = api.saveChatOptions(owner, it.id, buildJsonObject { put("expectedRevision", it.revision); put("options", options) }); require(response.success) { response.error?.message ?: "Speichern fehlgeschlagen" }; requireNotNull(response.data) }
+                val resource = chat?.let { val payload = buildJsonObject { put("expectedRevision", it.revision); put("options", options) }; val response = if (profileMode) api.saveProfileChatOptions(owner, it.id, payload) else api.saveChatOptions(owner, it.id, payload); require(response.success) { response.error?.message ?: "Speichern fehlgeschlagen" }; requireNotNull(response.data) }
                 check(current()); onSaved(options, resource); onDismiss()
             } }) { Text(if (busy) "Speichert …" else "Speichern") }
+            if (!profileMode) {
             HorizontalDivider()
             OutlinedButton(enabled = !busy && providers.isNotEmpty(), onClick = { importFile.launch(arrayOf("application/json", "text/plain")) }) { Text("Chats importieren") }
             if (chat != null) {
@@ -192,6 +194,7 @@ internal fun ChatWorkbenchSheet(
                         TextButton(enabled = !busy, onClick = { act { require(api.revokeModelChatShare(share.getValue("id").jsonPrimitive.content).success); check(current()); shares = api.getModelChatShares(chat.id).data.orEmpty() } }) { Text("Freigabe widerrufen · ${share["expiresAt"]?.jsonPrimitive?.content?.take(10).orEmpty()}") }
                     }
                 }
+            }
             }
             result?.let { Text(it) }; error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }

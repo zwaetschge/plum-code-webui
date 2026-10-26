@@ -28,15 +28,17 @@ export function NativeMemoryManagement({ onChanged }: { onChanged: () => void })
     queryKey: ['assistant', 'native-memory', owner, search],
     enabled: open,
     initialPageParam: 0,
-    queryFn: async ({ pageParam }) =>
+    queryFn: async ({ pageParam, signal }) =>
       (
         await api.get<{
           data: { entries: NativeEntry[]; unavailable: string[]; hasMore: boolean };
         }>(
-          `/api/assistant/memory-system/native?offset=${pageParam}&search=${encodeURIComponent(search)}`
+          `/api/assistant/memory-system/native?offset=${pageParam}&search=${encodeURIComponent(search)}`,
+          { signal: AbortSignal.any([signal, AbortSignal.timeout(45000)]) }
         )
       ).data.data,
     getNextPageParam: (last, _pages, lastOffset) => (last.hasMore ? lastOffset + 50 : undefined),
+    retry: false,
   });
   const invoke = async (fn: () => Promise<unknown>, imported = false) => {
     setBusy(true);
@@ -73,7 +75,18 @@ export function NativeMemoryManagement({ onChanged }: { onChanged: () => void })
         <Input value={search} maxLength={200} onChange={(e) => setSearch(e.target.value)} />
       </label>
       {query.isPending && open && <p role="status">Originalgedächtnisse laden …</p>}
-      {query.isError && <p role="alert">{query.error.message}</p>}
+      {query.isError && (
+        <div>
+          <p role="alert">
+            {query.error.name === 'TimeoutError'
+              ? 'Das Originalgedächtnis antwortet derzeit nicht.'
+              : query.error.message}
+          </p>
+          <Button variant="outline" onClick={() => void query.refetch()}>
+            Erneut laden
+          </Button>
+        </div>
+      )}
       {query.data?.pages[0]?.unavailable.length ? (
         <p>Derzeit nicht erreichbar: {query.data.pages[0].unavailable.join(', ')}.</p>
       ) : null}

@@ -3,6 +3,7 @@ export type * from './types/user.js';
 export type * from './types/session.js';
 export type * from './types/assistant.js';
 export type * from './types/chatContextReceipts.js';
+export type * from './types/memoryTopics.js';
 export type * from './types/message.js';
 export type * from './types/chat-delivery.js';
 export * from './types/settings.js';

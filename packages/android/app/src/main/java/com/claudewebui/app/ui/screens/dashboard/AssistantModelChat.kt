@@ -476,7 +476,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     }
     if (realtimeVoice && chat != null) RealtimeVoiceSheet(owner, chat!!.id, { refresh++ }) { realtimeVoice = false; refresh++ }
     if (showAdvanced) ChatWorkbenchSheet(
-        owner, api, chat, providers, newChatOptions,
+        owner, api, chat, providers, newChatOptions.takeIf { it.isNotEmpty() } ?: (profiles.firstOrNull { it.id == profileId }?.body?.get("chatOptions") as? JsonObject ?: newChatOptions),
         onSaved = { options, resource -> newChatOptions = options; resource?.let { chat = it }; refresh++ },
         onImported = { id -> scope.launch { try { val loaded = api.getAssistantApiTurns(id); checkOwner(); loaded.data?.chat?.let { showChat(it); currentOnChatSelected(it.id) }; showAdvanced = false } catch (failure: Exception) { error = failure.message } } },
         onDismiss = { showAdvanced = false },
@@ -807,6 +807,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         onNewChat = { selected, project ->
             showChat(null); currentOnChatSelected(null)
             profileId = selected?.id; projectId = project
+            newChatOptions = selected?.body?.get("chatOptions") as? JsonObject ?: buildJsonObject {}
             profiles = profiles.filter { it.id != selected?.id } + listOfNotNull(selected)
             val preferred = providers.firstOrNull { it.id == selected?.body?.get("apiProviderId")?.jsonPrimitive?.contentOrNull }
             if (preferred != null) {
@@ -819,6 +820,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             val current = chat
             if (current == null) {
                 profileId = selected?.id; projectId = project
+            newChatOptions = selected?.body?.get("chatOptions") as? JsonObject ?: buildJsonObject {}
                 profiles = profiles.filter { it.id != selected?.id } + listOfNotNull(selected)
                 val preferred = providers.firstOrNull { it.id == selected?.body?.get("apiProviderId")?.jsonPrimitive?.contentOrNull }
                 if (preferred != null) {

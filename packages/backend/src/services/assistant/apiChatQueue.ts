@@ -139,11 +139,13 @@ export async function enqueueApiTurn(userId: string, chatId: string, input: Inpu
     await tx.run('UPDATE assistant_resources SET updated_at=? WHERE id=?', now, chatId);
   });
   await pumpApiChatQueue(userId, chatId);
-  return await get(
+  const accepted = await get(
     'SELECT * FROM assistant_api_turns WHERE id=? AND chat_id=?',
     input.commandId,
     chatId
   );
+  if (!accepted) throw new AppError('Gespräch wurde inzwischen entfernt', 404, 'NOT_FOUND');
+  return accepted;
 }
 
 export async function pumpApiChatQueue(userId: string, chatId: string) {

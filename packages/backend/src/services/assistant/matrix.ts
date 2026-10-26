@@ -393,6 +393,15 @@ async function connectionFor(userId: string): Promise<MatrixConnection> {
     );
   return { ...identity, token };
 }
+/** Verify the current principal without enumerating or synchronising every joined room. */
+export async function verifyMatrixIdentity(userId: string) {
+  const c = await connectionFor(userId);
+  const identity = await request<{ user_id: string }>(c, '/_matrix/client/v3/account/whoami');
+  if (identity.user_id !== c.userId)
+    throw new AppError('Matrix-Konto wurde gewechselt.', 409, 'MATRIX_IDENTITY_CHANGED');
+  await transaction((tx) => assertConnection(tx, userId, c));
+  return { userId: identity.user_id, epoch: c.epoch };
+}
 async function assertConnection(tx: TransactionScope, userId: string, c: MatrixConnection) {
   await tx.get('SELECT id FROM users WHERE id=? FOR UPDATE', userId);
   const row = await tx.get(

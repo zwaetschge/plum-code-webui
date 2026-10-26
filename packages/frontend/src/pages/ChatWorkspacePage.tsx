@@ -9,6 +9,8 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import './chat-workspace.css';
 import { ResourcePicker } from '@/components/assistant/ResourcePicker';
 import { ModelChatMenu, ModelChatRename, ProjectMenu } from '@/components/layout/ModelChatMenu';
+import { ChatWorkbench } from '@/components/assistant/ChatWorkbench';
+import { ResourceRevisionDiff } from '@/components/assistant/ResourceRevisionDiff';
 import {
   EXPERT_MEMORY,
   PROJECT_MEMORY,
@@ -48,6 +50,13 @@ export function ChatWorkspacePage() {
   return <WorkspaceAccount key={String(owner) + ':' + location.pathname} owner={owner} />;
 }
 function WorkspaceAccount({ owner }: { owner?: string }) {
+  const cache = useQueryClient();
+  const apiProviders = useQuery({
+    queryKey: ['assistant', 'api-chat-providers', owner],
+    queryFn: async () =>
+      (await api.get<{ data: AssistantApiProvider[] }>('/api/assistant/api-chat-providers')).data
+        .data,
+  });
   const { id } = useParams(),
     location = useLocation(),
     [params, setParams] = useSearchParams();
@@ -192,7 +201,20 @@ function WorkspaceAccount({ owner }: { owner?: string }) {
                   {isProject ? <FolderOpen className="shrink-0" /> : <Bot className="shrink-0" />}
                   {resource.title}
                 </h1>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {!isProject && (
+                    <ChatWorkbench
+                      chat={resource}
+                      providers={apiProviders.data ?? []}
+                      disabled={false}
+                      onSaved={() => cache.invalidateQueries({ queryKey: ['assistant'] })}
+                    />
+                  )}
+                  <ResourceRevisionDiff
+                    collection={collection}
+                    id={resource.id}
+                    revision={resource.revision}
+                  />
                   <Link to={base + '/' + id + '/edit'} className={action}>
                     <Settings2 size={15} className="mr-2" />
                     Bearbeiten

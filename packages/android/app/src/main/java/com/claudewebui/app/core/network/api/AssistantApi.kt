@@ -20,6 +20,13 @@ import io.ktor.client.plugins.timeout
 interface AssistantApi {
     suspend fun getChatToolCatalog(owner: String, input: JsonObject): ApiResponse<List<JsonObject>>
     suspend fun decideChatTool(owner: String, chatId: String, turnId: String, callId: String, decision: String): ApiResponse<JsonObject>
+    suspend fun saveChatMemory(owner: String, id: String?, input: AssistantResourceInput): ApiResponse<AssistantResource>
+    suspend fun getMemoryTopics(search: String = "", offset: Int = 0): ApiResponse<JsonObject>
+    suspend fun getMemoryTopicDocument(id: String, offset: Int = 0): ApiResponse<JsonObject>
+    suspend fun forgetMemoryTopic(owner: String, id: String, version: String): ApiResponse<JsonObject>
+    suspend fun forgetChatMemory(owner: String, id: String, revision: Long): ApiResponse<JsonObject>
+    suspend fun getResourceRevisionDiff(collection: String, id: String, from: Long, to: Long): ApiResponse<JsonObject>
+    suspend fun saveProfileChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource>
     suspend fun getChatToolServers(): ApiResponse<List<JsonObject>>
     suspend fun saveChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource>
     suspend fun exportModelChat(id: String): ByteArray
@@ -85,6 +92,13 @@ interface AssistantApi {
 class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
     override suspend fun getChatToolCatalog(owner: String, input: JsonObject): ApiResponse<List<JsonObject>> = http.post("/api/assistant/api-chat-tools/catalog") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun decideChatTool(owner: String, chatId: String, turnId: String, callId: String, decision: String): ApiResponse<JsonObject> = http.post("/api/assistant/api-chats/${checked(chatId)}/turns/${checked(turnId)}/tools/${checked(callId)}/decision") { attributes.put(AssistantAccountKey, owner); setBody(JsonObject(mapOf("decision" to kotlinx.serialization.json.JsonPrimitive(decision)))) }
+    override suspend fun saveChatMemory(owner: String, id: String?, input: AssistantResourceInput): ApiResponse<AssistantResource> = if (id == null) http.post("/api/assistant/memory") { attributes.put(AssistantAccountKey, owner); setBody(input) } else http.patch("/api/assistant/memory/${checked(id)}") { attributes.put(AssistantAccountKey, owner); setBody(input) }
+    override suspend fun getMemoryTopics(search: String, offset: Int): ApiResponse<JsonObject> = http.get("/api/assistant/memory-system/topics") { url { parameters.append("search", search); parameters.append("offset", offset.toString()) } }
+    override suspend fun getMemoryTopicDocument(id: String, offset: Int): ApiResponse<JsonObject> = http.get("/api/assistant/memory-system/topics/${checked(id)}") { url { parameters.append("offset", offset.toString()) } }
+    override suspend fun forgetMemoryTopic(owner: String, id: String, version: String): ApiResponse<JsonObject> = http.delete("/api/assistant/memory-system/topics/${checked(id)}") { attributes.put(AssistantAccountKey, owner); setBody(JsonObject(mapOf("expectedVersion" to kotlinx.serialization.json.JsonPrimitive(version)))) }
+    override suspend fun forgetChatMemory(owner: String, id: String, revision: Long): ApiResponse<JsonObject> = http.delete("/api/assistant/memory-system/${checked(id)}") { attributes.put(AssistantAccountKey, owner); setBody(JsonObject(mapOf("expectedRevision" to kotlinx.serialization.json.JsonPrimitive(revision)))) }
+    override suspend fun getResourceRevisionDiff(collection: String, id: String, from: Long, to: Long): ApiResponse<JsonObject> = http.get("/api/assistant/revision-diff/${checked(collection)}/${checked(id)}") { url { parameters.append("from", from.toString()); parameters.append("to", to.toString()) } }
+    override suspend fun saveProfileChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource> = http.put("/api/assistant/profiles/${checked(id)}/options") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun getChatToolServers(): ApiResponse<List<JsonObject>> = http.get("/api/mcp-servers")
     override suspend fun saveChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource> = http.put("/api/assistant/api-chats/${checked(id)}/options") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun exportModelChat(id: String): ByteArray = http.get("/api/assistant/api-chats/${checked(id)}/export")

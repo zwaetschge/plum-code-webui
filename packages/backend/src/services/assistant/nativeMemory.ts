@@ -6,7 +6,7 @@ import path from 'node:path';
 import { Pool } from 'pg';
 import { parse } from 'dotenv';
 import { z } from 'zod';
-import { matrixStatus, matrixRooms } from './matrix.js';
+import { matrixStatus, verifyMatrixIdentity } from './matrix.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { transaction, all } from '../../db/pg.js';
 import { BODY_SCHEMAS, createResource, reviseResource } from './resources.js';
@@ -47,8 +47,7 @@ async function authorised(userId: string) {
       'NATIVE_MEMORY_IDENTITY'
     );
   // Validate the current token against the homeserver, not just its stored label.
-  await matrixRooms(userId);
-  const current = await matrixStatus(userId);
+  const current = await verifyMatrixIdentity(userId);
   if (current.userId !== identity.userId || current.epoch !== identity.epoch)
     throw new AppError('Matrix-Konto wurde gewechselt.', 409, 'MATRIX_IDENTITY_CHANGED');
   return config;
@@ -70,6 +69,8 @@ async function nativeDb(database?: string) {
       max: 2,
       idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 5000,
+      statement_timeout: 5000,
+      query_timeout: 6000,
       allowExitOnIdle: true,
     });
     poolUrl = database;
@@ -176,36 +177,41 @@ export async function nativeMemoryList(userId: string, search = '', offset = 0, 
   } catch {
     unavailable.push('swarm');
   }
-  for (const [agent, root] of Object.entries(hermesRoots())) {
-    try {
-      await access(root);
-    } catch {
-      unavailable.push(agent);
-      continue;
-    }
-    for (const target of ['memory', 'user'])
+  await Promise.all(
+    Object.entries(hermesRoots()).map(async ([agent, root]) => {
       try {
-        const data = await hermes(agent, target, { action: 'read' });
-        const found = data.entries.filter(
-          (e) =>
-            !containsSecret(e.text) &&
-            e.text.toLocaleLowerCase().includes(search.toLocaleLowerCase())
-        );
-        if (offset === 0)
-          entries.push(
-            ...found.map((e) => ({
-              id: `hermes:${agent}:${target}:${e.hash}`,
-              agentId: agent,
-              title: e.text.split('\n')[0]!.slice(0, 200),
-              text: e.text,
-              revision: data.hash,
-              runtime: 'hermes' as const,
-            }))
-          );
+        await access(root);
       } catch {
-        if (!unavailable.includes(agent)) unavailable.push(agent);
+        unavailable.push(agent);
+        return;
       }
-  }
+      await Promise.all(
+        ['memory', 'user'].map(async (target) => {
+          try {
+            const data = await hermes(agent, target, { action: 'read' });
+            const found = data.entries.filter(
+              (e) =>
+                !containsSecret(e.text) &&
+                e.text.toLocaleLowerCase().includes(search.toLocaleLowerCase())
+            );
+            if (offset === 0)
+              entries.push(
+                ...found.map((e) => ({
+                  id: `hermes:${agent}:${target}:${e.hash}`,
+                  agentId: agent,
+                  title: e.text.split('\n')[0]!.slice(0, 200),
+                  text: e.text,
+                  revision: data.hash,
+                  runtime: 'hermes' as const,
+                }))
+              );
+          } catch {
+            if (!unavailable.includes(agent)) unavailable.push(agent);
+          }
+        })
+      );
+    })
+  );
   return {
     entries,
     unavailable,

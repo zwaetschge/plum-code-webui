@@ -87,7 +87,7 @@ export const API_CHAT_INPUT = z
     profileId: z.string().min(1).max(200).nullable().optional(),
     projectId: z.string().min(1).max(200).nullable().optional(),
     sourceIds: z.array(z.string().min(1).max(200)).max(20).default([]),
-    chatOptions: CHAT_OPTIONS.optional(),
+    chatOptions: CHAT_OPTIONS.partial().optional(),
     artifactEdit: ARTIFACT_EDIT_INPUT.optional(),
     workflow: z.literal('research').optional(),
     temporary: z.boolean().optional(),
@@ -424,7 +424,10 @@ export async function createApiChat(userId: string, input: z.infer<typeof API_CH
     const body = BODY_SCHEMAS['api-chat'].parse({
       providerId: input.providerId,
       model: input.model,
-      ...(input.chatOptions ? { chatOptions: input.chatOptions } : {}),
+      chatOptions: CHAT_OPTIONS.parse({
+        ...((profile?.body.chatOptions ?? {}) as Record<string, unknown>),
+        ...input.chatOptions,
+      }),
       sourceIds: input.sourceIds,
       ...(input.artifactEdit ? { artifactEdit: input.artifactEdit } : {}),
       ...(input.workflow ? { workflow: input.workflow } : {}),
@@ -505,7 +508,14 @@ export async function updateApiChat(
       ...rest,
       providerId: input.providerId,
       model: input.model,
-      ...(input.chatOptions ? { chatOptions: input.chatOptions } : {}),
+      ...(input.chatOptions
+        ? {
+            chatOptions: CHAT_OPTIONS.parse({
+              ...((rest.chatOptions ?? {}) as Record<string, unknown>),
+              ...input.chatOptions,
+            }),
+          }
+        : {}),
       ...(input.memoryRead !== undefined
         ? { memoryRead: !chat.body.temporary && input.memoryRead }
         : {}),

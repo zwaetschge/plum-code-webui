@@ -5,13 +5,19 @@ import { all, get, transaction } from '../db/pg.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { CHAT_OPTIONS } from '../services/assistant/chatOptions.js';
-import { findResource, reviseResource } from '../services/assistant/resources.js';
+import { findResource, reviseResource, RESOURCE_KINDS } from '../services/assistant/resources.js';
 import { ingestSource } from '../services/assistant/ingestion.js';
 import { exportChat, importChats, shareChat } from '../services/assistant/chatPortability.js';
 import { apiChatEndpoint } from '../services/assistant/apiTransport.js';
 import { chatToolset } from '../services/assistant/chatTools.js';
 import { decideChatToolApproval } from '../services/assistant/chatToolApprovals.js';
 import { selectedChatSkills } from '../services/assistant/chatSkills.js';
+import {
+  memoryTopics,
+  memoryTopic,
+  forgetMemoryTopic,
+} from '../services/assistant/memoryTopics.js';
+import { resourceRevisionDiff } from '../services/assistant/revisionDiff.js';
 
 export const chatWorkbenchRouter = Router();
 const router = chatWorkbenchRouter;
@@ -31,6 +37,66 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 4 },
 });
+router.get(
+  '/revision-diff/:collection/:id',
+  handle(async (req, res) => {
+    const collection = String(req.params.collection) as keyof typeof RESOURCE_KINDS;
+    if (!Object.hasOwn(RESOURCE_KINDS, collection))
+      throw new AppError('Eintrag nicht gefunden', 404, 'NOT_FOUND');
+    const input = z
+      .object({ from: z.coerce.number().int().positive(), to: z.coerce.number().int().positive() })
+      .parse(req.query);
+    res.json({
+      success: true,
+      data: await resourceRevisionDiff(
+        owner(req),
+        collection,
+        String(req.params.id),
+        input.from,
+        input.to
+      ),
+    });
+  })
+);
+router.get(
+  '/memory-system/topics',
+  handle(async (req, res) => {
+    const input = z
+      .object({
+        search: z.string().max(200).default(''),
+        offset: z.coerce.number().int().min(0).max(100000).default(0),
+      })
+      .parse(req.query);
+    res.json({ success: true, data: await memoryTopics(owner(req), input.search, input.offset) });
+  })
+);
+router.get(
+  '/memory-system/topics/:topic',
+  handle(async (req, res) => {
+    const id = z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .parse(req.params.topic);
+    const { offset } = z
+      .object({ offset: z.coerce.number().int().min(0).max(100000).default(0) })
+      .parse(req.query);
+    res.json({ success: true, data: await memoryTopic(owner(req), id, offset) });
+  })
+);
+router.delete(
+  '/memory-system/topics/:topic',
+  handle(async (req, res) => {
+    const id = z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .parse(req.params.topic);
+    const { expectedVersion } = z
+      .object({ expectedVersion: z.string().regex(/^[a-f0-9]{64}$/) })
+      .strict()
+      .parse(req.body);
+    res.json({ success: true, data: await forgetMemoryTopic(owner(req), id, expectedVersion) });
+  })
+);
 async function chat(userId: string, id: string) {
   const resource = await findResource(userId, id);
   if (resource.kind !== 'api-chat') throw new AppError('Chat nicht gefunden', 404, 'NOT_FOUND');
@@ -81,9 +147,10 @@ router.post(
   })
 );
 router.put(
-  '/api-chats/:id/options',
+  ['/api-chats/:id/options', '/profiles/:id/options'],
   handle(async (req, res) => {
-    await chat(owner(req), String(req.params.id));
+    const profileMode = req.path.startsWith('/profiles/');
+    if (!profileMode) await chat(owner(req), String(req.params.id));
     const input = z
         .object({ expectedRevision: z.number().int().positive(), options: CHAT_OPTIONS })
         .strict()
@@ -100,7 +167,8 @@ router.put(
         userId
       );
       const current = await findResource(userId, id, tx);
-      if (current.kind !== 'api-chat') throw new AppError('Chat nicht gefunden', 404, 'NOT_FOUND');
+      if (current.kind !== (profileMode ? 'profile' : 'api-chat'))
+        throw new AppError('Eintrag nicht gefunden', 404, 'NOT_FOUND');
       if (
         await tx.get(
           "SELECT id FROM assistant_api_turns WHERE chat_id=? AND status='running' AND expires_at>?",

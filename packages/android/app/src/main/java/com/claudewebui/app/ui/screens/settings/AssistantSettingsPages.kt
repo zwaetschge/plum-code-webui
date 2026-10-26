@@ -401,6 +401,7 @@ private fun LazyListScope.memoryPage(controller: AssistantSettingsController, va
             item { SettingsSwitchRow(stringResource(R.string.assistant_memory_learning), value.memoryLearning, { controller.setBoolean("memoryLearning", it) }, Icons.Outlined.AutoAwesome, TileTone.Violet, enabled = enabled) }
             item { SettingsSwitchRow(stringResource(R.string.assistant_memory_agent_sharing), value.agentMemorySharing, { controller.setBoolean("agentMemorySharing", it) }, Icons.Outlined.Groups, TileTone.Teal, enabled = enabled) }
             item { SettingsRow(stringResource(R.string.assistant_manage_memory), Icons.AutoMirrored.Outlined.ManageSearch, TileTone.Blue, onClick = { openFeature("/assistant/memory") }) }
+            item { SettingsRow("Themengedächtnis", Icons.Outlined.EditNote, TileTone.Indigo, onClick = { openFeature("/assistant/memory-topics") }) }
         }
     }
     item(key = "history") {
