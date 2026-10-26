@@ -110,7 +110,7 @@ export async function apiChatImages(userId: string, id: string) {
       id,
       userId
     )
-  ).map(metadata);
+  ).filter((row) => String(row.mime_type).startsWith('image/')).map(metadata);
 }
 export async function apiChatImage(
   userId: string,
@@ -137,6 +137,7 @@ export async function apiImagePayloads(
   const images = [];
   for (const assetId of ids) {
     const file = await apiChatImage(userId, id, assetId, tx);
+    imageMime(file.bytes);
     images.push({
       id: file.id,
       filename: file.filename,

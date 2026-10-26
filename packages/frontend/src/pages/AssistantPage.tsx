@@ -5,6 +5,7 @@ import { TaskResults, taskResultsReviewed } from '@/components/assistant/TaskRes
 import { CollectionWorkspace } from '@/components/assistant/CollectionWorkspace';
 import { ComparisonStarter } from '@/components/assistant/ComparisonWorkspace';
 import { TaskImages } from '@/components/assistant/TaskImages';
+import { ToolFiles, type ToolFile } from '@/components/assistant/ToolFiles';
 import { NativeRoutineControls } from '@/components/assistant/NativeRoutineControls';
 import { LibrarySearch } from '@/components/assistant/LibrarySearch';
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
@@ -1553,6 +1554,8 @@ function AssistantAccountPage({ embeddedSection }: { embeddedSection?: string })
                 }}
               />
             )}
+            {selected.kind === 'artifact' && Array.isArray(selected.body.toolFiles) && <ToolFiles artifactId={selected.id} files={selected.body.toolFiles as ToolFile[]} />}
+            {['source', 'collection'].includes(selected.kind) && <Link className="text-sm underline" to={`/assistant/knowledge?resource=${encodeURIComponent(selected.id)}`}>Wissen und Zugriff verwalten</Link>}
             {selected.kind === 'collection' && Array.isArray(selected.body.resourceIds) && (
               <CollectionWorkspace
                 collection={selected}
@@ -1632,7 +1635,8 @@ function AssistantAccountPage({ embeddedSection }: { embeddedSection?: string })
                 Ursprüngliches Analyse-Notebook öffnen
               </Link>
             )}
-            {selected.kind === 'routine' && (
+            {selected.kind === 'routine' && selected.body.owner === 'api-chat' && <Link to="/assistant/schedules" className="text-sm underline">Chatzeitplan öffnen</Link>}
+            {selected.kind === 'routine' && selected.body.owner !== 'api-chat' && (
               <NativeRoutineControls
                 key={`${account}:${selected.id}:${selected.revision}`}
                 routine={selected}

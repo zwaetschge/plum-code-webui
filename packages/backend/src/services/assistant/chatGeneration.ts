@@ -1,3 +1,4 @@
+import type { ChatToolFile } from './chatToolAssets.js';
 import { estimateModelCost } from '@plum-code-webui/shared';
 import type { ChatCompaction } from '@plum-code-webui/shared';
 import {
@@ -17,6 +18,7 @@ export interface ChatToolEvent {
   status: 'running' | 'waiting' | 'completed' | 'failed';
   arguments?: string;
   result?: string;
+  files?: ChatToolFile[];
 }
 export interface ChatComparison {
   providerId: string;
@@ -52,6 +54,7 @@ export async function generateChat(options: {
   workbench: ChatWorkbench;
   onText: (text: string) => Promise<void>;
   onUpdate: () => Promise<void>;
+  onToolResult?: (event: ChatToolEvent, result: unknown) => Promise<unknown>;
   approveTool?: (
     callId: string,
     name: string,
@@ -122,11 +125,11 @@ export async function generateChat(options: {
                 event.status = 'failed';
               } else {
                 signal.throwIfAborted();
-                event.result = await tools.call(call.name, args, true);
+                event.result = await tools.call(call.name, args, true, options.onToolResult ? (result) => options.onToolResult!(event, result) : undefined);
                 event.status = 'completed';
               }
             } else {
-              event.result = await tools.call(call.name, args);
+              event.result = await tools.call(call.name, args, false, options.onToolResult ? (result) => options.onToolResult!(event, result) : undefined);
               event.status = 'completed';
             }
           } catch {

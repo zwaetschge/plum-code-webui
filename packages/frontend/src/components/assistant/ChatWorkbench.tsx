@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type {
   AssistantApiProvider,
   AssistantApiTurn,
@@ -10,6 +10,7 @@ import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { ToolFiles } from './ToolFiles';
 import { ChatRichText } from './ChatRichText';
 import { ChatContextReceipt } from './ChatContextReceipt';
 import { ChatCompactionReceipt } from './ChatCompactionReceipt';
@@ -226,6 +227,7 @@ export function ChatWorkbench({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl max-h-[88dvh] overflow-y-auto">
           <DialogTitle>{profileMode ? 'Fähigkeiten' : 'Chat-Werkzeuge'}</DialogTitle>
+          {!profileMode && !chat.body.temporary && <Link to={`/assistant/schedules?chat=${encodeURIComponent(chat.id)}`} onClick={() => setOpen(false)} className="text-sm underline">Nachricht planen</Link>}
           <fieldset disabled={disabled || busy} className="space-y-4">
             <details>
               <summary className="cursor-pointer">
@@ -747,6 +749,7 @@ export function ChatTurnDetails({
     [error, setError] = useState('');
   return (
     <div className="space-y-3">
+      {!!turn.toolEvents?.some((event) => event.files?.length) && <ToolFiles chatId={chatId} files={turn.toolEvents.flatMap((event) => event.files ?? [])} />}
       <ChatContextReceipt receipt={turn.contextReceipt} />
       <ChatCompactionReceipt compaction={turn.compaction} />
       {!!turn.toolEvents?.length && (

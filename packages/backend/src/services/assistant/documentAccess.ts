@@ -1,3 +1,4 @@
+import { mergeDocumentText } from './textMerge.js';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type {
@@ -23,6 +24,7 @@ export const DOCUMENT_WRITE_INPUT = z
     expectedRevision: z.number().int().positive(),
     title: z.string().trim().min(1).max(200),
     content: z.string().max(50000),
+    autoMerge: z.boolean().optional(),
   })
   .strict();
 const missing = () => new AppError('Gemeinsames Dokument ist nicht verfügbar', 404, 'NOT_FOUND');
@@ -265,13 +267,20 @@ export async function writeSharedDocument(
     const saved = await receipt(tx, userId, id, input.commandId, 'document-edit', input);
     if (saved.prior) return saved.prior as AssistantDocumentAccess;
     const current = await findResource(permitted.ownerId, id, tx);
-    retainedImages(current, input.content);
+    let content = input.content, title = input.title;
+    if (input.autoMerge && current.revision !== input.expectedRevision) {
+      const base = await access(userId, id, tx, input.expectedRevision);
+      content = mergeDocumentText(String(base.resource.body.content), String(current.body.content), input.content);
+      title = mergeDocumentText(base.resource.title, current.title, input.title);
+      if (content.length > 50000) throw new AppError('Gemeinsames Dokument ist zu lang', 413, 'DOCUMENT_TOO_LONG');
+    }
+    retainedImages(current, content);
     const revised = await reviseResource(
       permitted.ownerId,
       id,
-      input.expectedRevision,
-      input.title,
-      { ...current.body, content: input.content },
+      input.autoMerge ? current.revision : input.expectedRevision,
+      title,
+      { ...current.body, content },
       tx
     );
     const result = { ...permitted, resource: publicResource(revised) };

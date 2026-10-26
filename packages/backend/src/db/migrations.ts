@@ -1,3 +1,5 @@
+import { CHAT_SCHEDULE_SCHEMA } from '../services/assistant/chatSchedules.js';
+import { LIBRARY_ACCESS_SCHEMA } from '../services/assistant/libraryAccess.js';
 import { DEFAULT_CODEX_MODEL } from '@plum-code-webui/shared';
 import { CHAT_CAPABILITIES_SCHEMA } from '../services/assistant/chatCapabilitiesSchema.js';
 import { CHAT_COMPACTION_SCHEMA } from '../services/assistant/chatCompactionSchema.js';
@@ -239,6 +241,8 @@ const MIGRATIONS: Migration[] = [
     ],
   },
   { id: '022-api-chat-compaction', statements: CHAT_COMPACTION_SCHEMA },
+  { id: '023-library-access', statements: LIBRARY_ACCESS_SCHEMA },
+  { id: '024-chat-schedules', statements: CHAT_SCHEDULE_SCHEMA },
 ];
 
 async function ensureTable(): Promise<void> {

@@ -48,6 +48,7 @@ export interface AssistantApiTurn {
     status: 'running' | 'waiting' | 'completed' | 'failed';
     arguments?: string;
     result?: string;
+    files?: Array<{ id: string; filename: string; mimeType: string; byteLength: number; sha256: string; artifactId: string | null }>;
   }>;
   comparisons?: Array<{
     providerId: string;

@@ -4,6 +4,8 @@ import com.claudewebui.app.core.network.ApiHttp
 import com.claudewebui.app.data.model.*
 import io.ktor.client.request.*
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import com.claudewebui.app.core.network.AssistantAccountKey
 
 /**
  * The on-disk configuration library: `/api/claude-config` (skills, agents,
@@ -51,6 +53,11 @@ interface ConfigLibraryApi {
     ): ApiResponse<ConfigAgent>
 
     suspend fun deleteConfigAgent(name: String): ApiResponse<Unit>
+
+    suspend fun getSkillFiles(name: String): ApiResponse<JsonObject>
+    suspend fun getSkillFile(name: String, path: String, revision: String? = null): ApiResponse<JsonObject>
+    suspend fun getSkillFileHistory(name: String, path: String): ApiResponse<List<JsonObject>>
+    suspend fun writeSkillFile(owner: String, name: String, input: JsonObject): ApiResponse<JsonObject>
 
     suspend fun getConfigSkill(name: String): ApiResponse<ConfigSkillContent>
 
@@ -131,6 +138,11 @@ class ConfigLibraryApiImpl(private val http: ApiHttp) : ConfigLibraryApi {
 
     override suspend fun deleteConfigAgent(name: String): ApiResponse<Unit> =
         http.delete("/api/claude-config/agent/${http.pathSegment(name)}")
+
+    override suspend fun getSkillFiles(name: String): ApiResponse<JsonObject> = http.get("/api/claude-config/skill/${http.pathSegment(name)}/files")
+    override suspend fun getSkillFile(name: String, path: String, revision: String?): ApiResponse<JsonObject> = http.get("/api/claude-config/skill/${http.pathSegment(name)}/file") { parameter("path", path); revision?.let { parameter("revision", it) } }
+    override suspend fun getSkillFileHistory(name: String, path: String): ApiResponse<List<JsonObject>> = http.get("/api/claude-config/skill/${http.pathSegment(name)}/file-history") { parameter("path", path) }
+    override suspend fun writeSkillFile(owner: String, name: String, input: JsonObject): ApiResponse<JsonObject> = http.put("/api/claude-config/skill/${http.pathSegment(name)}/file") { attributes.put(AssistantAccountKey, owner); setBody(input) }
 
     override suspend fun getConfigSkill(name: String): ApiResponse<ConfigSkillContent> =
         http.get("/api/claude-config/skill/${http.pathSegment(name)}")

@@ -27,6 +27,10 @@ internal fun ChatWorkbenchSheet(
     onImported: (String) -> Unit, onDismiss: () -> Unit,
 ) {
     val profileMode = chat?.kind == "profile"
+    var showSchedules by remember { mutableStateOf(false) }
+    if (showSchedules && chat != null) androidx.compose.ui.window.Dialog(onDismissRequest = { showSchedules = false }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        AssistantWebWorkspace(path = "/assistant/schedules?chat=${chat.id}", area = "chat", onAreaSelect = { showSchedules = false }, onClose = { showSchedules = false }, onPersonalize = { showSchedules = false }, onNavigateToChat = { showSchedules = false }, onNativeChat = { showSchedules = false }, standaloneTitle = "Geplante Chats")
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val saved = chat?.body?.get("chatOptions") as? JsonObject ?: initial
@@ -114,6 +118,7 @@ internal fun ChatWorkbenchSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(if (profileMode) "Fähigkeiten" else "Chat-Werkzeuge", style = MaterialTheme.typography.headlineSmall)
+            if (!profileMode && chat != null && chat.body["temporary"]?.jsonPrimitive?.booleanOrNull != true) TextButton(onClick = { showSchedules = true }) { Text("Nachricht planen") }
             var showReferences by remember { mutableStateOf(false) }
             TextButton(onClick = { showReferences = !showReferences }) { Text("Gesprächsreferenzen · ${referenceChatIds.size}" + if (chat?.body?.get("memoryRead")?.jsonPrimitive?.booleanOrNull == false) " · Lesen aus" else "") }
             if (showReferences) {

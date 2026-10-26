@@ -334,7 +334,7 @@ export function CapabilityCatalogSections({
                           )}
                         </div>
 
-                        <div className="capability-card-actions flex shrink-0 gap-1 transition-opacity">
+                        <div className="capability-card-actions z-20 flex shrink-0 gap-1 transition-opacity">
                           <Button
                             variant="ghost"
                             size="icon"
@@ -568,7 +568,7 @@ export function CapabilityCatalogSections({
                             )}
                           </div>
 
-                          <div className="capability-card-actions flex shrink-0 gap-1 transition-opacity">
+                          <div className="capability-card-actions z-20 flex shrink-0 gap-1 transition-opacity">
                             {!isStylePreset && (
                               <Button
                                 variant="ghost"

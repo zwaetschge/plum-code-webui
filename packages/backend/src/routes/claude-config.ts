@@ -20,7 +20,24 @@ import {
   unregisterSkill,
 } from '../utils/leanSkillCatalog.js';
 
+import { z } from 'zod';
+import { listSkillFiles, readSkillFile, writeSkillFile, skillFileHistory } from '../utils/skillFiles.js';
+
 const router = Router();
+router.get('/skill/:name/files', requireAuth, requireAdmin, async (req, res) => {
+  res.json({ success: true, data: await listSkillFiles(resolveConfigHome(req.query.provider), String(req.params.name)) });
+});
+router.get('/skill/:name/file', requireAuth, requireAdmin, async (req, res) => {
+  const input = z.object({ path: z.string(), revision: z.string().optional() }).parse(req.query);
+  res.json({ success: true, data: await readSkillFile(resolveConfigHome(req.query.provider), String(req.params.name), input.path, input.revision) });
+});
+router.get('/skill/:name/file-history', requireAuth, requireAdmin, async (req, res) => {
+  const file = z.string().parse(req.query.path);
+  res.json({ success: true, data: await skillFileHistory(resolveConfigHome(req.query.provider), String(req.params.name), file) });
+});
+router.put('/skill/:name/file', requireAuth, requireAdmin, async (req, res) => {
+  res.json({ success: true, data: await writeSkillFile(resolveConfigHome(req.query.provider), String(req.params.name), req.body) });
+});
 
 interface AgentInfo {
   id: string;

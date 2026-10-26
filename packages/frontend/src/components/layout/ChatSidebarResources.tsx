@@ -163,6 +163,8 @@ export function ChatSidebarResources({
           <MessageCircle className="h-4 w-4 shrink-0" />
           {!collapsed && 'Verlauf verwalten'}
         </NavLink>
+          <NavLink to="/assistant/knowledge" onClick={onNavigate} className={({ isActive }) => cn(row, isActive && 'is-active')} title="Wissen"><Library className="h-4 w-4 shrink-0" />{!collapsed && 'Wissen'}</NavLink>
+          <NavLink to="/assistant/schedules" onClick={onNavigate} className={({ isActive }) => cn(row, isActive && 'is-active')} title="Geplant"><MessageCircle className="h-4 w-4 shrink-0" />{!collapsed && 'Geplant'}</NavLink>
         <NavLink
           to="/chat/assistants"
           onClick={onNavigate}

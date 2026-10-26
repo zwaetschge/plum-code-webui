@@ -613,6 +613,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                         } catch (failure: Exception) { error = failure.message }
                                     }
                                 }
+                                turn.toolEvents.flatMap { it.files }.forEach { file -> key(owner, shownId, file.id) { ChatToolFile(owner, api, shownId, file) } }
                                 if (turn.toolEvents.isNotEmpty()) {
                                     turn.toolEvents.filter { it.status == "waiting" }.forEach { event -> ChatToolDecision(owner, api, shownId, turn.id, event) }
                                     Text(turn.toolEvents.joinToString(" · ") { event -> "${if (event.name == "web_search") "Websuche" else if (event.name == "web_fetch") "Seitenabruf" else event.name}: ${if (event.status == "running") "Läuft …" else if (event.status == "failed") "Fehlgeschlagen" else "Fertig"}" }, style = MaterialTheme.typography.labelSmall, color = palette.muted)
@@ -1013,6 +1014,10 @@ fun ModelChatHistoryList(
     val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     key(owner) {
+        var showKnowledge by remember { mutableStateOf(false) }
+        if (showKnowledge) androidx.compose.ui.window.Dialog(onDismissRequest = { showKnowledge = false }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+            AssistantWebWorkspace(path = "/assistant/knowledge", area = "chat", onAreaSelect = { showKnowledge = false }, onClose = { showKnowledge = false }, onPersonalize = { showKnowledge = false }, onNavigateToChat = { showKnowledge = false }, onNativeChat = { showKnowledge = false }, standaloneTitle = "Wissen")
+        }
         var search by remember { mutableStateOf("") }
         var offset by remember { mutableIntStateOf(0) }
         var chats by remember { mutableStateOf<List<AssistantResource>>(emptyList()) }
@@ -1138,6 +1143,7 @@ fun ModelChatHistoryList(
         }
         Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(enabled = enabled, onClick = { showManager = true }) { Text("Verlauf verwalten") }
+            TextButton(enabled = enabled, onClick = { showKnowledge = true }) { Text("Wissen") }
             OutlinedTextField(search, { search = it; offset = 0 }, placeholder = { Text(stringResource(R.string.assistant_search_chats)) }, singleLine = true, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth())
             if (onNewChat != null) {
                 val newSource = remember { MutableInteractionSource() }

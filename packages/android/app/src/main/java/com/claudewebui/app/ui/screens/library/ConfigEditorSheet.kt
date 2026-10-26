@@ -86,8 +86,12 @@ private fun ConfigEditorForm(
     var version by remember { mutableStateOf(original.version) }
     var author by remember { mutableStateOf(original.author) }
     var category by remember { mutableStateOf(original.category) }
+    var showFiles by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
+    if (showFiles && original.key != null) {
+        SkillFilesSheet(original.key, onDismiss = { showFiles = false }, onChanged = onDismiss)
+    }
     val label = when (original.kind) {
         ConfigItemKind.AGENT -> screenResources.getString(R.string.library_agent_5ce2e)
         ConfigItemKind.SKILL -> screenResources.getString(R.string.library_skill_ec9f6)
@@ -123,6 +127,9 @@ private fun ConfigEditorForm(
             color = PlumMuted,
         )
 
+        if (original.kind == ConfigItemKind.SKILL && original.key != null) {
+            TextButton(onClick = { showFiles = true }) { Text("Dateien und Versionen") }
+        }
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },

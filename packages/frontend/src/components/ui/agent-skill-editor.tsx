@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { SkillFilesEditor } from './skill-files-editor';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Bot, Wand2, Save, Trash2, AlertTriangle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -46,6 +47,7 @@ export function AgentSkillEditor({
   onSaved,
 }: EditorProps) {
   const queryClient = useQueryClient();
+  const [showFiles, setShowFiles] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const isAgent = type === 'agent';
   const providerKey = configProvider || 'default';
@@ -246,6 +248,13 @@ export function AgentSkillEditor({
   const isPending =
     createMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
 
+  if (showFiles && editName) return <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={onClose} />
+    <div role="dialog" aria-label="Skilldateien" className="glass-dialog relative max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border">
+      <div className="flex items-center justify-between border-b p-4"><h2 className="font-semibold">{editName} · Dateien</h2><Button type="button" variant="ghost" onClick={() => setShowFiles(false)}>Zurück</Button><Button type="button" variant="ghost" onClick={onClose}>Schliessen</Button></div>
+      <SkillFilesEditor name={editName} provider={configProvider} onChanged={() => { void queryClient.invalidateQueries({ queryKey: ['claude-skill-detail', providerKey, editName] }); onSaved?.(); }} />
+    </div>
+  </div>;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="fixed inset-0 bg-background/80 backdrop-blur-sm" onClick={onClose} />
@@ -270,6 +279,7 @@ export function AgentSkillEditor({
           </Button>
         </div>
 
+        {!isAgent && mode === 'edit' && <Button type="button" variant="secondary" className="m-4" onClick={() => setShowFiles(true)}>Dateien und Versionen</Button>}
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
           {isLoadingContent ? (

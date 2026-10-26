@@ -101,4 +101,7 @@ data class AssistantChatSource(val id: String, val revision: Long, val title: St
 @Serializable
 data class AssistantChatComparison(val providerId: String, val model: String, val response: String = "", val status: String, val error: String? = null)
 @Serializable
-data class AssistantChatToolEvent(val id: String, val name: String, val status: String, val result: String? = null, val arguments: String? = null)
+data class AssistantChatToolEvent(val id: String, val name: String, val status: String, val result: String? = null, val arguments: String? = null, val files: List<AssistantToolFile> = emptyList())
+
+@kotlinx.serialization.Serializable
+data class AssistantToolFile(val id: String, val filename: String, val mimeType: String, val byteLength: Long, val sha256: String, val artifactId: String? = null)

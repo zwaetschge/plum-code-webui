@@ -29,6 +29,8 @@ interface AssistantApi {
     suspend fun saveProfileChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource>
     suspend fun getManagedChats(archived: Boolean = false, search: String = "", offset: Int = 0): ApiResponse<JsonObject>
     suspend fun bulkManageChats(owner: String, input: JsonObject): ApiResponse<JsonObject>
+    suspend fun getArtifactToolFile(artifactId: String, assetId: String): ByteArray
+    suspend fun getChatToolFile(chatId: String, assetId: String): ByteArray
     suspend fun getChatToolServers(): ApiResponse<List<JsonObject>>
     suspend fun saveChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource>
     suspend fun exportModelChat(id: String): ByteArray
@@ -103,6 +105,8 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
     override suspend fun saveProfileChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource> = http.put("/api/assistant/profiles/${checked(id)}/options") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun getManagedChats(archived: Boolean, search: String, offset: Int): ApiResponse<JsonObject> = http.get("/api/assistant/api-chats/manage") { url { parameters.append("archived", archived.toString()); parameters.append("search", search); parameters.append("offset", offset.toString()) } }
     override suspend fun bulkManageChats(owner: String, input: JsonObject): ApiResponse<JsonObject> = http.post("/api/assistant/api-chats/bulk") { attributes.put(AssistantAccountKey, owner); setBody(input) }
+    override suspend fun getArtifactToolFile(artifactId: String, assetId: String): ByteArray = http.get("/api/assistant/artifacts/${checked(artifactId)}/tool-files/${checked(assetId)}")
+    override suspend fun getChatToolFile(chatId: String, assetId: String): ByteArray = http.get("/api/assistant/api-chats/${checked(chatId)}/tool-files/${checked(assetId)}")
     override suspend fun getChatToolServers(): ApiResponse<List<JsonObject>> = http.get("/api/mcp-servers")
     override suspend fun saveChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource> = http.put("/api/assistant/api-chats/${checked(id)}/options") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun exportModelChat(id: String): ByteArray = http.get("/api/assistant/api-chats/${checked(id)}/export")

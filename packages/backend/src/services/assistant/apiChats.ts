@@ -40,6 +40,8 @@ import { buildSessionStyleContextFromSelection } from '../../utils/styleContext.
 import { contextReceipts } from './chatContextReceipts.js';
 import { selectedChatSkills } from './chatSkills.js';
 import { compactChatHistory, hydrateCompactionReceipts } from './chatCompaction.js';
+import { handoffChatToolResult } from './chatToolAssets.js';
+import { readableSource } from './libraryAccess.js';
 import { selectedChatReferences } from './chatReferences.js';
 import { apiTurnHash, enqueueApiTurn, pumpApiChatQueue } from './apiChatQueue.js';
 import { requestChatToolApproval } from './chatToolApprovals.js';
@@ -802,7 +804,7 @@ export async function executeApiTurn(
       ]),
     ].slice(0, 20);
     for (const sourceId of selectedIds) {
-      const source = await findResource(userId, sourceId, tx);
+      const source = (await readableSource(userId, sourceId, tx)).resource;
       if (source.body.temporaryChatId && source.body.temporaryChatId !== id)
         throw new AppError(
           'Temporäre Quelle gehört zu einem anderen Gespräch',
@@ -1040,6 +1042,11 @@ export async function executeApiTurn(
           input.voice || input.mergeTurnId ? { ...settings, comparisonModels: [] } : settings,
         workbench,
         onUpdate: saveWorkbench,
+        onToolResult: async (event, result) => {
+          const output = await handoffChatToolResult(userId, id, input.commandId, result);
+          if (output.files.length) event.files = output.files;
+          return output.result;
+        },
         approveTool: (callId, name, args, onReady) =>
           requestChatToolApproval(
             userId,
@@ -1604,7 +1611,7 @@ export async function purgeTemporaryApiChat(userId: string, id: string, permanen
     await tx.run('DELETE FROM assistant_resources WHERE id=? AND user_id=?', id, userId);
     for (const file of files)
       await tx.run(
-        "DELETE FROM assistant_assets WHERE id=? AND user_id=? AND NOT EXISTS(SELECT 1 FROM assistant_api_files WHERE asset_id=?) AND NOT EXISTS(SELECT 1 FROM assistant_resources WHERE user_id=? AND (body_json::jsonb->>'assetId'=? OR body_json::jsonb->>'audioAssetId'=?)) AND NOT EXISTS(SELECT 1 FROM assistant_resource_revisions v JOIN assistant_resources r ON r.id=v.resource_id WHERE r.user_id=? AND (jsonb_exists(v.body_json::jsonb->'inputImageIds',?) OR v.body_json::jsonb->'images' @> ?::jsonb))",
+        "DELETE FROM assistant_assets WHERE id=? AND user_id=? AND NOT EXISTS(SELECT 1 FROM assistant_api_files WHERE asset_id=?) AND NOT EXISTS(SELECT 1 FROM assistant_resources WHERE user_id=? AND (body_json::jsonb->>'assetId'=? OR body_json::jsonb->>'audioAssetId'=?)) AND NOT EXISTS(SELECT 1 FROM assistant_resource_revisions v JOIN assistant_resources r ON r.id=v.resource_id WHERE r.user_id=? AND (jsonb_exists(v.body_json::jsonb->'inputImageIds',?) OR v.body_json::jsonb->'images' @> ?::jsonb OR v.body_json::jsonb->'toolFiles' @> ?::jsonb))",
         file.asset_id,
         userId,
         file.asset_id,
@@ -1613,7 +1620,8 @@ export async function purgeTemporaryApiChat(userId: string, id: string, permanen
         file.asset_id,
         userId,
         file.asset_id,
-        JSON.stringify([{ assetId: file.asset_id }])
+        JSON.stringify([{ assetId: file.asset_id }]),
+        JSON.stringify([{ id: file.asset_id }])
       );
     return true;
   });

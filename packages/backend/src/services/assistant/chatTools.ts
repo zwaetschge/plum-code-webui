@@ -58,7 +58,7 @@ class McpConnection {
       this.child.on('exit', () => this.close());
       this.child.stdout.on('data', (chunk: Buffer) => {
         this.buffer += chunk.toString('utf8');
-        if (this.buffer.length > 4_000_000) {
+        if (this.buffer.length > 8_000_000) {
           this.close();
           return;
         }
@@ -413,13 +413,13 @@ export async function chatToolset(userId: string, options: ChatOptions, signal: 
       tools,
       catalog,
       requiresApproval: (name: string) => approvals.has(name),
-      call: async (name: string, args: Record<string, unknown>, approved = false) => {
+      call: async (name: string, args: Record<string, unknown>, approved = false, transform?: (result: unknown) => Promise<unknown>) => {
         const handler = handlers.get(name);
         if (!handler || !tools.some((tool) => tool.name === name))
           throw new Error('Werkzeug ist für diesen Chat nicht freigegeben oder noch nicht geladen');
         if (approvals.has(name) && !approved) throw new Error('Einzelgenehmigung fehlt');
         const result = await handler(args);
-        return redactSensitiveText(JSON.stringify(result)).slice(0, 32000);
+        return redactSensitiveText(JSON.stringify(transform ? await transform(result) : result)).slice(0, 32000);
       },
       close: () => connections.forEach((c) => c.close()),
     };

@@ -213,6 +213,14 @@ fun AssistantWorkspace(onAreaSelect: (String) -> Unit, onNavigateToChat: (String
                         "cancelled" -> R.string.assistant_cancelled; else -> R.string.assistant_interrupted
                     })) }
                     Text((resource.body["result"] ?: resource.body["goal"] ?: resource.body["text"] ?: resource.body["content"] ?: resource.body["instructions"])?.jsonPrimitive?.content.orEmpty())
+                    if (resource.kind == "artifact") {
+                        com.claudewebui.app.core.security.TokenStore.assistantOwnerKey()?.let { account ->
+                            (resource.body["toolFiles"] as? JsonArray)?.forEach { item ->
+                                val file = runCatching { Json { ignoreUnknownKeys = true }.decodeFromJsonElement<AssistantToolFile>(item) }.getOrNull()
+                                file?.let { key(account, resource.id, it.id) { ChatToolFile(account, api, null, it, resource.id) } }
+                            }
+                        }
+                    }
                     resource.body["sessionId"]?.jsonPrimitive?.content?.let { sessionId -> TextButton(onClick = { onNavigateToChat(sessionId) }) { Text(stringResource(R.string.assistant_open_chat)) } }
                     if (resource.kind == "task") {
                         AssistantTaskResults(resource, api) { changed -> resources = resources.map { if (it.id == changed.id && changed.revision >= it.revision) changed else it }; refresh++ }

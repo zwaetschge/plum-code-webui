@@ -1,5 +1,5 @@
+import { readableSource } from './libraryAccess.js';
 import type { TransactionScope } from '../../db/pg.js';
-import { findResource } from './resources.js';
 import { all, get, run } from '../../db/pg.js';
 import { embedMemory, embeddingModel } from './memorySemantic.js';
 import { AppError } from '../../middleware/errorHandler.js';
@@ -10,7 +10,7 @@ export async function captureTaskSources(
 ) {
   const result: Array<{ id: string; revision: number }> = [];
   for (const id of sourceIds) {
-    const source = await findResource(userId, id, tx);
+    const source = (await readableSource(userId, id, tx)).resource;
     if (source.kind !== 'source')
       throw new AppError('Ungültige Auftragsquelle', 400, 'INVALID_REFERENCE');
     result.push({ id: source.id, revision: source.revision });
@@ -74,7 +74,7 @@ export async function taskSourceContext(
       : null;
   const selected = versions.slice(0, 20);
   for (const [index, item] of selected.entries()) {
-    const source = await findResource(userId, item.id).catch(() => null);
+    const source = await readableSource(userId, item.id, undefined, item.revision).then((access) => access.resource).catch(() => null);
     if (!source || source.kind !== 'source') continue;
     const version = await get(
       'SELECT title,body_json FROM assistant_resource_revisions WHERE resource_id=? AND revision=?',
