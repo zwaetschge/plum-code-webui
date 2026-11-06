@@ -232,13 +232,8 @@ const designProfiles = {
       'Apply Material roles, adaptive layout, state layers, and accessible touch targets through the project stack.',
   },
   'design-plum-style': {
-    sources: [
-      'design-plum-style',
-      'design-plum-style-claude',
-      'design-plum-style-codex',
-      'design-plum-style-opencode',
-    ],
-    description: 'Plum Code house style with provider-aware Codex, Claude, and OpenCode variants.',
+    sources: ['design-plum-style', 'design-plum-style-claude', 'design-plum-style-codex'],
+    description: 'Plum Code house style with provider-aware Codex and Claude variants.',
     intent:
       'Preserve Plum hierarchy, plum accents, code readability, and calm operational density.',
   },

@@ -173,8 +173,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # arm64 dropped: the codex (Rust) and opencode-ai (Go) CLIs ship
-          # native binaries whose npm postinstall verification crashes with
+          # arm64 dropped: the codex (Rust) CLI ships a native binary
+          # whose npm postinstall verification crashes with
           # SIGILL under QEMU emulation on the amd64 GitHub runner. Anyone
           # on arm64 hardware can build natively from source via the
           # included scripts/install.sh — no emulation, no SIGILL.

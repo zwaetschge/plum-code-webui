@@ -57,6 +57,23 @@ export interface AssistantApiTurn {
     status: 'running' | 'completed' | 'failed';
     error?: string;
   }>;
+  /**
+   * Web sources of this turn (web_search/web_fetch), numbered turn-wide: the
+   * same URL keeps its `ref`. Updated while the turn streams; the answer cites
+   * them inline as `[ref](url)`.
+   */
+  webSources?: Array<{
+    ref: number;
+    url: string;
+    title: string;
+    /** Hostname without a leading "www.". */
+    domain: string;
+    /** Plain text, at most 300 characters. */
+    excerpt: string;
+    publishedAt: string | null;
+    /** Page text was fetched (auto-read or web_fetch). */
+    read: boolean;
+  }>;
   /** All versions of this turn (regenerated or edited in place), oldest first. */
   versions?: string[];
   /** Validated interactive view the model attached to this answer (Dynamic UI v1). */
@@ -73,6 +90,7 @@ export interface AssistantApiTurn {
     costUsd: number | null;
   } | null;
 }
+export type AssistantWebSource = NonNullable<AssistantApiTurn['webSources']>[number];
 
 export interface AssistantApiProvider {
   id: string;
@@ -226,6 +244,12 @@ export type SwarmAgentHealth = 'online' | 'idle' | 'offline' | 'stopped' | 'unkn
 
 export interface SwarmContainerState {
   name: string;
+  host?: string;
+  hostLabel?: string;
+  ownerSessionId?: string;
+  ownerSessionName?: string;
+  /** Explicitly permitted lifecycle operations; an empty list means read-only. */
+  actions?: Array<'start' | 'stop' | 'restart'>;
   state: string;
   status: string;
   running: boolean;
@@ -284,5 +308,6 @@ export interface SwarmDirectory {
   matrixConnected: boolean;
   /** Container details and actions need an admin account. */
   containersVisible: boolean;
+  containerErrors?: string[];
   checkedAt: string;
 }

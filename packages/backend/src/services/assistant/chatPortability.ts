@@ -7,6 +7,27 @@ import { apiChatEndpoint } from './apiTransport.js';
 import { apiChatTurns } from './apiChats.js';
 import { BODY_SCHEMAS } from './resources.js';
 import { imageMime } from './apiFiles.js';
+import { MAX_TURN_WEB_SOURCES } from './chatWebSources.js';
+
+/** Imported web sources must stay public HTTPS links; malformed entries are dropped. */
+const portableWebSource = z.object({
+  ref: z.number().int().positive(),
+  url: z
+    .string()
+    .max(2000)
+    .refine((value) => {
+      try {
+        return new URL(value).protocol === 'https:';
+      } catch {
+        return false;
+      }
+    }),
+  title: z.string().max(300),
+  domain: z.string().max(300),
+  excerpt: z.string().max(300),
+  publishedAt: z.string().max(40).nullable(),
+  read: z.boolean(),
+});
 
 const messageSchema = z
   .object({
@@ -211,6 +232,7 @@ const portableWorkbench = z.object({
     )
     .max(3)
     .default([]),
+  webSources: z.array(z.unknown()).catch([]).default([]),
 });
 export async function importChats(
   userId: string,
@@ -390,6 +412,10 @@ export async function importChats(
                 return id ? [{ ...ref, id, revision: 1 }] : [];
               })
             : [];
+          const webSources = wb.webSources.slice(0, MAX_TURN_WEB_SOURCES).flatMap((raw) => {
+            const parsed = portableWebSource.safeParse(raw);
+            return parsed.success ? [parsed.data] : [];
+          });
           const documents = Array.isArray(wb.documentSourceIds)
             ? wb.documentSourceIds.map((old) => sourceMap.get(String(old))).filter(Boolean)
             : [];
@@ -411,6 +437,7 @@ export async function importChats(
               documentSourceIds: documents,
               toolEvents: Array.isArray(wb.toolEvents) ? wb.toolEvents : [],
               comparisons: Array.isArray(wb.comparisons) ? wb.comparisons : [],
+              ...(webSources.length ? { webSources } : {}),
             }),
             now,
             now,

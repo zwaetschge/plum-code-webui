@@ -18,7 +18,7 @@ data class PermissionRequest(
     val requestId: String,
     val toolName: String = "tool",
     val toolInput: JsonElement? = null,
-    // Not every emitter includes these (OpenCode vs hook payloads differ);
+    // Not every emitter includes these (ACP vs hook payloads differ);
     // a missing field must not kill the whole prompt.
     val description: String = "",
     val suggestedPattern: String = "",
@@ -65,7 +65,7 @@ data class PermissionRespondResult(
     val pattern: String? = null
 )
 
-// ── OpenCode question prompts (session:question_request) ─────────────────────
+// ── Agent question prompts (session:question_request) ────────────────────────
 
 @Serializable
 data class QuestionOption(

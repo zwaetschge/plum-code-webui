@@ -15,7 +15,7 @@ const { createResource, findResource, BODY_SCHEMAS } =
 const { bindProfile, buildAssistantContext } = await import('../src/services/assistant/context.js');
 const { createApiChat, startApiTurn, apiChatTurns } =
   await import('../src/services/assistant/apiChats.js');
-const { writeOpenCodeProvidersForUser } = await import('../src/utils/opencodeProviderKeys.js');
+const { writeModelProvidersForUser } = await import('../src/utils/modelProviderKeys.js');
 const { safeEncrypt } = await import('../src/utils/encryption.js');
 const { default: router } = await import('../src/routes/assistant.js');
 const { errorHandler } = await import('../src/middleware/errorHandler.js');
@@ -132,7 +132,7 @@ try {
   assert(context?.includes('reference ranges'));
   assert(!context?.includes('Trader'));
   const stamp = new Date().toISOString();
-  await writeOpenCodeProvidersForUser('personal-alice', [
+  await writeModelProvidersForUser('personal-alice', [
     {
       id: 'openai',
       name: 'Own fixture',

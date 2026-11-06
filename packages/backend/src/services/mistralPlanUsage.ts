@@ -1,21 +1,26 @@
 import { all as pgAll, get as pgGet, run as pgRun } from '../db/pg.js';
 import { estimateModelCost } from '@plum-code-webui/shared';
-import { readOpenCodeProvidersForUser } from '../utils/opencodeProviderKeys.js';
+import { readModelProvidersForUser } from '../utils/modelProviderKeys.js';
 import { isProviderAvailable } from './cli-providers.js';
 import { safeJsonParse } from '../utils/json.js';
+import { safeDecrypt } from '../utils/encryption.js';
+import { readVibeApiKey } from './vibe/vibeAuth.js';
+import { probeMistralBudget, type MistralBudgetProbe } from './mistralBudgetProbe.js';
 
 /**
  * Mistral plan usage.
  *
  * A Mistral plan carries two monthly allowances in euros, both reset on the
  * 1st of the calendar month: API/Studio usage (Pro: €25.50) — what a regular
- * API key draws on, which is how Pi and OpenCode reach Mistral — and Vibe Code
+ * API key draws on, which is how Pi and model chat reach Mistral — and Vibe Code
  * usage (Pro: €255) for Vibe, or a key created under Code › Vibe CLI. Neither
  * is readable through an API outside Enterprise (the Admin API rejects regular
  * keys; rate-limit headers are per minute). So this is our own ledger of
  * Mistral turns in the month, priced at list rates (€ and $ taken 1:1), against
  * the allowance the user picks. Usage outside Plum (Le Chat, Studio, the Vibe
- * CLI) is not in it.
+ * CLI) is not in it, so the ledger can read far below the truth. Whether the
+ * allowance is used up is asked of Mistral itself (`mistralBudgetProbe.ts`);
+ * that answer overrides the estimate.
  */
 
 const MISTRAL_MODEL_PATTERN = 'mistral/%';
@@ -156,7 +161,12 @@ export async function saveMistralPlanConfig(
     return config;
   }
   const { monthlyBudget, currency, billingDay } = config;
-  await writePlanBudget(userId, 'mistral', { monthlyBudget, currency, billingDay, allowance: 'api' });
+  await writePlanBudget(userId, 'mistral', {
+    monthlyBudget,
+    currency,
+    billingDay,
+    allowance: 'api',
+  });
   return config;
 }
 
@@ -186,7 +196,7 @@ function toSqlTimestamp(date: Date): string {
 /**
  * Monthly spend against one of the plan's two allowances.
  *
- * `api` counts the routed `mistral/*` traffic (OpenCode, Pi) that a regular API
+ * `api` counts the routed `mistral/*` traffic (Pi, model chat) that a regular API
  * key pays for; `vibe` counts the turns the Vibe harness booked, which draw on
  * the separate Vibe Code allowance.
  */
@@ -196,17 +206,49 @@ export async function buildMistralLimitResponse(
 ) {
   const wantsVibe = allowance === 'vibe';
   const [providers, config] = await Promise.all([
-    readOpenCodeProvidersForUser(userId),
+    readModelProvidersForUser(userId),
     wantsVibe ? getVibePlanConfig(userId) : getMistralPlanConfig(userId),
   ]);
   const configured = wantsVibe
     ? await isProviderAvailable('vibe').catch(() => false)
-    : providers.some((provider) => provider.id === 'mistral' && provider.enabled && !!provider.apiKey);
+    : providers.some(
+        (provider) => provider.id === 'mistral' && provider.enabled && !!provider.apiKey
+      );
+  const mistralProvider = providers.find(
+    (provider) => provider.id === 'mistral' && provider.enabled && !!provider.apiKey
+  );
+  const registryKey = mistralProvider ? safeDecrypt(mistralProvider.apiKey) : null;
+  const vibeKey = readVibeApiKey();
+  // A key created under Code › Vibe CLI draws on the Vibe allowance wherever it
+  // is used. Registered as the Mistral model provider as well, Pi and model chat
+  // spend the Vibe budget and never touch API/Studio: on 2026-10-30 the
+  // registry key got Vibe's 402 `billing_vibe_budget_exhausted`.
+  const sharedKey = !!registryKey && registryKey === vibeKey;
+  const routedAllowance: MistralAllowance = sharedKey ? 'vibe' : 'api';
+  // Pi and model chat traffic counts on the allowance their key draws on.
+  const countsRouted = allowance === routedAllowance;
+  // With a shared key the probe answers for Vibe; the API card has no key of its own.
+  const probeKey = wantsVibe ? vibeKey : sharedKey ? null : registryKey;
+  const upstream: MistralBudgetProbe | null = probeKey
+    ? await probeMistralBudget(
+        probeKey,
+        wantsVibe ? undefined : mistralProvider?.baseUrl || undefined
+      )
+    : null;
+  const exhausted = upstream?.state === 'exhausted';
   const { start, end } = mistralBillingWindow(config.billingDay);
   // Vibe turns are booked with provider 'vibe' and a bare Mistral model id, so
   // the two allowances are separated by attribution, not by the model prefix.
-  const rowsSql = wantsVibe
-    ? `SELECT model,
+  const scopes: string[] = [];
+  const scopeParams: string[] = [];
+  if (wantsVibe) scopes.push(`lower(COALESCE(provider, '')) = 'vibe'`);
+  if (countsRouted) {
+    scopes.push(`(model LIKE ? AND lower(COALESCE(provider, '')) <> 'vibe')`);
+    scopeParams.push(MISTRAL_MODEL_PATTERN);
+  }
+  const rows = scopes.length
+    ? ((await pgAll(
+        `SELECT model,
             COALESCE(SUM(input_tokens), 0) as input_tokens,
             COALESCE(SUM(output_tokens), 0) as output_tokens,
             COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
@@ -215,35 +257,41 @@ export async function buildMistralLimitResponse(
             COUNT(*) as requests
        FROM usage_history
       WHERE user_id = ?
-        AND lower(COALESCE(provider, '')) = 'vibe'
+        AND (${scopes.join(' OR ')})
         AND created_at >= ? AND created_at < ?
-      GROUP BY model`
-    : `SELECT model,
-            COALESCE(SUM(input_tokens), 0) as input_tokens,
-            COALESCE(SUM(output_tokens), 0) as output_tokens,
-            COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
-            COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
-            COALESCE(SUM(total_tokens), 0) as total_tokens,
-            COUNT(*) as requests
-       FROM usage_history
-      WHERE user_id = ? AND model LIKE ?
-        AND lower(COALESCE(provider, '')) <> 'vibe'
-        AND created_at >= ? AND created_at < ?
-      GROUP BY model`;
-  const rowsParams = wantsVibe
-    ? [userId, toSqlTimestamp(start), toSqlTimestamp(end)]
-    : [userId, MISTRAL_MODEL_PATTERN, toSqlTimestamp(start), toSqlTimestamp(end)];
-  const rows = (await pgAll(rowsSql, ...rowsParams)) as unknown as Array<{
-    model: string;
-    input_tokens: number;
-    output_tokens: number;
-    cache_read_tokens: number;
-    cache_creation_tokens: number;
-    total_tokens: number;
-    requests: number;
-  }>;
-  const tokens = rows.reduce((sum, row) => sum + Number(row.total_tokens || 0), 0);
-  const requests = rows.reduce((sum, row) => sum + Number(row.requests || 0), 0);
+      GROUP BY model`,
+        userId,
+        ...scopeParams,
+        toSqlTimestamp(start),
+        toSqlTimestamp(end)
+      )) as unknown as Array<{
+        model: string;
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_tokens: number;
+        cache_creation_tokens: number;
+        total_tokens: number;
+        requests: number;
+      }>)
+    : [];
+  // Model chat keeps its own ledger with the cost already priced per turn.
+  const chat = countsRouted
+    ? ((await pgGet(
+        `SELECT COUNT(*) AS requests,
+            COALESCE(SUM((usage_json::jsonb->>'input')::numeric + (usage_json::jsonb->>'output')::numeric), 0) AS tokens,
+            COALESCE(SUM((usage_json::jsonb->>'costUsd')::numeric), 0) AS cost
+       FROM assistant_api_usage
+      WHERE user_id = ? AND provider_id = 'mistral' AND usage_json IS NOT NULL
+        AND created_at >= ? AND created_at < ?`,
+        userId,
+        start.toISOString(),
+        end.toISOString()
+      )) as unknown as { requests: number; tokens: number; cost: number } | undefined)
+    : undefined;
+  const tokens =
+    rows.reduce((sum, row) => sum + Number(row.total_tokens || 0), 0) + Number(chat?.tokens || 0);
+  const requests =
+    rows.reduce((sum, row) => sum + Number(row.requests || 0), 0) + Number(chat?.requests || 0);
   // Priced from tokens with the current rate card, like the analytics page,
   // so a later price correction reaches this figure too.
   const spendUsd = rows.reduce(
@@ -259,7 +307,7 @@ export async function buildMistralLimitResponse(
         },
         null
       ).cost,
-    0
+    Number(chat?.cost || 0)
   );
 
   const providerLabel = wantsVibe ? ('vibe' as const) : ('mistral' as const);
@@ -274,7 +322,7 @@ export async function buildMistralLimitResponse(
         code: 'NOT_CONFIGURED',
         message: wantsVibe
           ? 'Mistral Vibe is not signed in (Settings → Provider → Mistral Vibe).'
-          : 'Mistral is not configured (Settings → General → OpenCode → Mistral).',
+          : 'Mistral ist nicht eingerichtet (Einstellungen → Modellanbieter → Mistral).',
       },
     };
   }
@@ -282,32 +330,51 @@ export async function buildMistralLimitResponse(
   const budget = config.monthlyBudget;
   const unit = config.currency === 'EUR' ? 'eur' : 'usd';
   const windowSeconds = Math.round((end.getTime() - start.getTime()) / 1000);
+  // Mistral's own answer beats the ledger both ways: used up means 100 % even
+  // when our estimate is lower, and budget left caps a high estimate below 100.
+  const estimate = budget ? Math.round((spendUsd / budget) * 100) : null;
+  const utilization = exhausted
+    ? 100
+    : estimate === null
+      ? null
+      : upstream?.state === 'available'
+        ? Math.min(99, estimate)
+        : Math.min(999, estimate);
   return {
     success: true,
     supported: true,
     provider: providerLabel,
     data: {
-      subscriptionType: config.allowance === 'vibe' ? 'Vibe Code allowance' : 'API/Studio allowance',
+      subscriptionType:
+        config.allowance === 'vibe' ? 'Vibe Code allowance' : 'API/Studio allowance',
       rateLimitTier: budget ? 'Monthly allowance' : 'No allowance set',
       fiveHour: null,
       // The billing month is the only window that matters; it rides in the
       // long slot so every client renders it without special cases.
-      sevenDay: budget
-        ? {
-            // Whole percent: the Android client decodes utilization as Int.
-            utilization: Math.min(999, Math.round((spendUsd / budget) * 100)),
-            resetsAt: end.toISOString(),
-            windowSeconds,
-            used: Math.round(spendUsd * 100) / 100,
-            limit: budget,
-            remaining: Math.max(0, Math.round((budget - spendUsd) * 100) / 100),
-            unit,
-          }
-        : null,
+      sevenDay:
+        utilization === null
+          ? null
+          : {
+              // Whole percent: the Android client decodes utilization as Int.
+              utilization,
+              resetsAt: end.toISOString(),
+              windowSeconds,
+              ...(budget
+                ? {
+                    used: exhausted ? budget : Math.round(spendUsd * 100) / 100,
+                    limit: budget,
+                    remaining: exhausted
+                      ? 0
+                      : Math.max(0, Math.round((budget - spendUsd) * 100) / 100),
+                    unit,
+                  }
+                : {}),
+            },
       sevenDaySonnet: null,
       additional: [],
-      // Derived from our own ledger, so the provenance is explicit.
-      source: 'local-estimate' as const,
+      // Provenance is explicit: Mistral's word when it reports the allowance
+      // used up, otherwise our own ledger.
+      source: exhausted ? ('upstream' as const) : ('local-estimate' as const),
       planUsage: {
         periodStart: start.toISOString(),
         periodEnd: end.toISOString(),
@@ -319,14 +386,22 @@ export async function buildMistralLimitResponse(
         currency: config.currency,
         allowance: config.allowance,
         billingDay: config.billingDay,
+        upstream,
       },
     },
-    error: budget
-      ? undefined
-      : {
-          code: 'NO_BUDGET',
-          message:
-            'Mistral publishes no quota API for Pro plans. Set the monthly allowance to see a percentage.',
-        },
+    error:
+      sharedKey && !wantsVibe
+        ? {
+            code: 'SHARED_VIBE_KEY',
+            message:
+              'Der Mistral-Schlüssel ist derselbe wie bei Vibe: Chat und Pi zählen aufs Vibe-Guthaben, dieses API-Guthaben nutzt Plum nicht.',
+          }
+        : budget || exhausted
+          ? undefined
+          : {
+              code: 'NO_BUDGET',
+              message:
+                'Mistral publishes no quota API for Pro plans. Set the monthly allowance to see a percentage.',
+            },
   };
 }

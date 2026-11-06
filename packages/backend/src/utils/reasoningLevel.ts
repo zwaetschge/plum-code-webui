@@ -14,7 +14,6 @@ const REASONING_LEVELS_BY_PROVIDER: Record<CLIProvider, Set<string>> = {
     'max',
     'ultra',
   ]),
-  opencode: new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'extra_high', 'max']),
   pi: new Set([
     'off',
     'none',

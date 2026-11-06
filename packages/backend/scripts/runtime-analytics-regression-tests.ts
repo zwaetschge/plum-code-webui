@@ -1,11 +1,11 @@
 /**
  * One model id, two harnesses.
  *
- * `z-ai/glm-5.1` is reachable through both Pi and OpenCode, so usage keyed by
- * model alone silently merges two providers into one row and the analytics page
- * attributes a Pi turn's tokens to OpenCode. These pin the split: the ledger
- * keeps the provider, the turn is written once, and the timeline series for the
- * two harnesses cannot collide.
+ * `z-ai/glm-5.1` ran through OpenCode before it was removed (2026-10-27) and
+ * runs through Pi now. Usage keyed by model alone would silently merge the
+ * historical OpenCode rows into Pi's. These pin the split: the ledger keeps the
+ * provider, the turn is written once, and the timeline series for the two
+ * harnesses cannot collide.
  *
  * The one-time attribution migration that used to be tested here is gone with
  * the SQLite schema — its result is part of the Postgres baseline, and a
@@ -35,7 +35,7 @@ try {
   );
   for (const [id, provider, status] of [
     ['pi-session', 'pi', 'running'],
-    ['opencode-session', 'opencode', 'running'],
+    ['legacy-session', 'pi', 'running'],
     ['stopped-session', 'codex', 'stopped'],
   ]) {
     await pgRun(
@@ -84,7 +84,8 @@ try {
 
   await insertUsageHistoryTurn({
     ...turn,
-    sessionId: 'opencode-session',
+    sessionId: 'legacy-session',
+    // Historical row: OpenCode is gone, its usage stays labelled.
     provider: 'opencode',
     turnId: 'message-2',
     totalTokens: 20,
@@ -115,7 +116,7 @@ try {
   // `running` row describes a process the old backend owned.
   assert.equal(await reconcileStaleRunningSessions(), 2);
   assert.deepEqual(await pgAll('SELECT id, status FROM sessions ORDER BY id'), [
-    { id: 'opencode-session', status: 'stopped' },
+    { id: 'legacy-session', status: 'stopped' },
     { id: 'pi-session', status: 'stopped' },
     { id: 'stopped-session', status: 'stopped' },
   ]);

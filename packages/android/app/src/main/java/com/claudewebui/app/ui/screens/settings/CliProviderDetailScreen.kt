@@ -99,6 +99,10 @@ fun CliProviderDetailScreen(
     androidx.compose.runtime.LaunchedEffect(isVibe) {
         if (isVibe) viewModel.loadVibeAuth()
     }
+    val isPi = providerId.equals("pi", ignoreCase = true)
+    androidx.compose.runtime.LaunchedEffect(isPi) {
+        if (isPi) viewModel.loadPiModelCatalog()
+    }
 
     PlumBackdrop {
         Scaffold(
@@ -168,7 +172,7 @@ fun CliProviderDetailScreen(
                     )
                 }
 
-                if (providerId.lowercase() in setOf("codex", "opencode", "pi", "vibe")) {
+                if (providerId.lowercase() in setOf("codex", "pi", "vibe")) {
                     item {
                         RuntimeDefaultsPanel(
                             providerId = providerId.lowercase(),
@@ -180,6 +184,18 @@ fun CliProviderDetailScreen(
                             onReasoning = { viewModel.setProviderReasoning(providerId, it) },
                             onWebSearch = viewModel::setCodexWebSearch,
                             onFastTier = viewModel::setCodexFastTier,
+                        )
+                    }
+                }
+
+                if (isPi) {
+                    item {
+                        PiModelMenuPanel(
+                            catalog = state.piModelCatalog,
+                            stored = state.userSettings?.cliProviderModelLists?.get("pi") ?: emptyList(),
+                            providerDefault = state.piProviderDefault,
+                            saving = state.piModelMenuSaving,
+                            onSave = viewModel::setPiModelMenu,
                         )
                     }
                 }
@@ -204,21 +220,6 @@ fun CliProviderDetailScreen(
                             error = state.error,
                             onSaveKey = viewModel::saveVibeApiKey,
                             onSignOut = viewModel::signOutVibe,
-                        )
-                    }
-                }
-
-                if (providerId.equals("opencode", ignoreCase = true)) {
-                    item {
-                        OpenCodeProvidersPanel(
-                            providers = state.openCodeProviders,
-                            saving = state.openCodeSaving,
-                            tests = state.openCodeTestResults,
-                            testMessages = state.openCodeTestMessages,
-                            error = state.error,
-                            onSave = viewModel::saveOpenCodeProvider,
-                            onDelete = viewModel::deleteOpenCodeProvider,
-                            onTest = viewModel::testOpenCodeProvider,
                         )
                     }
                 }

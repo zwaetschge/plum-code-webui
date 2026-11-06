@@ -17,6 +17,7 @@ import type {
   SubagentRun,
   SubagentRunStatus,
   SessionLifecycleEvent,
+  GeneratedImageData,
 } from '@plum-code-webui/shared';
 
 // --- Streaming content buffer ---
@@ -242,7 +243,7 @@ export interface GeneratedImage {
   imageBase64?: string;
   mimeType: string;
   prompt: string;
-  generator: 'opencode' | 'other';
+  generator: GeneratedImageData['generator'];
   timestamp: number;
 }
 
@@ -297,7 +298,7 @@ interface SessionState {
   // Pending permissions state (hooks-based)
   pendingPermissions: Record<string, PendingPermission | null>;
 
-  // Pending OpenCode questions
+  // Pending agent questions (Vibe ACP elicitations)
   pendingQuestions: Record<string, PendingQuestion | null>;
 
   // File Tree state

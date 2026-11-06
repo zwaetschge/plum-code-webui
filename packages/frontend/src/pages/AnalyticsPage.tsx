@@ -291,8 +291,12 @@ export function AnalyticsPage() {
         const response = await api.get<UsageLimitsResponse>(`/api/usage/limits?provider=${prov}`);
         return { cliProvider: prov, ...response.data };
       },
-      staleTime: 5 * 60_000,
-      refetchInterval: 15 * 60_000,
+      // The server caches upstream reads (45–120 s), so a one-minute poll stays
+      // cheap and the tracker follows the account instead of lagging 15 min.
+      staleTime: 30_000,
+      refetchInterval: 60_000,
+      refetchOnMount: 'always',
+      refetchOnWindowFocus: true,
       retry: 1,
       enabled: enabledUsageTrackers.includes(prov),
     });

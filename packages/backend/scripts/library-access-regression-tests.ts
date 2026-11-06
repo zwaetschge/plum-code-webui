@@ -15,7 +15,7 @@ try {
   await run('INSERT INTO assistant_assets(id,user_id,filename,mime_type,sha256,bytes,created_at) VALUES(?,?,?,?,?,?,?)', assetId, owner, 'source.txt', 'text/plain', 'fixture-sha', Buffer.from('Original file'), new Date().toISOString());
   const project = await createResource(owner, 'project', 'Private project', BODY_SCHEMAS.project.parse({}));
   const source = await createResource(owner, 'source', 'Source', { ...BODY_SCHEMAS.source.parse({ text: 'Private old text', projectId: project.id }), assetId });
-  const current = await reviseResource(owner, source.id, 1, source.title, { ...source.body, text: 'Current allowed evidence' });
+  const _current = await reviseResource(owner, source.id, 1, source.title, { ...source.body, text: 'Current allowed evidence' });
   const collection = await createResource(owner, 'collection', 'Notebook', BODY_SCHEMAS.collection.parse({ knowledge: true, resourceIds: [source.id], notes: 'Notebook notes' }));
   await assert.rejects(libraryAccess(stranger, source.id));
   await changeLibraryMember(owner, collection.id, { expectedRevision: 1, email: viewer + '@example.invalid', role: 'viewer' });

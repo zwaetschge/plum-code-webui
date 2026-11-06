@@ -82,7 +82,6 @@ if (!(await databaseReachable())) {
       ['claude', 'drainClaudeQueuedTurns', 'claudeQueuedTurns', 'claudeIdle'],
       ['codex', 'drainCodexQueuedTurn', 'codexQueuedTurns', 'codexIdle'],
       ['vibe', 'drainAcpQueuedTurns', 'acpQueuedTurns', 'acpIdle'],
-      ['opencode', 'drainOpenCodeQueuedTurns', 'opencodeQueuedTurns', 'opencodeIdle'],
     ]) {
       const manager = Object.create(ClaudeProcessManager.prototype) as Record<string, unknown>;
       let dispatched = false;
@@ -92,12 +91,7 @@ if (!(await databaseReachable())) {
       };
       manager.emitQueueState = () => {};
       manager.notifyDiscordSessionEvent = async () => {};
-      for (const name of [
-        'dispatchClaudeTurn',
-        'dispatchCodexTurn',
-        'dispatchAcpTurn',
-        'dispatchOpenCodeTurn',
-      ])
+      for (const name of ['dispatchClaudeTurn', 'dispatchCodexTurn', 'dispatchAcpTurn'])
         manager[name] = () => {
           dispatched = true;
           throw new Error('Fixture must never dispatch a provider');
@@ -129,7 +123,7 @@ if (!(await databaseReachable())) {
     assert.equal((await taskLimits('limit-alice', task.id)).knownCostUsd, 3);
     assert.equal((await taskLimits('limit-alice', task.id)).unpricedTurns, 1);
     await assert.rejects(() => assertTaskTurnAllowed(second, 'limit-alice'), /Modellpreise/);
-    current = await reviseResource('limit-alice', task.id, current.revision, current.title, {
+    await reviseResource('limit-alice', task.id, current.revision, current.title, {
       ...current.body,
       budgetUsd: undefined,
       dueAt: new Date(Date.now() - 1000).toISOString(),

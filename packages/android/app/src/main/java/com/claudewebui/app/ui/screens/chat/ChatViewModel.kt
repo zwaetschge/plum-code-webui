@@ -188,6 +188,17 @@ class ChatViewModel(
                     if (visible && connection.second) while (isActive) { refreshAgents(); delay(5_000) }
                 }
         }
+        // Account quota: polled while the chat is on screen, and read again the
+        // moment a turn ends, since that is when it moves.
+        viewModelScope.launch {
+            agentScreenVisible.collectLatest { visible ->
+                if (visible) while (isActive) { loadProviderLimits(); delay(60_000) }
+            }
+        }
+        viewModelScope.launch {
+            _uiState.map { it.isWorking }.distinctUntilChanged().drop(1)
+                .collect { working -> if (!working) loadProviderLimits() }
+        }
     }
 
     private suspend fun refreshAgents(loadMore: Boolean = false) {
@@ -353,7 +364,7 @@ class ChatViewModel(
 
     /**
      * Live account quota (5h/weekly windows) of the active provider. Providers
-     * without an account of their own (OpenCode, Pi) answer `supported: false`
+     * without an account of their own (Pi) answer `supported: false`
      * and the row simply stays hidden.
      */
     fun loadProviderLimits() {
@@ -939,7 +950,7 @@ class ChatViewModel(
     /** Answer a legacy (denials-based) permission request over the socket. */
     fun respondToLegacyPermission(approve: Boolean) = permissions.respondToLegacyPermission(approve)
 
-    /** Answer an OpenCode question prompt; answers[i] holds question i's picks. */
+    /** Answer an agent question prompt; answers[i] holds question i's picks. */
     fun respondToQuestion(answers: List<List<String>>) = permissions.respondToQuestion(answers)
 
     fun dismissQuestion() = permissions.dismissQuestion()

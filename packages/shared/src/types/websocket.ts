@@ -180,7 +180,7 @@ export interface GeneratedImageData {
   imageBase64?: string;
   mimeType: string;
   prompt: string;
-  generator: 'opencode' | 'other';
+  generator: 'other';
 }
 
 // Permission denial data (when Claude tries to use a tool without permission)

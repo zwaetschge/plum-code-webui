@@ -5,8 +5,7 @@
  * - Claude Code CLI (claude) - Anthropic subscription
  * - Z.AI Code (zai) - Claude Code transport with Z.AI-compatible endpoint
  * - Codex CLI (codex) - OpenAI
- * - OpenCode CLI (opencode) - Multi-provider (75+ LLM backends)
- * - Pi (pi) - Alternative harness sharing OpenCode provider connections
+ * - Pi (pi) - Multi-provider harness over the WebUI model provider registry
  * - Mistral Vibe (vibe) - persistent ACP agent
  */
 
@@ -23,15 +22,11 @@ import type {
   SessionMode,
 } from '@plum-code-webui/shared';
 import { getCodexWebuiApprovalPolicy, getCodexWebuiSandboxMode } from '../utils/codexDefaults.js';
-import {
-  discoverOpenCodeCliModels,
-  getOpenCodeModelIdsForProviders,
-} from '../utils/opencodeCatalog.js';
 
 const execFileAsync = promisify(execFile);
 const CODEX_UNRAID_DEFAULT_ALLOWED_DIRS = ['/mnt/user', '/mnt/cache'];
 
-export type CLIProvider = 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'vibe';
+export type CLIProvider = 'claude' | 'zai' | 'codex' | 'pi' | 'vibe';
 
 export interface CLIProviderConfig {
   id: CLIProvider;
@@ -131,19 +126,21 @@ export function claudeContextWindowEnv(
 
 const CLI_PROVIDER_MODELS: Record<CLIProvider, string[]> = {
   claude: withClaude1mVariants([
-    'claude-fable-5',
-    'claude-opus-5',
-    'claude-sonnet-5',
-    'claude-haiku-4-5',
+    'claude-fable-5-1',
+    'claude-opus-5-5',
+    'claude-sonnet-5-5',
+    'claude-haiku-5-5',
   ]),
   zai: ['opus', 'sonnet', 'haiku'],
   // Fallback only — runtime list comes from ~/.codex/models_cache.json (filtered to
   // visibility=list, sorted by priority). Cache refreshes via the codex CLI itself;
   // if the user's auth token is expired, the cache freezes and the dropdown stays on
-  // whatever was last fetched. gpt-5.5 remains the default; codex CLI 0.153.3
-  // lists GPT-6 Astra first, then the 5.6 family. An older CLI never sees
-  // the newer entries at all — the models endpoint filters by client version.
+  // whatever was last fetched. gpt-6.1-sol is the default (gpt-5.5 is no longer
+  // served to ChatGPT accounts); codex CLI 0.162 lists the 6.1/6 family first.
+  // An older CLI never sees the newer entries at all — the models endpoint
+  // filters by client version.
   codex: [
+    'gpt-6.1-sol',
     'gpt-6-astra',
     'gpt-5.5',
     'gpt-5.6-sol',
@@ -153,19 +150,7 @@ const CLI_PROVIDER_MODELS: Record<CLIProvider, string[]> = {
     'gpt-5.4-mini',
     'gpt-5.3-codex-spark',
   ],
-  opencode: [
-    'opencode-go/kimi-k2.7',
-    'opencode/kimi-k2.7',
-    'z-ai/glm-5.1',
-    'z-ai/glm-5',
-    'anthropic/claude-sonnet-4-5',
-    'openai/gpt-4o',
-    'deepseek/deepseek-chat',
-    'google/gemini-2.5-pro',
-  ],
   pi: [
-    'opencode-go/kimi-k2.7',
-    'opencode/kimi-k2.7',
     'z-ai/glm-5.1',
     'z-ai/glm-5',
     'anthropic/claude-sonnet-4-5',
@@ -186,21 +171,31 @@ const CLI_PROVIDER_MODELS: Record<CLIProvider, string[]> = {
 // stable, while their labels are replaced with the versions exposed by the
 // installed Claude Code CLI.
 const MODEL_DISPLAY_LABELS: Record<string, string> = {
-  // Claude Code fallback labels. These are used only when CLI discovery fails.
+  // Claude Code fallback labels, used when CLI discovery fails. The previous
+  // generation stays labelled for existing sessions.
+  'claude-fable-5-1': 'Fable 5.1',
+  'claude-opus-5-5': 'Opus 5.5',
+  'claude-sonnet-5-5': 'Sonnet 5.5',
+  'claude-haiku-5-5': 'Haiku 5.5',
   'claude-fable-5': 'Fable 5',
   'claude-opus-5': 'Opus 5',
   'claude-sonnet-5': 'Sonnet 5',
   'claude-haiku-4-5': 'Haiku 4.5',
   ...claude1mLabels({
+    'claude-fable-5-1': 'Fable 5.1',
+    'claude-opus-5-5': 'Opus 5.5',
+    'claude-sonnet-5-5': 'Sonnet 5.5',
     'claude-fable-5': 'Fable 5',
     'claude-opus-5': 'Opus 5',
     'claude-sonnet-5': 'Sonnet 5',
   }),
-  // Legacy aliases remain labelled for existing sessions and Z.AI mappings.
-  opus: 'Opus 5',
-  sonnet: 'Sonnet 5',
-  haiku: 'Haiku 4.5',
+  // Aliases remain labelled for existing sessions and Z.AI mappings.
+  fable: 'Fable 5.1',
+  opus: 'Opus 5.5',
+  sonnet: 'Sonnet 5.5',
+  haiku: 'Haiku 5.5',
   // Codex (labels for the currently-listed models in upstream models_cache.json)
+  'gpt-6.1-sol': 'GPT 6.1 Sol',
   'gpt-6-astra': 'GPT 6 Astra',
   'gpt-5.5': 'GPT 5.5',
   'gpt-5.6-sol': 'GPT 5.6 Sol',
@@ -211,9 +206,7 @@ const MODEL_DISPLAY_LABELS: Record<string, string> = {
   'gpt-5.3-codex': 'GPT 5.3 Codex',
   'gpt-5.3-codex-spark': 'GPT 5.3 Codex Spark',
   'gpt-5.2': 'GPT 5.2',
-  // OpenCode (provider/model format)
-  'opencode-go/kimi-k2.7': 'Kimi K2.7 (OpenCode Go)',
-  'opencode/kimi-k2.7': 'Kimi K2.7',
+  // Pi (provider/model format)
   'z-ai/glm-5.1': 'GLM 5.1',
   'z-ai/glm-5': 'GLM 5',
   'anthropic/claude-sonnet-4-5': 'Claude Sonnet 4.5',
@@ -399,67 +392,57 @@ function versionFromClaudeModelId(modelId: string, family: ClaudeModelFamily): s
   return suffix.replace(/-/g, '.');
 }
 
+const CLAUDE_MODEL_ID_PATTERN = /claude-(fable|opus|sonnet|haiku)-\d+(?:-\d+)*(?:-\d{8})?/g;
+const CLAUDE_DISPLAY_NAME_LINE = /^Claude (Fable|Opus|Sonnet|Haiku) (\d+(?:\.\d+)*)$/;
+
 /**
- * Parse the model catalog embedded in Claude Code.
+ * Parse the model catalog embedded in Claude Code: per family the newest model
+ * ID the CLI knows.
  *
- * Current native releases expose canonical model ID/display-name pairs in
- * their string table. Older JavaScript releases expose the same IDs in
- * `firstParty` and alias maps. Prefer labelled pairs because native binaries
- * also retain legacy IDs for migrations and compatibility.
+ * Native releases carry display names ("Claude Opus 5.5") as separate strings;
+ * since 2.1.3xx they no longer sit next to their IDs. A family with display
+ * names only accepts IDs whose version has one, so legacy and unreleased IDs
+ * kept for migrations or feature gates never win. The JavaScript CLI has no
+ * standalone display names; there every ID counts. Dated snapshots collapse
+ * to their stable family/version ID.
  */
 export function parseClaudeCliModelCatalog(source: string): ClaudeCliModelCatalog {
-  const candidates = new Map<
-    ClaudeModelFamily,
-    Array<{ modelId: string; version: string; label: string }>
-  >();
-  for (const family of CLAUDE_MODEL_FAMILIES) candidates.set(family, []);
-
-  const lines = source.split(/\r?\n/);
-  for (let index = 1; index < lines.length; index += 1) {
-    const modelId = lines[index - 1]?.trim() ?? '';
-    const displayName = lines[index]?.trim() ?? '';
-    const modelMatch = /^claude-(fable|opus|sonnet|haiku)-[a-z0-9-]+$/.exec(modelId);
-    const labelMatch = /^Claude (Fable|Opus|Sonnet|Haiku) (\d+(?:\.\d+)*)$/.exec(displayName);
-    if (!modelMatch?.[1] || !labelMatch?.[1] || !labelMatch[2]) continue;
-
-    const family = modelMatch[1] as ClaudeModelFamily;
-    if (labelMatch[1].toLowerCase() !== family) continue;
-    candidates.get(family)!.push({
-      modelId,
-      version: labelMatch[2],
-      label: `${labelMatch[1]} ${labelMatch[2]}`,
-    });
+  const released = new Map<ClaudeModelFamily, Map<string, string>>();
+  for (const line of source.split(/\r?\n/)) {
+    const match = CLAUDE_DISPLAY_NAME_LINE.exec(line.trim());
+    if (!match?.[1] || !match[2]) continue;
+    const family = match[1].toLowerCase() as ClaudeModelFamily;
+    if (!released.has(family)) released.set(family, new Map());
+    released.get(family)!.set(match[2], `${match[1]} ${match[2]}`);
   }
 
-  // JavaScript CLI fallback: extract canonical IDs when no adjacent display
-  // labels exist. Dated snapshots collapse to their stable family/version ID.
-  if ([...candidates.values()].every((items) => items.length === 0)) {
-    const modelPattern = /claude-(fable|opus|sonnet|haiku)-\d+(?:-\d+)*(?:-\d{8})?/g;
-    let match: RegExpExecArray | null;
-    while ((match = modelPattern.exec(source)) !== null) {
-      const family = match[1] as ClaudeModelFamily;
-      const version = versionFromClaudeModelId(match[0], family);
-      if (!version) continue;
-      const stableId = `claude-${family}-${version.replace(/\./g, '-')}`;
-      const familyLabel = family.charAt(0).toUpperCase() + family.slice(1);
-      candidates.get(family)!.push({
-        modelId: stableId,
-        version,
-        label: `${familyLabel} ${version}`,
-      });
-    }
+  const latest = new Map<ClaudeModelFamily, { modelId: string; version: string; label: string }>();
+  for (const match of source.matchAll(CLAUDE_MODEL_ID_PATTERN)) {
+    const family = match[1] as ClaudeModelFamily;
+    const version = versionFromClaudeModelId(match[0], family);
+    if (!version) continue;
+    const names = released.get(family);
+    const label = names
+      ? names.get(version)
+      : `${family.charAt(0).toUpperCase()}${family.slice(1)} ${version}`;
+    if (!label) continue;
+    const current = latest.get(family);
+    if (current && compareClaudeVersions(version, current.version) <= 0) continue;
+    latest.set(family, {
+      modelId: `claude-${family}-${version.replace(/\./g, '-')}`,
+      version,
+      label,
+    });
   }
 
   const models: string[] = [];
   const labels: Record<string, string> = {};
   for (const family of CLAUDE_MODEL_FAMILIES) {
-    const latest = candidates
-      .get(family)!
-      .sort((left, right) => compareClaudeVersions(right.version, left.version))[0];
-    if (!latest) continue;
-    models.push(latest.modelId);
-    labels[latest.modelId] = latest.label;
-    labels[family] = latest.label;
+    const entry = latest.get(family);
+    if (!entry) continue;
+    models.push(entry.modelId);
+    labels[entry.modelId] = entry.label;
+    labels[family] = entry.label;
   }
 
   return { models, labels };
@@ -487,23 +470,37 @@ function discoverClaude(): void {
     let source =
       readCliFile(bin, 'cli.js') ?? readCliFile(bin, '@anthropic-ai', 'claude-code', 'cli.js');
     if (!source) {
-      source = execFileSync('strings', [bin], {
-        encoding: 'utf-8',
-        maxBuffer: 64 * 1024 * 1024,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
+      // The native binary's full string table is over 70 MB (2.1.318) and
+      // overflowed any sane buffer, which silently left the stale fallback
+      // list in place. Keep only display names and lines naming a model ID.
+      source = execFileSync(
+        'sh',
+        [
+          '-c',
+          'strings "$1" | grep -E "^Claude (Fable|Opus|Sonnet|Haiku) [0-9.]+$|claude-(fable|opus|sonnet|haiku)-[0-9]"',
+          'sh',
+          bin,
+        ],
+        { encoding: 'utf-8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }
+      );
     }
 
     const catalog = parseClaudeCliModelCatalog(source);
-    if (catalog.models.length === 0) return;
+    if (catalog.models.length === 0) {
+      console.warn('[CLI-PROVIDERS] claude: no models found in the CLI, keeping the fallback list');
+      return;
+    }
     discoveredModels.claude = withClaude1mVariants(catalog.models);
     Object.assign(MODEL_DISPLAY_LABELS, catalog.labels, claude1mLabels(catalog.labels));
     console.log(
       `[CLI-PROVIDERS] claude: discovered ${catalog.models.length} models:`,
       catalog.models
     );
-  } catch {
-    /* keep defaults */
+  } catch (error) {
+    console.warn(
+      '[CLI-PROVIDERS] claude: model discovery failed, keeping the fallback list:',
+      error instanceof Error ? error.message : error
+    );
   }
 }
 
@@ -655,157 +652,6 @@ function formatCodexLabel(modelId: string): string {
   return modelId.replace(/-/g, ' ');
 }
 
-/**
- * OpenCode: Discover models from either the user's opencode.json config
- * (explicit allow-list) or from the auth.json (enabled providers).
- *
- * Precedence:
- * 1. Explicit `models` array in ~/.config/opencode/opencode.json
- * 2. Auth file: expand each configured provider to its default model set
- * 3. Fall back to CLI_PROVIDER_MODELS.opencode
- */
-function discoverOpenCode(): void {
-  try {
-    const homeDir = os.homedir();
-    const authDir = (
-      getProviderEnv('opencode', 'CREDENTIALS_PATH') ||
-      path.join(homeDir, '.local', 'share', 'opencode')
-    ).replace(/^~/, homeDir);
-    const configDir = (
-      getProviderEnv('opencode', 'CONFIG_PATH') || path.join(homeDir, '.config', 'opencode')
-    ).replace(/^~/, homeDir);
-    const configPath = path.join(configDir, 'opencode.json');
-    const authPath = path.join(authDir, 'auth.json');
-
-    const userModels: string[] = [];
-    // Top-level `models` is an explicit allow-list — honor it and skip
-    // auth-based expansion. Provider blocks are additive: they declare custom
-    // providers (e.g. llama-local) that should coexist with the models
-    // auth.json's providers expose. Those should merge, not short-circuit.
-    let hasExplicitAllowList = false;
-
-    // 1. Explicit allow-list in opencode.json
-    if (fs.existsSync(configPath)) {
-      try {
-        const raw = fs.readFileSync(configPath, 'utf-8');
-        const cfg = JSON.parse(raw) as {
-          model?: string;
-          models?: string[];
-          provider?: Record<string, { models?: Record<string, unknown> }>;
-        };
-        if (Array.isArray(cfg.models) && cfg.models.length > 0) {
-          userModels.push(...cfg.models);
-          hasExplicitAllowList = true;
-        }
-        // Provider-scoped model blocks (provider.<id>.models.<modelId>)
-        if (cfg.provider) {
-          for (const [providerId, block] of Object.entries(cfg.provider)) {
-            if (block?.models) {
-              for (const modelId of Object.keys(block.models)) {
-                userModels.push(`${providerId}/${modelId}`);
-              }
-            }
-          }
-        }
-      } catch {
-        // Malformed JSON — fall through to auth-based discovery
-      }
-    }
-
-    // 2. Live OpenCode CLI output covers authenticated providers plus providers
-    // configured through environment variables. It is intentionally not the
-    // complete provider list; the Settings provider browser uses models.dev for
-    // that. Here we keep the session selector to runnable/default models.
-    if (!hasExplicitAllowList) {
-      const liveProviders = discoverOpenCodeCliModels();
-      for (const [providerId, models] of Object.entries(liveProviders)) {
-        for (const modelId of models) {
-          userModels.push(`${providerId}/${modelId}`);
-        }
-      }
-    }
-
-    // 3. Auth file fallback: derive model set from enabled providers via the
-    // same models.dev catalog used by the Settings page.
-    if (!hasExplicitAllowList && userModels.length === 0 && fs.existsSync(authPath)) {
-      try {
-        const raw = fs.readFileSync(authPath, 'utf-8');
-        const auth = JSON.parse(raw) as Record<string, unknown>;
-        const configuredProviders = Object.keys(auth).filter(
-          (id) => typeof auth[id] === 'object' && auth[id] !== null
-        );
-
-        userModels.push(...getOpenCodeModelIdsForProviders(configuredProviders));
-        if (userModels.length === 0) {
-          for (const providerId of configuredProviders) {
-            for (const model of PROVIDER_DEFAULT_MODELS[providerId] ?? []) {
-              userModels.push(`${providerId}/${model}`);
-            }
-          }
-        }
-      } catch {
-        // Malformed auth.json — fall through
-      }
-    }
-
-    if (userModels.length > 0) {
-      const unique = [...new Set(userModels)];
-      discoveredModels.opencode = unique;
-      for (const modelId of unique) {
-        if (!MODEL_DISPLAY_LABELS[modelId]) {
-          MODEL_DISPLAY_LABELS[modelId] = formatOpenCodeLabel(modelId);
-        }
-      }
-      console.log(`[CLI-PROVIDERS] opencode: discovered ${unique.length} models:`, unique);
-    }
-  } catch {
-    // Keep defaults
-  }
-}
-
-/**
- * Per-provider model seeds used when auth.json lists a provider but no
- * opencode.json model allow-list is present. Pairs with the user's auth
- * config to produce a sensible default surface.
- */
-const PROVIDER_DEFAULT_MODELS: Record<string, string[]> = {
-  anthropic: ['claude-sonnet-4-5', 'claude-opus-4-5', 'claude-haiku-4-5'],
-  openai: ['gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini'],
-  'z-ai': ['glm-5.1', 'glm-5'],
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-  google: ['gemini-2.5-pro', 'gemini-2.5-flash'],
-  groq: ['llama-3.3-70b-versatile'],
-  openrouter: [],
-  'x-ai': ['grok-2-latest'],
-  mistral: ['mistral-large-latest'],
-  cohere: ['command-r-plus'],
-  together: [],
-};
-
-function formatOpenCodeLabel(modelId: string): string {
-  // "z-ai/glm-5.1" → "GLM 5.1", "anthropic/claude-sonnet-4-5" → "Claude Sonnet 4.5"
-  const parts = modelId.split('/');
-  const tail = parts[parts.length - 1] || modelId;
-  const provider = parts.length > 1 ? parts[0] : undefined;
-
-  const cleaned = tail
-    .replace(/[-_]/g, ' ')
-    .split(' ')
-    .map((segment) => {
-      if (/^\d/.test(segment)) return segment; // keep version segments verbatim
-      return segment.charAt(0).toUpperCase() + segment.slice(1);
-    })
-    .join(' ');
-
-  if (provider === 'z-ai') {
-    return cleaned.replace(/^Glm/i, 'GLM');
-  }
-  if (provider === 'openai' || provider === 'x-ai') {
-    return cleaned.replace(/^Gpt/i, 'GPT').replace(/^Grok/i, 'Grok');
-  }
-  return cleaned;
-}
-
 // ── Discovery Cache ──────────────────────────────────────────────────
 
 const discoveredModels: Partial<Record<CLIProvider, string[]>> = {};
@@ -893,7 +739,6 @@ function ensureDiscovery(): void {
   discoveryDone = true;
   discoverClaude();
   discoverCodex();
-  discoverOpenCode();
   discoverVibe();
 }
 
@@ -906,7 +751,6 @@ export function resetDiscovery(): void {
   codexModelsCacheFingerprint = null;
   delete discoveredModels.claude;
   delete discoveredModels.codex;
-  delete discoveredModels.opencode;
   delete discoveredModels.pi;
   delete discoveredModels.vibe;
 }
@@ -970,9 +814,6 @@ export async function refreshCodexModelsCache(): Promise<boolean> {
 
 function getDiscoveredModels(provider: CLIProvider): string[] {
   ensureDiscovery();
-  if (provider === 'pi') {
-    return discoveredModels.opencode ?? CLI_PROVIDER_MODELS.opencode;
-  }
   if (provider === 'codex') {
     const latestFingerprint = readCodexModelsCacheFingerprint();
     if (latestFingerprint !== codexModelsCacheFingerprint) {
@@ -983,7 +824,7 @@ function getDiscoveredModels(provider: CLIProvider): string[] {
   return discoveredModels[provider] ?? CLI_PROVIDER_MODELS[provider];
 }
 
-export function resolveOpenCodeConfiguredModel(
+export function resolveConfiguredModel(
   selectedModel: string | null | undefined,
   configuredModels: string[]
 ): string | null {
@@ -1015,11 +856,11 @@ export function resolveCliProviderSelectedModel(
       ? sessionSelectedModel.trim()
       : null;
 
-  if (provider !== 'opencode' && provider !== 'pi') {
+  if (provider !== 'pi') {
     return sessionSelected ?? userSelected;
   }
 
-  return resolveOpenCodeConfiguredModel(sessionSelected ?? userSelected, configuredModels);
+  return resolveConfiguredModel(sessionSelected ?? userSelected, configuredModels);
 }
 
 function parseEnvModels(provider: CLIProvider): string[] | undefined {
@@ -1039,6 +880,16 @@ function getProviderEnv(provider: CLIProvider, key: string): string | undefined 
 
 function envOr(provider: CLIProvider, key: string, fallback: string): string {
   return getProviderEnv(provider, key) || fallback;
+}
+
+/**
+ * The in-app update installs Vibe releases under the npm prefix and switches the
+ * `bin/vibe-acp` link (cli-updates.ts). Spawning through the link, not its
+ * resolved target, lets the next session pick up an update without a restart.
+ */
+function vibeAcpCommand(): string {
+  const link = path.join(os.homedir(), '.npm-global', 'bin', 'vibe-acp');
+  return fs.existsSync(link) ? link : (findCliBinary('vibe-acp') ?? 'vibe-acp');
 }
 
 function defaultCliCommand(provider: CLIProvider, command: string): string {
@@ -1080,46 +931,14 @@ export const CLI_PROVIDERS: Record<CLIProvider, CLIProviderConfig> = {
     defaultModel: getProviderEnv('codex', 'DEFAULT_MODEL') || DEFAULT_CODEX_MODEL,
     models: parseEnvModels('codex') ?? CLI_PROVIDER_MODELS.codex,
   },
-  opencode: {
-    id: 'opencode',
-    name: 'OpenCode',
-    command: defaultCliCommand('opencode', 'opencode'),
-    icon: '⚡',
-    // OpenCode writes auth/tokens to ~/.local/share/opencode/auth.json per XDG.
-    // Config lives at ~/.config/opencode/opencode.json but absence of a config
-    // file doesn't mean the CLI is unusable — auth presence is the real signal.
-    credentialsPath: envOr('opencode', 'CREDENTIALS_PATH', '~/.local/share/opencode'),
-    supportsStreamJson: true,
-    supportsResume: true,
-    supportsModes: true,
-    capabilities: {
-      streaming: true,
-      resume: true,
-      modes: true,
-      approvals: true,
-      nativeVision: false,
-      imageBridge: true,
-      mcp: true,
-      mcpSessionAttribution: 'prompt-scoped',
-      usageLimits: 'local-budget',
-      reasoning: true,
-      serviceTier: false,
-      webSearch: true,
-      allowedDirectories: true,
-    },
-    defaultModel: getProviderEnv('opencode', 'DEFAULT_MODEL') || 'z-ai/glm-5.1',
-    models: parseEnvModels('opencode') ?? CLI_PROVIDER_MODELS.opencode,
-  },
   pi: {
     id: 'pi',
     name: 'Pi',
     command: defaultCliCommand('pi', 'pi'),
     icon: 'π',
-    // Authentication and API connections are intentionally shared with OpenCode.
-    // Pi itself stores only generated, secret-free provider references in ~/.pi.
-    // Pi keeps its own config under ~/.pi. Pointing availability at ~/.opencode
-    // made Pi look uninstalled whenever OpenCode was absent, even though Pi
-    // only needs a configured endpoint from the WebUI provider registry.
+    // API connections come from the WebUI model provider registry. Pi itself
+    // stores only generated, secret-free provider references in ~/.pi, so a
+    // configured registry endpoint is what makes it usable.
     credentialsPath: envOr('pi', 'CREDENTIALS_PATH', '~/.pi'),
     supportsStreamJson: true,
     supportsResume: true,
@@ -1139,11 +958,8 @@ export const CLI_PROVIDERS: Record<CLIProvider, CLIProviderConfig> = {
       webSearch: true,
       allowedDirectories: true,
     },
-    defaultModel:
-      getProviderEnv('pi', 'DEFAULT_MODEL') ||
-      getProviderEnv('opencode', 'DEFAULT_MODEL') ||
-      'z-ai/glm-5.1',
-    models: parseEnvModels('pi') ?? parseEnvModels('opencode') ?? CLI_PROVIDER_MODELS.opencode,
+    defaultModel: getProviderEnv('pi', 'DEFAULT_MODEL') || 'z-ai/glm-5.1',
+    models: parseEnvModels('pi') ?? CLI_PROVIDER_MODELS.pi,
   },
   claude: {
     id: 'claude',
@@ -1203,7 +1019,7 @@ export const CLI_PROVIDERS: Record<CLIProvider, CLIProviderConfig> = {
   vibe: {
     id: 'vibe',
     name: 'Mistral Vibe',
-    command: defaultCliCommand('vibe', 'vibe-acp'),
+    command: envOr('vibe', 'COMMAND', vibeAcpCommand()),
     icon: '🧡',
     // Vibe keeps its config, sessions and the plan key (`.env`) under
     // VIBE_HOME. Signing in through Mistral stores a key that draws on the
@@ -1321,6 +1137,7 @@ export function getCLIArgs(
       }
 
       if (options.ephemeral && !args.includes('--ephemeral')) args.push('--ephemeral');
+      args.push(...codexTransportArgs());
 
       // Sandbox / approval flags only apply to fresh `exec`, not `exec resume`.
       if (!isResume) {
@@ -1400,34 +1217,6 @@ export function getCLIArgs(
       break;
     }
 
-    case 'opencode':
-      // OpenCode CLI: `opencode run --format json --model <model> "prompt"`
-      // Permission semantics are declarative (OPENCODE_PERMISSION env JSON)
-      // rather than hook-based — see buildOpenCodePermissionJson().
-      args.push('run', '--format', 'json');
-
-      if (options.model) {
-        args.push('--model', options.model);
-      }
-
-      if (options.reasoningLevel) {
-        args.push('--variant', normalizeOpenCodeVariant(options.reasoningLevel));
-      }
-
-      // Resume explicit session; OpenCode also supports --continue for the
-      // latest session, but we always carry an explicit session id when one
-      // exists, so --session is the right primitive here.
-      if (options.resumeSessionId && config.supportsResume) {
-        args.push('--session', options.resumeSessionId);
-      }
-
-      // Danger mode bypasses permission prompts entirely. All other modes
-      // rely on the OPENCODE_PERMISSION env var built at spawn time.
-      if (options.mode === 'danger') {
-        args.push('--dangerously-skip-permissions');
-      }
-      break;
-
     case 'pi':
       // Pi's RPC mode is a persistent JSONL process. Provider/model credentials
       // and shared extensions are prepared in the per-user PI_CODING_AGENT_DIR.
@@ -1496,164 +1285,23 @@ function normalizePiThinking(reasoningLevel: string): string {
   return normalized;
 }
 
-function normalizeOpenCodeVariant(reasoningLevel: string): string {
-  const normalized = reasoningLevel
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, '_');
-  if (normalized === 'extra_high' || normalized === 'xhigh') return 'max';
-  return normalized;
-}
-
 /**
- * Build the JSON value for the OPENCODE_PERMISSION env var.
- *
- * OpenCode evaluates permissions declaratively at runtime. The JSON schema:
- *   { "edit": "ask"|"allow"|"deny",
- *     "bash": { "<pattern>": "ask"|"allow"|"deny", "*": "ask" },
- *     "webfetch": "ask"|"allow"|"deny" }
- *
- * Modes map to policies matching Claude's permission-mode semantics:
- *   - auto-accept: edits allowed, common bash allowed, destructive bash asked
- *   - manual:      everything asked (OpenCode sends ask-events the UI surfaces)
- *   - planning:    edits denied (read-only), bash mostly denied
- *   - danger:      N/A — bypassed via --dangerously-skip-permissions flag
+ * Codex reaches OpenAI over the Responses WebSocket by default, and that socket
+ * is often closed by the server mid-turn ("websocket closed by server before
+ * response.completed"), which Codex answers with five reconnects before it
+ * falls back. The same ChatGPT login over HTTPS streaming (SSE) has no such
+ * drops, keeps prompt caching and resumes WebSocket-era threads. A custom
+ * provider is needed because the built-in `openai` one cannot be overridden.
+ * PLUM_CODEX_WEBSOCKETS=1 restores the WebSocket transport.
  */
-export function buildOpenCodePermissionJson(mode?: SessionMode): string {
-  switch (mode) {
-    case 'planning':
-      return JSON.stringify({
-        edit: 'deny',
-        webfetch: 'allow',
-        bash: {
-          '*': 'deny',
-          'ls *': 'allow',
-          'cat *': 'allow',
-          'grep *': 'allow',
-          'find *': 'allow',
-          'git status': 'allow',
-          'git diff *': 'allow',
-          'git log *': 'allow',
-        },
-      });
-    case 'manual':
-      return JSON.stringify({
-        edit: 'ask',
-        webfetch: 'ask',
-        bash: { '*': 'ask' },
-      });
-    case 'danger':
-      // Unused — --dangerously-skip-permissions takes effect at the flag level.
-      return JSON.stringify({ edit: 'allow', webfetch: 'allow', bash: { '*': 'allow' } });
-    case 'auto-accept':
-    default:
-      return JSON.stringify({
-        edit: 'allow',
-        webfetch: 'allow',
-        bash: {
-          '*': 'allow',
-          'rm -rf *': 'ask',
-          'rm -rf /': 'deny',
-          'sudo *': 'ask',
-          'curl * | bash *': 'ask',
-          'curl * | sh *': 'ask',
-          'wget * | bash *': 'ask',
-        },
-      });
-  }
-}
-
-export type OpenCodePermissionRule = {
-  permission: string;
-  pattern: string;
-  action: 'allow' | 'deny' | 'ask';
-};
-
-function openCodeDirectoryPatterns(
-  workingDirectory?: string,
-  allowedDirectories?: string[]
-): string[] {
-  const values = [workingDirectory, ...(allowedDirectories || [])]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => path.resolve(value));
-  const unique = Array.from(new Set(values));
-  return unique.flatMap((dir) => [dir, `${dir}/**`]);
-}
-
-function openCodeDirectoryAllowRules(
-  workingDirectory?: string,
-  allowedDirectories?: string[]
-): OpenCodePermissionRule[] {
-  return openCodeDirectoryPatterns(workingDirectory, allowedDirectories).map((pattern) => ({
-    permission: 'external_directory',
-    pattern,
-    action: 'allow',
-  }));
-}
-
-export function buildOpenCodePermissionRules(
-  mode?: SessionMode,
-  opts: { workingDirectory?: string; allowedDirectories?: string[] } = {}
-): OpenCodePermissionRule[] {
-  const directoryAllows = openCodeDirectoryAllowRules(
-    opts.workingDirectory,
-    opts.allowedDirectories
-  );
-  // OpenCode permission patterns are last-match-wins, so broad external_directory
-  // catch-alls must come before the specific WebUI workspace/add-dir allows.
-  const allowRead: OpenCodePermissionRule[] = [
-    { permission: 'read', pattern: '*', action: 'allow' },
-    { permission: 'list', pattern: '*', action: 'allow' },
-    { permission: 'glob', pattern: '*', action: 'allow' },
-    { permission: 'grep', pattern: '*', action: 'allow' },
-    { permission: 'webfetch', pattern: '*', action: 'allow' },
-    { permission: 'websearch', pattern: '*', action: 'allow' },
+export function codexTransportArgs(): string[] {
+  if (process.env.PLUM_CODEX_WEBSOCKETS === '1') return [];
+  return [
+    '-c',
+    'model_providers.openai-https={name="OpenAI",requires_openai_auth=true,wire_api="responses",supports_websockets=false}',
+    '-c',
+    'model_provider="openai-https"',
   ];
-
-  switch (mode) {
-    case 'planning':
-      return [
-        ...allowRead,
-        { permission: 'edit', pattern: '*', action: 'deny' },
-        { permission: 'bash', pattern: '*', action: 'deny' },
-        { permission: 'task', pattern: '*', action: 'deny' },
-        { permission: 'todowrite', pattern: '*', action: 'deny' },
-        { permission: 'external_directory', pattern: '*', action: 'deny' },
-        ...directoryAllows,
-        { permission: 'repo_clone', pattern: '*', action: 'deny' },
-        { permission: 'plan_enter', pattern: '*', action: 'deny' },
-        { permission: 'plan_exit', pattern: '*', action: 'deny' },
-      ];
-    case 'manual':
-      return [
-        ...allowRead,
-        { permission: 'edit', pattern: '*', action: 'ask' },
-        { permission: 'bash', pattern: '*', action: 'ask' },
-        { permission: 'task', pattern: '*', action: 'ask' },
-        { permission: 'todowrite', pattern: '*', action: 'ask' },
-        { permission: 'external_directory', pattern: '*', action: 'ask' },
-        ...directoryAllows,
-        { permission: 'repo_clone', pattern: '*', action: 'ask' },
-      ];
-    case 'danger':
-      return [
-        { permission: '*', pattern: '*', action: 'allow' },
-        { permission: 'question', pattern: '*', action: 'deny' },
-      ];
-    case 'auto-accept':
-    default:
-      return [
-        ...allowRead,
-        { permission: 'edit', pattern: '*', action: 'allow' },
-        { permission: 'bash', pattern: '*', action: 'allow' },
-        { permission: 'task', pattern: '*', action: 'allow' },
-        { permission: 'todowrite', pattern: '*', action: 'allow' },
-        { permission: 'external_directory', pattern: '*', action: 'ask' },
-        ...directoryAllows,
-        { permission: 'repo_clone', pattern: '*', action: 'allow' },
-        { permission: 'question', pattern: '*', action: 'deny' },
-      ];
-  }
 }
 
 function getCodexApprovalArgs(mode?: SessionMode): string[] {
@@ -1746,7 +1394,7 @@ export async function getProviderStatuses(): Promise<Record<string, ProviderRunt
     const command = CLI_PROVIDERS[provider].command;
     value[provider] = {
       installed: !!findCliBinary(command),
-      // Per-user harnesses (Pi, OpenCode) report false here; their credentials
+      // Per-user harnesses (Pi) report false here; their credentials
       // are per account, and this endpoint has no user.
       authenticated: await isProviderAvailable(provider).catch(() => false),
     };
@@ -1767,12 +1415,12 @@ export async function isProviderAvailable(
   const credPath = config.credentialsPath.replace('~', os.homedir());
 
   try {
-    // Pi and OpenCode route through endpoints the user configures here, so a
-    // configured endpoint is the credential. This is what lets an operator set
-    // up one harness and leave the others untouched.
-    if (userId && (provider === 'pi' || provider === 'opencode')) {
-      const { readOpenCodeProvidersForUser } = await import('../utils/opencodeProviderKeys.js');
-      return (await readOpenCodeProvidersForUser(userId)).some(
+    // Pi routes through endpoints the user configures in the model provider
+    // registry, so a configured endpoint is the credential. This is what lets
+    // an operator set up one harness and leave the others untouched.
+    if (userId && provider === 'pi') {
+      const { readModelProvidersForUser } = await import('../utils/modelProviderKeys.js');
+      return (await readModelProvidersForUser(userId)).some(
         (entry) => entry.enabled && entry.apiKey.trim().length > 0
       );
     }
@@ -1873,7 +1521,6 @@ export function formatInputMessage(provider: CLIProvider, message: string): stri
       })}\n`;
 
     case 'codex':
-    case 'opencode':
       // Plain text + newline
       return message + '\n';
 

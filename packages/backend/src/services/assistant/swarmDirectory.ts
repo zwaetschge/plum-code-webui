@@ -23,7 +23,7 @@ import type {
   SwarmHubState,
 } from '@plum-code-webui/shared';
 import { all, get } from '../../db/pg.js';
-import { dockerHost } from '../docker/index.js';
+import { directorySnapshot, directoryLogs } from './swarmContainers.js';
 import { getProviderStatuses } from '../cli-providers.js';
 import { getEnabledCliProvidersForUser } from '../../routes/settings.js';
 import { matrixStatus } from './matrix.js';
@@ -306,7 +306,7 @@ export async function swarmDirectory(userId: string): Promise<SwarmDirectory> {
   ] = await Promise.all([
     hubHealth(),
     hubAgents(),
-    admin ? dockerHost.listContainers().catch(() => null) : Promise.resolve(null),
+    admin ? directorySnapshot(directoryContainers()) : Promise.resolve(null),
     matrixStatus(userId).catch(() => ({ connected: false })),
     cardStatuses(userId),
     getProviderStatuses().catch(
@@ -327,7 +327,20 @@ export async function swarmDirectory(userId: string): Promise<SwarmDirectory> {
     >,
     subagentFiles(),
   ]);
-  const byName = new Map((containerRows ?? []).map((row) => [row.name, containerState(row)]));
+  const sessionIds = [...new Set((containerRows?.rows ?? []).flatMap((row) => row.ownerSessionId ?? []))];
+  const ownedSessions: Array<{ id: string; name: string }> = sessionIds.length ? await all(
+    `SELECT id, name FROM sessions WHERE user_id = ? AND id IN (${sessionIds.map(() => '?').join(',')})`,
+    userId, ...sessionIds
+  ) : [];
+  const sessionNames = new Map(ownedSessions.map((s) => [s.id, s.name]));
+  const byName = new Map((containerRows?.rows ?? []).map((row) => {
+    const state: SwarmContainerState = { ...containerState(row), host: row.host, hostLabel: row.hostLabel, actions: row.actions };
+    if (row.ownerSessionId && sessionNames.has(row.ownerSessionId)) {
+      state.ownerSessionId = row.ownerSessionId;
+      state.ownerSessionName = sessionNames.get(row.ownerSessionId);
+    }
+    return [row.name, state];
+  }));
   const docker = !!containerRows;
   const rooms = health?.rooms ?? {};
   const spent = new Map((health?.betrieb?.budget ?? []).map((b) => [b.agent, b.heute ?? 0]));
@@ -437,7 +450,8 @@ export async function swarmDirectory(userId: string): Promise<SwarmDirectory> {
     agents
       .filter((a) => a.worker === 'offline' && a.containers[0]?.running)
       .map(async (a) => {
-        const logs = await dockerHost.getContainerLogs(a.containers[0]!.name, 5).catch(() => null);
+        const target = a.containers[0]!;
+        const logs = await directoryLogs(directoryContainers(), target.name, target.host, 5).catch(() => null);
         const line = logs?.lines
           .at(-1)
           ?.replace(/^(?:\S+Z\s+)+/, '')
@@ -469,6 +483,7 @@ export async function swarmDirectory(userId: string): Promise<SwarmDirectory> {
     agents,
     matrixConnected: matrix.connected === true,
     containersVisible: docker,
+    containerErrors: containerRows?.errors ?? [],
     checkedAt: new Date().toISOString(),
   };
 }

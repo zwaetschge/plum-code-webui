@@ -1,6 +1,6 @@
 import { orderChatApiProviders, type AssistantApiProvider } from '@plum-code-webui/shared';
-import { readOpenCodeProvidersForUser } from '../../utils/opencodeProviderKeys.js';
-import { getOpenCodeProviderCatalog } from '../../utils/opencodeCatalog.js';
+import { readModelProvidersForUser } from '../../utils/modelProviderKeys.js';
+import { getModelProviderCatalog } from '../../utils/modelCatalog.js';
 import { safeDecrypt } from '../../utils/encryption.js';
 import { AppError } from '../../middleware/errorHandler.js';
 
@@ -23,16 +23,14 @@ const compatible = new Set([
   'ollama',
   'ollama-cloud',
   'lmstudio',
-  'opencode',
-  'opencode-go',
 ]);
 interface Endpoint extends AssistantApiProvider {
   baseUrl: string;
   key: string;
 }
 async function endpoints(userId: string): Promise<Endpoint[]> {
-  const providers = await readOpenCodeProvidersForUser(userId),
-    catalog = getOpenCodeProviderCatalog();
+  const providers = await readModelProvidersForUser(userId),
+    catalog = getModelProviderCatalog();
   return providers.flatMap((provider) => {
     if (!provider.enabled || !provider.apiKey) return [];
     const protocol =
@@ -126,6 +124,43 @@ const GEMINI_THINKING_BUDGET: Record<ApiReasoningEffort, number> = {
   max: 24576,
   ultra: 32768,
 };
+/**
+ * Models that refused `reasoning_effort`, keyed by endpoint and model. Mistral
+ * accepts it only for its reasoning models and rejects the whole request for
+ * the rest (400 "reasoning_effort is not enabled for this model"), so the
+ * effort rail would otherwise break every turn with such a model.
+ */
+const noReasoningEffort = new Set<string>();
+
+/** Mistral's and OpenAI's error message, short and without the key. */
+async function upstreamError(response: Response, key: string): Promise<string> {
+  let text = '';
+  try {
+    text = (await response.text()).slice(0, 4000);
+  } catch {
+    return '';
+  }
+  let message = text;
+  try {
+    const body = JSON.parse(text) as Record<string, unknown>;
+    const error = body.error;
+    const found =
+      typeof body.message === 'string'
+        ? body.message
+        : error &&
+            typeof error === 'object' &&
+            typeof (error as { message?: unknown }).message === 'string'
+          ? (error as { message: string }).message
+          : typeof body.detail === 'string'
+            ? body.detail
+            : null;
+    if (found) message = found;
+  } catch {
+    /* plain-text error */
+  }
+  return message.split(key).join('…').replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
 export interface ApiTool {
   name: string;
   description: string;
@@ -241,122 +276,143 @@ export async function streamApiChat(
     headers['x-api-key'] = endpoint.key;
     headers['anthropic-version'] = '2023-06-01';
   } else headers.authorization = `Bearer ${endpoint.key}`;
-  const response = await fetch(base, {
-    method: 'POST',
-    headers,
-    redirect: 'error',
-    signal,
-    body: JSON.stringify(
-      gemini
-        ? {
-            systemInstruction: { parts: [{ text: system }] },
-            contents: messages.map((message) => ({
-              role: message.role === 'assistant' ? 'model' : 'user',
-              parts:
-                message.nativeBlocks ??
-                (message.role === 'tool'
-                  ? [
-                      {
-                        functionResponse: {
-                          name: message.name,
-                          response: { result: message.content },
-                        },
-                      },
-                    ]
-                  : [
-                      { text: message.content },
-                      ...(message.images ?? []).map((image) => ({
-                        inlineData: { mimeType: image.mimeType, data: image.data },
-                      })),
-                    ]),
-            })),
-            ...(generation.tools?.length
-              ? {
-                  tools: [
-                    {
-                      functionDeclarations: generation.tools.map((t) => ({
-                        name: t.name,
-                        description: t.description,
-                        parameters: t.parameters,
-                      })),
-                    },
-                  ],
-                }
-              : {}),
-            generationConfig: {
-              candidateCount: 1,
-              ...(generation.temperature !== undefined
-                ? { temperature: generation.temperature }
-                : {}),
-              maxOutputTokens:
-                outputLimit +
-                (effort === 'auto' ? 8192 : effort ? GEMINI_THINKING_BUDGET[effort] : 0),
-              ...(effort === 'auto'
-                ? { thinkingConfig: { thinkingBudget: -1 } }
-                : effort
-                  ? { thinkingConfig: { thinkingBudget: GEMINI_THINKING_BUDGET[effort] } }
-                  : {}),
-            },
-          }
-        : anthropic
+  const effortKey = `${endpoint.baseUrl}\u0000${model}`;
+  let openaiEffort =
+    !anthropic && !gemini && effort && effort !== 'auto' && !noReasoningEffort.has(effortKey)
+      ? effort === 'max' || effort === 'ultra'
+        ? 'high'
+        : effort
+      : null;
+  const post = () =>
+    fetch(base, {
+      method: 'POST',
+      headers,
+      redirect: 'error',
+      signal,
+      body: JSON.stringify(
+        gemini
           ? {
-              model,
-              system,
-              messages: wireMessages,
+              systemInstruction: { parts: [{ text: system }] },
+              contents: messages.map((message) => ({
+                role: message.role === 'assistant' ? 'model' : 'user',
+                parts:
+                  message.nativeBlocks ??
+                  (message.role === 'tool'
+                    ? [
+                        {
+                          functionResponse: {
+                            name: message.name,
+                            response: { result: message.content },
+                          },
+                        },
+                      ]
+                    : [
+                        { text: message.content },
+                        ...(message.images ?? []).map((image) => ({
+                          inlineData: { mimeType: image.mimeType, data: image.data },
+                        })),
+                      ]),
+              })),
               ...(generation.tools?.length
                 ? {
-                    tools: generation.tools.map((t) => ({
-                      name: t.name,
-                      description: t.description,
-                      input_schema: t.parameters,
-                    })),
+                    tools: [
+                      {
+                        functionDeclarations: generation.tools.map((t) => ({
+                          name: t.name,
+                          description: t.description,
+                          parameters: t.parameters,
+                        })),
+                      },
+                    ],
                   }
                 : {}),
-              ...(!effort && generation.temperature !== undefined
-                ? { temperature: generation.temperature }
-                : {}),
-              // The thinking budget counts against max_tokens, so the answer keeps its 8k.
-              max_tokens:
-                outputLimit +
-                (effort === 'auto' ? 8192 : effort ? ANTHROPIC_THINKING_BUDGET[effort] : 0),
-              stream: true,
-              // Adaptive thinking: the model thinks only as long as the question needs.
-              ...(effort === 'auto'
-                ? { thinking: { type: 'adaptive' } }
-                : effort
+              generationConfig: {
+                candidateCount: 1,
+                ...(generation.temperature !== undefined
+                  ? { temperature: generation.temperature }
+                  : {}),
+                maxOutputTokens:
+                  outputLimit +
+                  (effort === 'auto' ? 8192 : effort ? GEMINI_THINKING_BUDGET[effort] : 0),
+                ...(effort === 'auto'
+                  ? { thinkingConfig: { thinkingBudget: -1 } }
+                  : effort
+                    ? { thinkingConfig: { thinkingBudget: GEMINI_THINKING_BUDGET[effort] } }
+                    : {}),
+              },
+            }
+          : anthropic
+            ? {
+                model,
+                system,
+                messages: wireMessages,
+                ...(generation.tools?.length
                   ? {
-                      thinking: {
-                        type: 'enabled',
-                        budget_tokens: ANTHROPIC_THINKING_BUDGET[effort],
-                      },
+                      tools: generation.tools.map((t) => ({
+                        name: t.name,
+                        description: t.description,
+                        input_schema: t.parameters,
+                      })),
                     }
                   : {}),
-            }
-          : {
-              model,
-              messages: [{ role: 'system', content: system }, ...wireMessages],
-              stream: true,
-              stream_options: { include_usage: true },
-              ...(generation.tools?.length
-                ? { tools: generation.tools.map((t) => ({ type: 'function', function: t })) }
-                : {}),
-              ...(endpoint.id === 'openai'
-                ? { max_completion_tokens: outputLimit }
-                : { max_tokens: outputLimit }),
-              ...(!effort && generation.temperature !== undefined
-                ? { temperature: generation.temperature }
-                : {}),
-              // OpenAI-style APIs know low/medium/high; max and ultra are the highest of those.
-              ...(effort && effort !== 'auto'
-                ? { reasoning_effort: effort === 'max' || effort === 'ultra' ? 'high' : effort }
-                : {}),
-            }
-    ),
-  });
+                ...(!effort && generation.temperature !== undefined
+                  ? { temperature: generation.temperature }
+                  : {}),
+                // The thinking budget counts against max_tokens, so the answer keeps its 8k.
+                max_tokens:
+                  outputLimit +
+                  (effort === 'auto' ? 8192 : effort ? ANTHROPIC_THINKING_BUDGET[effort] : 0),
+                stream: true,
+                // Adaptive thinking: the model thinks only as long as the question needs.
+                ...(effort === 'auto'
+                  ? { thinking: { type: 'adaptive' } }
+                  : effort
+                    ? {
+                        thinking: {
+                          type: 'enabled',
+                          budget_tokens: ANTHROPIC_THINKING_BUDGET[effort],
+                        },
+                      }
+                    : {}),
+              }
+            : {
+                model,
+                messages: [{ role: 'system', content: system }, ...wireMessages],
+                stream: true,
+                stream_options: { include_usage: true },
+                ...(generation.tools?.length
+                  ? { tools: generation.tools.map((t) => ({ type: 'function', function: t })) }
+                  : {}),
+                ...(endpoint.id === 'openai'
+                  ? { max_completion_tokens: outputLimit }
+                  : { max_tokens: outputLimit }),
+                ...(!effort && generation.temperature !== undefined
+                  ? { temperature: generation.temperature }
+                  : {}),
+                // OpenAI-style APIs know low/medium/high; max and ultra are the highest of those.
+                ...(openaiEffort ? { reasoning_effort: openaiEffort } : {}),
+              }
+      ),
+    });
+  let response = await post();
+  let detail = '';
   if (!response.ok) {
-    await response.body?.cancel();
+    detail = await upstreamError(response, endpoint.key);
+    // A model without reasoning support: answer without the effort setting
+    // instead of failing, and skip it for this model from now on.
+    if (response.status === 400 && openaiEffort && /reasoning[_ ]effort/i.test(detail)) {
+      noReasoningEffort.add(effortKey);
+      openaiEffort = null;
+      response = await post();
+      detail = response.ok ? '' : await upstreamError(response, endpoint.key);
+    }
+  }
+  if (!response.ok) {
+    console.warn(
+      `[api-chat] ${endpoint.id}/${model} rejected: HTTP ${response.status}${detail ? ` ${detail}` : ''}`
+    );
     throw new AppError(
-      `Die Modell-API hat den Auftrag abgelehnt (HTTP ${response.status}).`,
+      `Die Modell-API hat den Auftrag abgelehnt (HTTP ${response.status}${detail ? `: ${detail}` : ''}).`,
       502,
       'API_UPSTREAM_ERROR'
     );

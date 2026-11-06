@@ -8,7 +8,7 @@ import { Input } from '../ui/input';
 import { Switch } from '../ui/switch';
 
 /**
- * CLI subagents: whole provider CLIs (Codex, Claude Code, OpenCode) that any
+ * CLI subagents: whole provider CLIs (Codex, Claude Code, Pi) that any
  * harness can spawn as one-shot workers through the `subagents` MCP tool —
  * cross-harness delegation, as opposed to the upstream list above which swaps
  * the API endpoint underneath Claude-transport agents.
@@ -18,7 +18,7 @@ import { Switch } from '../ui/switch';
  * above — the backend injects that endpoint at spawn time.
  */
 
-const PROVIDERS = ['codex', 'claude', 'zai', 'opencode', 'pi'] as const;
+const PROVIDERS = ['codex', 'claude', 'zai', 'pi'] as const;
 type CliProvider = (typeof PROVIDERS)[number];
 
 interface CliSubagentEntry {
@@ -88,17 +88,17 @@ export function CliSubagentsSection() {
       <div>
         <p className="text-sm font-medium">CLI-Subagenten (andere Provider als Worker)</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Jede Session (egal ob Claude Code, Codex, OpenCode oder Pi) kann über das MCP-Tool{' '}
+          Jede Session (egal ob Claude Code, Codex oder Pi) kann über das MCP-Tool{' '}
           <code>run_subagent</code> einen dieser CLIs als Einmal-Worker starten — z.&nbsp;B. Codex
           delegiert an Claude, oder Claude delegiert an Codex. Der Worker arbeitet im selben
           Verzeichnis und nutzt das jeweilige eigene Abo/Login. Modell leer lassen für den
-          Provider-Default; OpenCode erwartet <code>anbieter/modell</code>-IDs.
+          Provider-Default; Pi erwartet <code>anbieter/modell</code>-IDs.
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           <code>zai</code> ist kein eigenes CLI: Es startet das Claude-CLI gegen deinen
           Z.AI-Endpunkt (dieselbe zweite Claude-Transportschicht wie eine Z.AI-Session). GLM-Worker
-          bleiben damit im Claude-Harnisch mit Skills, Agents und MCP, statt über OpenCode zu
-          laufen. Ohne konfigurierte Z.AI-API wird der Eintrag beim Start ausgeblendet.
+          bleiben damit im Claude-Harnisch mit Skills, Agents und MCP, statt über Pi zu laufen. Ohne
+          konfigurierte Z.AI-API wird der Eintrag beim Start ausgeblendet.
         </p>
       </div>
 

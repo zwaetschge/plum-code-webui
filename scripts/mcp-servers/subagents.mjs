@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 // CLI-subagent MCP bridge for Plum Code WebUI.
 //
-// Lets ANY harness (Claude Code, Codex, OpenCode, Pi) delegate a task to a
-// whole other provider CLI as a one-shot headless worker instead of its own
-// built-in subagent: Codex can spawn `opencode run -m z-ai/glm-5.2`, Claude
-// can spawn `codex exec`, and so on. The spawned CLIs use the shared logins
-// under ~/.codex, ~/.claude, ~/.opencode — no credentials pass through here.
+// Lets ANY harness (Claude Code, Codex, Pi) delegate a task to a whole other
+// provider CLI as a one-shot headless worker instead of its own built-in
+// subagent: Codex can spawn `pi -p --model z-ai/glm-5.2`, Claude can spawn
+// `codex exec`, and so on. Codex and Claude use the shared logins under
+// ~/.codex and ~/.claude; Pi's per-user agent dir and registry keys arrive as
+// env from the backend.
 //
 // `zai` is the one provider that is not its own binary: it runs the Claude CLI
 // against the user's Z.AI endpoint, which is how the WebUI's second Claude
-// transport works. A GLM subagent therefore stays inside the Claude harness
-// instead of being handed to OpenCode. Its endpoint and token arrive as env
-// from the backend, same channel as the OpenCode tenant credentials.
+// transport works. A GLM subagent therefore stays inside the Claude harness.
+// Its endpoint and token arrive as env from the backend, same channel as Pi's
+// credentials.
 //
 // Which subagents exist (label, provider, model) is configured per WebUI user
 // in Settings → General → Subagents and fetched from the backend with the
@@ -81,7 +82,7 @@ function asText(payload, isError = false) {
 // ---------------------------------------------------------------------------
 // Configuration
 
-const KNOWN_PROVIDERS = ['codex', 'claude', 'opencode', 'pi', 'zai', 'vibe'];
+const KNOWN_PROVIDERS = ['codex', 'claude', 'pi', 'zai', 'vibe'];
 
 // Which binary a provider actually spawns. Only `zai` differs from its name.
 const PROVIDER_BINARY = { zai: 'claude' };
@@ -160,6 +161,16 @@ function buildInvocation(provider, prompt, model) {
           'workspace-write',
           '-c',
           'approval_policy="never"',
+          // HTTPS streaming instead of the Responses WebSocket, which the server
+          // often closes mid-turn (see codexTransportArgs in the backend).
+          ...(process.env.PLUM_CODEX_WEBSOCKETS === '1'
+            ? []
+            : [
+                '-c',
+                'model_providers.openai-https={name="OpenAI",requires_openai_auth=true,wire_api="responses",supports_websockets=false}',
+                '-c',
+                'model_provider="openai-https"',
+              ]),
           ...(model ? ['-m', model] : []),
           prompt,
         ],
@@ -176,11 +187,6 @@ function buildInvocation(provider, prompt, model) {
           ...(model ? ['--model', model] : []),
           prompt,
         ],
-      };
-    case 'opencode':
-      return {
-        command: 'opencode',
-        args: ['run', ...(model ? ['-m', model] : []), prompt],
       };
     case 'pi':
       // --print is pi's non-interactive mode; --no-session keeps one-shot
@@ -223,9 +229,9 @@ function buildChildEnv(provider, providerEnv) {
     for (const key of CLAUDE_UPSTREAM_ENV_KEYS) delete env[key];
   } else if (provider !== 'claude') {
     // The calling session may carry model-router overrides for the Claude
-    // transport. A codex/opencode child must not inherit them: opencode's
-    // anthropic provider would otherwise send its traffic through a router
-    // token that meters someone else's turn.
+    // transport. A codex/pi child must not inherit them: an anthropic provider
+    // would otherwise send its traffic through a router token that meters
+    // someone else's turn.
     delete env.ANTHROPIC_BASE_URL;
     delete env.ANTHROPIC_AUTH_TOKEN;
     delete env.ANTHROPIC_API_KEY;
@@ -273,8 +279,8 @@ function createCapture(limit = MAX_CAPTURE_CHARS) {
 
 function runChild(invocation, { cwd, env, timeoutMs }) {
   return new Promise((resolve) => {
-    // stdin must be closed: codex and opencode both detect a piped stdin and
-    // wait for EOF to append it to the prompt — an open pipe hangs them forever.
+    // stdin must be closed: codex and pi both detect a piped stdin and wait
+    // for EOF to append it to the prompt — an open pipe hangs them forever.
     const proc = spawn(invocation.command, invocation.args, {
       cwd,
       env,
@@ -475,14 +481,14 @@ const TOOLS = [
   {
     name: 'run_subagent',
     description:
-      'Delegate a task to another provider CLI as a headless one-shot subagent (e.g. Codex, Claude Code, the Z.AI/GLM harness, or OpenCode). The subagent runs in the given working directory with full tool access and returns its final answer. Use this instead of the built-in subagent when the task should run on a different provider or subscription. For GLM work prefer the "zai" subagent: it is the Claude harness pointed at Z.AI, not OpenCode.',
+      'Delegate a task to another provider CLI as a headless one-shot subagent (e.g. Codex, Claude Code, the Z.AI/GLM harness, or Pi). The subagent runs in the given working directory with full tool access and returns its final answer. Use this instead of the built-in subagent when the task should run on a different provider or subscription. For GLM work prefer the "zai" subagent: it is the Claude harness pointed at Z.AI.',
     inputSchema: {
       type: 'object',
       properties: {
         subagent: {
           type: 'string',
           description:
-            'Which subagent to run: a configured label or a bare provider (codex, claude, zai, opencode, pi). See list_subagents.',
+            'Which subagent to run: a configured label or a bare provider (codex, claude, zai, pi, vibe). See list_subagents.',
         },
         prompt: {
           type: 'string',
@@ -492,7 +498,7 @@ const TOOLS = [
         model: {
           type: 'string',
           description:
-            'Optional model override (opencode expects provider/model ids like z-ai/glm-5.2).',
+            'Optional model override (pi expects provider/model ids like z-ai/glm-5.2).',
         },
         working_directory: {
           type: 'string',

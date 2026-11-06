@@ -34,7 +34,8 @@ internal fun ChatWorkbenchSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val saved = chat?.body?.get("chatOptions") as? JsonObject ?: initial
-    var web by remember { mutableStateOf(saved["webSearch"]?.jsonPrimitive?.booleanOrNull ?: false) }
+    // Web search is on unless a chat or profile switched it off; the model decides when to search.
+    var web by remember { mutableStateOf(saved["webSearch"]?.jsonPrimitive?.booleanOrNull ?: true) }
     var full by remember { mutableStateOf(saved["fullDocuments"]?.jsonPrimitive?.booleanOrNull ?: false) }
     var writes by remember { mutableStateOf(saved["allowToolWrites"]?.jsonPrimitive?.booleanOrNull ?: false) }
     var servers by remember { mutableStateOf<List<JsonObject>>(emptyList()) }

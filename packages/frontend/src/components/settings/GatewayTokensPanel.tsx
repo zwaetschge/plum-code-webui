@@ -17,7 +17,7 @@ interface GatewayToken {
 }
 
 /**
- * Credentials for an outside supervisor — Hermes, an OpenCode or Codex CLI —
+ * Credentials for an outside supervisor — Hermes, a Pi or Codex CLI —
  * that watches and drives every session through the same API this UI uses.
  * The secret is shown once, on creation, and never again.
  */

@@ -50,7 +50,7 @@ scripted.
 
 - **Own window per session:** Plum creates one Firefox window per session (unfocused) holding its tab group. It never switches, reorders or focuses the user's own tabs and windows. A group left in a normal window by an older version is moved out on first use.
 - **Virtual cursor:** A Plum pointer glides to every click, hover, type and scroll target, shows a ripple on clicks and stays in place across page loads. It and the violet frame are hidden while a screenshot is taken.
-- **Chat sidebar:** The window's sidebar shows the session's Plum chat (`<plum>/session/<id>`, mobile layout at sidebar width). Firefox only opens sidebars on a user action; in a session window the Plum toolbar icon toggles it with one click, and `Alt+Shift+P` works too. Firefox restores it with the window, and new session windows usually inherit an open sidebar. Put it on the right with `sidebar.position_start = false`.
+- **Chat sidebar:** The window's sidebar shows the session's Plum chat (`<plum>/session/<id>`, mobile layout at sidebar width). Firefox only opens sidebars on a user action; in a session window the Plum toolbar icon toggles it with one click, and `Alt+Shift+P` works too (elsewhere `Alt+Shift+P` opens the popup and `Alt+Shift+C` toggles the chat sidebar). Firefox restores it with the window, and new session windows usually inherit an open sidebar. Put it on the right with `sidebar.position_start = false`.
 
 ## Settings, safety and diagnostics (0.8)
 

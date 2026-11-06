@@ -585,7 +585,7 @@ class SocketService {
     this.socket.on('session:question_request', (data) => {
       console.log(`[SOCKET] session:question_request received:`, data.requestId);
       useSessionStore.getState().setPendingQuestion(data.sessionId, data);
-      notificationService.notifyNeedsInput(data.sessionId, 'OpenCode needs your input');
+      notificationService.notifyNeedsInput(data.sessionId);
     });
 
     this.socket.on('error', (message) => {
@@ -1709,7 +1709,7 @@ class SocketService {
     answers: string[][],
     providerSessionId?: string
   ): Promise<void> {
-    await api.post('/api/opencode/questions/respond', { requestId, answers, providerSessionId });
+    await api.post('/api/permissions/questions/respond', { requestId, answers, providerSessionId });
 
     useSessionStore.getState().setPendingQuestion(sessionId, null);
   }
@@ -1719,7 +1719,7 @@ class SocketService {
     requestId: string,
     providerSessionId?: string
   ): Promise<void> {
-    await api.post('/api/opencode/questions/reject', { requestId, providerSessionId });
+    await api.post('/api/permissions/questions/reject', { requestId, providerSessionId });
 
     useSessionStore.getState().setPendingQuestion(sessionId, null);
   }

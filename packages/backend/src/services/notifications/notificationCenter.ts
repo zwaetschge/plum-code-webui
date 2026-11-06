@@ -1,3 +1,4 @@
+import { liveEvents } from '../liveEvents.js';
 import { all as pgAll, run as pgRun } from '../../db/pg.js';
 import { nanoid } from 'nanoid';
 import type { Server as SocketIOServer } from 'socket.io';
@@ -63,6 +64,7 @@ export async function notify(input: NotifyInput): Promise<void> {
       createdAt: new Date().toISOString(),
     };
     io?.to(`user:${input.userId}`).emit('notification:new', payload);
+    liveEvents.emit('notification', input.userId, payload);
     void sendWebPush(input.userId, payload);
   } catch (error) {
     console.error('[Notifications] failed to record notification:', error);

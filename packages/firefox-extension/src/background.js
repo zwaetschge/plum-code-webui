@@ -37,6 +37,8 @@ const state = {
   /** Diagnostics for the options page. */
   connectedAt: null,
   reconnects: 0,
+  /** Latest usage.limits rows; `at` is when Plum computed them, `receivedAt` local. */
+  usage: { rows: [], at: null, receivedAt: 0 },
 };
 
 // ---------------------------------------------------------------- utilities
@@ -124,6 +126,8 @@ function publicState() {
       .map(([id, entry]) => ({ sessionId: id, windowId: entry.guideWindowId })),
     // One demonstration per window, so parallel sessions each record their own.
     recordings: [...state.recordings.values()].map(recordingSummary),
+    usage: { rows: state.usage.rows, at: state.usage.at },
+    usageHidden: state.settings.usageHidden || [],
   };
 }
 
@@ -161,6 +165,7 @@ function broadcastState() {
             : `Plum Browser – ${state.statusDetail || 'nicht verbunden'}`,
     })
     .catch(() => {});
+  void drawUsageIcon();
   browser.runtime.sendMessage({ plumState: publicState() }).catch(() => {});
 }
 
@@ -169,6 +174,179 @@ function setStatus(status, detail = '') {
   state.statusDetail = detail;
   broadcastState();
 }
+
+// ---------------------------------------------------------------- account usage
+//
+// Plum pushes `usage` frames after booked turns and every few minutes; a slow
+// poll covers servers that do not. The rows survive restarts (storage) so the
+// popup can show the last known state while offline, and the toolbar icon
+// carries a ring with the highest utilization.
+
+const USAGE_POLL_MS = 5 * 60_000;
+const USAGE_COLORS = { ok: '#07ca6b', warning: '#e89558', danger: '#ea2143' };
+const usageIcon = { key: '', base: null };
+let usageRefresh = null;
+
+function setUsage(rows, at) {
+  if (!Array.isArray(rows)) return;
+  const time = Date.parse(at) || Date.now();
+  state.usage = { rows, at: time, receivedAt: Date.now() };
+  browser.storage.local.set({ usageCache: { rows, at: time } }).catch(() => {});
+  broadcastState();
+}
+
+function refreshUsage() {
+  if (!usageRefresh) {
+    usageRefresh = rpc('usage.limits', {})
+      .then((rows) => setUsage(rows))
+      .catch(() => {})
+      .finally(() => {
+        usageRefresh = null;
+      });
+  }
+  return usageRefresh;
+}
+
+// Fallback poll, only while connected and only when no frame came for a while.
+setInterval(() => {
+  if (state.status === 'connected' && Date.now() - state.usage.receivedAt >= USAGE_POLL_MS)
+    void refreshUsage();
+}, 60_000);
+
+/** Ring value: the active provider, else the fullest shown provider. */
+function usageLevel() {
+  const hidden = state.settings.usageHidden || [];
+  const shown = state.usage.rows.filter((row) => !hidden.includes(row.provider));
+  if (!shown.length) return null;
+  const active = shown.find((row) => row.active);
+  let pct = 0;
+  let exhausted = false;
+  for (const row of active ? [active] : shown) {
+    if (row.exhausted) exhausted = true;
+    for (const window of row.windows || []) pct = Math.max(pct, Number(window.utilization) || 0);
+  }
+  if (exhausted) pct = 100;
+  pct = Math.min(100, Math.max(0, Math.round(pct)));
+  const color =
+    exhausted || pct >= 90
+      ? USAGE_COLORS.danger
+      : pct >= 75
+        ? USAGE_COLORS.warning
+        : USAGE_COLORS.ok;
+  return { pct, color };
+}
+
+/** The Plum logo, slightly smaller, inside a thin progress ring. */
+function ringImage(base, size, level, stale) {
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext('2d');
+  const inset = size * 0.1;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(base, inset, inset, size - inset * 2, size - inset * 2);
+  const line = size >= 32 ? 3 : 1.75;
+  const center = size / 2;
+  const radius = center - line / 2 - 0.25;
+  ctx.lineWidth = line;
+  // Offline the ring shows the last known value, faded.
+  ctx.globalAlpha = stale ? 0.45 : 1;
+  ctx.strokeStyle = 'rgba(128, 128, 128, 0.38)';
+  ctx.beginPath();
+  ctx.arc(center, center, radius, 0, Math.PI * 2);
+  ctx.stroke();
+  if (level.pct > 0) {
+    ctx.strokeStyle = level.color;
+    ctx.lineCap = level.pct >= 100 ? 'butt' : 'round';
+    ctx.beginPath();
+    ctx.arc(center, center, radius, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * level.pct) / 100);
+    ctx.stroke();
+  }
+  return ctx.getImageData(0, 0, size, size);
+}
+
+async function drawUsageIcon() {
+  const level = usageLevel();
+  const stale = state.status !== 'connected';
+  const key = level ? `${level.pct}|${level.color}|${stale}` : 'none';
+  if (key === usageIcon.key) return;
+  usageIcon.key = key;
+  try {
+    if (!level || typeof OffscreenCanvas === 'undefined') {
+      await actionApi.setIcon({ path: { 16: 'icons/icon-16.png', 32: 'icons/icon-32.png' } });
+      return;
+    }
+    usageIcon.base ||= fetch(browser.runtime.getURL('icons/icon-32.png'))
+      .then((response) => response.blob())
+      .then((blob) => createImageBitmap(blob));
+    const base = await usageIcon.base;
+    if (usageIcon.key !== key) return; // a newer value is being drawn
+    await actionApi.setIcon({
+      imageData: { 16: ringImage(base, 16, level, stale), 32: ringImage(base, 32, level, stale) },
+    });
+  } catch (error) {
+    usageIcon.key = '';
+    usageIcon.base = null;
+    console.warn('[plum] usage icon failed', error);
+  }
+}
+
+// ---------------------------------------------------------------- pushed notices
+//
+// Usage alerts and new approvals/questions become system notifications; a click
+// opens the matching page in Plum.
+
+const noticeTargets = new Map();
+
+function plumUrl(path) {
+  const base = plumNormalizeServerUrl(state.settings.serverUrl);
+  if (!base || typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//'))
+    return null;
+  return `${base}${path}`;
+}
+
+function showNotice(id, title, message, url) {
+  if (!browser.notifications) return;
+  if (url) noticeTargets.set(id, url);
+  browser.notifications
+    .create(id, {
+      type: 'basic',
+      iconUrl: browser.runtime.getURL('icons/icon-128.png'),
+      title: String(title || 'Plum'),
+      message: String(message || ''),
+    })
+    .catch(() => noticeTargets.delete(id));
+}
+
+function handleUsageAlert(frame) {
+  const provider = typeof frame.provider === 'string' ? frame.provider : '';
+  const row = state.usage.rows.find((entry) => entry.provider === provider);
+  const path = (row && row.analyticsPath) || `/analytics?provider=${encodeURIComponent(provider)}`;
+  showNotice(`plum-usage-${provider}-${frame.level}`, frame.title, frame.body, plumUrl(path));
+}
+
+function handleSessionNotice(frame) {
+  const sessionId = typeof frame.sessionId === 'string' ? frame.sessionId : '';
+  showNotice(
+    `plum-ask-${sessionId || Date.now()}`,
+    frame.title,
+    frame.body,
+    sessionId ? chatUrl(sessionId) : plumUrl('/')
+  );
+  // An open popup or panel reloads its approvals list.
+  browser.runtime.sendMessage({ plumApprovalsChanged: true }).catch(() => {});
+}
+
+browser.notifications?.onClicked.addListener((id) => {
+  const url = noticeTargets.get(id);
+  if (!url) return;
+  noticeTargets.delete(id);
+  browser.notifications.clear(id).catch(() => {});
+  void browser.tabs
+    .create({ url })
+    .then((tab) => tab && browser.windows.update(tab.windowId, { focused: true }))
+    .catch(() => {});
+});
+browser.notifications?.onClosed.addListener((id) => noticeTargets.delete(id));
 
 // ---------------------------------------------------------------- connection
 
@@ -268,6 +446,7 @@ function tryEndpoint(candidate, generation) {
           plumSaveSettings({ wsPath: candidate.path }).catch(() => {});
           state.settings.wsPath = candidate.path;
           setStatus('connected');
+          void refreshUsage();
           finish(true);
         } else if (frame.type === 'error') {
           clearTimeout(handshakeTimer);
@@ -286,7 +465,9 @@ function tryEndpoint(candidate, generation) {
       } else if (frame.type === 'event') {
         // Live session events for the chat panels (they filter by session).
         browser.runtime.sendMessage({ plumEvent: frame }).catch(() => {});
-      }
+      } else if (frame.type === 'usage') setUsage(frame.rows, frame.at);
+      else if (frame.type === 'usage-alert') handleUsageAlert(frame);
+      else if (frame.type === 'notification') handleSessionNotice(frame);
     });
     socket.addEventListener('close', (event) => {
       clearTimeout(handshakeTimer);
@@ -2174,9 +2355,22 @@ function routeMessage(message, sender) {
   if (message.plumReconnect) {
     state.retryMs = 1_000;
     return plumLoadSettings().then(async (settings) => {
+      // Another Plum or account: the cached usage belongs to the old one.
+      if (
+        settings.serverUrl !== state.settings.serverUrl ||
+        settings.token !== state.settings.token
+      ) {
+        state.usage = { rows: [], at: null, receivedAt: 0 };
+        browser.storage.local.remove('usageCache').catch(() => {});
+      }
       state.settings = settings;
       return connect().then(() => publicState());
     });
+  }
+  if (message.plumUsageRefresh) {
+    // The popup opened: fresh rows unless the last ones are recent.
+    if (Date.now() - state.usage.receivedAt < 60_000) return Promise.resolve(publicState());
+    return refreshUsage().then(() => publicState());
   }
   if (message.plumStopSession) {
     const { id, stopped } = message.plumStopSession;
@@ -2374,7 +2568,7 @@ async function isManagedTab(tab) {
 // here only the live toggles need to reach the running state.
 browser.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  const live = ['paused', 'allowJs', 'protectedSites', 'blockedSites'];
+  const live = ['paused', 'allowJs', 'protectedSites', 'blockedSites', 'usageHidden'];
   if (!live.some((key) => key in changes)) return;
   plumLoadSettings().then((settings) => {
     state.settings = settings;
@@ -2641,6 +2835,10 @@ actionApi.onClicked.addListener((tab) => {
 let startupDone = false;
 const startup = (async () => {
   state.settings = await plumLoadSettings();
+  // Last known usage, shown as "Stand vor …" until fresh rows arrive.
+  const { usageCache } = await browser.storage.local.get('usageCache').catch(() => ({}));
+  if (usageCache && Array.isArray(usageCache.rows))
+    state.usage = { rows: usageCache.rows, at: usageCache.at || null, receivedAt: 0 };
   await restoreSessions();
   broadcastState();
   await reattachSessionWindows().catch(() => {});

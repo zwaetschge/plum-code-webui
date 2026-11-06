@@ -7,7 +7,12 @@ import { ChatRelay } from './chatRelay.js';
 import { latestDesktopCompanion, latestExtensionVersion, versionNewer } from './package.js';
 import { getDesktopRules } from './desktop.js';
 import { handleBridgeRpc } from './rpc.js';
-import { isBrowserTokenActive, resolveBrowserToken } from './tokens.js';
+import {
+  isBrowserTokenActive,
+  resolveBrowserToken,
+  type BrowserTokenScope,
+  type ResolvedBrowserToken,
+} from './tokens.js';
 
 /**
  * Relay between agent MCP calls and the user's Plum Browser extension
@@ -30,8 +35,23 @@ const TOKEN_RECHECK_MS = 60_000;
 /** A session leaves its browser once the user has been away from it this long and is active elsewhere. */
 const SWITCH_AFTER_IDLE_MS = 10 * 60_000;
 
-/** A browser extension, or the desktop companion that shows marks over native apps. */
-export type BridgeClientKind = 'browser' | 'desktop';
+/**
+ * A browser extension, the desktop companion that shows marks over native
+ * apps, or the Wear OS app. A watch only reads usage/approvals/sessions and
+ * answers them (rpc.ts); it never receives tool calls or desktop frames.
+ */
+export type BridgeClientKind = 'browser' | 'desktop' | 'watch';
+
+/**
+ * The kind a connection gets. A watch-scope token is always a watch, whatever
+ * its hello says, so a token handed to a watch can never drive a browser or a
+ * desktop. A browser-scope token may announce any kind.
+ */
+export function resolveClientKind(scope: BrowserTokenScope, requested: unknown): BridgeClientKind {
+  if (scope === 'watch') return 'watch';
+  if (requested === 'desktop' || requested === 'watch') return requested;
+  return 'browser';
+}
 
 export const desktopActivitySchema = z.object({
   sessionId: z.string().max(64).default(''),
@@ -174,6 +194,12 @@ export class BrowserBridge {
   >();
   private pingTimer: NodeJS.Timeout | null = null;
 
+  constructor(
+    private readonly resolveToken: (
+      token: string
+    ) => Promise<ResolvedBrowserToken | null> = resolveBrowserToken
+  ) {}
+
   attach(httpServer: HttpServer): void {
     httpServer.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
       const pathname = (req.url || '').split('?')[0];
@@ -215,10 +241,13 @@ export class BrowserBridge {
     const current = this.pickConnection(userId, sessionId);
     return {
       mode: sticky?.pinned ? 'pinned' : 'auto',
-      connections: this.listConnections(userId).map((conn) => ({
-        ...conn,
-        usedByThisSession: conn.id === current?.id,
-      })),
+      // A watch is no target for an agent, so it is not offered as one.
+      connections: this.listConnections(userId)
+        .filter((conn) => conn.client.kind !== 'watch')
+        .map((conn) => ({
+          ...conn,
+          usedByThisSession: conn.id === current?.id,
+        })),
     };
   }
 
@@ -303,6 +332,29 @@ export class BrowserBridge {
     return reached;
   }
 
+  /** Send a frame to every open bridge client of the user (desktop, browsers and watches). */
+  sendAll(userId: string, frame: Record<string, unknown>): number {
+    const data = JSON.stringify(frame);
+    let reached = 0;
+    for (const conn of this.connections.values()) {
+      if (conn.userId !== userId || conn.ws.readyState !== WebSocket.OPEN) continue;
+      conn.ws.send(data);
+      reached += 1;
+    }
+    return reached;
+  }
+
+  /** Users with at least one open bridge client. */
+  connectedUserIds(): string[] {
+    return [
+      ...new Set(
+        [...this.connections.values()]
+          .filter((conn) => conn.ws.readyState === WebSocket.OPEN)
+          .map((conn) => conn.userId)
+      ),
+    ];
+  }
+
   /** Drop live sockets opened with a token that was just revoked. */
   disconnectToken(tokenId: string): void {
     for (const conn of this.connections.values()) {
@@ -315,7 +367,12 @@ export class BrowserBridge {
     session: BrowserCallSession,
     tool: string,
     args: Record<string, unknown>,
-    opts: { connectionId?: string; timeoutMs?: number; kind?: BridgeClientKind } = {}
+    // A watch takes no tool calls, so it cannot be asked for one.
+    opts: {
+      connectionId?: string;
+      timeoutMs?: number;
+      kind?: Exclude<BridgeClientKind, 'watch'>;
+    } = {}
   ): Promise<BrowserCallResult> {
     const kind = opts.kind ?? 'browser';
     const conn = opts.connectionId
@@ -436,7 +493,7 @@ export class BrowserBridge {
     ws: WebSocket,
     frame: Record<string, unknown>
   ): Promise<Connection | null> {
-    const resolved = await resolveBrowserToken(text(frame.token, 200)).catch(() => null);
+    const resolved = await this.resolveToken(text(frame.token, 200)).catch(() => null);
     if (!resolved) {
       ws.send(JSON.stringify({ type: 'error', code: 'UNAUTHORIZED', message: 'Invalid token' }));
       ws.close(4401, 'invalid token');
@@ -448,6 +505,7 @@ export class BrowserBridge {
       unknown
     >;
     const now = new Date();
+    const kind = resolveClientKind(resolved.scope, client.kind);
     const conn: Connection = {
       id: nanoid(10),
       userId: resolved.userId,
@@ -455,8 +513,8 @@ export class BrowserBridge {
       tokenName: resolved.name,
       ws,
       client: {
-        kind: client.kind === 'desktop' ? 'desktop' : 'browser',
-        name: text(client.name, 40) || 'Firefox',
+        kind,
+        name: text(client.name, 40) || (kind === 'watch' ? 'Uhr' : 'Firefox'),
         version: text(client.version, 40),
         extensionVersion: text(client.extensionVersion, 40),
         platform: text(client.platform, 40),
@@ -481,8 +539,9 @@ export class BrowserBridge {
       JSON.stringify({
         type: 'welcome',
         connectionId: conn.id,
+        kind,
         // Lets the extension offer an update when Plum ships a newer build.
-        latestVersion: latestExtensionVersion(),
+        ...(kind === 'watch' ? {} : { latestVersion: latestExtensionVersion() }),
       })
     );
     // An older desktop companion gets the shipped one; it checks the digest,
@@ -505,7 +564,7 @@ export class BrowserBridge {
       }
     }
     console.log(
-      `[BROWSER] Firefox connected (${conn.client.label}, ${conn.client.name} ${conn.client.version}) user=${conn.userId}`
+      `[BROWSER] ${kind} connected (${conn.client.label}, ${conn.client.name} ${conn.client.version}) user=${conn.userId}`
     );
     return conn;
   }
@@ -570,6 +629,7 @@ export class BrowserBridge {
         {
           userId: conn.userId,
           connectionId: conn.id,
+          kind: conn.client.kind,
           pinSession: (sessionId) =>
             this.sessionBrowser.set(sessionId, {
               connectionId: conn.id,

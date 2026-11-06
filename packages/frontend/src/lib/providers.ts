@@ -3,7 +3,7 @@ import type { CLIProvider as CLIProviderType } from '@plum-code-webui/shared';
 export type { CLIProvider } from '@plum-code-webui/shared';
 type CLIProvider = CLIProviderType;
 
-export type UiProvider = 'plum' | 'claude' | 'zai' | 'codex' | 'opencode' | 'pi' | 'vibe';
+export type UiProvider = 'plum' | 'claude' | 'zai' | 'codex' | 'pi' | 'vibe';
 export const ACCOUNT_USAGE_LIMIT_PROVIDERS = [
   'codex',
   'claude',
@@ -15,7 +15,7 @@ export const ACCOUNT_USAGE_LIMIT_PROVIDERS = [
   'vibe',
 ] as const;
 export type AccountUsageLimitProvider = (typeof ACCOUNT_USAGE_LIMIT_PROVIDERS)[number];
-export type UsageLimitProvider = AccountUsageLimitProvider | 'z-ai' | 'opencode-go';
+export type UsageLimitProvider = AccountUsageLimitProvider | 'z-ai';
 
 export const DEFAULT_UI_PROVIDER: UiProvider = 'plum';
 export const UI_PROVIDER_STORAGE_KEY = 'ui-provider';
@@ -63,21 +63,13 @@ export const UI_PROVIDER_META: Record<
     loginCta: 'Continue with Codex',
     description: 'OpenAI Codex CLI with fast, focused coding sessions.',
   },
-  opencode: {
-    id: 'opencode',
-    label: 'OpenCode',
-    productName: 'OpenCode',
-    tagline: 'Multi-Provider',
-    loginCta: 'Continue with OpenCode',
-    description: 'OpenCode CLI with 75+ LLM providers. Default: GLM 5.1.',
-  },
   pi: {
     id: 'pi',
     label: 'Pi',
     productName: 'Pi',
     tagline: 'Agent Harness',
     loginCta: 'Continue with Pi',
-    description: 'Pi agent harness using the same provider connections as OpenCode.',
+    description: 'Pi agent harness for GLM, DeepSeek, Mistral, Anthropic API and custom endpoints.',
   },
   vibe: {
     id: 'vibe',
@@ -94,7 +86,6 @@ export const CLI_PROVIDER_LABEL: Record<CLIProvider, string> = {
   claude: 'Claude Code',
   zai: 'Z.AI Code',
   codex: 'Codex',
-  opencode: 'OpenCode',
   pi: 'Pi',
   vibe: 'Mistral Vibe',
 };
@@ -103,7 +94,6 @@ export const CLI_PROVIDER_ICON: Record<CLIProvider, string> = {
   claude: 'C',
   zai: 'Z',
   codex: 'O',
-  opencode: '⚡',
   pi: 'π',
   vibe: '🧡',
 };
@@ -111,8 +101,7 @@ export const CLI_PROVIDER_ICON: Record<CLIProvider, string> = {
 export const CLI_PROVIDER_DEFAULT_MODEL: Record<CLIProvider, string> = {
   claude: 'sonnet',
   zai: 'opus',
-  codex: 'gpt-5.5',
-  opencode: 'z-ai/glm-5.1',
+  codex: 'gpt-6.1-sol',
   pi: 'z-ai/glm-5.1',
   // `mistral-medium-3.5` is the alias of mistral-vibe-cli-latest, the model the
   // plan's Vibe Code allowance pays for.
@@ -124,7 +113,6 @@ export const UI_PROVIDER_THEME_COLOR: Record<UiProvider, string> = {
   claude: '#141413',
   zai: '#0f766e',
   codex: '#000000',
-  opencode: '#160d2b',
   pi: '#0e1716',
   vibe: '#ff7000',
 };
@@ -137,7 +125,6 @@ export const USAGE_PROVIDER_LABEL: Record<UsageLimitProvider, string> = {
   mistral: 'Mistral',
   vibe: CLI_PROVIDER_LABEL.vibe,
   'z-ai': 'Z.ai Coding Plan',
-  'opencode-go': 'OpenCode Go',
 };
 
 export const USAGE_PROVIDER_SHORT_LABEL: Record<UsageLimitProvider, string> = {
@@ -148,7 +135,6 @@ export const USAGE_PROVIDER_SHORT_LABEL: Record<UsageLimitProvider, string> = {
   mistral: 'Mistral',
   vibe: 'Vibe',
   'z-ai': 'Z.ai',
-  'opencode-go': 'OpenCode Go',
 };
 
 export const CLI_PROVIDER_LIMIT_LABELS: Record<
@@ -201,7 +187,6 @@ const CLI_TO_UI: Record<CLIProvider, UiProvider> = {
   claude: 'claude',
   zai: 'zai',
   codex: 'codex',
-  opencode: 'opencode',
   pi: 'pi',
   vibe: 'vibe',
 };
@@ -211,7 +196,6 @@ const UI_TO_CLI: Record<UiProvider, CLIProvider> = {
   claude: 'claude',
   zai: 'zai',
   codex: 'codex',
-  opencode: 'opencode',
   pi: 'pi',
   vibe: 'vibe',
 };
@@ -221,7 +205,6 @@ export function normalizeUiProvider(value?: string | null): UiProvider {
   if (key === 'plum') return 'plum';
   if (key === 'codex') return 'codex';
   if (key === 'zai' || key === 'z-ai') return 'zai';
-  if (key === 'opencode') return 'opencode';
   if (key === 'pi') return 'pi';
   if (key === 'vibe') return 'vibe';
   return 'plum';
@@ -245,7 +228,7 @@ export function getUsageLimitProviderForModel(
   // Vibe turns carry a bare `mistral-*` model id, so attribution must come from
   // the harness: they spend the plan's Vibe allowance, not the API allowance.
   if (cliProvider === 'vibe') return 'vibe';
-  if (cliProvider !== 'opencode' && cliProvider !== 'pi') {
+  if (cliProvider !== 'pi') {
     return cliProvider;
   }
   // The Alibaba Token Plan is a prepaid allotment shared by every model routed
@@ -291,7 +274,6 @@ export function applyProviderClass(_provider: UiProvider): void {
     'provider-claude',
     'provider-zai',
     'provider-codex',
-    'provider-opencode',
     'provider-pi',
     'provider-kimi',
     'provider-vibe'
@@ -328,10 +310,8 @@ export function getConversationReasoningOptions(provider: CLIProvider, model?: s
   const levels =
     provider === 'vibe'
       ? ['off', 'low', 'medium', 'high', 'max', 'ultracode']
-        : provider === 'pi'
-          ? ['minimal', 'low', 'medium', 'high', 'max', 'ultracode']
-          : provider === 'opencode'
-            ? ['minimal', 'low', 'medium', 'high', 'max']
-            : ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+      : provider === 'pi'
+        ? ['minimal', 'low', 'medium', 'high', 'max', 'ultracode']
+        : ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
   return levels.map((value) => ({ value, label: labels[value] ?? value }));
 }

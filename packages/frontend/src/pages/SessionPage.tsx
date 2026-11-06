@@ -1234,7 +1234,6 @@ export function SessionPage() {
     sessionProvider === 'claude' ||
     sessionProvider === 'zai' ||
     sessionProvider === 'codex' ||
-    sessionProvider === 'opencode' ||
     sessionProvider === 'pi' ||
     // ACP harnesses queue follow-ups in the backend (queueAcpTurn).
     sessionProvider === 'vibe';
@@ -1249,7 +1248,6 @@ export function SessionPage() {
   const composerQueuesWhileActive =
     sessionProvider === 'claude' ||
     sessionProvider === 'zai' ||
-    sessionProvider === 'opencode' ||
     sessionProvider === 'pi' ||
     sessionProvider === 'vibe' ||
     (supportsSteeredFollowups && activeFollowupMode === 'queue');
@@ -1348,27 +1346,14 @@ export function SessionPage() {
     openRunCockpitSection,
     footerConnectsToAssistantTurn,
   };
-  const configuredModelsForProvider = settings?.cliProviderModelLists?.[sessionProvider] || [];
-  const rawSelectedModel = session?.cliModel || '';
-  const selectedModel =
-    (sessionProvider === 'opencode' || sessionProvider === 'pi') &&
-    rawSelectedModel &&
-    configuredModelsForProvider.length > 0 &&
-    !configuredModelsForProvider.includes(rawSelectedModel)
-      ? ''
-      : rawSelectedModel;
+  // Pi's list arrives already narrowed to the models picked in the Pi settings,
+  // with the picked default first; a session keeps its model even if it was
+  // hidden from the menu later (the backend runs it while it is available).
+  const selectedModel = session?.cliModel || '';
   const currentProviderInfo = cliProviders?.find((provider) => provider.id === sessionProvider);
   const providerDefaultModel =
     currentProviderInfo?.defaultModel || CLI_PROVIDER_DEFAULT_MODEL[sessionProvider];
-  const resolvedSharedProviderDefaultModel = (() => {
-    if (sessionProvider !== 'opencode' && sessionProvider !== 'pi') return '';
-    return configuredModelsForProvider[0] || providerDefaultModel;
-  })();
-  const resolvedDefaultModel =
-    selectedModel ||
-    (sessionProvider === 'opencode' || sessionProvider === 'pi'
-      ? resolvedSharedProviderDefaultModel
-      : providerDefaultModel);
+  const resolvedDefaultModel = selectedModel || providerDefaultModel;
   const modelSelectValue = selectedModel || '__default__';
   const modelLabels = useMemo(() => {
     return currentProviderInfo?.modelLabels || {};
@@ -1389,13 +1374,8 @@ export function SessionPage() {
     return (labelled || raw).toString();
   })();
   const modelOptions = useMemo(() => {
-    const configuredModels = settings?.cliProviderModelLists?.[sessionProvider] || [];
-    if (sessionProvider === 'opencode' || sessionProvider === 'pi') {
-      return Array.from(
-        new Set(configuredModels.length > 0 ? configuredModels : currentProviderInfo?.models || [])
-      );
-    }
-
+    const configuredModels =
+      sessionProvider === 'pi' ? [] : settings?.cliProviderModelLists?.[sessionProvider] || [];
     const options = new Set<string>();
     const providerModels = currentProviderInfo?.models || [];
     for (const model of providerModels) {
@@ -3033,26 +3013,19 @@ export function SessionPage() {
       .map((provider) => {
         const current = provider.id === sessionProvider;
         const labels = provider.modelLabels ?? {};
-        const configured = configuredLists[provider.id] ?? [];
-        const shared = provider.id === 'opencode' || provider.id === 'pi';
+        // Pi's list is already the picked menu (see modelOptions).
+        const configured = provider.id === 'pi' ? [] : (configuredLists[provider.id] ?? []);
         const values = current
           ? modelOptions
-          : shared
-            ? Array.from(new Set(configured.length > 0 ? configured : (provider.models ?? [])))
-            : Array.from(new Set([...(provider.models ?? []), ...configured]));
+          : Array.from(new Set([...(provider.models ?? []), ...configured]));
         const fallbackDefault = current
           ? resolvedDefaultModel
-          : (shared ? configured[0] : '') ||
-            provider.defaultModel ||
-            CLI_PROVIDER_DEFAULT_MODEL[provider.id as CLIProvider];
-        const hasDefault = provider.id !== 'opencode' || configured.length > 0;
+          : provider.defaultModel || CLI_PROVIDER_DEFAULT_MODEL[provider.id as CLIProvider];
         return {
           providerId: provider.id,
           name: provider.name,
           available: provider.available !== false,
-          defaultLabel: hasDefault
-            ? `Standard${fallbackDefault ? ` · ${labels[fallbackDefault] || fallbackDefault}` : ''}`
-            : undefined,
+          defaultLabel: `Standard${fallbackDefault ? ` · ${labels[fallbackDefault] || fallbackDefault}` : ''}`,
           models: values.map((value) => ({ value, label: labels[value] || value })),
         };
       })
@@ -3062,9 +3035,7 @@ export function SessionPage() {
       );
     const chipModel = selectedModel || resolvedDefaultModel;
     const chipModelLabel = chipModel ? modelLabels[chipModel] || chipModel : 'Standard';
-    const showReasoning = ['claude', 'zai', 'codex', 'opencode', 'pi', 'vibe'].includes(
-      sessionProvider
-    );
+    const showReasoning = ['claude', 'zai', 'codex', 'pi', 'vibe'].includes(sessionProvider);
     const sessionModelLabels = modelOptions.map((value) => ({
       value,
       label: modelLabels[value] || value,
@@ -3234,7 +3205,7 @@ export function SessionPage() {
           currentPendingQuestion.providerSessionId
         );
       } catch (error) {
-        console.error('Failed to respond to OpenCode question:', error);
+        console.error('Failed to respond to agent question:', error);
       }
     },
     [id, currentPendingQuestion]
@@ -3249,7 +3220,7 @@ export function SessionPage() {
         currentPendingQuestion.providerSessionId
       );
     } catch (error) {
-      console.error('Failed to reject OpenCode question:', error);
+      console.error('Failed to reject agent question:', error);
     }
   }, [id, currentPendingQuestion]);
 
@@ -3732,8 +3703,7 @@ export function SessionPage() {
           className="h-full"
         />
       );
-    }
-    else if (panel === 'connections') {
+    } else if (panel === 'connections') {
       body = (
         <ConnectionsPanel
           className="h-full"

@@ -7,7 +7,7 @@ import kotlinx.serialization.Serializable
  * from the upstream provider (ChatGPT/Codex, Anthropic, Z.AI, Kimi, …).
  *
  * The envelope is *not* the generic [ApiResponse]: it carries a `supported`
- * flag alongside `data`, because execution harnesses like OpenCode and Pi have
+ * flag alongside `data`, because execution harnesses like Pi have
  * no account of their own and answer `supported: false` with an explanatory
  * error instead of failing the request.
  */
@@ -59,7 +59,12 @@ data class PlanUsage(
     /** "api" (API/Studio allowance) or "vibe" (Vibe Code allowance). */
     val allowance: String = "api",
     val billingDay: Int = 1,
+    /** Mistral's own answer whether the allowance is used up (free probe). */
+    val upstream: PlanUpstreamState? = null,
 ) {
+    /** Mistral reports the allowance as used up, whatever our estimate says. */
+    val exhausted: Boolean get() = upstream?.state == "exhausted"
+
     /** Which of the plan's two allowances this month belongs to. */
     val allowanceKind: MistralAllowance get() = MistralAllowance.fromId(allowance)
 }
@@ -80,7 +85,7 @@ data class MistralPlanConfig(
 /**
  * The two monthly allowances of a single Mistral plan.
  *
- * `api` is what a regular console key spends (how Pi and OpenCode reach
+ * `api` is what a regular console key spends (how Pi and model chat reach
  * Mistral), `vibe` is the much larger Vibe Code allowance that the Vibe harness
  * and a key created under Code › Vibe CLI draw on. Plum keeps one ledger per
  * allowance, so the budget editor has to say which one it is writing.
@@ -128,3 +133,11 @@ enum class UsageLimitProvider(val id: String, val label: String) {
      */
     val isMonthlyPlan: Boolean get() = this == MISTRAL || this == VIBE
 }
+
+@Serializable
+data class PlanUpstreamState(
+    /** "exhausted", "available", "unauthorized" or "unknown". */
+    val state: String = "unknown",
+    val errorType: String? = null,
+    val checkedAt: String? = null,
+)

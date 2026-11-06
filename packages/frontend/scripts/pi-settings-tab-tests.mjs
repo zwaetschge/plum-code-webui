@@ -33,8 +33,20 @@ assert.match(
 );
 assert.match(
   settingsPage,
-  /<TabsContent value="pi"[\s\S]*?onClick=\{\(\) => handleGeneralTabChange\('logins'\)\}[\s\S]*?Manage provider accounts/,
-  'Pi settings must link to the shared provider account page'
+  /<TabsContent value="pi"[\s\S]*?onClick=\{\(\) => handleGeneralTabChange\('model-providers'\)\}[\s\S]*?Modellanbieter/,
+  'Pi settings must link to the Modellanbieter registry'
 );
+assert.match(
+  settingsPage,
+  /<TabsContent value="model-providers"[\s\S]*?id="model-providers"[\s\S]*?<ModelProvidersPanel \/>/,
+  'the Modellanbieter destination must render the registry panel'
+);
+
+const modelProvidersPanel = fs.readFileSync(
+  new URL('../src/components/settings/ModelProvidersPanel.tsx', import.meta.url),
+  'utf8'
+);
+assert.match(modelProvidersPanel, /const BASE_PATH = '\/api\/model-providers';/);
+assert.doesNotMatch(modelProvidersPanel, /\/api\/opencode/);
 
 console.log('Pi settings tab regression tests passed.');

@@ -5,6 +5,8 @@ import com.claudewebui.app.data.model.*
 import io.ktor.client.request.setBody
 import io.ktor.http.encodeURLPathPart
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import com.claudewebui.app.core.network.AssistantAccountKey
 import com.claudewebui.app.core.security.TokenStore
 import io.ktor.client.request.*
@@ -26,12 +28,12 @@ interface AssistantApi {
     suspend fun forgetMemoryTopic(owner: String, id: String, version: String): ApiResponse<JsonObject>
     suspend fun forgetChatMemory(owner: String, id: String, revision: Long): ApiResponse<JsonObject>
     suspend fun getResourceRevisionDiff(collection: String, id: String, from: Long, to: Long): ApiResponse<JsonObject>
-    suspend fun saveProfileChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource>
     suspend fun getManagedChats(archived: Boolean = false, search: String = "", offset: Int = 0): ApiResponse<JsonObject>
     suspend fun bulkManageChats(owner: String, input: JsonObject): ApiResponse<JsonObject>
     suspend fun getArtifactToolFile(artifactId: String, assetId: String): ByteArray
     suspend fun getChatToolFile(chatId: String, assetId: String): ByteArray
     suspend fun getChatToolServers(): ApiResponse<List<JsonObject>>
+    suspend fun saveProfileChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource>
     suspend fun saveChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource>
     suspend fun exportModelChat(id: String): ByteArray
     suspend fun getModelChatShares(id: String): ApiResponse<List<JsonObject>>
@@ -88,9 +90,15 @@ interface AssistantApi {
     suspend fun openAssistantBrianConversation(): ApiResponse<JsonObject>
     suspend fun getSwarmDirectory(): ApiResponse<SwarmDirectory>
     /** start, stop or restart; only containers the directory lists, admin only. */
-    suspend fun swarmContainerAction(name: String, action: String): ApiResponse<JsonObject>
-    suspend fun getSwarmContainerLogs(name: String): ApiResponse<SwarmContainerLogs>
+    suspend fun swarmContainerAction(name: String, action: String, host: String? = null): ApiResponse<JsonObject>
+    suspend fun getSwarmContainerLogs(name: String, host: String? = null): ApiResponse<SwarmContainerLogs>
     suspend fun getAssistantMatrixMedia(roomId: String, eventId: String): ByteArray
+    suspend fun getHermesStatus(fresh: Boolean = false): ApiResponse<HermesStatus>
+    /** Starts the autoupdater's update of Brian; admin only. */
+    suspend fun updateHermes(): ApiResponse<HermesStatus>
+    /** Hermes image update or compose rebuild of one Schwarm agent; admin only. */
+    suspend fun updateHermesAgent(id: String): ApiResponse<HermesStatus>
+    suspend fun setHermesAutoUpdate(paused: Boolean): ApiResponse<HermesStatus>
 }
 
 class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
@@ -102,12 +110,12 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
     override suspend fun forgetMemoryTopic(owner: String, id: String, version: String): ApiResponse<JsonObject> = http.delete("/api/assistant/memory-system/topics/${checked(id)}") { attributes.put(AssistantAccountKey, owner); setBody(JsonObject(mapOf("expectedVersion" to kotlinx.serialization.json.JsonPrimitive(version)))) }
     override suspend fun forgetChatMemory(owner: String, id: String, revision: Long): ApiResponse<JsonObject> = http.delete("/api/assistant/memory-system/${checked(id)}") { attributes.put(AssistantAccountKey, owner); setBody(JsonObject(mapOf("expectedRevision" to kotlinx.serialization.json.JsonPrimitive(revision)))) }
     override suspend fun getResourceRevisionDiff(collection: String, id: String, from: Long, to: Long): ApiResponse<JsonObject> = http.get("/api/assistant/revision-diff/${checked(collection)}/${checked(id)}") { url { parameters.append("from", from.toString()); parameters.append("to", to.toString()) } }
-    override suspend fun saveProfileChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource> = http.put("/api/assistant/profiles/${checked(id)}/options") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun getManagedChats(archived: Boolean, search: String, offset: Int): ApiResponse<JsonObject> = http.get("/api/assistant/api-chats/manage") { url { parameters.append("archived", archived.toString()); parameters.append("search", search); parameters.append("offset", offset.toString()) } }
     override suspend fun bulkManageChats(owner: String, input: JsonObject): ApiResponse<JsonObject> = http.post("/api/assistant/api-chats/bulk") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun getArtifactToolFile(artifactId: String, assetId: String): ByteArray = http.get("/api/assistant/artifacts/${checked(artifactId)}/tool-files/${checked(assetId)}")
     override suspend fun getChatToolFile(chatId: String, assetId: String): ByteArray = http.get("/api/assistant/api-chats/${checked(chatId)}/tool-files/${checked(assetId)}")
     override suspend fun getChatToolServers(): ApiResponse<List<JsonObject>> = http.get("/api/mcp-servers")
+    override suspend fun saveProfileChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource> = http.put("/api/assistant/profiles/${checked(id)}/options") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun saveChatOptions(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource> = http.put("/api/assistant/api-chats/${checked(id)}/options") { attributes.put(AssistantAccountKey, owner); setBody(input) }
     override suspend fun exportModelChat(id: String): ByteArray = http.get("/api/assistant/api-chats/${checked(id)}/export")
     override suspend fun getModelChatShares(id: String): ApiResponse<List<JsonObject>> = http.get("/api/assistant/api-chats/${checked(id)}/shares")
@@ -284,9 +292,13 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
     override suspend fun sendAssistantMatrixEvent(roomId: String, input: AssistantMatrixSend): ApiResponse<JsonObject> = http.post("/api/assistant/matrix/rooms/${roomId.encodeURLPathPart()}/events") { setBody(input) }
     override suspend fun openAssistantBrianConversation(): ApiResponse<JsonObject> = http.post("/api/assistant/matrix/brian/conversation")
     override suspend fun getSwarmDirectory(): ApiResponse<SwarmDirectory> = http.get("/api/assistant/swarm/directory")
-    override suspend fun swarmContainerAction(name: String, action: String): ApiResponse<JsonObject> =
-        http.post("/api/assistant/swarm/containers/${name.encodeURLPathPart()}/${checked(action)}")
-    override suspend fun getSwarmContainerLogs(name: String): ApiResponse<SwarmContainerLogs> =
-        http.get("/api/docker/containers/${name.encodeURLPathPart()}/logs") { url { parameters.append("tail", "60") } }
+    override suspend fun swarmContainerAction(name: String, action: String, host: String?): ApiResponse<JsonObject> =
+        http.post("/api/assistant/swarm/containers/${name.encodeURLPathPart()}/${checked(action)}") { setBody(buildJsonObject { host?.let { put("host", it) } }) }
+    override suspend fun getSwarmContainerLogs(name: String, host: String?): ApiResponse<SwarmContainerLogs> =
+        http.get("/api/assistant/swarm/containers/${name.encodeURLPathPart()}/logs") { url { host?.let { parameters.append("host", it) } } }
     override suspend fun getAssistantMatrixMedia(roomId: String, eventId: String): ByteArray = http.get("/api/assistant/matrix/rooms/${roomId.encodeURLPathPart()}/events/${eventId.encodeURLPathPart()}/media")
+    override suspend fun getHermesStatus(fresh: Boolean): ApiResponse<HermesStatus> = http.get("/api/hermes") { url { if (fresh) parameters.append("fresh", "1") } }
+    override suspend fun updateHermes(): ApiResponse<HermesStatus> = http.post("/api/hermes/update")
+    override suspend fun updateHermesAgent(id: String): ApiResponse<HermesStatus> = http.post("/api/hermes/agents/${checked(id)}/update")
+    override suspend fun setHermesAutoUpdate(paused: Boolean): ApiResponse<HermesStatus> = http.put("/api/hermes/auto-update") { setBody(HermesAutoUpdateInput(paused)) }
 }

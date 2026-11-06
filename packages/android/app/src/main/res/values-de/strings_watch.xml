@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Wear-OS-Kopplung: Einstellungen und Hinweis im Dashboard (wear/WatchPairing.kt). -->
+<resources>
+    <string name="settings_hub_watch">Uhr</string>
+    <string name="watch_description">Plum auf der Wear-OS-Uhr: Nutzung, Freigaben und Sessions live, direkt vom Server. Die Uhr bekommt einen eigenen Schlüssel, der nur das lesen und beantworten kann.</string>
+    <string name="watch_none_connected">Keine Uhr verbunden. Kopple sie zuerst in der Wear-OS-App mit diesem Handy.</string>
+    <string name="watch_app_installed">Plum-App installiert</string>
+    <string name="watch_app_missing">Plum-App nicht installiert</string>
+    <string name="watch_pair">Uhr koppeln</string>
+    <string name="watch_pair_again">Neu koppeln</string>
+    <string name="watch_unpair">Entkoppeln</string>
+    <string name="watch_paired">Gekoppelt</string>
+    <string name="watch_paired_with">Gekoppelt: %1$s</string>
+    <string name="watch_paired_since">Gekoppelt seit %1$s</string>
+    <string name="watch_not_connected_now">Uhr gerade nicht verbunden</string>
+    <string name="watch_revoked_on_server">Der Schlüssel wurde auf dem Server widerrufen. Bitte neu koppeln.</string>
+    <string name="watch_pairing_busy">Wird gekoppelt …</string>
+    <string name="watch_pair_failed">Koppeln fehlgeschlagen: %1$s</string>
+    <string name="watch_unpair_failed">Entkoppeln fehlgeschlagen: %1$s</string>
+    <string name="watch_hint_title">Plum auf der Uhr</string>
+    <string name="watch_hint_detail">%1$s hat die Plum-App. Koppeln für Nutzung, Freigaben und Sessions live.</string>
+    <string name="watch_hint_pair">Koppeln</string>
+    <string name="watch_hint_later">Nicht jetzt</string>
+</resources>

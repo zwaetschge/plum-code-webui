@@ -13,7 +13,7 @@ const { contextReceipts } = await import('../src/services/assistant/chatContextR
 const { enqueueMemory, memorySource, processMemoryJob, forgetMemory } =
   await import('../src/services/assistant/memory.js');
 const { safeEncrypt } = await import('../src/utils/encryption.js');
-const { writeOpenCodeProvidersForUser } = await import('../src/utils/opencodeProviderKeys.js');
+const { writeModelProvidersForUser } = await import('../src/utils/modelProviderKeys.js');
 if (!(await testing.databaseReachable())) throw new Error('Isolated PostgreSQL unavailable');
 await testing.createTestSchema();
 try {
@@ -25,7 +25,7 @@ try {
     user
   );
   const stamp = new Date().toISOString();
-  await writeOpenCodeProvidersForUser(user, [
+  await writeModelProvidersForUser(user, [
     {
       id: 'fixture',
       name: 'Fixture',

@@ -666,9 +666,12 @@ private fun ProviderLimitCard(
                 color = PlumText,
                 fontSize = 12.sp,
             )
-            if (plan.budget == null) {
+            if (plan.exhausted) {
+                Text(screenResources.getString(R.string.analytics_mistral_exhausted), color = PlumRed, fontSize = 11.sp)
+            } else if (plan.budget == null) {
                 Text(screenResources.getString(R.string.analytics_mistral_no_budget), color = PlumMuted, fontSize = 10.sp)
             }
+            item.note?.let { Text(it, color = PlumMuted, fontSize = 11.sp) }
             // Both plan ledgers are Plum's own estimate against a declared
             // budget, so both are editable; upstream quotas are read-only.
             if (isVibeLedger || item.providerId == "mistral") {
@@ -708,7 +711,7 @@ private fun formatMoney(amount: Double, currency: String): String =
 
 /**
  * Mistral has no quota API for Pro plans, so the month is measured against the
- * allowance picked here: a regular API key (what Pi and OpenCode use) draws on
+ * allowance picked here: a regular API key (what Pi and model chat use) draws on
  * API/Studio, a key created under Code › Vibe CLI — or a Vibe browser sign-in —
  * on Vibe Code. The Vibe ledger has no choice to make, so it locks the picker.
  */
@@ -1524,6 +1527,7 @@ private fun relativeTime(iso: String, resources: android.content.res.Resources):
 private fun analyticsProviderColor(provider: String): Long = when (provider.lowercase()) {
     "codex" -> 0xFF22C55EL
     "kimi" -> 0xFF2582EDL
+    // Historical usage rows only; OpenCode is no longer a provider.
     "opencode" -> 0xFFF472B6L
     "pi" -> 0xFFA855F7L
     "z.ai", "zai" -> 0xFF14B8A6L

@@ -2,17 +2,17 @@ import type { Session } from '@plum-code-webui/shared';
 import { sessionSurface } from '@/lib/sessionSurface';
 
 /** The four work modes of the sidebar pill, in display order. */
-export type SidebarMode = 'chat' | 'task' | 'code' | 'swarm';
+export type SidebarMode = 'chat' | 'task' | 'code' | 'hermes';
 
 export const SIDEBAR_MODE_HOME: Record<SidebarMode, string> = {
   chat: '/chat',
   task: '/tasks',
   code: '/code',
-  swarm: '/swarm',
+  hermes: '/hermes',
 };
 
 const LAST_MODE_KEY = 'plum:sidebar-mode';
-const MODES = new Set<SidebarMode>(['chat', 'task', 'code', 'swarm']);
+const MODES = new Set<SidebarMode>(['chat', 'task', 'code', 'hermes']);
 
 /**
  * Mode implied by the current route. Session pages take their session's
@@ -26,7 +26,8 @@ export function routeSidebarMode(
   if (pathname === '/chat' || pathname.startsWith('/chat/')) return 'chat';
   if (pathname === '/tasks' || pathname === '/assistant/tasks') return 'task';
   if (pathname === '/code') return 'code';
-  if (pathname === '/swarm') return 'swarm';
+  // The Schwarm view runs in the background now and is reached from Hermes.
+  if (pathname === '/hermes' || pathname === '/swarm') return 'hermes';
   const sessionId = pathname.match(/^\/session\/([^/]+)/)?.[1];
   if (sessionId && session?.id === sessionId) return sessionSurface(session);
   return null;

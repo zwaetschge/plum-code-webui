@@ -7,7 +7,23 @@ const exec = promisify(execFile)
 export async function requireStoppedLegacyCoordinator() {
   const name = process.env.PLUM_SWARM_LEGACY_CONTAINER
   if (!name || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,120}$/.test(name)) throw new Error('PLUM_SWARM_LEGACY_CONTAINER muss den bisherigen Hub eindeutig benennen')
-  const result = await exec('docker',['inspect','--format','{{.State.Running}} {{.State.Restarting}} {{.State.Status}}',name],{timeout:5000,maxBuffer:4096})
+  let result: { stdout: string }
+  try {
+    // Generic `docker inspect` falls back to image inspection after a container
+    // 404. A deliberately restricted image API then masks absence as HTTP 403.
+    result = await exec('docker',['container','inspect','--format','{{.State.Running}} {{.State.Restarting}} {{.State.Status}}',name],{timeout:5000,maxBuffer:4096})
+  } catch (error) {
+    const failure = error as { code?: number; killed?: boolean; signal?: string | null; stdout?: string; stderr?: string }
+    const absent = new Set([
+      `Error: No such container: ${name}`,
+      `Error response from daemon: No such container: ${name}`,
+    ])
+    // A missing legacy writer cannot race this coordinator. Permission errors,
+    // transport failures and timeouts still fail closed, never imply absence.
+    if (failure.code === 1 && !failure.killed && !failure.signal &&
+        !(failure.stdout || '').trim() && absent.has((failure.stderr || '').trim())) return
+    throw error
+  }
   if (!/^false false (exited|created)\s*$/.test(result.stdout)) throw new Error('Der bisherige Schwarm-Hub ist noch aktiv; Koordination bleibt bei ihm')
 }
 export async function acquireCoordinator() {

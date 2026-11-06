@@ -1,0 +1,100 @@
+# Deployment recipe; site-specific live overrides keep their existing credentials.
+# Native coordinator is opt-in via --profile assistant-native and replaces the stopped legacy writer.
+services:
+  claude-code-webui:
+    environment:
+      FRONTEND_URL: https://plum.zwaetschge-webui.ch
+      CORS_ALLOWED_ORIGINS: https://plum.zwaetschge-webui.ch,https://code.zwaetschge-webui.ch,http://localhost:4545
+      PREVIEW_HOSTNAME: preview-plum.zwaetschge-webui.ch
+      PREVIEW_HOSTNAME_ALIASES: preview.code.zwaetschge-webui.ch
+      PROXY_AUTH_ENABLED: "true"
+      GITHUB_CALLBACK_URL: https://plum.zwaetschge-webui.ch/auth/github/callback
+      GOOGLE_CALLBACK_URL: https://plum.zwaetschge-webui.ch/auth/google/callback
+      PLUM_ASSISTANT_EXECUTOR: "true"
+      PLUM_SWARM_COORDINATOR_ENABLED: "false"
+      PLUM_PUBLICATIONS_ENABLED: ${PLUM_PUBLICATIONS_ENABLED:-false}
+      PLUM_MATRIX_HOMESERVER: ${PLUM_MATRIX_HOMESERVER:-}
+      PLUM_ANDROID_APP_LINK_FINGERPRINTS: ${PLUM_ANDROID_APP_LINK_FINGERPRINTS:-}
+    labels:
+      traefik.docker.network: brian_traefik-public
+      traefik.http.routers.plumcode.rule: Host(`plum.zwaetschge-webui.ch`) || Host(`code.zwaetschge-webui.ch`)
+      traefik.http.routers.plumcode.priority: "100"
+      traefik.http.routers.plumcode.middlewares: authelia@file,security-headers@file
+      traefik.http.routers.plumcode-mobile.rule: (Host(`plum.zwaetschge-webui.ch`) || Host(`code.zwaetschge-webui.ch`)) && (Path(`/mobile`) || PathPrefix(`/mobile/`))
+      traefik.http.routers.plumcode-mobile.priority: "200"
+      traefik.http.routers.plumcode-mobile-auth.rule: (Host(`plum.zwaetschge-webui.ch`) || Host(`code.zwaetschge-webui.ch`)) && Path(`/mobile/auth/proxy/mobile`)
+      traefik.http.routers.plumcode-mobile-auth.priority: "210"
+      traefik.http.routers.plumcode-applinks.rule: (Host(`plum.zwaetschge-webui.ch`) || Host(`code.zwaetschge-webui.ch`)) && Path(`/.well-known/assetlinks.json`)
+      traefik.http.routers.plumcode-applinks.priority: "220"
+      traefik.http.routers.plumcode-applinks.entrypoints: websecure
+      traefik.http.routers.plumcode-applinks.tls.certresolver: cloudflare
+      traefik.http.routers.plumcode-applinks.service: plumcode
+      traefik.http.routers.plumcode-applinks.middlewares: security-headers@file
+      # Anonymous immutable releases only. No API, files, proxy identity or state bridge.
+      # Backend additionally requires the explicit PLUM_PUBLICATIONS_ENABLED rollout setting.
+      traefik.http.routers.plumcode-published.rule: Host(`plum.zwaetschge-webui.ch`) && PathPrefix(`/published/`)
+      traefik.http.routers.plumcode-published.priority: "230"
+      traefik.http.routers.plumcode-published.entrypoints: websecure
+      traefik.http.routers.plumcode-published.tls.certresolver: cloudflare
+      traefik.http.routers.plumcode-published.service: plumcode
+      # Public bootstrap contains no account data; API accepts only the one-use
+      # handshake or the separate bounded Office capability, never proxy identity.
+      traefik.http.routers.plumcode-office.rule: Host(`plum.zwaetschge-webui.ch`) && (Path(`/office/taskpane.html`) || Path(`/office/taskpane.js`) || Path(`/office/style.css`) || Path(`/office/icon.png`) || Path(`/office/manifest.xml`) || Path(`/api/office/redeem`))
+      traefik.http.routers.plumcode-office.priority: "240"
+      traefik.http.routers.plumcode-office.entrypoints: websecure
+      traefik.http.routers.plumcode-office.tls.certresolver: cloudflare
+      traefik.http.routers.plumcode-office.service: plumcode
+      traefik.http.routers.plumcode-office-api.rule: Host(`plum.zwaetschge-webui.ch`) && PathPrefix(`/api/office/`) && HeaderRegexp(`Authorization`, `^Bearer plum_office_[A-Za-z0-9_-]+$`)
+      traefik.http.routers.plumcode-office-api.priority: "240"
+      traefik.http.routers.plumcode-office-api.entrypoints: websecure
+      traefik.http.routers.plumcode-office-api.tls.certresolver: cloudflare
+      traefik.http.routers.plumcode-office-api.service: plumcode
+      traefik.http.routers.plumpreview.rule: Host(`preview-plum.zwaetschge-webui.ch`) || Host(`preview.code.zwaetschge-webui.ch`)
+      traefik.http.routers.plumpreview.priority: "100"
+  repair-bot:
+    environment:
+      PLUM_ASSISTANT_EXECUTOR: "false"
+
+  plum-swarm-coordinator:
+    image: ${PLUM_SWARM_IMAGE:-plum-code-webui:latest}
+    container_name: plum-swarm-coordinator
+    restart: unless-stopped
+    profiles: [assistant-native]
+    working_dir: /app/packages/backend
+    entrypoint: [node]
+    command: [--input-type=module, -e, 'await import("@plum-code-webui/swarm/runtime")']
+    env_file: [./config/swarm/native.env]
+    environment:
+      PLUM_SWARM_COORDINATOR_ENABLED: "true"
+      PLUM_SWARM_LEGACY_CONTAINER: council-matrix
+      PLUM_OEFFENTLICH: https://plum.zwaetschge-webui.ch
+    volumes:
+      - /mnt/cache:/mnt/cache
+      - /mnt/user:/mnt/user
+    networks:
+      default: {}
+      council-net:
+        aliases: [council-matrix]
+      matrix-net:
+        aliases: [council-matrix]
+    healthcheck:
+      test: [CMD, node, -e, 'fetch("http://127.0.0.1:4700/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+# These networks already exist on this deployment. Their aliases preserve the
+# authenticated internal relay endpoints without restarting the relays/workers.
+networks:
+  council-net:
+    external: true
+    name: council-net
+  matrix-net:
+    external: true
+    name: matrix-net

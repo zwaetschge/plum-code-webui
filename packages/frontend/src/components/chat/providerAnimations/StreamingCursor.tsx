@@ -4,8 +4,6 @@ export function StreamingCursor({ provider }: { provider: UiProvider }) {
   switch (provider) {
     case 'codex':
       return <span className="pl-cursor-codex" aria-hidden="true" />;
-    case 'opencode':
-      return <span className="pl-cursor-opencode" aria-hidden="true" />;
     case 'claude':
     case 'plum':
     default:
@@ -20,8 +18,6 @@ export function streamingContentClass(provider: UiProvider): string {
   switch (provider) {
     case 'codex':
       return 'pl-stream-codex pl-stream-fade';
-    case 'opencode':
-      return 'pl-stream-opencode pl-stream-fade';
     case 'claude':
     case 'plum':
     default:

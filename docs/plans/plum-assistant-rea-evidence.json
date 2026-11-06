@@ -1,0 +1,85 @@
+{
+  "evidence_id": "ev_31ea4780b4fe51f3f3b61ad89d74c0c070f381edc57f15a26dab1f6c4f32f509",
+  "subject": null,
+  "provider": {
+    "id": "rea-cdp-browser",
+    "name": "REA Chrome DevTools Protocol observation provider",
+    "version": "2"
+  },
+  "analysis_profile": null,
+  "predicate_type": "rea.web-screenshot",
+  "operation": "capture_web_screenshot",
+  "parameters": {
+    "cdp_endpoint": "http://127.0.0.1:9224",
+    "allowed_origins": [
+      "http://127.0.0.1:5188"
+    ],
+    "target_id": "9DDB70A554833FD5C443BB5E0ED7BA0B"
+  },
+  "raw_result": null,
+  "normalized_result": {
+    "browser": {
+      "product": "Chrome/152.0.7977.82",
+      "protocol_version": "1.3",
+      "revision": "537.36 (@d04cdb24d67b081f6cf80200ffc5233f44b61109)",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+      "js_version": "15.2.124.21"
+    },
+    "target": {
+      "target_id": "9DDB70A554833FD5C443BB5E0ED7BA0B",
+      "url": "http://127.0.0.1:5188/shared/local-fixture-token",
+      "origin": "http://127.0.0.1:5188"
+    },
+    "captured_at": "2026-10-10T16:22:54.197Z",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "artifact": {
+      "sha256": "73a26ab6895f1163d0847a9f38755a1dce193285955f5070ca2ad1a41bdaeea6",
+      "bytes": 408025,
+      "media_type": "image/png"
+    },
+    "completeness": {
+      "status": "complete_within_window",
+      "conditions": [
+        "complete_within_window"
+      ],
+      "policy_filtered_sections": [],
+      "attach_limited_sections": [],
+      "truncated_sections": [],
+      "unavailable_sections": [],
+      "excluded": [],
+      "dropped_events": {
+        "scripts": 0,
+        "network_requests": 0,
+        "console_events": 0,
+        "websocket_connections": 0,
+        "websocket_frames": 0,
+        "webmcp_tools": 0,
+        "timeline_events": 0,
+        "total": 0
+      }
+    },
+    "limitations": [
+      "The screenshot contains the visible viewport, including on-screen content.",
+      "REA does not scroll, evaluate JavaScript, or capture beyond the current viewport."
+    ]
+  },
+  "confidence": "observed",
+  "authority": "external-service",
+  "environment": {
+    "id": "Chrome/152.0.7977.82@537.36 (@d04cdb24d67b081f6cf80200ffc5233f44b61109)",
+    "platform": "unknown",
+    "architecture": "unknown",
+    "isolation": "none"
+  },
+  "limitations": [
+    "Artifact identity is unavailable for this observation.",
+    "The screenshot contains the visible viewport, including on-screen content.",
+    "REA does not scroll, evaluate JavaScript, or capture beyond the current viewport.",
+    "Browser host platform and architecture were not observed."
+  ],
+  "locations": [],
+  "evidence_links": []
+}

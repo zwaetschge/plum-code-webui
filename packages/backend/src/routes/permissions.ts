@@ -6,7 +6,7 @@ import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { addPatternToSettings } from '../services/claudeSettings.js';
 import { config } from '../config.js';
-import { opencodeServer } from '../services/opencode/OpencodeServer.js';
+import { clearPendingQuestion } from '../services/pendingQuestions.js';
 import { auditFromRequest, recordAudit } from '../utils/auditLog.js';
 import { getProcessManager } from '../websocket/index.js';
 import {
@@ -101,6 +101,17 @@ const permissionRequestSchema = z.object({
   toolInput: z.unknown(),
   description: z.string().optional(),
   suggestedPattern: z.string().optional(),
+});
+
+const questionRespondSchema = z.object({
+  requestId: z.string().min(1),
+  providerSessionId: z.string().optional(),
+  answers: z.array(z.array(z.string())),
+});
+
+const questionRejectSchema = z.object({
+  requestId: z.string().min(1),
+  providerSessionId: z.string().optional(),
 });
 
 const permissionRespondSchema = z.object({
@@ -316,46 +327,6 @@ router.post('/respond', requireAuth, async (req: Request, res: Response) => {
   }
 
   if (!request) {
-    if (session.cli_provider !== 'opencode' || !session.claude_session_id) {
-      throw new AppError('Permission request not found or expired', 404, 'NOT_FOUND');
-    }
-    try {
-      const reply =
-        action === 'deny'
-          ? 'reject'
-          : action === 'allow_global' || action === 'allow_project'
-            ? 'always'
-            : 'once';
-      const handled = await opencodeServer.replyPermission(
-        requestId,
-        reply,
-        pattern,
-        session.claude_session_id,
-        userId
-      );
-      if (handled) {
-        await resolveApprovalNotification(requestId);
-        await auditFromRequest(req, 'permission.respond', {
-          resourceType: 'permission_request',
-          resourceId: requestId,
-          metadata: {
-            provider: 'opencode',
-            action,
-            pattern: pattern ?? null,
-          },
-        });
-        return res.json({
-          success: true,
-          action,
-          pattern,
-          provider: 'opencode',
-        });
-      }
-    } catch (err) {
-      console.error(`[PERMISSIONS] OpenCode permission reply failed for ${requestId}:`, err);
-      throw new AppError('Failed to respond to OpenCode permission request', 502, 'OPENCODE_ERROR');
-    }
-
     throw new AppError('Permission request not found or expired', 404, 'NOT_FOUND');
   }
 
@@ -504,6 +475,58 @@ router.get('/pending/:sessionId', requireAuth, async (req: Request, res: Respons
     success: true,
     data: pending,
   });
+});
+
+/**
+ * POST /api/permissions/questions/respond
+ * Answers a pending agent question (Vibe ACP elicitation) in the running
+ * process. The question is settled either way: a 404 means the provider has
+ * already forgotten it, so leaving it in the registry would keep a dead prompt
+ * on the widget and the watch.
+ */
+router.post('/questions/respond', requireAuth, async (req: Request, res: Response) => {
+  const result = questionRespondSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: JSON.stringify(result.error.flatten()) },
+    });
+  }
+
+  const handled = getProcessManager().respondAcpQuestion(
+    result.data.requestId,
+    result.data.answers
+  );
+  clearPendingQuestion(result.data.requestId);
+  if (!handled) {
+    return res
+      .status(404)
+      .json({ success: false, error: { code: 'ERROR', message: 'Question request not found' } });
+  }
+  res.json({ success: true });
+});
+
+/**
+ * POST /api/permissions/questions/reject
+ * Dismisses a pending agent question (Vibe ACP elicitation).
+ */
+router.post('/questions/reject', requireAuth, async (req: Request, res: Response) => {
+  const result = questionRejectSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: JSON.stringify(result.error.flatten()) },
+    });
+  }
+
+  const handled = getProcessManager().respondAcpQuestion(result.data.requestId, null);
+  clearPendingQuestion(result.data.requestId);
+  if (!handled) {
+    return res
+      .status(404)
+      .json({ success: false, error: { code: 'ERROR', message: 'Question request not found' } });
+  }
+  res.json({ success: true });
 });
 
 export default router;

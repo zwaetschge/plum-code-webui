@@ -62,7 +62,7 @@ export async function extractWithMemoryCli(userId: string, prompt: string, model
       '--color',
       'never',
       '-m',
-      model || provider.defaultModel || 'gpt-5.5',
+      model || provider.defaultModel || 'gpt-6.1-sol',
       ...config.flatMap((value) => ['-c', value]),
       '-',
     ];
@@ -133,7 +133,7 @@ export async function extractWithMemoryCli(userId: string, prompt: string, model
       text: result.text,
       usage: {
         cliProvider: 'codex' as const,
-        model: model || provider.defaultModel || 'gpt-5.5',
+        model: model || provider.defaultModel || 'gpt-6.1-sol',
         input: Math.max(0, input - cached),
         cached,
         output,

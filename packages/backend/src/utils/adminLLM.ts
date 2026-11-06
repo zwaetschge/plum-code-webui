@@ -7,15 +7,16 @@
  * Codex is the primary admin provider going forward. Anthropic is restricting
  * `claude -p` and moving to a credit system, so Claude is treated as a fallback.
  *
- * Order of preference: codex → opencode → claude.
- * Override via env `ADMIN_LLM_PROVIDER=codex|opencode|claude`.
+ * Order of preference: codex → claude. Pi is not a candidate: its provider
+ * connections are per user, and these helper calls have no user context.
+ * Override via env `ADMIN_LLM_PROVIDER=codex|claude`.
  */
 
 import { spawn } from 'child_process';
 import { isProviderAvailable, type CLIProvider } from '../services/cli-providers.js';
 import { getCodexWebuiApprovalPolicy, getCodexWebuiSandboxMode } from './codexDefaults.js';
 
-const DEFAULT_ORDER: CLIProvider[] = ['codex', 'opencode', 'claude'];
+const DEFAULT_ORDER: CLIProvider[] = ['codex', 'claude'];
 
 interface RunOpts {
   cwd?: string;
@@ -54,13 +55,6 @@ function buildRunner(provider: CLIProvider): ProviderRunner {
           prompt,
         ],
       };
-    case 'opencode':
-      // `opencode run "<prompt>"` is the non-interactive mode; no JSON
-      // wrapper needed for plain text completion.
-      return {
-        command: 'opencode',
-        args: (prompt) => ['run', prompt],
-      };
     case 'claude':
     default:
       return {
@@ -95,9 +89,7 @@ export interface AdminLLMResult {
 export async function runAdminLLM(prompt: string, opts: RunOpts = {}): Promise<AdminLLMResult> {
   const provider = await pickProvider();
   if (!provider) {
-    throw new Error(
-      'No admin LLM provider available (codex/opencode/claude). Run a CLI login first.'
-    );
+    throw new Error('No admin LLM provider available (codex/claude). Run a CLI login first.');
   }
 
   const runner = buildRunner(provider);

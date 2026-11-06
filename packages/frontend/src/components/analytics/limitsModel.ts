@@ -38,6 +38,12 @@ export interface UsageLimitData {
     /** Which of the plan's allowances the key draws on. */
     allowance: 'api' | 'vibe';
     billingDay: number;
+    /** Mistral's own answer whether the allowance is used up (free probe). */
+    upstream?: {
+      state: 'exhausted' | 'available' | 'unauthorized' | 'unknown';
+      errorType: string | null;
+      checkedAt: string;
+    } | null;
   };
   accountUsage?: {
     periodDays: number;

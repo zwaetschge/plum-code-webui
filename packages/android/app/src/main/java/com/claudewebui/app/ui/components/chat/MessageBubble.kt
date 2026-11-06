@@ -722,9 +722,13 @@ fun MarkdownContent(
     modifier: Modifier = Modifier,
     isStreaming: Boolean = false,
     onRunCode: ((String, String) -> Unit)? = null,
+    // Web sources of the turn: links to them render as citation chips.
+    webSources: List<com.claudewebui.app.data.model.AssistantWebSource> = emptyList(),
+    onCitation: ((List<com.claudewebui.app.data.model.AssistantWebSource>) -> Unit)? = null,
 ) {
     val componentTokens = PlumTheme.tokens
     val parsed = remember(text) { parseMarkdown(text) }
+    val citations = if (onCitation != null && webSources.isNotEmpty()) webSources else emptyList()
 
     Column(
         modifier = modifier,
@@ -738,6 +742,8 @@ fun MarkdownContent(
                         text = block.annotated,
                         style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
                         color = MaterialTheme.colorScheme.onSurface,
+                        webSources = citations,
+                        onCitation = onCitation,
                     )
                 }
                 is MarkdownBlock.Heading -> {
@@ -750,6 +756,8 @@ fun MarkdownContent(
                         },
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(top = componentTokens.spacing.xs, bottom = componentTokens.spacing.xxs),
+                        webSources = citations,
+                        onCitation = onCitation,
                     )
                 }
                 is MarkdownBlock.Code -> {
@@ -785,6 +793,8 @@ fun MarkdownContent(
                                 fontStyle = FontStyle.Italic,
                             ),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            webSources = citations,
+                            onCitation = onCitation,
                         )
                     }
                 }
@@ -804,6 +814,8 @@ fun MarkdownContent(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
+                            webSources = citations,
+                            onCitation = onCitation,
                         )
                     }
                 }
@@ -908,7 +920,13 @@ private fun LinkedText(
     style: androidx.compose.ui.text.TextStyle,
     color: Color,
     modifier: Modifier = Modifier,
+    webSources: List<com.claudewebui.app.data.model.AssistantWebSource> = emptyList(),
+    onCitation: ((List<com.claudewebui.app.data.model.AssistantWebSource>) -> Unit)? = null,
 ) {
+    if (webSources.isNotEmpty() && onCitation != null) {
+        CitedText(text, style.copy(color = color), webSources, onCitation, modifier)
+        return
+    }
     val uriHandler = LocalUriHandler.current
     ClickableText(
         text = text,
@@ -1148,7 +1166,8 @@ fun parseInline(text: String): AnnotatedString = buildAnnotatedString {
         if (text[i] == '[') {
             val closeBracket = text.indexOf(']', i + 1)
             if (closeBracket > i && closeBracket + 1 < len && text[closeBracket + 1] == '(') {
-                val closeParen = text.indexOf(')', closeBracket + 2)
+                // Balanced, so `…/Foo_(Bar)` stays one URL instead of ending at the first `)`.
+                val closeParen = linkUrlEnd(text, closeBracket + 2)
                 if (closeParen > closeBracket + 2) {
                     val linkText = text.substring(i + 1, closeBracket)
                     val linkUrl = text.substring(closeBracket + 2, closeParen)

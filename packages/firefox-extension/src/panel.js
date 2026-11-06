@@ -199,6 +199,46 @@ async function sendPendingShare(session) {
   );
 }
 
+// ---------------------------------------------------------------- usage + approvals
+
+// Chrome has no popup: its account quotas and open approvals live here.
+let usageKey = '';
+let usageTick = 0;
+function renderUsage(state) {
+  const usage = state.usage || { rows: [], at: null };
+  const connected = state.status === 'connected';
+  const key = JSON.stringify([usage, state.usageHidden, connected, state.configured, usageTick]);
+  if (key === usageKey) return;
+  usageKey = key;
+  $('usageCard').hidden = !state.configured || !usage.rows.length;
+  plumRenderUsage($('usage'), $('noUsage'), usage.rows, {
+    hidden: state.usageHidden || [],
+    onOpen: (row) =>
+      void plumOpenPlum(
+        serverUrl,
+        row.analyticsPath || `/analytics?provider=${encodeURIComponent(row.provider)}`
+      ),
+  });
+  $('usageWhen').textContent = usage.at
+    ? connected
+      ? plumRelative(usage.at)
+      : plumStandText(usage.at)
+    : '';
+  $('usageWhen').classList.toggle('stale', !connected);
+}
+setInterval(() => {
+  usageTick += 1;
+  if (lastState) renderUsage(lastState);
+}, 15_000);
+
+const approvals = plumMountApprovals($('approvals'), {
+  onOpen: (item) => {
+    const session = picker.find(item.sessionId);
+    if (session) openSession(session);
+    else void plumOpenPlum(serverUrl, `/session/${encodeURIComponent(item.sessionId)}`);
+  },
+});
+
 // ---------------------------------------------------------------- macros
 
 async function renderMacros() {
@@ -337,6 +377,8 @@ function render(state) {
   lastState = state;
   renderModes();
   serverUrl = state.serverUrl || '';
+  renderUsage(state);
+  approvals.setEnabled(state.status === 'connected');
   const paused = state.paused && state.status === 'connected';
   $('dot').className = `dot ${paused ? 'paused' : state.status}`;
   $('status').textContent = paused ? 'Pausiert' : STATUS_TEXT[state.status] || state.status;
@@ -368,6 +410,8 @@ let startedOnce = false;
 /** First connection: pick the chat to show. Reconnects: reload what is open. */
 async function onConnected() {
   void renderMacros();
+  void approvals.refresh();
+  void browser.runtime.sendMessage({ plumUsageRefresh: true }).catch(() => {});
   await picker.refresh();
   fillProviders();
   const defaults = await browser.runtime
@@ -417,6 +461,8 @@ $('clearActions').addEventListener('click', async () => {
 browser.runtime.onMessage.addListener((message) => {
   if (message && message.plumState) render(message.plumState);
   if (message && message.plumToast) toast(message.plumToast, message.error ? 'error' : 'ok');
+  if (message && message.plumApprovalsChanged && lastStatus === 'connected')
+    void approvals.refresh();
 });
 
 (async () => {

@@ -5,7 +5,6 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Bedtime
-import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -17,7 +16,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 enum class CliProvider(val displayName: String, val id: String) {
     CLAUDE("Claude", "claude"),
     CODEX("Codex", "codex"),
-    OPENCODE("OpenCode", "opencode"),
     PI("Pi", "pi"),
 
     VIBE("Vibe", "vibe"),
@@ -69,16 +67,6 @@ object ProviderThemes {
             onContainerColorDark = Color(0xFF4DD8A8),
             icon = Icons.Filled.Code,
             displayName = "Codex",
-        ),
-        CliProvider.OPENCODE to ProviderTheme(
-            color = OpenCodeColor,
-            colorDark = Color(0xFFA78BFA),
-            containerColor = Color(0xFFF0EBFF),
-            containerColorDark = Color(0xFF2E1065),
-            onContainerColor = Color(0xFF5B21B6),
-            onContainerColorDark = Color(0xFFA78BFA),
-            icon = Icons.Filled.FlashOn,
-            displayName = "OpenCode",
         ),
         CliProvider.PI to ProviderTheme(
             color = Color(0xFF0F766E),

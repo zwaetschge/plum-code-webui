@@ -4,7 +4,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Brain, CheckCircle, Hand, Zap, ChevronDown, Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -237,7 +237,7 @@ export function ContextPopover({
   const usageProvider = getUsageLimitProviderForModel(provider, effectiveModel);
   const limitsSupported = usageProvider !== null;
 
-  const { data: usageLimitResult } = useQuery({
+  const { data: usageLimitResult, refetch: refetchUsageLimits } = useQuery({
     queryKey: ['usage-limits', usageProvider ?? 'none'],
     queryFn: async () => {
       if (!usageProvider) return null;
@@ -246,9 +246,21 @@ export function ContextPopover({
       );
       return response.data.success ? response.data : null;
     },
-    staleTime: 60000,
+    // Polled, not only fetched on mount: the popover stays mounted for the
+    // whole session, so without an interval it showed the first reading.
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
     enabled: !!resolvedSessionId && limitsSupported,
   });
+  // A finished turn is when the quota moves; read it then instead of waiting
+  // for the next poll.
+  const sessionBusy = Boolean(activeSession?.runtime?.busy);
+  const wasBusy = useRef(sessionBusy);
+  useEffect(() => {
+    if (wasBusy.current && !sessionBusy && limitsSupported) void refetchUsageLimits();
+    wasBusy.current = sessionBusy;
+  }, [sessionBusy, limitsSupported, refetchUsageLimits]);
   const usageLimits = usageLimitResult?.supported ? usageLimitResult.data : null;
   const responseProvider = usageLimitResult?.provider as AccountUsageLimitProvider | undefined;
   const resolvedUsageProvider =

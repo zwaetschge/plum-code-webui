@@ -117,15 +117,10 @@ services:
       - CLI_PROVIDER_CLAUDE_DEFAULT_MODEL=${CLI_PROVIDER_CLAUDE_DEFAULT_MODEL:-sonnet}
       - CLI_PROVIDER_CODEX_MODELS=${CLI_PROVIDER_CODEX_MODELS:-}
       - CLI_PROVIDER_CODEX_DEFAULT_MODEL=${CLI_PROVIDER_CODEX_DEFAULT_MODEL:-gpt-5.5}
-      - CLI_PROVIDER_OPENCODE_MODELS=${CLI_PROVIDER_OPENCODE_MODELS:-}
-      - CLI_PROVIDER_OPENCODE_DEFAULT_MODEL=${CLI_PROVIDER_OPENCODE_DEFAULT_MODEL:-z-ai/glm-5.1}
-      - CLI_PROVIDER_OPENCODE_DEFAULT_AGENT=${CLI_PROVIDER_OPENCODE_DEFAULT_AGENT:-build}
-      - CLI_PROVIDER_OPENCODE_STYLE_PROMPT=${CLI_PROVIDER_OPENCODE_STYLE_PROMPT:-}
       - CLI_PROVIDER_PI_MODELS=${CLI_PROVIDER_PI_MODELS:-}
       - CLI_PROVIDER_PI_DEFAULT_MODEL=${CLI_PROVIDER_PI_DEFAULT_MODEL:-z-ai/glm-5.1}
-      - OPENCODE_DEBUG_EVENTS=${OPENCODE_DEBUG_EVENTS:-0}
-      - OPENCODE_NO_PROGRESS_TIMEOUT_MS=${OPENCODE_NO_PROGRESS_TIMEOUT_MS:-600000}
-      - OPENCODE_ZAI_VISION_MCP=${OPENCODE_ZAI_VISION_MCP:-auto}
+      # OPENCODE_ZAI_VISION_MCP is the pre-2026-10-27 name and still honoured.
+      - PLUM_ZAI_VISION_MCP=${PLUM_ZAI_VISION_MCP:-${OPENCODE_ZAI_VISION_MCP:-auto}}
       - ADMIN_LLM_PROVIDER=${ADMIN_LLM_PROVIDER:-}
       - CODEX_USAGE_URL=${CODEX_USAGE_URL:-}
       - CODEX_USER_AGENT=${CODEX_USER_AGENT:-}
@@ -151,9 +146,8 @@ services:
       - claude-data:/app/packages/backend/data
       # Mount Claude credentials from host
       - ${HOME}/.claude:/home/node/.claude
-      # Mount Codex and OpenCode credentials from host
+      # Mount Codex credentials from host
       - ${HOME}/.codex:/home/node/.codex
-      - ${HOME}/.opencode:/home/node/.opencode
       - ${HOME}/.pi:/home/node/.pi
       - ${HOME}/.vibe:/home/node/.vibe
       # Persist npm global installs (CLI updates)

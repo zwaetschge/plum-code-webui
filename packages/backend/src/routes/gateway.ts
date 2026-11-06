@@ -19,7 +19,7 @@ import type { ApiResponse } from '@plum-code-webui/shared';
  *
  * The watchdog this replaces polled one container and asked an LLM about it.
  * What was actually wanted is the other direction: let another instance —
- * Hermes, an OpenCode or Codex CLI — hold the overview and drive the work. So
+ * Hermes, a Pi or Codex CLI — hold the overview and drive the work. So
  * the gateway is deliberately thin. Authentication is the whole integration:
  * a gateway token resolves to its owner in `resolveAuthenticatedUserId`, which
  * means every existing endpoint already works for the supervisor. Only the two

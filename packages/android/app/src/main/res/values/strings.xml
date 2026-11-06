@@ -14,7 +14,7 @@
     <string name="widget_label_cost_today">Cost</string>
     <string name="widget_desc_cost_today">API-equivalent cost today and this week, plus request count.</string>
     <string name="widget_label_providers">Provider Usage</string>
-    <string name="widget_desc_providers">This week\'s usage broken down by provider (Codex, OpenCode, Pi, Claude…).</string>
+    <string name="widget_desc_providers">This week\'s usage broken down by provider (Codex, Pi, Claude…).</string>
     <string name="widget_label_models">Model Usage</string>
     <string name="widget_desc_models">Top models this week by cost and tokens.</string>
     <string name="widget_label_limits">Provider Limits</string>

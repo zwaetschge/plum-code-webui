@@ -16,7 +16,7 @@ import {
   type AgentCardContent,
 } from '../protocol/index.js'
 import { sql } from '../db/index.js'
-import { env, HUB_MXID, puppetMxid } from '../env.js'
+import { env, puppetMxid } from '../env.js'
 import { enqueue } from '../outbox.js'
 import type { Ctx } from '../context.js'
 import { listAgents, roomsByKind, setRoomId, upsertRoom } from '../agents/store.js'

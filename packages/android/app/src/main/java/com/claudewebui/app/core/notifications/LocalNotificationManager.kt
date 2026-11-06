@@ -321,7 +321,7 @@ object LocalNotificationManager {
             }
             .launchIn(scope)
 
-        // Agent questions (OpenCode prompts) block the turn until answered —
+        // Agent questions (e.g. Vibe's ask_user_question) block the turn until answered —
         // surface them with the options as inline/watch actions. Multi-question
         // prompts need the full UI, so those fall back to an open-the-app nudge.
         socket.question
@@ -597,7 +597,7 @@ object LocalNotificationManager {
         NotificationService.cancelSessionNotifications(context, sessionId)
     }
 
-    /** Inline/watch answer to an OpenCode question prompt. */
+    /** Inline/watch answer to an agent question prompt. */
     fun answerQuestionFromNotification(
         context: Context,
         sessionId: String,

@@ -6,7 +6,7 @@ import { AppError } from '../../middleware/errorHandler.js';
 /**
  * Credentials for an external supervisor.
  *
- * The point of the gateway is that another instance — Hermes, an OpenCode or
+ * The point of the gateway is that another instance — Hermes, a Pi or
  * Codex CLI, a cron script — can watch and drive every session through exactly
  * the API the user drives. So a gateway token resolves to a user identity and
  * then flows through the normal auth path; there is no parallel, weaker set of

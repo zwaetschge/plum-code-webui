@@ -12,8 +12,12 @@ import { NativeAuthRecovery } from '@/components/NativeAuthRecovery';
 const MemoryTopicsPage = lazy(() =>
   import('@/pages/MemoryTopicsPage').then((m) => ({ default: m.MemoryTopicsPage }))
 );
-const ChatSchedulesPage = lazy(() => import('@/pages/ChatSchedulesPage').then((m) => ({ default: m.ChatSchedulesPage })));
-const KnowledgePage = lazy(() => import('@/pages/KnowledgePage').then((m) => ({ default: m.KnowledgePage })));
+const ChatSchedulesPage = lazy(() =>
+  import('@/pages/ChatSchedulesPage').then((m) => ({ default: m.ChatSchedulesPage }))
+);
+const KnowledgePage = lazy(() =>
+  import('@/pages/KnowledgePage').then((m) => ({ default: m.KnowledgePage }))
+);
 const ChatManagerPage = lazy(() =>
   import('@/pages/ChatManagerPage').then((m) => ({ default: m.ChatManagerPage }))
 );
@@ -43,6 +47,9 @@ const CollaborativeDocumentPage = lazy(() =>
   }))
 );
 const SwarmPage = lazy(() => import('@/pages/SwarmPage').then((m) => ({ default: m.SwarmPage })));
+const HermesPage = lazy(() =>
+  import('@/pages/HermesPage').then((m) => ({ default: m.HermesPage }))
+);
 const BasicLoginPage = lazy(() =>
   import('@/pages/BasicLoginPage').then((m) => ({ default: m.BasicLoginPage }))
 );
@@ -261,7 +268,8 @@ export default function App() {
               <Route path="assistant/:section" element={<AssistantPage />} />
               <Route path="assistant/schedules" element={<ChatSchedulesPage />} />
               <Route path="assistant/knowledge" element={<KnowledgePage />} />
-            <Route path="assistant/memory-topics" element={<MemoryTopicsPage />} />
+              <Route path="assistant/memory-topics" element={<MemoryTopicsPage />} />
+              <Route path="hermes" element={<HermesPage />} />
               <Route path="swarm" element={<SwarmPage />} />
               <Route path="shared/:token" element={<SharedAssistantPage />} />
               <Route path="collaborate" element={<CollaborativeDocumentPage />} />

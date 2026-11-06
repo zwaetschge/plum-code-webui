@@ -243,7 +243,158 @@ const MIGRATIONS: Migration[] = [
   { id: '022-api-chat-compaction', statements: CHAT_COMPACTION_SCHEMA },
   { id: '023-library-access', statements: LIBRARY_ACCESS_SCHEMA },
   { id: '024-chat-schedules', statements: CHAT_SCHEDULE_SCHEMA },
+  {
+    /**
+     * OpenCode left Plum on 2026-10-27; Pi runs the same registry endpoints.
+     * OpenCode session ids cannot be resumed by Pi, so the native id is cleared
+     * and the session stops. Usage rows keep provider `opencode` on purpose:
+     * analytics still label that history.
+     */
+    id: '025-retire-opencode',
+    statements: [
+      `UPDATE sessions SET cli_provider='pi',claude_session_id=NULL,status='stopped' WHERE cli_provider='opencode'`,
+    ],
+    run: retireOpenCodeSettings,
+  },
+  {
+    // Wear OS pairing tokens share browser_tokens; `scope` keeps a watch token
+    // out of the browser and desktop roles (services/browserBridge/tokens.ts).
+    id: '026-browser-token-scope',
+    statements: [
+      `ALTER TABLE browser_tokens ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'browser'`,
+    ],
+  },
 ];
+
+/** Per-provider settings maps that may still carry an `opencode` entry. */
+const OPENCODE_PROVIDER_MAP_KEYS = [
+  'cliProviderModels',
+  'cliProviderModelLists',
+  'cliProviderReasoning',
+  'cliProviderServiceTiers',
+  'localUsageBudgets',
+  'usagePlans',
+] as const;
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Rewrites one `settings_json` blob for the OpenCode removal. Returns null when
+ * nothing changes, so re-running it over migrated data is a no-op. Exported for
+ * the regression suite.
+ */
+export function retireOpenCodeSettingsJson(raw: string | null): string | null {
+  let settings: unknown;
+  try {
+    settings = JSON.parse(raw || '{}');
+  } catch {
+    return null;
+  }
+  if (!isPlainRecord(settings)) return null;
+  const next: Record<string, unknown> = { ...settings };
+  let changed = false;
+
+  // The model provider registry moves to a provider-neutral key. A row that
+  // already has `modelProviders` keeps it; the stale copy is dropped.
+  if ('opencodeProviders' in next) {
+    if (!Array.isArray(next.modelProviders) && Array.isArray(next.opencodeProviders)) {
+      next.modelProviders = next.opencodeProviders;
+    }
+    delete next.opencodeProviders;
+    changed = true;
+  }
+  // The OpenCode Go dashboard cookie is a credential for a feature that is gone.
+  if ('opencodeGoQuota' in next) {
+    delete next.opencodeGoQuota;
+    changed = true;
+  }
+  for (const key of ['defaultCliProvider', 'uiProvider'] as const) {
+    if (next[key] === 'opencode') {
+      next[key] = 'pi';
+      changed = true;
+    }
+  }
+  if (Array.isArray(next.enabledCliProviders) && next.enabledCliProviders.includes('opencode')) {
+    const remaining = next.enabledCliProviders.filter((provider) => provider !== 'opencode');
+    // Dropping the only enabled harness would read as "never configured" and
+    // re-enable everything; Pi is what the user's OpenCode endpoints run on now.
+    next.enabledCliProviders = remaining.length > 0 ? remaining : ['pi'];
+    changed = true;
+  }
+  for (const key of OPENCODE_PROVIDER_MAP_KEYS) {
+    const map = next[key];
+    if (isPlainRecord(map) && 'opencode' in map) {
+      const rest = { ...map };
+      delete rest.opencode;
+      next[key] = rest;
+      changed = true;
+    }
+  }
+  if (Array.isArray(next.cliSubagents)) {
+    const kept = next.cliSubagents.filter(
+      (entry) => !(isPlainRecord(entry) && entry.provider === 'opencode')
+    );
+    if (kept.length !== next.cliSubagents.length) {
+      next.cliSubagents = kept;
+      changed = true;
+    }
+  }
+  return changed ? JSON.stringify(next) : null;
+}
+
+/**
+ * Assistant profiles and tasks store their CLI provider in the resource body;
+ * a draft that still names OpenCode would otherwise fail as "disabled" when it
+ * starts. Only the live body is rewritten, revisions stay as recorded.
+ */
+export function retireOpenCodeResourceBody(raw: string): string | null {
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isPlainRecord(body)) return null;
+  let changed = false;
+  if (body.provider === 'opencode') {
+    body.provider = 'pi';
+    changed = true;
+  }
+  if (body.agentId === 'cli:opencode') {
+    body.agentId = 'cli:pi';
+    changed = true;
+  }
+  return changed ? JSON.stringify(body) : null;
+}
+
+async function retireOpenCodeSettings(tx: TransactionScope): Promise<void> {
+  const rows = (await tx.all(
+    `SELECT user_id, settings_json FROM user_settings WHERE settings_json LIKE '%opencode%'`
+  )) as unknown as Array<{ user_id: string; settings_json: string | null }>;
+  for (const row of rows) {
+    const next = retireOpenCodeSettingsJson(row.settings_json);
+    if (next !== null) {
+      await tx.run(
+        'UPDATE user_settings SET settings_json = ? WHERE user_id = ?',
+        next,
+        row.user_id
+      );
+    }
+  }
+
+  const resources = (await tx.all(
+    `SELECT id, body_json FROM assistant_resources
+      WHERE kind IN ('profile', 'task') AND body_json LIKE '%opencode%'`
+  )) as unknown as Array<{ id: string; body_json: string }>;
+  for (const resource of resources) {
+    const next = retireOpenCodeResourceBody(resource.body_json);
+    if (next !== null) {
+      await tx.run('UPDATE assistant_resources SET body_json = ? WHERE id = ?', next, resource.id);
+    }
+  }
+}
 
 async function ensureTable(): Promise<void> {
   await pgTransaction(async (tx) => {

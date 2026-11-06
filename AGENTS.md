@@ -15,7 +15,7 @@ Plum Code WebUI: pnpm monorepo (`packages/backend|frontend|shared|android|deskto
 
 ## Providers (one line each)
 
-Codex (`~/.codex`, per-turn `codex exec --json`), OpenCode (per-user HTTP/SSE, routes GLM/Kimi), Pi (JSONL RPC, Antigravity extension), Mistral Vibe (persistent ACP stdio), Claude Code (legacy, stream-json; `ultrathink`/`ultracode` via `claudeEffortLaunch`). Usage is written only by `ClaudeProcessManager.saveUsageToDatabase`; label with `getProviderLabelForUsage`. Details: history file.
+Codex (`~/.codex`, per-turn `codex exec --json`), Pi (JSONL RPC, Antigravity extension; GLM/DeepSeek/Mistral/Anthropic-API/custom endpoints from the model provider registry), Mistral Vibe (persistent ACP stdio), Claude Code (legacy, stream-json; `ultrathink`/`ultracode` via `claudeEffortLaunch`). Usage is written only by `ClaudeProcessManager.saveUsageToDatabase`; label with `getProviderLabelForUsage`. Details: history file.
 
 ## Rebuild / redeploy (MANDATORY)
 
@@ -38,8 +38,31 @@ It triggers `repair-bot` (sidecar in `docker-compose.override.yml`), which build
 
 ## Removed — do not reintroduce
 
-Kimi Code as a standalone CLI provider (historical usage and general Kimi models remain), Gemini provider and image service (old API-key one), top-level GLM provider, orchestration manager / task router / worker pool, Ralph loop, Superpowers integration, watchdog/Telegram alerts, main-container self-rebuild API, `/api/automation|tasks|devices|claude-settings`. `repair-bot` is the only rebuild path.
+Kimi Code as a standalone CLI provider (historical usage and general Kimi models remain), OpenCode CLI provider (2026-10-27; historical usage keeps its label; the per-user model provider registry stays as „Modellanbieter“ under `/api/model-providers`), Gemini provider and image service (old API-key one), top-level GLM provider, orchestration manager / task router / worker pool, Ralph loop, Superpowers integration, watchdog/Telegram alerts, main-container self-rebuild API, `/api/automation|tasks|devices|claude-settings`. `repair-bot` is the only rebuild path.
 
 ## Where things are
 
 Backend entry `packages/backend/src/index.ts` (routes, services); frontend `packages/frontend/src/main.tsx`, chat `pages/SessionPage.tsx`; env schema `packages/backend/src/config.ts`; migrations `db/migrations.ts`. Skills `~/.claude/skills`, agents `~/.claude/agents`, catalog `node /app/scripts/capability-catalog.mjs search "<task>"`.
+
+<!-- webui-managed: project-context:start -->
+# Project: plum-code-webui
+
+Web UI for Codex, Pi, Mistral Vibe, and Claude Code agent harnesses
+
+## Tech Stack
+Docker, Docker Compose
+
+**Monorepo** (pnpm)
+
+## Commands
+- `pnpm dev` — dev
+- `pnpm run build` — build
+- `pnpm test` — test
+- `pnpm run lint` — lint
+- `pnpm run typecheck` — typecheck
+- `pnpm start` — start
+- `pnpm run format` — format
+
+## Key Directories
+packages/, scripts/
+<!-- webui-managed: project-context:end -->

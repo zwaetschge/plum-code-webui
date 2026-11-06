@@ -45,7 +45,19 @@ const PLUM_DEFAULTS = Object.freeze({
   ].join('\n'),
   // Sites the agent may not read or touch at all; it is told to ask the user.
   blockedSites: '',
+  // Usage providers hidden in the popup and the icon ring (ids from usage.limits).
+  usageHidden: [],
 });
+
+/** Providers usage.limits can report, in the server's order. */
+const PLUM_USAGE_PROVIDERS = Object.freeze([
+  ['codex', 'Codex'],
+  ['claude', 'Claude'],
+  ['zai', 'Z.AI'],
+  ['alibaba', 'Token Plan'],
+  ['mistral', 'Mistral'],
+  ['vibe', 'Vibe'],
+]);
 
 const PLUM_STATUS_TEXT = Object.freeze({
   connected: 'Verbunden',

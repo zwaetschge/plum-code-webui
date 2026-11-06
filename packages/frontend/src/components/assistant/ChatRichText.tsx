@@ -1,16 +1,134 @@
-import { createContext, memo, useContext, useRef, useState } from 'react';
+import {
+  createContext,
+  memo,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentPropsWithoutRef,
+} from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
+import './chat-prose.css';
 import { api } from '@/services/api';
 import { nativeShell } from '@/lib/nativeShell';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { CitationChip } from './ChatWebSources';
+import { isCitationLabel, normalizeUrl, sourceIndex, type WebSource } from './webSources';
 
 const SourceFiles = createContext<Array<{ id: string; revision: number }>>([]);
+const WebSources = createContext<Map<string, WebSource>>(new Map());
+
+interface HastNode {
+  type: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+}
+const textOf = (node: HastNode | undefined): string =>
+  !node
+    ? ''
+    : node.type === 'text'
+      ? (node.value ?? '')
+      : (node.children ?? []).map(textOf).join('');
+
+/**
+ * Adjacent web citations (`[3](a)[4](b)`) collapse into one chip that lists every source,
+ * and a chip stays on the line of the word it supports.
+ */
+function rehypeCitationGroups({ index }: { index: Map<string, WebSource> }) {
+  const citation = (node: HastNode) => {
+    const href = node.type === 'element' && node.tagName === 'a' ? node.properties?.href : null;
+    if (typeof href !== 'string') return null;
+    const source = index.get(normalizeUrl(href));
+    return source && isCitationLabel(textOf(node), href, source) ? href : null;
+  };
+  const visit = (node: HastNode) => {
+    if (!node.children) return;
+    node.children.forEach(visit);
+    const out: HastNode[] = [];
+    for (let at = 0; at < node.children.length; at++) {
+      const child = node.children[at]!,
+        href = citation(child);
+      if (!href) {
+        out.push(child);
+        continue;
+      }
+      const hrefs = [href];
+      let last = at;
+      for (let next = at + 1; next < node.children.length; next++) {
+        const sibling = node.children[next]!;
+        if (sibling.type === 'text' && !(sibling.value ?? '').trim()) continue;
+        const nextHref = citation(sibling);
+        if (!nextHref) break;
+        hrefs.push(nextHref);
+        last = next;
+      }
+      const chip =
+        last > at
+          ? { ...child, properties: { ...child.properties, dataCiteRefs: hrefs.join(' ') } }
+          : child;
+      // Chips are atomic inlines, so a no-break space alone does not hold them to the last word.
+      const before = out[out.length - 1];
+      const word = before?.type === 'text' ? /(\S{1,24})\s*$/.exec(before.value ?? '') : null;
+      if (before && word) {
+        before.value = before.value!.slice(0, word.index);
+        out.push({
+          type: 'element',
+          tagName: 'span',
+          properties: { className: ['plum-cite-glue'] },
+          children: [{ type: 'text', value: word[1] + '\u00a0' }, chip],
+        });
+      } else out.push(chip);
+      at = last;
+    }
+    node.children = out;
+  };
+  return (tree: { type: string }) => {
+    if (index.size) visit(tree as HastNode);
+  };
+}
+
+function MarkdownLink({
+  href,
+  children,
+  node,
+  ...props
+}: ComponentPropsWithoutRef<'a'> & { node?: unknown }) {
+  const index = useContext(WebSources);
+  const group = (props as Record<string, unknown>)['data-cite-refs'];
+  if (href && index.size) {
+    const sources = [
+      ...new Set(
+        (typeof group === 'string' ? group.split(' ') : [href])
+          .map((url) => index.get(normalizeUrl(url)))
+          .filter((source): source is WebSource => !!source)
+      ),
+    ];
+    if (sources.length)
+      return (
+        <CitationChip
+          sources={sources}
+          label={
+            typeof group === 'string' || isCitationLabel(textOf(node as HastNode), href, sources[0])
+              ? undefined
+              : children
+          }
+        />
+      );
+  }
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  );
+}
 interface PythonFile {
   name: string;
   data: Uint8Array;
@@ -151,12 +269,14 @@ export function CodePlayground({ code, language }: { code: string; language: str
   );
 }
 const markdownComponents: Components = {
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer">
-      {children}
-    </a>
+  a: MarkdownLink,
+  pre: ({ children }) => <div className="not-prose plum-prose-code">{children}</div>,
+  // Wide tables scroll inside their frame instead of widening the answer.
+  table: ({ children }) => (
+    <div className="plum-prose-table">
+      <table>{children}</table>
+    </div>
   ),
-  pre: ({ children }) => <div className="not-prose my-3">{children}</div>,
   code: ({ className, children, ...props }) => {
     const language = /language-([\w+-]+)/.exec(className ?? '')?.[1] ?? '';
     const code = String(children).replace(/\n$/, '');
@@ -170,21 +290,27 @@ const markdownComponents: Components = {
 export const ChatRichText = memo(function ChatRichText({
   text,
   sourceVersions = [],
+  webSources,
 }: {
   text: string;
   sourceVersions?: Array<{ id: string; revision: number }>;
+  /** Sources of the turn; markdown links to them render as citation chips. */
+  webSources?: WebSource[];
 }) {
+  const index = useMemo(() => sourceIndex(webSources), [webSources]);
   return (
     <SourceFiles.Provider value={sourceVersions}>
-      <div className="prose prose-sm max-w-none break-words dark:prose-invert [&_table]:block [&_table]:w-full [&_table]:overflow-x-auto [&_th]:border-b [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_td]:border-b [&_td]:px-3 [&_td]:py-2 [&_pre]:max-w-full">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-          components={markdownComponents}
-        >
-          {text}
-        </ReactMarkdown>
-      </div>
+      <WebSources.Provider value={index}>
+        <div className="prose prose-sm plum-prose max-w-none break-words dark:prose-invert">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeKatex, [rehypeCitationGroups, { index }]]}
+            components={markdownComponents}
+          >
+            {text}
+          </ReactMarkdown>
+        </div>
+      </WebSources.Provider>
     </SourceFiles.Provider>
   );
 });

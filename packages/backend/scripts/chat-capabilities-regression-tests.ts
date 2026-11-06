@@ -89,6 +89,8 @@ try {
   );
   const controller = new AbortController();
   const options = CHAT_OPTIONS.parse({
+    // Web tools are on by default; this case isolates the MCP catalog.
+    webSearch: false,
     mcpServerIds: ['catalog-fixture'],
     toolPermissions: {
       'catalog-fixture:function_138': 'ask',

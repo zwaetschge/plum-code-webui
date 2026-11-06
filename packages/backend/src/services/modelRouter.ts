@@ -68,11 +68,17 @@ export interface ModelRouterOptions {
   /** Overridable for tests; defaults to the real API. */
   anthropicBaseUrl?: string;
   /**
-   * Decides where a model goes. null means Anthropic passthrough. Only called
-   * for models that are not obviously Anthropic's own (see isAnthropicModel),
-   * so the main agent's hot path never waits on it.
+   * Decides where a model goes. null means passthrough to the session's base
+   * (Anthropic, or the session fallback). Only called for models that are not
+   * obviously Anthropic's own (see isAnthropicModel), so the main agent's hot
+   * path never waits on it. `customOnly` asks for user-defined upstreams only:
+   * a fallback session already reaches the built-in Z.AI endpoint by itself.
    */
-  resolveUpstream(userId: string, model: string): Promise<ResolvedUpstream | null>;
+  resolveUpstream(
+    userId: string,
+    model: string,
+    opts?: { customOnly?: boolean }
+  ): Promise<ResolvedUpstream | null>;
   /** Fired once per completed routed request with the usage it reported. */
   onRoutedUsage?(event: RouterUsageEvent): void;
   onError?(message: string, error: unknown): void;
@@ -81,8 +87,13 @@ export interface ModelRouterOptions {
 export interface ModelRouter {
   /** Mount with `app.use('/model-router', handler)` — before body parsing. */
   handler(req: IncomingMessage, res: ServerResponse): void;
-  /** Returns the token that goes into the session's base URL. */
-  registerSession(sessionId: string, userId: string): string;
+  /**
+   * Returns the token that goes into the session's base URL. A `fallback`
+   * replaces Anthropic as the passthrough target: a Z.AI Code session sends
+   * everything that matches no user-defined upstream to Z.AI, with its own
+   * credentials untouched, exactly as if the router were absent.
+   */
+  registerSession(sessionId: string, userId: string, fallback?: { baseUrl: string }): string;
   unregisterSession(sessionId: string): void;
   /**
    * Tokens routed to Z.AI for this session since the last drain. The process
@@ -94,11 +105,18 @@ export interface ModelRouter {
   drainRoutedUsage(sessionId: string): RoutedUsageTotals;
 }
 
+interface RouterSession {
+  userId: string;
+  sessionId: string;
+  /** Passthrough target instead of Anthropic (Z.AI Code sessions). */
+  fallbackBase: URL | null;
+}
+
 export function isZaiModel(model: unknown): model is string {
   return typeof model === 'string' && /^(z-ai\/|zai\/)?glm-/i.test(model);
 }
 
-/** OpenCode spells these z-ai/glm-*; the Z.AI endpoint itself wants glm-*. */
+/** Routed ids spell these z-ai/glm-*; the Z.AI endpoint itself wants glm-*. */
 export function normalizeZaiModel(model: string): string {
   return model.replace(/^(z-ai|zai)\//i, '');
 }
@@ -216,11 +234,15 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
   const anthropicBase = new URL(options.anthropicBaseUrl ?? 'https://api.anthropic.com');
   const onError = options.onError ?? (() => {});
 
-  const byToken = new Map<string, { userId: string; sessionId: string }>();
+  const byToken = new Map<string, RouterSession>();
   const bySession = new Map<string, string>();
   const usage = new Map<string, RoutedUsageTotals>();
 
-  function registerSession(sessionId: string, userId: string): string {
+  function registerSession(
+    sessionId: string,
+    userId: string,
+    fallback?: { baseUrl: string }
+  ): string {
     // A respawn replaces the old token, so a leaked URL from a dead process
     // stops working the moment the session restarts.
     const previous = bySession.get(sessionId);
@@ -229,7 +251,11 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
     // never drained must not be subtracted from the new instance's first turn.
     usage.delete(sessionId);
     const token = randomBytes(24).toString('base64url');
-    byToken.set(token, { userId, sessionId });
+    byToken.set(token, {
+      userId,
+      sessionId,
+      fallbackBase: fallback ? new URL(fallback.baseUrl) : null,
+    });
     bySession.set(sessionId, token);
     return token;
   }
@@ -344,7 +370,7 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
   async function route(
     req: IncomingMessage,
     res: ServerResponse,
-    session: { userId: string; sessionId: string },
+    session: RouterSession,
     upstreamPath: string,
     body: Buffer | null
   ): Promise<void> {
@@ -357,9 +383,16 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
     if (req.method === 'POST' && /^\/v1\/messages(\?|$)/.test(upstreamPath) && body) {
       try {
         parsedBody = JSON.parse(body.toString('utf8')) as Record<string, unknown>;
-        if (typeof parsedBody.model === 'string' && !isAnthropicModel(parsedBody.model)) {
+        // A fallback session has no Claude subscription behind it, so every
+        // model name is a candidate for a user-defined upstream.
+        if (
+          typeof parsedBody.model === 'string' &&
+          (session.fallbackBase || !isAnthropicModel(parsedBody.model))
+        ) {
           resolved = await options
-            .resolveUpstream(session.userId, parsedBody.model)
+            .resolveUpstream(session.userId, parsedBody.model, {
+              customOnly: session.fallbackBase !== null,
+            })
             .catch(() => null);
         }
       } catch {
@@ -368,18 +401,12 @@ export function createModelRouter(options: ModelRouterOptions): ModelRouter {
     }
 
     if (!resolved) {
-      const headers: http.OutgoingHttpHeaders = { ...req.headers, host: anthropicBase.host };
+      const base = session.fallbackBase ?? anthropicBase;
+      const headers: http.OutgoingHttpHeaders = { ...req.headers, host: base.host };
       for (const header of HOP_BY_HOP) delete headers[header];
       delete headers['content-length'];
       if (body) headers['content-length'] = String(body.length);
-      forward(
-        req,
-        res,
-        anthropicBase,
-        anthropicBase.pathname.replace(/\/$/, '') + upstreamPath,
-        headers,
-        body
-      );
+      forward(req, res, base, base.pathname.replace(/\/$/, '') + upstreamPath, headers, body);
       return;
     }
 

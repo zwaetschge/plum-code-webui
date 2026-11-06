@@ -7,7 +7,7 @@ import {
   Search,
   CheckCheck,
   Code2,
-  Network,
+  Feather,
   FolderOpen,
   Library,
   SlidersHorizontal,
@@ -150,9 +150,9 @@ export function AssistantSidebar({
           Verlauf verwalten
         </NavLink>
         <nav aria-label="Bibliothek" className="space-y-1">
-          <NavLink to="/swarm" onClick={onNavigate} className="assistant-nav-link">
-            <Network size={16} />
-            Schwarm
+          <NavLink to="/hermes" onClick={onNavigate} className="assistant-nav-link">
+            <Feather size={16} />
+            Hermes
           </NavLink>
           <NavLink to="/" end onClick={onNavigate} className="assistant-nav-link">
             <Home size={16} />

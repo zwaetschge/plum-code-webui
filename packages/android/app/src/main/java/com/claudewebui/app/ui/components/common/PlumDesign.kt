@@ -883,7 +883,6 @@ fun PlumBottomBar(
 @ReadOnlyComposable
 fun providerColor(provider: CLIProvider): Color = when (provider) {
     CLIProvider.CODEX -> PlumGreen
-    CLIProvider.OPENCODE -> PlumAccent
     CLIProvider.PI -> PlumBlue
 
     CLIProvider.VIBE -> VibeColor
@@ -893,7 +892,6 @@ fun providerColor(provider: CLIProvider): Color = when (provider) {
 
 fun providerLabel(provider: CLIProvider): String = when (provider) {
     CLIProvider.CODEX -> "CODEX"
-    CLIProvider.OPENCODE -> "OPENCODE"
     CLIProvider.PI -> "PI"
 
     CLIProvider.VIBE -> "VIBE"
@@ -902,8 +900,7 @@ fun providerLabel(provider: CLIProvider): String = when (provider) {
 }
 
 fun providerModel(provider: CLIProvider): String = when (provider) {
-    CLIProvider.CODEX -> "gpt-5.5"
-    CLIProvider.OPENCODE -> "glm-5.1"
+    CLIProvider.CODEX -> "gpt-6.1-sol"
     CLIProvider.PI -> "glm-5.1"
 
     // Vibe ships one hosted model: the alias of mistral-vibe-cli-latest that the

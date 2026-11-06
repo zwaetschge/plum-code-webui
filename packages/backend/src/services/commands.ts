@@ -186,12 +186,9 @@ const PROVIDER_LABELS: Record<CLIProvider, string> = {
   claude: 'Claude Code',
   zai: 'Z.AI Code',
   codex: 'Codex',
-  opencode: 'OpenCode',
   pi: 'Pi',
   vibe: 'Mistral Vibe',
 };
-
-const OPENCODE_FORWARDED_COMMANDS = new Set(['init', 'review', 'security-review', 'plan']);
 
 export class CommandService {
   private userCommandsDir: string;
@@ -394,20 +391,6 @@ export class CommandService {
           response: rawCommand,
         };
       }
-      if (provider === 'opencode') {
-        if (OPENCODE_FORWARDED_COMMANDS.has(parsed.name)) {
-          const rawCommand = `/${parsed.name}${parsed.rawArgs ? ' ' + parsed.rawArgs : ''}`;
-          return {
-            success: true,
-            action: 'forward_to_cli',
-            response: rawCommand,
-          };
-        }
-        return {
-          success: false,
-          error: `/${parsed.name} is a Claude Code native command and is not available in OpenCode. Use /init, /review, /security-review, /plan, a WebUI command, or ask OpenCode in plain language.`,
-        };
-      }
       if (provider === 'vibe') {
         // Vibe answers its own versions (/help, /compact, /mcp …).
         return {
@@ -512,11 +495,7 @@ export class CommandService {
             ? Object.entries(CLI_FORWARDED_DESCRIPTIONS)
                 .map(([name, desc]) => `/${name} — ${desc}`)
                 .join('\n')
-            : provider === 'opencode'
-              ? Array.from(OPENCODE_FORWARDED_COMMANDS)
-                  .map((name) => `/${name} — ${CLI_FORWARDED_DESCRIPTIONS[name]}`)
-                  .join('\n')
-              : '';
+            : '';
         const customList = commands
           .filter((c) => c.scope !== 'builtin')
           .map((c) => `/${c.name} — ${c.description} [${c.scope}]`)
@@ -702,7 +681,7 @@ export class CommandService {
               context.usage.contextUsedPercent !== undefined
                 ? `  Percent: ${context.usage.contextUsedPercent}%`
                 : null,
-              `  Model: ${context.currentModel || 'gpt-5.5'}`,
+              `  Model: ${context.currentModel || 'gpt-6.1-sol'}`,
             ]
               .filter(Boolean)
               .join('\n'),
@@ -849,7 +828,7 @@ export class CommandService {
         if (parsed.args.length === 0) {
           return {
             success: true,
-            response: `Current model: ${context.currentModel || 'gpt-5.5'}`,
+            response: `Current model: ${context.currentModel || 'gpt-6.1-sol'}`,
           };
         }
         return {
@@ -864,7 +843,7 @@ export class CommandService {
           success: true,
           response: [
             `Session: ${context.sessionId || 'N/A'}`,
-            `Model: ${context.currentModel || 'gpt-5.5'}`,
+            `Model: ${context.currentModel || 'gpt-6.1-sol'}`,
             `Project: ${context.projectPath || 'None'}`,
           ].join('\n'),
         };
@@ -889,7 +868,6 @@ export class CommandService {
       case 'compact':
         if (
           context.provider === 'codex' ||
-          context.provider === 'opencode' ||
           context.provider === 'pi' ||
           context.provider === 'vibe'
         ) {

@@ -49,7 +49,6 @@
     <string name="settings_comfyui_039d8">ComfyUI</string>
     <string name="settings_comfyui_discord_home_assistant_b5f60">ComfyUI · Discord · Home Assistant</string>
     <string name="settings_command_89018">Befehl</string>
-    <string name="settings_common_ids_z_ai_openai_anthropic_deepseek_opencode_go_9dd94">Gängige IDs: z-ai, openai, anthropic, deepseek, opencode-go</string>
     <string name="settings_configure_792c8">Konfigurieren</string>
     <string name="settings_configured_668c5">Konfiguriert</string>
     <string name="settings_connected_c2f9b">Verbunden</string>
@@ -86,6 +85,8 @@
     <string name="settings_enable_agent_cc689">Agent aktivieren</string>
     <string name="settings_enabled_3ea3f">aktiviert</string>
     <string name="settings_enabled_df174">Aktiviert</string>
+    <string name="settings_model_provider_in_pi">In Pi</string>
+    <string name="settings_model_provider_not_in_pi">nicht in Pi</string>
     <string name="settings_encrypted_tokens_9a220">Verschlüsselte Tokens</string>
     <string name="settings_enter_this_code_443aa">Diesen Code eingeben:</string>
     <string name="settings_env_1_s_edb51">Umgebung: %1$s</string>
@@ -144,7 +145,6 @@
     <string name="settings_no_custom_upstreams_7bd9f">Keine eigenen Endpunkte</string>
     <string name="settings_no_key_38878">Kein Schlüssel</string>
     <string name="settings_no_mcp_servers_configured_a6d33">Keine MCP-Server konfiguriert</string>
-    <string name="settings_no_opencode_provider_keys_configured_a77ea">Keine OpenCode-Anbieterschlüssel konfiguriert.</string>
     <string name="settings_no_plugins_installed_969f6">Keine Plugins installiert</string>
     <string name="settings_no_subagents_configured_e075f">Keine Subagenten konfiguriert</string>
     <string name="settings_no_tokens_issued_5e7e8">Keine Tokens ausgestellt</string>
@@ -162,7 +162,6 @@
     <string name="settings_per_session_66a54">Pro Sitzung</string>
     <string name="settings_permission_mode_de70c">Berechtigungsmodus</string>
     <string name="settings_permissions_d06d5">Berechtigungen</string>
-    <string name="settings_provider_accounts_513fb">Anbieterkonten</string>
     <string name="settings_provider_id_61099">Anbieter-ID</string>
     <string name="settings_providers_87b7c">Anbieter</string>
     <string name="settings_push_notifications_03be2">Push-Benachrichtigungen</string>
@@ -193,7 +192,6 @@
     <string name="settings_server_status_fd709">Serverstatus</string>
     <string name="settings_server_url_1d5d1">Server-URL</string>
     <string name="settings_settings_c7f73">Einstellungen</string>
-    <string name="settings_shared_by_opencode_and_pi_keys_stay_encrypted_on_the_server_87b97">Gemeinsam von OpenCode und Pi genutzt; Schlüssel bleiben verschlüsselt auf dem Server.</string>
     <string name="settings_show_tools_063a5">Werkzeuge anzeigen</string>
     <string name="settings_sign_in_ada2e">Anmelden</string>
     <string name="settings_sign_in_again_7842f">Erneut anmelden</string>
@@ -215,8 +213,8 @@
     <string name="settings_tap_to_create_your_first_agent_7b44d">Tippe auf +, um deinen ersten Agenten zu erstellen</string>
     <string name="settings_test_640ab">Testen</string>
     <string name="settings_testing_95c45">Test läuft…</string>
-    <string name="settings_the_encrypted_provider_key_will_be_removed_for_opencode_and_pi_ce4aa">Der verschlüsselte Anbieterschlüssel wird für OpenCode und Pi entfernt.</string>
-    <string name="settings_the_same_second_claude_transport_a_z_ai_session_uses_not_opencode_c25b9">"denselben zweiten Claude-Transport wie eine Z.AI-Sitzung, nicht OpenCode. Der Eintrag "</string>
+    <string name="settings_model_provider_delete_body">Der gespeicherte Schlüssel und die Modellliste werden entfernt.</string>
+    <string name="settings_the_same_second_claude_transport_a_z_ai_session_uses_6e1d4">"denselben zweiten Claude-Transport wie eine Z.AI-Sitzung. Der Eintrag "</string>
     <string name="settings_theme_a797e">Darstellung</string>
     <string name="settings_then_the_card_stops_claiming_it_is_working_e4e6d">" · danach zeigt die Karte sie nicht mehr als arbeitend an"</string>
     <string name="settings_this_harness_is_signed_in_run_it_again_to_switch_accounts_b23bc">Diese CLI ist angemeldet. Starte die Anmeldung erneut, um das Konto zu wechseln.</string>
@@ -302,4 +300,13 @@
     <string name="settings_vibe_login_waiting">Wartet, bis die Anmeldung im Browser abgeschlossen ist…</string>
     <string name="settings_vibe_key_saved">Vibe-Key gespeichert</string>
     <string name="settings_vibe_key_removed">Vibe-Key entfernt</string>
+    <string name="settings_model_providers">Modellanbieter</string>
+    <string name="settings_model_provider_models">Modelle</string>
+    <string name="settings_no_model_providers">Noch keine Modellanbieter.</string>
+    <string name="settings_model_provider_saved">%1$s gespeichert</string>
+    <string name="settings_model_provider_removed">Modellanbieter entfernt</string>
+    <plurals name="settings_model_count">
+        <item quantity="one">%d Modell</item>
+        <item quantity="other">%d Modelle</item>
+    </plurals>
 </resources>

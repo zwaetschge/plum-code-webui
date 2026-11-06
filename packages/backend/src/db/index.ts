@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { type CLIProvider } from '@plum-code-webui/shared';
 
 import { bootstrapAdmin, seedUserFromEnv } from './bootstrap.js';
+import { liveEvents } from '../services/liveEvents.js';
 import { runPendingMigrations } from './migrations.js';
 import {
   get as pgGet,
@@ -217,6 +218,7 @@ export async function insertUsageHistoryTurn(input: UsageHistoryTurnInput): Prom
     input.model,
     createdAt
   );
+  if (result.changes > 0) liveEvents.emit('usage', input.userId);
   return result.changes > 0;
 }
 

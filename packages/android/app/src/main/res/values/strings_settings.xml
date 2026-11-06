@@ -49,7 +49,6 @@
     <string name="settings_comfyui_039d8">ComfyUI</string>
     <string name="settings_comfyui_discord_home_assistant_b5f60">ComfyUI · Discord · Home Assistant</string>
     <string name="settings_command_89018">Command</string>
-    <string name="settings_common_ids_z_ai_openai_anthropic_deepseek_opencode_go_9dd94">Common IDs: z-ai, openai, anthropic, deepseek, opencode-go</string>
     <string name="settings_configure_792c8">Configure</string>
     <string name="settings_configured_668c5">Configured</string>
     <string name="settings_connected_c2f9b">Connected</string>
@@ -86,6 +85,8 @@
     <string name="settings_enable_agent_cc689">Enable Agent</string>
     <string name="settings_enabled_3ea3f">enabled</string>
     <string name="settings_enabled_df174">Enabled</string>
+    <string name="settings_model_provider_in_pi">In Pi</string>
+    <string name="settings_model_provider_not_in_pi">not in Pi</string>
     <string name="settings_encrypted_tokens_9a220">Encrypted tokens</string>
     <string name="settings_enter_this_code_443aa">Enter this code:</string>
     <string name="settings_env_1_s_edb51">Env: %1$s</string>
@@ -144,7 +145,6 @@
     <string name="settings_no_custom_upstreams_7bd9f">No custom upstreams</string>
     <string name="settings_no_key_38878">No key</string>
     <string name="settings_no_mcp_servers_configured_a6d33">No MCP servers configured</string>
-    <string name="settings_no_opencode_provider_keys_configured_a77ea">No OpenCode provider keys configured.</string>
     <string name="settings_no_plugins_installed_969f6">No plugins installed</string>
     <string name="settings_no_subagents_configured_e075f">No subagents configured</string>
     <string name="settings_no_tokens_issued_5e7e8">No tokens issued</string>
@@ -162,7 +162,6 @@
     <string name="settings_per_session_66a54">Per session</string>
     <string name="settings_permission_mode_de70c">Permission Mode</string>
     <string name="settings_permissions_d06d5">Permissions</string>
-    <string name="settings_provider_accounts_513fb">Provider accounts</string>
     <string name="settings_provider_id_61099">Provider ID</string>
     <string name="settings_providers_87b7c">Providers</string>
     <string name="settings_push_notifications_03be2">Push notifications</string>
@@ -193,7 +192,6 @@
     <string name="settings_server_status_fd709">Server Status</string>
     <string name="settings_server_url_1d5d1">Server URL</string>
     <string name="settings_settings_c7f73">Settings</string>
-    <string name="settings_shared_by_opencode_and_pi_keys_stay_encrypted_on_the_server_87b97">Shared by OpenCode and Pi; keys stay encrypted on the server.</string>
     <string name="settings_show_tools_063a5">Show tools</string>
     <string name="settings_sign_in_ada2e">Sign in</string>
     <string name="settings_sign_in_again_7842f">Sign in again</string>
@@ -215,8 +213,8 @@
     <string name="settings_tap_to_create_your_first_agent_7b44d">Tap + to create your first agent</string>
     <string name="settings_test_640ab">Test</string>
     <string name="settings_testing_95c45">Testing…</string>
-    <string name="settings_the_encrypted_provider_key_will_be_removed_for_opencode_and_pi_ce4aa">The encrypted provider key will be removed for OpenCode and Pi.</string>
-    <string name="settings_the_same_second_claude_transport_a_z_ai_session_uses_not_opencode_c25b9">"the same second Claude transport a Z.AI session uses, not OpenCode. It "</string>
+    <string name="settings_model_provider_delete_body">The stored key and model list are removed.</string>
+    <string name="settings_the_same_second_claude_transport_a_z_ai_session_uses_6e1d4">"the same second Claude transport a Z.AI session uses. It "</string>
     <string name="settings_theme_a797e">Theme</string>
     <string name="settings_then_the_card_stops_claiming_it_is_working_e4e6d">" · then the card stops claiming it is working"</string>
     <string name="settings_this_harness_is_signed_in_run_it_again_to_switch_accounts_b23bc">This harness is signed in. Run it again to switch accounts.</string>
@@ -302,4 +300,13 @@
     <string name="settings_vibe_login_waiting">Waiting for the sign-in to finish in your browser…</string>
     <string name="settings_vibe_key_saved">Vibe key stored</string>
     <string name="settings_vibe_key_removed">Vibe key removed</string>
+    <string name="settings_model_providers">Model providers</string>
+    <string name="settings_model_provider_models">Models</string>
+    <string name="settings_no_model_providers">No model providers yet.</string>
+    <string name="settings_model_provider_saved">%1$s saved</string>
+    <string name="settings_model_provider_removed">Model provider removed</string>
+    <plurals name="settings_model_count">
+        <item quantity="one">%d model</item>
+        <item quantity="other">%d models</item>
+    </plurals>
 </resources>

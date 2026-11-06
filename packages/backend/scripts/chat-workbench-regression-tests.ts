@@ -12,7 +12,7 @@ const { useTestSchema, createTestSchema, dropTestSchema, databaseReachable } =
 useTestSchema();
 const { run, get, all } = await import('../src/db/pg.js');
 const { safeEncrypt } = await import('../src/utils/encryption.js');
-const { writeOpenCodeProvidersForUser } = await import('../src/utils/opencodeProviderKeys.js');
+const { writeModelProvidersForUser } = await import('../src/utils/modelProviderKeys.js');
 const { createApiChat, startApiTurn, apiChatTurns, purgeTemporaryApiChat } =
   await import('../src/services/assistant/apiChats.js');
 const { importChats, exportChat, shareChat, parseChatArchive } =
@@ -131,7 +131,7 @@ try {
       name
     );
   const now = new Date().toISOString();
-  await writeOpenCodeProvidersForUser(
+  await writeModelProvidersForUser(
     'workbench-alice',
     ['openai', 'anthropic'].map((id) => ({
       id,

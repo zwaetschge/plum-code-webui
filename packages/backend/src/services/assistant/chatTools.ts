@@ -9,6 +9,119 @@ import type { ChatOptions } from './chatOptions.js';
 import type { ApiTool } from './apiTransport.js';
 import { createHash } from 'node:crypto';
 import { readChatSkill } from './chatSkills.js';
+import { WebSourceRegistry, plainText, publishedDate } from './chatWebSources.js';
+
+type WebSearchResult = { title: string; url: string; excerpt: string; publishedAt: string | null };
+type WebSearchFilters = { recency?: 'day' | 'week' | 'month' | 'year'; topic?: 'general' | 'news' };
+/** Pages read right away per search, their text budget and the bound on that step. */
+const AUTO_READ_PAGES = 3,
+  AUTO_READ_CHARS = 4000,
+  AUTO_READ_TIMEOUT_MS = 6000;
+
+/**
+ * Self-hosted SearXNG (PLUM_SEARXNG_URL) aggregates Bing, Brave, Yahoo and more
+ * in the query's own language. Only its JSON API is called; result links still
+ * pass the public-URL boundary like every other web source.
+ */
+async function searchSearxng(
+  query: string,
+  filters: WebSearchFilters = {}
+): Promise<WebSearchResult[]> {
+  const base = process.env.PLUM_SEARXNG_URL?.trim();
+  if (!base) return [];
+  const url = new URL('search', base.endsWith('/') ? base : base + '/');
+  url.searchParams.set('q', query);
+  url.searchParams.set('format', 'json');
+  if (filters.recency) url.searchParams.set('time_range', filters.recency);
+  if (filters.topic) url.searchParams.set('categories', filters.topic);
+  const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) return [];
+  const body = (await response.json()) as {
+    results?: Array<{ title?: string; url?: string; content?: string; publishedDate?: unknown }>;
+  };
+  const results: WebSearchResult[] = [];
+  const seen = new Set<string>();
+  for (const item of body.results ?? []) {
+    try {
+      const href = publicSourceUrl(String(item.url)).href;
+      if (seen.has(href)) continue;
+      seen.add(href);
+      results.push({
+        title: String(item.title ?? '').trim() || href,
+        url: href,
+        excerpt: String(item.content ?? '').slice(0, 1500),
+        publishedAt: publishedDate(item.publishedDate),
+      });
+    } catch {
+      /* Search results never bypass the public-URL boundary. */
+    }
+    if (results.length >= 8) break;
+  }
+  return results;
+}
+
+/** Fallback without SearXNG: Bing's result page, pinned to en/US for stable markup. */
+async function searchBing(query: string): Promise<WebSearchResult[]> {
+  const page = await fetchPublicSource(
+    'https://www.bing.com/search?q=' + encodeURIComponent(query) + '&setlang=en&cc=us'
+  );
+  const decode = (text: string) =>
+    text
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>');
+  const plain = (html: string) =>
+    decode(html.replace(/<[^>]*>/g, ' '))
+      .replace(/\s+/g, ' ')
+      .trim();
+  const results: WebSearchResult[] = [];
+  for (const match of page.bytes
+    .toString('utf8')
+    .matchAll(/<li\b[^>]*class=["'][^"']*\bb_algo\b[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi)) {
+    const heading = /<h2[^>]*>([\s\S]*?)<\/h2>/i.exec(match[1]!);
+    const link = heading && /href=["']([^"']+)["']/i.exec(heading[1]!);
+    if (!link) continue;
+    try {
+      let url = new URL(decode(link[1]!), page.url);
+      if (url.hostname === 'www.bing.com' && url.pathname === '/ck/a') {
+        const encoded = url.searchParams.get('u');
+        if (!encoded?.startsWith('a1')) continue;
+        url = new URL(Buffer.from(encoded.slice(2), 'base64url').toString('utf8'));
+      }
+      if (url.hostname.endsWith('bing.com')) continue;
+      results.push({
+        title: plain(heading![1]!),
+        url: publicSourceUrl(url.href).href,
+        excerpt: plain(match[1]!).slice(0, 1500),
+        publishedAt: null,
+      });
+    } catch {
+      /* Search results never bypass the public-URL boundary. */
+    }
+    if (results.length >= 8) break;
+  }
+  return results;
+}
+
+/** One public page through the normal source boundary, cancelled after `timeoutMs`. */
+async function readWebPage(url: string, signal: AbortSignal, timeoutMs: number) {
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+  bounded.throwIfAborted();
+  let cancel = () => {};
+  try {
+    return await Promise.race([
+      fetchPublicSource(url, 3, { signal: bounded }),
+      new Promise<never>((_, reject) => {
+        cancel = () => reject(new Error('Seite antwortet zu langsam'));
+        bounded.addEventListener('abort', cancel, { once: true });
+      }),
+    ]);
+  } finally {
+    bounded.removeEventListener('abort', cancel);
+  }
+}
 
 export interface ChatToolCatalogItem {
   key: string;
@@ -193,7 +306,14 @@ const toolSchema = z.object({
   inputSchema: z.record(z.unknown()),
   annotations: z.object({ readOnlyHint: z.boolean().optional() }).passthrough().optional(),
 });
-export async function chatToolset(userId: string, options: ChatOptions, signal: AbortSignal) {
+export async function chatToolset(
+  userId: string,
+  options: ChatOptions,
+  signal: AbortSignal,
+  /** The generating turn's registry; refs then stay stable across all of its tool calls. */
+  context: { webSources?: WebSourceRegistry } = {}
+) {
+  const webSources = context.webSources ?? new WebSourceRegistry();
   const connections: McpConnection[] = [],
     tools: ApiTool[] = [];
   const handlers = new Map<string, (args: Record<string, unknown>) => Promise<unknown>>();
@@ -228,64 +348,121 @@ export async function chatToolset(userId: string, options: ChatOptions, signal: 
       {
         name: 'web_search',
         description:
-          'Search the public web. Return actual result links and excerpts; use web_fetch for full sources.',
+          'Search the public web. Returns up to 8 results with turn-wide ref numbers, plus the main text of the top results in "pages". Cite as [ref](url). Use web_fetch for other results.',
         parameters: {
           type: 'object',
-          properties: { query: { type: 'string', maxLength: 500 } },
+          properties: {
+            query: { type: 'string', maxLength: 500 },
+            recency: {
+              type: 'string',
+              enum: ['day', 'week', 'month', 'year'],
+              description: 'Only results from this period, for current events.',
+            },
+            topic: {
+              type: 'string',
+              enum: ['general', 'news'],
+              description: 'news searches news sources.',
+            },
+          },
           required: ['query'],
           additionalProperties: false,
         },
       },
       async (args) => {
-        const query = z.string().trim().min(1).max(500).parse(args.query);
-        const page = await fetchPublicSource(
-          'https://www.bing.com/search?q=' + encodeURIComponent(query) + '&setlang=en&cc=us'
-        );
-        const decode = (text: string) =>
-          text
-            .replace(/&amp;/g, '&')
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'")
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>');
-        const plain = (html: string) =>
-          decode(html.replace(/<[^>]*>/g, ' '))
-            .replace(/\s+/g, ' ')
-            .trim();
-        const results: Array<{ title: string; url: string; excerpt: string }> = [];
-        for (const match of page.bytes
-          .toString('utf8')
-          .matchAll(/<li\b[^>]*class=["'][^"']*\bb_algo\b[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi)) {
-          const heading = /<h2[^>]*>([\s\S]*?)<\/h2>/i.exec(match[1]!);
-          const link = heading && /href=["']([^"']+)["']/i.exec(heading[1]!);
-          if (!link) continue;
-          try {
-            let url = new URL(decode(link[1]!), page.url);
-            if (url.hostname === 'www.bing.com' && url.pathname === '/ck/a') {
-              const encoded = url.searchParams.get('u');
-              if (!encoded?.startsWith('a1')) continue;
-              url = new URL(Buffer.from(encoded.slice(2), 'base64url').toString('utf8'));
-            }
-            if (url.hostname.endsWith('bing.com')) continue;
-            results.push({
-              title: plain(heading![1]!),
-              url: publicSourceUrl(url.href).href,
-              excerpt: plain(match[1]!).slice(0, 1500),
-            });
-          } catch {
-            /* Search results never bypass the public-URL boundary. */
+        const input = z
+          .object({
+            query: z.string().trim().min(1).max(500),
+            // Models occasionally send null or an unsupported value: search unfiltered then.
+            recency: z.enum(['day', 'week', 'month', 'year']).optional().catch(undefined),
+            topic: z.enum(['general', 'news']).optional().catch(undefined),
+          })
+          .parse(args);
+        const { query } = input;
+        // Filtered searches often come back empty (e.g. news engines failing on a time
+        // range): relax recency, then topic, before leaving SearXNG.
+        const attempts: WebSearchFilters[] = [{ recency: input.recency, topic: input.topic }];
+        if (input.recency) attempts.push({ topic: input.topic });
+        if (input.topic) attempts.push({});
+        let found: WebSearchResult[] = [],
+          applied: WebSearchFilters = {};
+        try {
+          for (const filters of attempts) {
+            found = await searchSearxng(query, filters);
+            applied = filters;
+            if (found.length) break;
           }
+        } catch {
+          found = [];
+        }
+        // Bing's page has neither dates nor time filters; the query alone still helps.
+        if (!found.length) {
+          found = await searchBing(query);
+          applied = {};
+        }
+        const relaxed = (!!input.recency && !applied.recency) || (!!input.topic && !applied.topic);
+        const results: Array<{
+          ref: number;
+          title: string;
+          url: string;
+          domain: string;
+          excerpt: string;
+          publishedAt: string | null;
+        }> = [];
+        for (const item of found) {
+          const source = webSources.add(item);
+          if (!source || results.some((result) => result.ref === source.ref)) continue;
+          results.push({
+            ref: source.ref,
+            title: plainText(item.title, 300) || source.title,
+            url: source.url,
+            domain: source.domain,
+            excerpt: plainText(item.excerpt, 600),
+            publishedAt: item.publishedAt ?? source.publishedAt,
+          });
           if (results.length >= 8) break;
         }
         if (!results.length) throw new Error('Websuche hat keine lesbaren Ergebnisse geliefert');
-        return { query, results, retrievedAt: new Date().toISOString() };
+        // Sources appear in the client before the pages are read.
+        await webSources.changed();
+        // Pages already read in this turn are not fetched again; the next results take their place.
+        const unread = results.filter((result) => !webSources.find(result.url)?.read);
+        const read = await Promise.allSettled(
+          unread.slice(0, AUTO_READ_PAGES).map(async (result) => {
+            const page = await readWebPage(result.url, signal, AUTO_READ_TIMEOUT_MS);
+            const text = page.text
+              .replace(/[ \t]+\n/g, '\n')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim()
+              .slice(0, AUTO_READ_CHARS);
+            if (!text) throw new Error('Seite ohne Text');
+            webSources.add({ url: result.url, title: page.title, read: true }, page.url);
+            return {
+              ref: result.ref,
+              url: result.url,
+              title: plainText(page.title, 300) || result.title,
+              text,
+            };
+          })
+        );
+        signal.throwIfAborted();
+        return {
+          query,
+          results,
+          pages: read.flatMap((item) => (item.status === 'fulfilled' ? [item.value] : [])),
+          ...(relaxed
+            ? {
+                note: 'Nothing matched the requested recency/topic; these results are less filtered, so check their dates.',
+              }
+            : {}),
+          retrievedAt: new Date().toISOString(),
+        };
       }
     );
     add(
       {
         name: 'web_fetch',
         description:
-          'Read a public HTTPS page; use its exact URL when citing information. Local/private addresses are blocked.',
+          'Read a public HTTPS page in full. Returns its turn-wide ref; cite as [ref](url). Local/private addresses are blocked.',
         parameters: {
           type: 'object',
           properties: { url: { type: 'string', maxLength: 2000 } },
@@ -294,10 +471,16 @@ export async function chatToolset(userId: string, options: ChatOptions, signal: 
         },
       },
       async (args) => {
-        const page = await fetchPublicSource(z.string().max(2000).parse(args.url), 3);
+        const requested = publicSourceUrl(z.string().max(2000).parse(args.url)).href;
+        const page = await fetchPublicSource(requested, 3, { signal });
+        const source = webSources.add(
+          { url: page.url, title: page.title, excerpt: page.text, read: true },
+          requested
+        );
         return {
+          ref: source?.ref ?? null,
           title: page.title,
-          url: page.url,
+          url: source?.url ?? page.url,
           text: page.text.slice(0, 24000),
           retrievedAt: new Date().toISOString(),
         };
@@ -413,13 +596,20 @@ export async function chatToolset(userId: string, options: ChatOptions, signal: 
       tools,
       catalog,
       requiresApproval: (name: string) => approvals.has(name),
-      call: async (name: string, args: Record<string, unknown>, approved = false, transform?: (result: unknown) => Promise<unknown>) => {
+      call: async (
+        name: string,
+        args: Record<string, unknown>,
+        approved = false,
+        transform?: (result: unknown) => Promise<unknown>
+      ) => {
         const handler = handlers.get(name);
         if (!handler || !tools.some((tool) => tool.name === name))
           throw new Error('Werkzeug ist für diesen Chat nicht freigegeben oder noch nicht geladen');
         if (approvals.has(name) && !approved) throw new Error('Einzelgenehmigung fehlt');
         const result = await handler(args);
-        return redactSensitiveText(JSON.stringify(transform ? await transform(result) : result)).slice(0, 32000);
+        return redactSensitiveText(
+          JSON.stringify(transform ? await transform(result) : result)
+        ).slice(0, 32000);
       },
       close: () => connections.forEach((c) => c.close()),
     };

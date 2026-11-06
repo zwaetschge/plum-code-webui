@@ -29,7 +29,7 @@ internal fun previewMonitorState(): MonitorUiState {
     )
     val webui = session("webui", "Plum WebUI", CLIProvider.CODEX, busy = true, summary = "Bash: pnpm typecheck")
     val android = session("android", "Android-App", CLIProvider.CLAUDE, busy = true, approvals = 1)
-    val docs = session("docs", "Dokumentation", CLIProvider.OPENCODE, busy = false)
+    val docs = session("docs", "Dokumentation", CLIProvider.PI, busy = false)
     return MonitorUiState(
         slots = listOf("webui", "android", "docs", null),
         sessions = listOf(webui, android, docs),

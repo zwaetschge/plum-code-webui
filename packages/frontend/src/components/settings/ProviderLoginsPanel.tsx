@@ -1,19 +1,9 @@
 import { useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, KeyRound, LogOut, Pencil, Plus, Trash2, Zap } from 'lucide-react';
+import { Check, KeyRound, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import { CliDeviceLoginDialog } from '@/components/settings/CliDeviceLoginDialog';
 import { api } from '@/services/api';
 import type { ApiResponse } from '@plum-code-webui/shared';
@@ -31,19 +21,9 @@ interface Harness {
   ready: boolean;
 }
 
-interface Endpoint {
-  id: string;
-  name: string;
-  baseUrl: string | null;
-  enabled: boolean;
-  hasKey: boolean;
-  modelCount: number;
-}
-
 interface SetupStatus {
   ready: boolean;
   harnesses: Harness[];
-  endpoints: Endpoint[];
   antigravity: { available: boolean; authenticated: boolean };
 }
 
@@ -52,13 +32,13 @@ const DEVICE_LOGIN = new Set(['codex', 'claude', 'vibe']);
 /**
  * Every way into a provider, in one place.
  *
- * The methods genuinely differ — a device code for the CLI harnesses, an API
- * key for endpoints, an in-session OAuth for Antigravity — so this shows each
- * one with the step it actually needs instead of pretending they are uniform.
+ * The methods genuinely differ — a device code for the CLI harnesses, an
+ * in-session OAuth for Antigravity — so this shows each one with the step it
+ * actually needs instead of pretending they are uniform. API keys for model
+ * endpoints live in the Modellanbieter registry (ModelProvidersPanel).
  */
 export function ProviderLoginsPanel() {
   const queryClient = useQueryClient();
-  const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null);
 
   const { data: status } = useQuery({
     queryKey: ['setup-status'],
@@ -71,8 +51,6 @@ export function ProviderLoginsPanel() {
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['setup-status'] });
-    queryClient.invalidateQueries({ queryKey: ['opencode-providers'] });
-    queryClient.invalidateQueries({ queryKey: ['opencode-available-providers'] });
     queryClient.invalidateQueries({ queryKey: ['codex-status'] });
     queryClient.invalidateQueries({ queryKey: ['claude-status'] });
     queryClient.invalidateQueries({ queryKey: ['provider-diagnostics'] });
@@ -113,67 +91,6 @@ export function ProviderLoginsPanel() {
             </li>
           ))}
         </ul>
-      </section>
-
-      <section className="space-y-2">
-        <header>
-          <h3 className="text-sm font-medium">API endpoints</h3>
-          <p className="text-xs text-muted-foreground">
-            Keys for OpenAI-compatible providers. Pi and OpenCode both resolve their models from
-            here.
-          </p>
-        </header>
-        {status.endpoints.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No endpoints yet.</p>
-        ) : (
-          <ul className="space-y-1.5">
-            {status.endpoints.map((endpoint) => (
-              <li key={endpoint.id} className="rounded-lg border border-border px-3 py-2">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm">{endpoint.name}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {endpoint.baseUrl ?? endpoint.id}
-                      {endpoint.hasKey ? ' · key stored' : ' · no key'}
-                      {endpoint.enabled ? '' : ' · disabled'}
-                    </span>
-                  </span>
-                  <span className="flex flex-wrap items-center gap-1">
-                    <TestEndpointButton id={endpoint.id} />
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      aria-label={`Edit ${endpoint.name}`}
-                      aria-expanded={editingEndpointId === endpoint.id}
-                      onClick={() =>
-                        setEditingEndpointId((current) =>
-                          current === endpoint.id ? null : endpoint.id
-                        )
-                      }
-                    >
-                      <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
-                    </Button>
-                    <RemoveEndpointButton endpoint={endpoint} onDone={refresh} />
-                  </span>
-                </div>
-                {editingEndpointId === endpoint.id && (
-                  <div className="mt-3">
-                    <EndpointForm
-                      endpoint={endpoint}
-                      onSaved={() => {
-                        setEditingEndpointId(null);
-                        refresh();
-                      }}
-                      onCancel={() => setEditingEndpointId(null)}
-                    />
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        <AddEndpointForm onSaved={refresh} />
       </section>
 
       {status.antigravity.available && (
@@ -393,245 +310,6 @@ function VibeApiKeyControls({ onChanged }: { onChanged: () => void }) {
         </p>
       )}
     </div>
-  );
-}
-
-function TestEndpointButton({ id }: { id: string }) {
-  const [result, setResult] = useState<{ connected: boolean; message: string } | null>(null);
-  const test = useMutation({
-    mutationFn: async () => {
-      const response = await api.post<ApiResponse<{ connected: boolean; message: string }>>(
-        `/api/opencode/providers/${encodeURIComponent(id)}/test`
-      );
-      if (!response.data.data) throw new Error('No response from OpenCode.');
-      return response.data.data;
-    },
-    onSuccess: setResult,
-    onError: (error) =>
-      setResult({
-        connected: false,
-        message: error instanceof Error ? error.message : 'Provider test failed',
-      }),
-  });
-
-  return (
-    <span className="inline-flex flex-col items-start">
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        onClick={() => test.mutate()}
-        disabled={test.isPending}
-      >
-        <Zap className="mr-1 h-3.5 w-3.5" /> {test.isPending ? 'Testing…' : 'Test'}
-      </Button>
-      {result && (
-        <span
-          role="status"
-          className={`max-w-48 text-xs ${result.connected ? 'text-emerald-500' : 'text-destructive'}`}
-        >
-          {result.message}
-        </span>
-      )}
-    </span>
-  );
-}
-
-function RemoveEndpointButton({ endpoint, onDone }: { endpoint: Endpoint; onDone: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const remove = useMutation({
-    mutationFn: async () => {
-      await api.delete(`/api/opencode/providers/${encodeURIComponent(endpoint.id)}`);
-    },
-    onSuccess: () => {
-      setOpen(false);
-      onDone();
-    },
-    onError: (mutationError) =>
-      setError(
-        mutationError instanceof Error ? mutationError.message : 'Could not remove endpoint'
-      ),
-  });
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        if (nextOpen) setError(null);
-      }}
-    >
-      <DialogTrigger asChild>
-        <Button type="button" size="sm" variant="ghost" aria-label={`Remove ${endpoint.name}`}>
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Remove {endpoint.name}?</DialogTitle>
-          <DialogDescription>
-            This removes the saved connection and API key for OpenCode and Pi.
-          </DialogDescription>
-        </DialogHeader>
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        )}
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setOpen(false)}
-            disabled={remove.isPending}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={() => remove.mutate()}
-            disabled={remove.isPending}
-          >
-            {remove.isPending ? 'Removing…' : 'Remove endpoint'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function AddEndpointForm({ onSaved }: { onSaved: () => void }) {
-  const [open, setOpen] = useState(false);
-
-  if (!open) {
-    return (
-      <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
-        <Plus className="mr-1 h-3.5 w-3.5" />
-        Add endpoint
-      </Button>
-    );
-  }
-
-  return (
-    <EndpointForm
-      onSaved={() => {
-        setOpen(false);
-        onSaved();
-      }}
-      onCancel={() => setOpen(false)}
-    />
-  );
-}
-
-function EndpointForm({
-  endpoint,
-  onSaved,
-  onCancel,
-}: {
-  endpoint?: Endpoint;
-  onSaved: () => void;
-  onCancel: () => void;
-}) {
-  const [id, setId] = useState(endpoint?.id ?? '');
-  const [name, setName] = useState(endpoint?.name ?? '');
-  const [apiKey, setApiKey] = useState('');
-  const [baseUrl, setBaseUrl] = useState(endpoint?.baseUrl ?? '');
-  const [enabled, setEnabled] = useState(endpoint?.enabled ?? true);
-  const [error, setError] = useState<string | null>(null);
-  const formId = useId();
-
-  const save = useMutation({
-    mutationFn: async () => {
-      if (!endpoint && !apiKey.trim()) throw new Error('Enter an API key.');
-      await api.put('/api/opencode/providers', {
-        id: id.trim(),
-        name: name.trim() || id.trim(),
-        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-        ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
-        enabled,
-      });
-    },
-    onSuccess: onSaved,
-    onError: (mutationError) =>
-      setError(mutationError instanceof Error ? mutationError.message : 'Could not save endpoint'),
-  });
-
-  return (
-    <form
-      className="grid gap-3 rounded-lg border border-border p-3 sm:grid-cols-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        setError(null);
-        save.mutate();
-      }}
-    >
-      <div>
-        <Label htmlFor={`${formId}-id`}>Provider ID</Label>
-        <Input
-          id={`${formId}-id`}
-          value={id}
-          onChange={(event) => setId(event.target.value)}
-          placeholder="z-ai"
-          required
-          readOnly={Boolean(endpoint)}
-        />
-      </div>
-      <div>
-        <Label htmlFor={`${formId}-name`}>Display name</Label>
-        <Input
-          id={`${formId}-name`}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Z.AI"
-        />
-      </div>
-      <div>
-        <Label htmlFor={`${formId}-key`}>{endpoint ? 'New API key (optional)' : 'API key'}</Label>
-        <Input
-          id={`${formId}-key`}
-          type="password"
-          value={apiKey}
-          onChange={(event) => setApiKey(event.target.value)}
-          placeholder={endpoint?.hasKey ? 'Leave blank to keep the stored key' : undefined}
-          required={!endpoint}
-          autoComplete="new-password"
-        />
-      </div>
-      <div>
-        <Label htmlFor={`${formId}-url`}>Base URL (optional)</Label>
-        <Input
-          id={`${formId}-url`}
-          value={baseUrl}
-          onChange={(event) => setBaseUrl(event.target.value)}
-          placeholder="Known providers fill this in"
-        />
-      </div>
-      <div className="flex items-center gap-2 sm:col-span-2">
-        <Switch id={`${formId}-enabled`} checked={enabled} onCheckedChange={setEnabled} />
-        <Label htmlFor={`${formId}-enabled`}>Enabled for OpenCode and Pi</Label>
-      </div>
-      {error && (
-        <p role="alert" className="text-xs text-destructive sm:col-span-2">
-          {error}
-        </p>
-      )}
-      <div className="flex gap-2 sm:col-span-2">
-        <Button type="submit" size="sm" disabled={save.isPending}>
-          <KeyRound className="mr-1 h-3.5 w-3.5" />
-          {save.isPending ? 'Saving…' : endpoint ? 'Save changes' : 'Save endpoint'}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={onCancel}
-          disabled={save.isPending}
-        >
-          Cancel
-        </Button>
-      </div>
-    </form>
   );
 }
 

@@ -180,7 +180,8 @@ export const PROVIDER_FALLBACK_COLOR = '#94a3b8';
 export const PROVIDER_COLORS: Record<string, string> = {
   Codex: '#22c55e',
   Kimi: '#2582ed',
-  // Kimi already owns blue; OpenCode needs a hue that stays apart from it.
+  // Historical rows only: OpenCode is no longer a harness, its usage keeps the
+  // label. Kimi already owns blue, so this hue stays apart from it.
   OpenCode: '#f472b6',
   Pi: '#a855f7',
   'Z.AI': '#14b8a6',

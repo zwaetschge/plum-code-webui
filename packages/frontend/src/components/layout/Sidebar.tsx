@@ -1,7 +1,7 @@
 import { ChatSidebarResources } from './ChatSidebarResources';
 import { SHOW_CHAT_HISTORY_EVENT } from '@/lib/chatHistory';
-import { SwarmSidebarSection } from './SwarmSidebarSection';
-import { Inbox, MessageSquare, ListTodo, Code2, Bot, Network } from 'lucide-react';
+import { HermesSidebarSection } from './HermesSidebarSection';
+import { Inbox, MessageSquare, ListTodo, Code2, Bot, Feather } from 'lucide-react';
 import { SessionSurfaceMenuItem } from '@/components/session/SessionSurfaceMenuItem';
 import { sessionSurface } from '@/lib/sessionSurface';
 import {
@@ -82,14 +82,14 @@ const AREA_PRELOAD: Record<SidebarMode, () => Promise<unknown>> = {
   chat: () => import('@/pages/ChatPage'),
   task: () => import('@/pages/TaskSessionsPage'),
   code: () => import('@/pages/DashboardPage'),
-  swarm: () => import('@/pages/SwarmPage'),
+  hermes: () => import('@/pages/HermesPage'),
 };
 
 const MODE_ITEMS: { mode: SidebarMode; label: string; icon: typeof Code2 }[] = [
   { mode: 'chat', label: 'Chat', icon: MessageSquare },
   { mode: 'task', label: 'Task', icon: ListTodo },
   { mode: 'code', label: 'Code', icon: Code2 },
-  { mode: 'swarm', label: 'Schwarm', icon: Network },
+  { mode: 'hermes', label: 'Hermes', icon: Feather },
 ];
 
 /** Zone ③: pages that belong to no mode. `path: null` opens the outbox panel. */
@@ -102,7 +102,7 @@ const GLOBAL_ITEMS: { label: string; path: string | null; icon: typeof Code2 }[]
   { label: 'Operations', path: '/operations', icon: ServerCog },
 ];
 
-const NEW_ITEM: Record<Exclude<SidebarMode, 'swarm'>, { label: string; path: string }> = {
+const NEW_ITEM: Record<Exclude<SidebarMode, 'hermes'>, { label: string; path: string }> = {
   chat: { label: 'Neuer Chat', path: '/chat' },
   task: { label: 'Neue Aufgabe', path: '/tasks?new=true' },
   code: { label: 'Neue Session', path: '/code?new=true' },
@@ -308,7 +308,7 @@ export function Sidebar({
 
   const filteredSessions = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (mode === 'swarm') return [];
+    if (mode === 'hermes') return [];
     let list = sessions.filter((session) => sessionSurface(session) === mode);
 
     if (q) {
@@ -1166,8 +1166,8 @@ export function Sidebar({
     () => (mode === 'chat' ? filteredSessions : []),
     [filteredSessions, mode]
   );
-  const newItem = mode === 'swarm' ? null : NEW_ITEM[mode];
-  // Chat sessions (API model chats) and the swarm have no session tools; the
+  const newItem = mode === 'hermes' ? null : NEW_ITEM[mode];
+  // Chat sessions (API model chats) and Hermes have no session tools; the
   // block belongs to task and code sessions only.
   const showToolsBlock =
     Boolean(activeId) &&
@@ -1366,7 +1366,7 @@ export function Sidebar({
             </Link>
           )}
 
-          {mode !== 'swarm' && mode !== 'chat' && !isCollapsed && (
+          {mode !== 'hermes' && mode !== 'chat' && !isCollapsed && (
             <div className="flex items-center justify-between px-3 py-1.5 shrink-0">
               <div className="flex items-center gap-2">
                 <span className="sidebar-section-label">
@@ -1412,7 +1412,7 @@ export function Sidebar({
             </div>
           )}
 
-          {mode !== 'swarm' && !isCollapsed && (
+          {mode !== 'hermes' && !isCollapsed && (
             <div className="px-2 pb-1 space-y-1.5 shrink-0">
               <div className="sidebar-session-search relative">
                 <Search className="absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
@@ -1494,8 +1494,8 @@ export function Sidebar({
                   chatSessions={chatSessions}
                   renderSession={renderSessionRow}
                 />
-              ) : mode === 'swarm' ? (
-                <SwarmSidebarSection collapsed={isCollapsed} onNavigate={handleLinkClick} />
+              ) : mode === 'hermes' ? (
+                <HermesSidebarSection collapsed={isCollapsed} onNavigate={handleLinkClick} />
               ) : (
                 renderSessionGroups()
               )}

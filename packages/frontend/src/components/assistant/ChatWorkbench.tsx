@@ -14,6 +14,8 @@ import { ToolFiles } from './ToolFiles';
 import { ChatRichText } from './ChatRichText';
 import { ChatContextReceipt } from './ChatContextReceipt';
 import { ChatCompactionReceipt } from './ChatCompactionReceipt';
+import { ChatSourcesRow } from './ChatWebSources';
+import { isWebActivity } from './webSources';
 
 interface Options {
   webSearch: boolean;
@@ -31,7 +33,7 @@ interface Options {
   toolPermissions: Record<string, 'allow' | 'ask' | 'block'>;
 }
 const defaults: Options = {
-  webSearch: false,
+  webSearch: true,
   mcpServerIds: [],
   allowToolWrites: false,
   comparisonModels: [],
@@ -747,18 +749,27 @@ export function ChatTurnDetails({
       null
     ),
     [error, setError] = useState('');
+  // Web searches and page reads have their own line above the answer.
+  const toolEvents = turn.toolEvents?.filter((event) => !isWebActivity(event)) ?? [];
   return (
     <div className="space-y-3">
+      {!!turn.webSources?.length && (
+        <ChatSourcesRow
+          sources={turn.webSources}
+          text={turn.response}
+          live={turn.status === 'running'}
+        />
+      )}
       {!!turn.toolEvents?.some((event) => event.files?.length) && <ToolFiles chatId={chatId} files={turn.toolEvents.flatMap((event) => event.files ?? [])} />}
       <ChatContextReceipt receipt={turn.contextReceipt} />
       <ChatCompactionReceipt compaction={turn.compaction} />
-      {!!turn.toolEvents?.length && (
+      {!!toolEvents.length && (
         <details
           className="text-sm"
-          open={turn.toolEvents.some((event) => event.status === 'waiting') || undefined}
+          open={toolEvents.some((event) => event.status === 'waiting') || undefined}
         >
-          <summary className="cursor-pointer">Werkzeuge · {turn.toolEvents.length}</summary>
-          {turn.toolEvents.map((event, index) => (
+          <summary className="cursor-pointer">Werkzeuge · {toolEvents.length}</summary>
+          {toolEvents.map((event, index) => (
             <details
               key={event.id + index}
               className="my-2 rounded-md border p-2"

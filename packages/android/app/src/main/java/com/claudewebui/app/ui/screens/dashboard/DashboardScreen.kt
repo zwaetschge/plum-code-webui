@@ -169,7 +169,7 @@ fun DashboardScreen(
     val selectArea: (String) -> Unit = { viewModel.clearSelection(); workspace.clearSelection(it); assistantArea = it; workspacePath = null; modelChatMode = false }
     val reduceMotion = com.claudewebui.app.ui.theme.LocalReduceMotion.current
 
-    // Chat / Task / Code / Schwarm are sibling areas of one workspace. The
+    // Chat / Task / Code / Hermes are sibling areas of one workspace. The
     // header stays put and only the content below it cross-fades, so every
     // switch (Chat→Task as much as Task→Code) animates the same way: no
     // scale, no slide, nothing here is a drill-down.
@@ -177,7 +177,8 @@ fun DashboardScreen(
         showPersonalization -> "personalization"
         workspacePath != null -> "web:$workspacePath"
         assistantArea == "chat" -> "model"
-        assistantArea == "swarm" -> "swarm"
+        // "swarm" is the pre-Hermes id a restored state may still carry.
+        assistantArea == "hermes" || assistantArea == "swarm" -> "hermes"
         else -> "list:$assistantArea"
     }
     var showEmergency by remember { mutableStateOf(false) }
@@ -272,7 +273,7 @@ fun DashboardScreen(
                             onAreaSelect = selectArea, onAgentChats = { modelChatMode = false },
                             selectedChatId = workspace.selection("chat"), onChatSelected = { workspace.select("chat", it) },
                         )
-                    target == "swarm" -> AssistantSwarmScreen(topInset = topInset, emergencyOpen = showEmergency, onEmergencyDismiss = { showEmergency = false }, onAreaSelect = selectArea)
+                    target == "hermes" -> AssistantHermesScreen(topInset = topInset, emergencyOpen = showEmergency, onEmergencyDismiss = { showEmergency = false }, onAreaSelect = selectArea)
                     else -> DashboardListScreen(
                         onNavigateToChat, onNavigateToMessage, onNavigateToSettings, onNavigateMain,
                         viewModel, embedded, selectedSessionId, target.removePrefix("list:"), selectArea,
@@ -339,6 +340,8 @@ internal fun DashboardListScreen(
     val messageRepository = org.koin.compose.koinInject<com.claudewebui.app.data.repository.MessageRepository>()
     val outboxFlow = remember(messageRepository) { messageRepository.observePendingOutbox() }
     val outbox by outboxFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    // A watch with the Plum app that this phone has not paired yet.
+    val unpairedWatch = rememberUnpairedWatch()
     LaunchedEffect(Unit) {
         DashboardMenuBus.events.collect { command -> if (command == DashboardMenuCommand.SELECT_SESSIONS) selectMode = true }
     }
@@ -489,6 +492,9 @@ internal fun DashboardListScreen(
                         actionLabel = screenResources.getString(R.string.overview_outbox_show),
                         compact = true,
                     )
+                }
+                unpairedWatch?.let { watch ->
+                    item(span = { GridItemSpan(maxLineSpan) }) { WatchPairingHintCard(watch) }
                 }
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     DashboardSearchField(
@@ -1877,16 +1883,16 @@ private fun areaOrder(screen: String): Int = when (screen) {
     "model" -> 0
     "list:task" -> 1
     "list:code" -> 2
-    "swarm" -> 3
+    "hermes" -> 3
     else -> -1
 }
 
-/** Position of an area id ("chat", "task", "code", "swarm") in the selector; -1 otherwise. */
+/** Position of an area id ("chat", "task", "code", "hermes") in the selector; -1 otherwise. */
 internal fun areaIndex(area: String): Int = when (area) {
     "chat" -> 0
     "task" -> 1
     "code" -> 2
-    "swarm" -> 3
+    "hermes", "swarm" -> 3
     else -> -1
 }
 

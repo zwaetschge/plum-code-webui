@@ -2,22 +2,19 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {
-  getOpenCodeProviderCatalog,
-  refreshOpenCodeModelsCache,
-  type OpenCodeProviderCatalog,
-} from './opencodeCatalog.js';
+  getModelProviderCatalog,
+  refreshModelsCache,
+  type ModelProviderCatalog,
+} from './modelCatalog.js';
 import {
-  getOpenCodeCredentialEnvVars,
-  readOpenCodeProvidersForUser,
-  type OpenCodeProvider,
-} from './opencodeProviderKeys.js';
-import {
-  ensureOpenCodeTenantDirectories,
-  resolveOpenCodeTenantPaths,
-} from '../services/opencode/tenantPaths.js';
-import { syncProviderLinks } from './providerLinks.js';
+  getModelProviderCredentialEnvVars,
+  isPiModelProvider,
+  readModelProvidersForUser,
+  type ModelProvider,
+} from './modelProviderKeys.js';
 import { lookupContextWindow } from './contextWindow.js';
 import { writeFileAtomicSync } from './atomicWrite.js';
+import { refreshProviderModelsInBackground } from './providerModelDiscovery.js';
 
 const CLAUDE_AGENTS_DIR = path.join(os.homedir(), '.claude', 'agents');
 const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json');
@@ -26,6 +23,31 @@ const PI_ROOT = path.join(os.homedir(), '.pi', 'webui-users');
 export const PI_COMPACTION_RESERVE_TOKENS = 40_000;
 /** Upper bound for `maxTokens` written into Pi's models.json. */
 export const PI_MAX_TOKENS_CAP = 32_768;
+/**
+ * Agent-level retries for long runs. Pi's defaults (3 tries, 2 s base) gave up
+ * on a provider that was overloaded for half a minute.
+ */
+export const PI_RETRY_SETTINGS = {
+  enabled: true,
+  maxRetries: 8,
+  baseDelayMs: 3_000,
+  maxAgentDelayMs: 60_000,
+};
+/**
+ * A request that sends nothing for this long counts as stalled and is retried.
+ * Pi's 5 minute default left runs hanging for exactly 5:00 before a retry that
+ * then answered in seconds; local endpoints still get time for a long prefill.
+ */
+export const PI_HTTP_IDLE_TIMEOUT_MS = 150_000;
+
+/**
+ * Compaction reserve for one model: the global 40k, but at most a quarter of
+ * its window. On a 32k model the global value put the threshold below zero,
+ * so Pi compacted before every request.
+ */
+export function piCompactionReserveFor(contextWindow: number): number {
+  return Math.min(PI_COMPACTION_RESERVE_TOKENS, Math.floor(contextWindow / 4));
+}
 
 interface ClaudeMcpServer {
   type?: string;
@@ -101,13 +123,13 @@ function inferPiApi(
 }
 
 function modelSupportsReasoning(modelId: string): boolean {
-  return /(?:reason|thinking|(^|[-_/])o[134](?:[-_/]|$)|gpt-5|glm-5|kimi|deepseek-r)/i.test(
+  return /(?:reason|thinking|(^|[-_/])o[134](?:[-_/]|$)|gpt-5|glm-5|kimi|deepseek-r|deepseek-flash|deepseek-v4)/i.test(
     modelId
   );
 }
 
 function modelSupportsImages(modelId: string): boolean {
-  return /(?:vision|vl|gpt-4o|gpt-5|claude|gemini|glm-4\.5v)/i.test(modelId);
+  return /(?:vision|vl|gpt-4o|gpt-5|claude|gemini|glm-4\.5v|deepseek-flash)/i.test(modelId);
 }
 
 function humanizeModel(modelId: string): string {
@@ -129,27 +151,27 @@ export function isPiRunnableModel(modelId: string): boolean {
 }
 
 export function buildPiProviderConfig(
-  provider: OpenCodeProvider,
-  catalog: OpenCodeProviderCatalog = getOpenCodeProviderCatalog(),
+  provider: ModelProvider,
+  catalog: ModelProviderCatalog = getModelProviderCatalog(),
   configuredModelIds: string[] = []
 ): Record<string, unknown> | null {
   const catalogProvider = catalog[provider.id];
   const baseUrl = provider.baseUrl || catalogProvider?.api;
-  // Union, not either/or. Pi used to take the OpenCode tenant file when it had
-  // an entry and the catalog otherwise, so a provider listed in one source hid
-  // every model known only to the other — and a provider missing from the
-  // catalog (a self-hosted or newly added endpoint) existed for Pi only as long
-  // as OpenCode had written a config for it.
+  // Union, not either/or: a provider listed in one source must not hide every
+  // model known only to the other, and a provider missing from the catalog (a
+  // self-hosted or newly added endpoint) still gets its registry models.
+  // A list the provider reported itself is complete; the catalog would only add
+  // retired models back (DeepSeek's deepseek-chat long after its API dropped it).
   const modelIds = [
     ...new Set([
       ...(provider.models ?? []),
       ...configuredModelIds,
-      ...(catalogProvider?.models ?? []),
+      ...(provider.modelsSource === 'live' ? [] : (catalogProvider?.models ?? [])),
     ]),
   ].filter(isPiRunnableModel);
   if (!provider.enabled || !baseUrl || modelIds.length === 0) return null;
 
-  const envVar = getOpenCodeCredentialEnvVars(provider.id, catalog)[0];
+  const envVar = getModelProviderCredentialEnvVars(provider.id, catalog)[0];
   if (!envVar) return null;
 
   return {
@@ -173,34 +195,22 @@ export function buildPiProviderConfig(
         ...(contextWindow ? { contextWindow } : {}),
         // models.dev's `output` is the model's ceiling (131k for Qwen Max). Some
         // OpenAI-compatible endpoints reserve `max_tokens` out of the window up
-        // front, so keep the request budget modest; Pi's own default is 16k.
-        ...(limit?.output ? { maxTokens: Math.min(limit.output, PI_MAX_TOKENS_CAP) } : {}),
+        // front, so keep the request budget modest. Without a catalog limit Pi
+        // used 16k, reasoning included, which cut GLM rounds off mid-answer; a
+        // quarter of a known window (capped) leaves room for both.
+        ...(limit?.output
+          ? { maxTokens: Math.min(limit.output, PI_MAX_TOKENS_CAP) }
+          : contextWindow
+            ? { maxTokens: Math.min(PI_MAX_TOKENS_CAP, Math.floor(contextWindow / 4)) }
+            : {}),
       };
     }),
   };
 }
 
-export function parsePiProviderModels(config: unknown): Record<string, string[]> {
-  if (!isRecord(config) || !isRecord(config.provider)) return {};
-
-  const providers: Record<string, string[]> = {};
-  for (const [providerId, rawProvider] of Object.entries(config.provider)) {
-    if (!isRecord(rawProvider) || !isRecord(rawProvider.models)) continue;
-    const models = Object.keys(rawProvider.models).filter((modelId) => modelId.trim().length > 0);
-    if (models.length > 0) providers[providerId] = models;
-  }
-  return providers;
-}
-
-function readPiProviderModelsForUser(userId: string): Record<string, string[]> {
-  const tenantPaths = resolveOpenCodeTenantPaths(userId);
-  const config = readJsonObject(path.join(tenantPaths.configDir, 'opencode.json'));
-  return parsePiProviderModels(config);
-}
-
 /**
  * Providers Pi implements natively. Mistral has no OpenAI-style base URL in the
- * OpenCode catalog or on models.dev, so the generic path drops it; Pi's own
+ * model catalog or on models.dev, so the generic path drops it; Pi's own
  * provider speaks Mistral's chat API and carries the model metadata. Only the
  * key is passed on (MISTRAL_API_KEY via the credential env).
  *
@@ -250,12 +260,37 @@ export function readPiNativeModelIds(providerId: string): string[] {
   if (!file) return [];
   const data = readJsonObject(file);
   const known = isRecord(data[native.api]) ? (data[native.api] as Record<string, unknown>) : {};
-  return native.models.filter((id) => id in known);
+  // Pi keys catalog entries as `<type>:<id>` (`chat:zai-glm-5-3`); the bare id
+  // only appears inside each entry. Collect both spellings plus the entries'
+  // own `id` field, otherwise not a single curated model matches and the
+  // native provider list is silently empty.
+  const knownIds = new Set<string>();
+  for (const [key, value] of Object.entries(known)) {
+    knownIds.add(key);
+    knownIds.add(key.includes(':') ? key.slice(key.indexOf(':') + 1) : key);
+    if (isRecord(value) && typeof value.id === 'string') knownIds.add(value.id);
+  }
+  return native.models.filter((id) => knownIds.has(id));
+}
+
+/**
+ * True when a provider should run through Pi's native implementation. A custom
+ * base URL usually means a proxy and stays on the generic path — but pointing a
+ * native provider at its own official API is not a proxy. With Mistral the
+ * generic OpenAI path sends the system prompt as a `developer` role, which
+ * api.mistral.ai rejects with 422, so a turn against the real endpoint only
+ * ever works through Pi's `mistral-conversations` provider.
+ */
+function isPiNativeProviderEndpoint(providerId: string, baseUrl?: string): boolean {
+  if (!baseUrl) return true;
+  if (providerId !== 'mistral') return false;
+  const normalized = baseUrl.trim().replace(/\/+$/, '').replace(/\/v1$/, '');
+  return /^https?:\/\/api\.mistral\.ai$/i.test(normalized);
 }
 
 export function buildPiModelCatalog(
-  storedProviders: OpenCodeProvider[],
-  catalog: OpenCodeProviderCatalog,
+  storedProviders: ModelProvider[],
+  catalog: ModelProviderCatalog,
   configuredModels: Record<string, string[]>,
   nativeModelIds: (providerId: string) => string[] = readPiNativeModelIds
 ): {
@@ -265,10 +300,13 @@ export function buildPiModelCatalog(
   const piProviders: Record<string, unknown> = {};
   const models: string[] = [];
 
-  for (const provider of storedProviders.filter((entry) => entry.enabled)) {
+  for (const provider of storedProviders.filter(isPiModelProvider)) {
     // A custom base URL means a proxy or self-hosted endpoint: that stays on
     // the generic path. Otherwise Pi's native provider serves the account.
-    if (PI_NATIVE_PROVIDERS[provider.id] && !provider.baseUrl) {
+    if (
+      PI_NATIVE_PROVIDERS[provider.id] &&
+      isPiNativeProviderEndpoint(provider.id, provider.baseUrl)
+    ) {
       const native = nativeModelIds(provider.id);
       if (native.length > 0) {
         models.push(...native.map((modelId) => `${provider.id}/${modelId}`));
@@ -293,22 +331,34 @@ export function buildPiModelCatalog(
 }
 
 async function buildPiProvidersForUser(userId: string): Promise<{
-  storedProviders: OpenCodeProvider[];
+  storedProviders: ModelProvider[];
   piProviders: Record<string, unknown>;
   models: string[];
 }> {
-  const storedProviders = (await readOpenCodeProvidersForUser(userId)).filter(
+  const storedProviders = (await readModelProvidersForUser(userId)).filter(
     (provider) => provider.enabled
   );
-  const resolved = buildPiModelCatalog(
-    storedProviders,
-    getOpenCodeProviderCatalog(),
-    readPiProviderModelsForUser(userId)
-  );
+  const resolved = buildPiModelCatalog(storedProviders, getModelProviderCatalog(), {});
   return { storedProviders, ...resolved };
 }
 
+/**
+ * The models the session pickers offer: the user's stored list
+ * (`cliProviderModelLists.pi`, chosen in the Pi settings) in its order, so its
+ * first entry is the default, limited to models that are still available. No
+ * stored list, or nothing of it left, offers every available model.
+ */
+export function selectVisiblePiModels(available: string[], stored: string[]): string[] {
+  const availableIds = new Set(available);
+  const visible = [...new Set(stored.map((model) => model.trim()))].filter((model) =>
+    availableIds.has(model)
+  );
+  return visible.length > 0 ? visible : available;
+}
+
 export async function getPiModelsForUser(userId: string): Promise<string[]> {
+  // Keeps the registry's lists current; the result shows on the next read.
+  refreshProviderModelsInBackground(userId);
   const models = (await buildPiProvidersForUser(userId)).models;
   // Extension-provided models are not in the registry, so append them — but only
   // once this user has actually completed `/login antigravity`. Offering them on
@@ -324,8 +374,11 @@ function readClaudeMcpServers(): Record<string, ClaudeMcpServer> {
   return settings.mcpServers && typeof settings.mcpServers === 'object' ? settings.mcpServers : {};
 }
 
-function shouldEnableZaiVision(providers: OpenCodeProvider[]): boolean {
-  const policy = (process.env.OPENCODE_ZAI_VISION_MCP || 'auto').trim().toLowerCase();
+function shouldEnableZaiVision(providers: ModelProvider[]): boolean {
+  // OPENCODE_ZAI_VISION_MCP is the pre-2026-10-27 name, still honoured.
+  const policy = (process.env.PLUM_ZAI_VISION_MCP || process.env.OPENCODE_ZAI_VISION_MCP || 'auto')
+    .trim()
+    .toLowerCase();
   if (['0', 'false', 'off', 'disabled', 'none'].includes(policy)) return false;
   const hasStoredKey = providers.some(
     (provider) =>
@@ -339,7 +392,7 @@ function shouldEnableZaiVision(providers: OpenCodeProvider[]): boolean {
   );
 }
 
-function buildPiMcpConfig(providers: OpenCodeProvider[]): Record<string, unknown> {
+function buildPiMcpConfig(providers: ModelProvider[]): Record<string, unknown> {
   const mcpServers: Record<string, unknown> = { ...readClaudeMcpServers() };
   if (shouldEnableZaiVision(providers) && !mcpServers['zai-vision']) {
     mcpServers['zai-vision'] = {
@@ -507,21 +560,64 @@ export function hasPiAntigravityLogin(userId: string): boolean {
   }
 }
 
+/**
+ * Pi's agent settings for long, unattended runs. Values the user set in the
+ * file win; only missing ones are filled in.
+ */
+export function buildPiAgentSettings(
+  current: Record<string, unknown>,
+  piProviders: Record<string, unknown>,
+  extensions: string[]
+): Record<string, unknown> {
+  const compaction = isRecord(current.compaction) ? current.compaction : {};
+  const retry = isRecord(current.retry) ? current.retry : {};
+
+  // Small windows get a reserve that fits them; the global one stays for the rest.
+  const generatedOverrides: Record<string, { reserveTokens: number }> = {};
+  for (const [providerId, entry] of Object.entries(piProviders)) {
+    const models = isRecord(entry) && Array.isArray(entry.models) ? entry.models : [];
+    for (const model of models) {
+      if (!isRecord(model) || typeof model.id !== 'string') continue;
+      const window = typeof model.contextWindow === 'number' ? model.contextWindow : 0;
+      if (window <= 0 || piCompactionReserveFor(window) >= PI_COMPACTION_RESERVE_TOKENS) continue;
+      generatedOverrides[`${providerId}/${model.id}`] = {
+        reserveTokens: piCompactionReserveFor(window),
+      };
+    }
+  }
+  const userOverrides = isRecord(compaction.modelOverrides) ? compaction.modelOverrides : {};
+  const modelOverrides = { ...generatedOverrides, ...userOverrides };
+
+  return {
+    ...current,
+    defaultProjectTrust: 'always',
+    enableInstallTelemetry: false,
+    // Pi only checks the threshold after a whole agent run, and one agentic run
+    // adds 30-40k tokens of tool output. With the 16k default a 128k model went
+    // from "fine" to the hard limit inside a single run, and the summariser no
+    // longer fitted either. Compact earlier; a user-set value wins.
+    compaction: {
+      ...compaction,
+      reserveTokens:
+        typeof compaction.reserveTokens === 'number'
+          ? compaction.reserveTokens
+          : PI_COMPACTION_RESERVE_TOKENS,
+      ...(Object.keys(modelOverrides).length > 0 ? { modelOverrides } : {}),
+    },
+    retry: { ...PI_RETRY_SETTINGS, ...retry },
+    httpIdleTimeoutMs:
+      current.httpIdleTimeoutMs !== undefined ? current.httpIdleTimeoutMs : PI_HTTP_IDLE_TIMEOUT_MS,
+    extensions,
+  };
+}
+
 export async function syncPiConfig(userId: string): Promise<PiConfigSyncResult> {
   const agentDir = path.join(PI_ROOT, safeUserSegment(userId), 'agent');
   fs.mkdirSync(agentDir, { recursive: true });
   // Per-model context windows come from models.dev; make sure the cache exists
   // before the catalog is read. Bounded by a 20 s timeout, silent on failure.
-  await refreshOpenCodeModelsCache();
+  await refreshModelsCache();
 
-  const tenantPaths = resolveOpenCodeTenantPaths(userId);
-  ensureOpenCodeTenantDirectories(tenantPaths);
-  await syncProviderLinks({
-    quiet: true,
-    userId,
-    opencodeConfigPath: path.join(tenantPaths.configDir, 'opencode.json'),
-    opencodeAgentsDir: path.join(tenantPaths.configDir, 'agents'),
-  });
   const { storedProviders, piProviders, models } = await buildPiProvidersForUser(userId);
 
   writeJsonIfChanged(path.join(agentDir, 'models.json'), { providers: piProviders });
@@ -532,24 +628,10 @@ export async function syncPiConfig(userId: string): Promise<PiConfigSyncResult> 
 
   const extensions = resolvePiExtensionPaths();
   const currentSettings = readJsonObject(path.join(agentDir, 'settings.json'));
-  const currentCompaction = isRecord(currentSettings.compaction) ? currentSettings.compaction : {};
-  writeJsonIfChanged(path.join(agentDir, 'settings.json'), {
-    ...currentSettings,
-    defaultProjectTrust: 'always',
-    enableInstallTelemetry: false,
-    // Pi only checks the threshold after a whole agent run, and one agentic run
-    // adds 30-40k tokens of tool output. With the 16k default a 128k model went
-    // from "fine" to the hard limit inside a single run, and the summariser no
-    // longer fitted either. Compact earlier; a user-set value wins.
-    compaction: {
-      ...currentCompaction,
-      reserveTokens:
-        typeof currentCompaction.reserveTokens === 'number'
-          ? currentCompaction.reserveTokens
-          : PI_COMPACTION_RESERVE_TOKENS,
-    },
-    extensions,
-  });
+  writeJsonIfChanged(
+    path.join(agentDir, 'settings.json'),
+    buildPiAgentSettings(currentSettings, piProviders, extensions)
+  );
 
   const agentCount = syncPiAgents(agentDir);
   return {

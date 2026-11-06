@@ -1,17 +1,16 @@
 package com.claudewebui.wear
 
-import android.app.PendingIntent
-import android.content.Intent
 import androidx.wear.watchface.complications.data.ComplicationData
 import androidx.wear.watchface.complications.data.ComplicationType
 import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.ShortTextComplicationData
-import androidx.wear.watchface.complications.datasource.ComplicationRequest
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceService
+import androidx.wear.watchface.complications.datasource.ComplicationRequest
 
 /**
  * Watch-face complication showing how many approvals and questions are waiting;
- * tapping it opens the watch app's list.
+ * tapping it opens the watch app on its „Freigaben“ page. Paired watches count
+ * from their own bridge data, unpaired ones from the phone's snapshot.
  */
 class ApprovalsComplicationService : ComplicationDataSourceService() {
 
@@ -22,22 +21,23 @@ class ApprovalsComplicationService : ComplicationDataSourceService() {
         request: ComplicationRequest,
         listener: ComplicationRequestListener,
     ) {
-        val snapshot = WearSnapshotStore.cached(this)
-        listener.onComplicationData(build(snapshot.approvals.size + snapshot.questions.size))
+        listener.onComplicationData(build(waitingCount()))
     }
 
-    private fun build(count: Int): ComplicationData {
-        val tap = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, WearMainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        return ShortTextComplicationData.Builder(
+    private fun waitingCount(): Int =
+        if (PairingStore.isPaired(this)) {
+            BridgeCache.load(this).approvals.size
+        } else {
+            val snapshot = WearSnapshotStore.cached(this)
+            snapshot.approvals.size + snapshot.questions.size
+        }
+
+    private fun build(count: Int): ComplicationData =
+        ShortTextComplicationData.Builder(
             PlainComplicationText.Builder(count.toString()).build(),
-            PlainComplicationText.Builder("Plum waiting").build(),
+            PlainComplicationText.Builder("Plum: $count offen").build(),
         )
-            .setTapAction(tap)
+            .setTitle(PlainComplicationText.Builder("offen").build())
+            .setTapAction(UsageComplicationService.openApp(this, WearMainActivity.PAGE_APPROVALS))
             .build()
-    }
 }

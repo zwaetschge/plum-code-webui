@@ -318,105 +318,6 @@
     letter-spacing: 0;
   }
 
-  :root.provider-opencode {
-    /* OpenCode: electric violet/cyan, terminal-first, provider-agnostic */
-    --background: 250 56% 7%; /* Deep violet-black */
-    --foreground: 0 0% 98%; /* Off-white */
-    --card: 252 38% 10%; /* Dark violet cards */
-    --card-foreground: 0 0% 98%;
-    --popover: 252 38% 12%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 280 85% 60%; /* Electric Purple */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 252 32% 18%;
-    --secondary-foreground: 0 0% 90%;
-    --muted: 252 26% 16%;
-    --muted-foreground: 250 14% 68%;
-    --accent: 185 85% 50%; /* Cyan */
-    --accent-foreground: 260 40% 6%;
-    --destructive: 0 75% 55%;
-    --destructive-foreground: 0 0% 100%;
-    --success: 160 70% 45%;
-    --success-foreground: 0 0% 100%;
-    --border: 252 30% 24%;
-    --input: 252 30% 24%;
-    --ring: 280 85% 60%;
-
-    /* OpenCode brand colors */
-    --opencode-purple: 280 85% 60%; /* Electric Purple */
-    --opencode-cyan: 185 85% 50%; /* Cyan */
-    --opencode-pink: 320 85% 60%; /* Hot Pink accent */
-    --claude-crail: var(--opencode-purple);
-    --claude-terracotta: var(--opencode-cyan);
-    --claude-pampas: 260 35% 96%;
-    --claude-cloudy: 260 15% 30%;
-
-    --brand-accent: var(--opencode-purple);
-    --brand-accent-2: var(--opencode-cyan);
-    --pattern-color: 280 80% 62%;
-    --pattern-opacity: 0.12;
-
-    --shadow-color: 250 60% 4%;
-    --glow-color: 280 85% 60%;
-    --aurora-violet: 280 88% 64%;
-    --aurora-cyan: 185 88% 52%;
-    --aurora-rose: 322 86% 62%;
-    --aurora-gold: 48 92% 58%;
-    --aurora-deep: 250 70% 6%;
-    --aurora-opacity: 0.62;
-
-    --font-ui: 'IBM Plex Sans', 'Sora', ui-sans-serif, system-ui, sans-serif;
-    --font-body: 'IBM Plex Sans', 'Sora', ui-sans-serif, system-ui, sans-serif;
-    --font-mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
-  }
-
-  :root.provider-opencode.dark {
-    /* OpenCode Dark (same as base - always dark theme) */
-    --background: 250 56% 7%;
-    --foreground: 0 0% 98%;
-    --card: 252 38% 10%;
-    --card-foreground: 0 0% 98%;
-    --popover: 252 38% 12%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 280 85% 60%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 252 32% 18%;
-    --secondary-foreground: 0 0% 90%;
-    --muted: 252 26% 16%;
-    --muted-foreground: 250 14% 68%;
-    --accent: 185 85% 50%;
-    --accent-foreground: 260 40% 6%;
-    --destructive: 0 75% 55%;
-    --destructive-foreground: 0 0% 100%;
-    --success: 160 70% 45%;
-    --success-foreground: 0 0% 100%;
-    --border: 252 30% 24%;
-    --input: 252 30% 24%;
-    --ring: 280 85% 60%;
-
-    --opencode-purple: 280 85% 60%;
-    --opencode-cyan: 185 85% 50%;
-    --opencode-pink: 320 85% 60%;
-    --claude-crail: var(--opencode-purple);
-    --claude-terracotta: var(--opencode-cyan);
-    --claude-pampas: 260 35% 96%;
-    --claude-cloudy: 260 15% 30%;
-
-    --brand-accent: var(--opencode-purple);
-    --brand-accent-2: var(--opencode-cyan);
-    --pattern-color: 280 80% 62%;
-    --pattern-opacity: 0.12;
-
-    --shadow-color: 250 60% 4%;
-    --glow-color: 280 85% 60%;
-    --aurora-violet: 280 88% 64%;
-    --aurora-cyan: 185 88% 52%;
-    --aurora-rose: 322 86% 62%;
-    --aurora-gold: 48 92% 58%;
-    --aurora-deep: 250 70% 6%;
-    --aurora-opacity: 0.62;
-  }
-
   html.eink,
   :root.eink {
     --background: 0 0% 98%;
@@ -725,58 +626,6 @@ html.theme-switching *::after {
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-  }
-
-  /* OpenCode: Electric theme styles */
-  :root.provider-opencode .claude-card {
-    border: 1px solid hsl(260 30% 25%);
-    box-shadow: 0 0 20px hsl(280 60% 20% / 0.3);
-  }
-
-  :root.provider-opencode .claude-card:hover {
-    border-color: hsl(280 70% 50%);
-    box-shadow: 0 0 30px hsl(280 70% 50% / 0.4);
-  }
-
-  /* Electric buttons with glow */
-  :root.provider-opencode .claude-button-primary {
-    background: linear-gradient(135deg, hsl(280 85% 60%) 0%, hsl(280 75% 55%) 100%);
-    border: 1px solid hsl(280 70% 50%);
-    box-shadow: 0 0 15px hsl(280 70% 50% / 0.4);
-  }
-
-  :root.provider-opencode .claude-button-primary:hover {
-    background: linear-gradient(135deg, hsl(280 75% 65%) 0%, hsl(280 65% 60%) 100%);
-    box-shadow: 0 0 25px hsl(280 70% 50% / 0.6);
-  }
-
-  /* Cyan accent on hover */
-  :root.provider-opencode a:hover,
-  :root.provider-opencode .text-primary:hover {
-    color: hsl(185 85% 50%);
-  }
-
-  /* Glowing focus states */
-  :root.provider-opencode input:focus,
-  :root.provider-opencode textarea:focus {
-    border-color: hsl(280 85% 60%);
-    box-shadow: 0 0 15px hsl(280 70% 50% / 0.3);
-    outline: none;
-  }
-
-  /* Electric gradient text - purple to cyan */
-  :root.provider-opencode .gradient-text {
-    background: linear-gradient(135deg, hsl(280 85% 60%) 0%, hsl(185 85% 50%) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  /* OpenCode lightning pattern */
-  :root.provider-opencode .pattern-bg {
-    background-image:
-      linear-gradient(120deg, hsl(var(--aurora-violet) / 0.12), transparent 38%),
-      linear-gradient(245deg, hsl(var(--aurora-cyan) / 0.1), transparent 42%);
   }
 
   .ui-pill {
@@ -3235,13 +3084,6 @@ html.dark .aurora-grain,
   --login-galaxy-d: 0 0% 72%;
 }
 
-.login-galaxy-opencode {
-  --login-galaxy-a: 280 88% 64%;
-  --login-galaxy-b: 185 88% 52%;
-  --login-galaxy-c: 322 86% 62%;
-  --login-galaxy-d: 48 92% 58%;
-}
-
 .login-galaxy-claude {
   --login-galaxy-a: 16 55% 62%;
   --login-galaxy-b: 270 100% 75%;
@@ -3393,7 +3235,7 @@ html.dark .aurora-grain,
   --provider-button-c: 160 28% 64%;
 }
 
-.provider-login-button-opencode {
+.provider-login-button-pi {
   --provider-button-a: 252 58% 12%;
   --provider-button-b: 280 88% 38%;
   --provider-button-c: 185 88% 58%;
@@ -3575,60 +3417,6 @@ html.dark .aurora-grain,
   animation-delay: -1.33s;
 }
 
-/* OpenCode — Lava lamp (#07) */
-.pl-opencode-lamp {
-  border: 1.5px solid currentColor;
-  border-radius: 999px;
-  overflow: hidden;
-  background: transparent;
-  position: relative;
-  display: inline-block;
-}
-.pl-opencode-lamp svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-@keyframes pl-opencode-b1 {
-  0%,
-  100% {
-    transform: translateY(60px);
-  }
-  50% {
-    transform: translateY(-10px);
-  }
-}
-@keyframes pl-opencode-b2 {
-  0%,
-  100% {
-    transform: translate(10px, 50px);
-  }
-  50% {
-    transform: translate(-5px, 0);
-  }
-}
-@keyframes pl-opencode-b3 {
-  0%,
-  100% {
-    transform: translate(-10px, 55px);
-  }
-  50% {
-    transform: translate(8px, 5px);
-  }
-}
-.pl-opencode-b1 {
-  animation: pl-opencode-b1 4s ease-in-out infinite;
-}
-.pl-opencode-b2 {
-  animation: pl-opencode-b2 4s ease-in-out infinite;
-  animation-delay: -1.3s;
-}
-.pl-opencode-b3 {
-  animation: pl-opencode-b3 4s ease-in-out infinite;
-  animation-delay: -2.6s;
-}
-
 /* =============================================================
  * Provider-specific streaming-text cursors (Template B)
  * ============================================================= */
@@ -3668,20 +3456,6 @@ html.dark .aurora-grain,
   vertical-align: -2px;
   margin-left: 2px;
   animation: pl-blink 1s steps(2, end) infinite;
-}
-
-/* OpenCode — soft rounded pill with blur halo (#04 char-blur-in spirit) */
-.pl-cursor-opencode {
-  display: inline-block;
-  width: 8px;
-  height: 0.9em;
-  background: currentColor;
-  border-radius: 4px;
-  vertical-align: -1px;
-  margin-left: 3px;
-  filter: blur(0.5px);
-  animation: pl-blink 1.2s ease-in-out infinite;
-  box-shadow: 0 0 6px currentColor;
 }
 
 /* Streaming — fade the trailing edge of freshly-arriving text so it eases
@@ -3760,24 +3534,6 @@ html.dark .aurora-grain,
     transform: none;
     filter: none;
   }
-}
-
-/* Per-provider fine-tuning kept for back-compat / explicit targeting */
-.pl-stream-opencode {
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    black 0,
-    black calc(100% - 3em),
-    rgba(0, 0, 0, 0.7) calc(100% - 1.8em),
-    rgba(0, 0, 0, 0.25) 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    black 0,
-    black calc(100% - 3em),
-    rgba(0, 0, 0, 0.7) calc(100% - 1.8em),
-    rgba(0, 0, 0, 0.25) 100%
-  );
 }
 
 /* ================================================================
@@ -3955,12 +3711,8 @@ html.dark .aurora-grain,
   .pl-codex-k4,
   .pl-codex-k5,
   .pl-codex-k6,
-  .pl-opencode-b1,
-  .pl-opencode-b2,
-  .pl-opencode-b3,
   .pl-cursor-claude,
   .pl-cursor-codex,
-  .pl-cursor-opencode,
   .tl-read-beam,
   .tl-write-drop,
   .tl-edit-blob-a,
@@ -6668,8 +6420,7 @@ html.dark .chat-composer-form.glass-chrome {
   html.dark .dashboard-shell,
   :root.dark .dashboard-shell,
   :root.provider-plum .dashboard-shell,
-  :root.provider-codex .dashboard-shell,
-  :root.provider-opencode .dashboard-shell {
+  :root.provider-codex .dashboard-shell {
     --dashboard-chip: linear-gradient(
       180deg,
       color-mix(in oklab, hsl(var(--foreground)) 11%, transparent),
@@ -8624,8 +8375,7 @@ html.dark .chat-composer-form.glass-chrome {
   html.dark .app-sidebar-shell,
   :root.dark .app-sidebar-shell,
   :root.provider-plum .app-sidebar-shell,
-  :root.provider-codex .app-sidebar-shell,
-  :root.provider-opencode .app-sidebar-shell {
+  :root.provider-codex .app-sidebar-shell {
     --sidebar-row-surface: linear-gradient(
       180deg,
       color-mix(in oklab, hsl(var(--foreground)) 8.5%, transparent),

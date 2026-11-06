@@ -4,7 +4,7 @@
 # Walks the operator through: prereq check → .env generation → docker build →
 # container start → health check → optional `codex login` for first-time
 # Codex auth so the wrapper has a working primary CLI on first launch.
-# Other providers (OpenCode and Claude) can be logged in later from the UI.
+# Other providers (Pi, Mistral Vibe and Claude) can be set up later from the UI.
 #
 # Re-runnable: existing .env values are kept unless --reset is passed.
 
@@ -186,7 +186,7 @@ prompt DATA_DIR "Host path for SQLite DB and generated files" "$DATA_DIR_DEFAULT
 
 CONFIG_DIR_DEFAULT="$(get_existing CONFIG_DIR)"
 CONFIG_DIR_DEFAULT="${CONFIG_DIR_DEFAULT:-./config}"
-prompt CONFIG_DIR "Host path for per-harness config (claude, codex, opencode, pi, kimi, vibe)" "$CONFIG_DIR_DEFAULT"
+prompt CONFIG_DIR "Host path for per-harness config (claude, codex, pi, kimi, vibe)" "$CONFIG_DIR_DEFAULT"
 
 SESSION_SECRET="$(get_existing SESSION_SECRET)"
 if [[ -z "$SESSION_SECRET" ]]; then
@@ -268,13 +268,10 @@ CLI_PROVIDER_CLAUDE_MODELS=$(get_existing CLI_PROVIDER_CLAUDE_MODELS)
 CLI_PROVIDER_CLAUDE_DEFAULT_MODEL=${EXISTING_ENV[CLI_PROVIDER_CLAUDE_DEFAULT_MODEL]:-sonnet}
 CLI_PROVIDER_CODEX_MODELS=$(get_existing CLI_PROVIDER_CODEX_MODELS)
 CLI_PROVIDER_CODEX_DEFAULT_MODEL=${EXISTING_ENV[CLI_PROVIDER_CODEX_DEFAULT_MODEL]:-gpt-5.5}
-CLI_PROVIDER_OPENCODE_MODELS=$(get_existing CLI_PROVIDER_OPENCODE_MODELS)
-CLI_PROVIDER_OPENCODE_DEFAULT_MODEL=${EXISTING_ENV[CLI_PROVIDER_OPENCODE_DEFAULT_MODEL]:-z-ai/glm-5.1}
 CLI_PROVIDER_PI_MODELS=$(get_existing CLI_PROVIDER_PI_MODELS)
 CLI_PROVIDER_PI_DEFAULT_MODEL=${EXISTING_ENV[CLI_PROVIDER_PI_DEFAULT_MODEL]:-z-ai/glm-5.1}
-OPENCODE_ZAI_VISION_MCP=${EXISTING_ENV[OPENCODE_ZAI_VISION_MCP]:-auto}
+PLUM_ZAI_VISION_MCP=${EXISTING_ENV[PLUM_ZAI_VISION_MCP]:-${EXISTING_ENV[OPENCODE_ZAI_VISION_MCP]:-auto}}
 ADMIN_LLM_PROVIDER=$(get_existing ADMIN_LLM_PROVIDER)
-OPENCODE_DEBUG_EVENTS=${EXISTING_ENV[OPENCODE_DEBUG_EVENTS]:-0}
 CODEX_USAGE_URL=$(get_existing CODEX_USAGE_URL)
 CODEX_USER_AGENT=$(get_existing CODEX_USER_AGENT)
 COMFYUI_URL=$(get_existing COMFYUI_URL)
@@ -325,7 +322,6 @@ mkdir -p \
   "${DATA_DIR}" \
   "${CONFIG_DIR}/claude" \
   "${CONFIG_DIR}/codex" \
-  "${CONFIG_DIR}/opencode" \
   "${CONFIG_DIR}/pi" \
   "${CONFIG_DIR}/kimi" \
   "${CONFIG_DIR}/vibe" \
@@ -376,9 +372,9 @@ Codex is the default provider in the WebUI. The CLI inside the container needs
 to be linked to your OpenAI account once. This will run \`codex login\` in your
 terminal — follow the OAuth prompts.
 
-Other providers (OpenCode and Claude) can be authenticated later
-from the WebUI Settings page, or from the container shell:
-  docker exec -it claude-code-webui opencode auth login
+Other providers can be set up later from the WebUI Settings page: Pi uses the
+API keys under Einstellungen → Modellanbieter; Antigravity and Claude can also
+log in from the container shell:
   docker exec -it claude-code-webui pi /login
   docker exec -it claude-code-webui claude   # then type /login
 
@@ -411,8 +407,7 @@ Useful commands:
   docker compose logs -f claude-code-webui
   docker compose restart claude-code-webui
   docker exec -it claude-code-webui codex           # primary: Codex CLI
-  docker exec -it claude-code-webui opencode        # OpenCode CLI (75+ LLMs)
-  docker exec -it claude-code-webui pi              # Pi harness (shares OpenCode connections in WebUI)
+  docker exec -it claude-code-webui pi              # Pi harness (uses the WebUI model providers)
   docker exec -it claude-code-webui claude          # legacy: Claude CLI
 
 To re-run the installer (preserves existing .env): ./scripts/install.sh

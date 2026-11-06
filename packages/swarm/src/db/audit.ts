@@ -89,9 +89,12 @@ export async function audit(
   at: Date = new Date(),
 ): Promise<void> {
   const schreiben = async (tx: Db): Promise<void> => {
-    // Die letzte Zeile sperren, damit zwei gleichzeitige Läufe dieselbe Kette
-    // nicht verzweigen. Die Zeit setzt der Hub, nicht `now()`: Der Hash muss
-    // beim Nachrechnen dieselbe Zeit sehen.
+    // Vor dem Lesen serialisieren, auch bei leerer Tabelle. FOR UPDATE auf
+    // dem letzten Eintrag reicht nicht: Ein wartender Leser behält sonst den
+    // alten Snapshot und hängt einen zweiten Eintrag an denselben Vorgänger.
+    // Das Transaktionsschloss gilt auch für Aufrufer mit bereits offenem tx.
+    await tx`SELECT pg_advisory_xact_lock(1398227282, 1096107081)`
+    // Die Zeit setzt der Hub, nicht now(): Beim Nachrechnen muss sie gleich sein.
     const [prev] = await tx`SELECT hash FROM swarm.audit ORDER BY id DESC LIMIT 1 FOR UPDATE`
     const hash = chainHash((prev?.hash as string | undefined) ?? null, at.toISOString(), actor, action, target, detail)
     await tx`

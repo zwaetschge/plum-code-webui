@@ -36,7 +36,7 @@ export interface ProviderCapabilities {
  * eight places (config templates, helper spawns, the SQL default, /model), so a
  * version bump only ever updated some of them and the rest quietly disagreed.
  */
-export const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+export const DEFAULT_CODEX_MODEL = 'gpt-6.1-sol';
 
 export type ProviderFamilyLabel =
   | 'Codex'
@@ -79,9 +79,10 @@ export function getProviderLabelForModel(model?: string | null): ProviderFamilyL
  * Resolve the analytics provider from the persisted runtime attribution first.
  *
  * Model-only inference remains available for historical rows, but it cannot
- * distinguish Pi from OpenCode because both harnesses can run the same routed
- * model id (for example `z-ai/glm-5.1`). New usage rows therefore persist the
- * CLI provider that actually executed the turn and consumers must prefer it.
+ * tell which harness ran a routed model id (for example `z-ai/glm-5.1`). New
+ * usage rows therefore persist the CLI provider that actually executed the
+ * turn and consumers must prefer it. "OpenCode" is a read-only label for
+ * historical rows only; the provider was removed on 2026-10-27.
  */
 export function getProviderLabelForUsage(
   provider?: string | null,

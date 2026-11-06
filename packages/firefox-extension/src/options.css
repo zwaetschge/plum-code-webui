@@ -53,3 +53,15 @@ textarea {
   color: var(--text);
   resize: vertical;
 }
+
+.provider-toggles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 28px;
+  margin-top: 8px;
+}
+
+.provider-toggles .field {
+  margin: 0;
+  font-weight: 500;
+}

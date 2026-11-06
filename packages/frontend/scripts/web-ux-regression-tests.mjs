@@ -84,7 +84,7 @@ assert.match(
   /if \(sessionProvider === 'vibe'\) \{[\s\S]{0,260}\{ value: 'off', label: 'Off' \}/
 );
 assert.match(session, /sessionProvider === 'vibe'\s*\?\s*'Thinking'/);
-assert.match(session, /'opencode', 'pi', 'vibe'\]\.includes\(/);
+assert.match(session, /'codex', 'pi', 'vibe'\]\.includes\(/);
 
 // Sign-in: the shared cli-login dialog plus the write-only key field.
 assert.match(providerLogins, /DEVICE_LOGIN = new Set\(\['codex', 'claude', 'kimi', 'vibe'\]\)/);

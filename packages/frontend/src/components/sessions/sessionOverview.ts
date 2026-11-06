@@ -36,7 +36,6 @@ export const PROVIDER_ACCENT: Record<CLIProvider, string> = {
   claude: '#d97757',
   zai: '#14b8a6',
   codex: '#10a37f',
-  opencode: '#8b5cf6',
   pi: '#0ea5e9',
   vibe: '#ff7000',
 };

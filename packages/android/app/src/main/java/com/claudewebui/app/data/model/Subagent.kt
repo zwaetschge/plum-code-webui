@@ -20,9 +20,9 @@ import kotlinx.serialization.Serializable
 data class CliSubagentEntry(
     val id: String = "",
     val label: String = "",
-    /** One of codex, claude, zai, opencode, pi. */
+    /** One of codex, claude, zai, pi. */
     val provider: String = "codex",
-    /** Optional override; OpenCode wants `provider/model`, zai a bare GLM id. */
+    /** Optional override; Pi wants `provider/model`, zai a bare GLM id. */
     val model: String = "",
     val enabled: Boolean = true,
 )

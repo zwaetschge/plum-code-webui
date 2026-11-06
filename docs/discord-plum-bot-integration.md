@@ -38,7 +38,7 @@ session/delegation/approval paths as normal Plum work.
   configured webhook URL.
 - Every normal session turn receives a short `Discord Main Gateway` system
   reminder when Discord is enabled and configured. This reminder tells Codex,
-  OpenCode, Claude Code, and Vibe that Discord is the primary escalation and
+  Pi, Claude Code, and Vibe that Discord is the primary escalation and
   completion channel, and that final goal summaries should start with
   `Goal complete:`.
 - Automation goals created through `/api/automation/sessions/:id/goals` and

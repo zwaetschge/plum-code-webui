@@ -2,7 +2,7 @@
   "name": "plum-code-webui",
   "version": "0.1.0",
   "private": true,
-  "description": "Web UI for Codex, OpenCode, Pi, and Claude Code agent harnesses",
+  "description": "Web UI for Codex, Pi, Mistral Vibe, and Claude Code agent harnesses",
   "type": "module",
   "scripts": {
     "dev": "pnpm --parallel -r run dev",
@@ -19,7 +19,6 @@
   },
   "keywords": [
     "codex",
-    "opencode",
     "pi-agent",
     "claude-code",
     "webui",

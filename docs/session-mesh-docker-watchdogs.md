@@ -23,7 +23,7 @@ to make sessions usable as deliberate peers:
 
 Use these terms consistently in backend, UI, and prompts:
 
-- Subagent: provider-local worker inside one CLI turn. Existing Codex/OpenCode
+- Subagent: provider-local worker inside one CLI turn. Existing Codex/Pi
   subagent events fit here.
 - Peer: another WebUI session that can receive a message, produce a result, and
   keep its own transcript.

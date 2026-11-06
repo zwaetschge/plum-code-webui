@@ -5,9 +5,10 @@ import fs from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { DEFAULT_CODEX_MODEL } from '../../shared/src/types/cli-providers.js';
+import { getPiRun, setPiRunJournalPath } from '../src/services/claude/piRunJournal.js';
 import { fileURLToPath } from 'node:url';
 import {
-  buildOpenCodePermissionRules,
   CLI_PROVIDERS,
   getCLIArgs,
   getCliModels,
@@ -18,7 +19,7 @@ import {
   claudeContextWindowEnv,
   resetDiscovery,
   resolveCliProviderSelectedModel,
-  resolveOpenCodeConfiguredModel,
+  resolveConfiguredModel,
 } from '../src/services/cli-providers.js';
 import {
   classifyAttachment,
@@ -26,29 +27,12 @@ import {
   sanitizeAttachmentDisplayName,
   sanitizeAttachmentFilename,
 } from '../src/services/attachments.js';
-import {
-  buildOpenCodePromptText,
-  buildOpenCodeRuntimePrompt,
-  getOpenCodeBuildAgentPrompt,
-  getOpenCodePrimaryAgent,
-  isOpenCodeManagedBuildAgentPrompt,
-  DEFAULT_OPENCODE_STYLE_PROMPT,
-  OPENCODE_WEBUI_BUILD_AGENT_PROMPT_MARKER,
-  OPENCODE_WEBUI_SESSION_ARG,
-} from '../src/services/opencode/sessionContext.js';
-import {
-  applyOpenCodePrimaryAgentConfig,
-  applyZaiVisionMcpConfig,
-  buildWebuiOpenCodeProviderConfig,
-  resolveZaiVisionMcpPolicy,
-} from '../src/utils/providerLinks.js';
-import { getOpenCodeCredentialEnvVars } from '../src/utils/opencodeProviderKeys.js';
+import { getModelProviderCredentialEnvVars } from '../src/utils/modelProviderKeys.js';
 import {
   buildPiModelCatalog,
   readPiNativeModelIds,
   buildPiProviderConfig,
   isPiRunnableModel,
-  parsePiProviderModels,
 } from '../src/utils/piConfig.js';
 import {
   ensureDefaultClaudeMcpServers,
@@ -56,36 +40,8 @@ import {
 } from '../src/utils/mcpDefaults.js';
 import { sanitizeClaudeResumeTranscript } from '../src/utils/claudeResumeTranscript.js';
 import { mapCodexUsage } from '../src/utils/codexUsage.js';
-import {
-  buildOpenCodePollMessagesUrl,
-  buildOpenCodeTurnMessageId,
-  collectOpenCodeMessageUsage,
-  collectOpenCodePollCursor,
-  extractOpenCodeAssistantErrorMessage,
-  formatOpenCodeStallErrorMessage,
-  hasOpenCodeHardSafetyTimeoutElapsed,
-  OpencodeServer,
-  OPENCODE_POLL_MESSAGE_LIMIT,
-  OpenCodeProviderTurnGate,
-  isTerminalOpenCodeAssistantMessage,
-  resolveOpenCodeProviderTurnGateKey,
-  resolveOpenCodeNoProgressTimeoutMs,
-  resolveOpenCodeStallTimeout,
-  selectOpenCodeTurnMessages,
-  shouldDetachOpenCodeServer,
-  subtractOpenCodeUsage,
-  opencodeServer,
-} from '../src/services/opencode/OpencodeServer.js';
-import {
-  getOpenCodeProviderCatalog,
-  parseOpenCodeModelsCache,
-} from '../src/utils/opencodeCatalog.js';
-import {
-  hasOpenCodeGoLocalUsage,
-  mapZaiAccountUsage,
-  mapZaiUsage,
-  parseOpenCodeGoQuotaHtml,
-} from '../src/routes/usage.js';
+import { parseModelsCache } from '../src/utils/modelCatalog.js';
+import { mapZaiAccountUsage, mapZaiUsage } from '../src/routes/usage.js';
 import {
   createSessionSchema,
   readProjectIconCandidate,
@@ -134,7 +90,7 @@ import {
   findCodexExecRootThreadId,
   readCodexDescendantUsageDetail,
   formatCodexSharedContextForTest,
-  acpModeForSessionMode,
+  acpModeForSessionMode as _acpModeForSessionMode,
   resolveSessionStartMode,
   shouldRecoverInterruptedAcpTurn,
   isCodexNativeSlashCommand,
@@ -196,29 +152,6 @@ type DisconnectProcessStub = {
   disconnectedAt: number | null;
 };
 
-type OpenCodeQueueProcessStub = {
-  cliProvider: 'opencode';
-  opencodeIdle: boolean;
-  opencodeQueuedTurns: Array<{
-    queueId: string;
-    queuedAt: string;
-    originalMessage: string;
-    attachments?: unknown[];
-  }>;
-  currentToolName: string | null;
-  currentActivitySummary: string | null;
-  currentAgentType: string | null;
-  currentAgentDescription: string | null;
-  subagentRuns: Map<string, { status: 'started' | 'completed' | 'error' }>;
-  isStreaming: boolean;
-  mode: 'auto-accept';
-  model: string;
-  workingDirectory: string;
-  claudeSessionId: string | null;
-  lastActivityAt: number;
-  disconnectedAt: number | null;
-};
-
 type CodexQueueTurnStub = {
   queueId: string;
   queuedAt: string;
@@ -244,14 +177,6 @@ type AcpQueueProcessStub = {
   acpQueuedTurns: CodexQueueTurnStub[];
 };
 
-type OpenCodeMcpEntry = {
-  type?: string;
-  command?: string[];
-  environment?: Record<string, string>;
-  enabled?: boolean;
-  webuiManaged?: string;
-};
-
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '../../..');
 
@@ -261,20 +186,6 @@ function asUsageHarness(manager: ClaudeProcessManager): UsageHarness {
 
 function asProcessStore<T>(manager: ClaudeProcessManager): { processes: Map<string, T> } {
   return manager as unknown as { processes: Map<string, T> };
-}
-
-async function promiseWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timer: NodeJS.Timeout | null = null;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 function testProviderLabels() {
@@ -359,86 +270,6 @@ function testProviderTurnUsageAggregation() {
   assert.equal(claudeUsage.turnInputTokens, 125);
   assert.equal(claudeUsage.turnOutputTokens, 100);
   assert.equal(claudeUsage.turnCacheReadTokens, 2_875);
-
-  const seen = new Set<string>();
-  const rootUsage = collectOpenCodeMessageUsage(
-    [
-      {
-        info: {
-          id: 'root-message',
-          role: 'assistant',
-          tokens: {
-            input: 10,
-            output: 5,
-            reasoning: 3,
-            cache: { read: 100, write: 2 },
-          },
-        },
-      },
-    ],
-    seen
-  );
-  const childUsage = collectOpenCodeMessageUsage(
-    [
-      {
-        info: {
-          id: 'child-message',
-          role: 'assistant',
-          tokens: {
-            input: 20,
-            output: 7,
-            reasoning: 4,
-            cache: { read: 200, write: 1 },
-          },
-        },
-      },
-      {
-        info: {
-          id: 'root-message',
-          role: 'assistant',
-          tokens: {
-            input: 10,
-            output: 5,
-            reasoning: 3,
-            cache: { read: 100, write: 2 },
-          },
-        },
-      },
-    ],
-    seen
-  );
-  assert.deepEqual(rootUsage, {
-    input: 10,
-    output: 5,
-    reasoning: 3,
-    cacheRead: 100,
-    cacheWrite: 2,
-  });
-  assert.deepEqual(childUsage, {
-    input: 20,
-    output: 7,
-    reasoning: 4,
-    cacheRead: 200,
-    cacheWrite: 1,
-  });
-  assert.deepEqual(
-    subtractOpenCodeUsage(
-      { input: 30, output: 12, reasoning: 7, cacheRead: 300, cacheWrite: 3 },
-      rootUsage
-    ),
-    { input: 20, output: 7, reasoning: 4, cacheRead: 200, cacheWrite: 1 }
-  );
-  assert.equal(
-    subtractOpenCodeUsage(rootUsage, {
-      input: 11,
-      output: 5,
-      reasoning: 3,
-      cacheRead: 100,
-      cacheWrite: 2,
-    }),
-    null,
-    'counter resets must fall back instead of creating negative usage'
-  );
 }
 
 function testContextWindowFallbacks() {
@@ -446,6 +277,8 @@ function testContextWindowFallbacks() {
   assert.equal(resolveContextWindow('claude-opus-5'), 1_000_000);
   assert.equal(resolveContextWindow('claude-sonnet-5'), 1_000_000);
   assert.equal(resolveContextWindow('claude-haiku-4-5'), 200_000);
+  assert.equal(resolveContextWindow('claude-haiku-5-5'), 1_000_000);
+  assert.equal(resolveContextWindow('claude-opus-5-5'), 1_000_000);
   assert.equal(resolveContextWindow('gpt-5.5'), 256_000);
   assert.equal(resolveContextWindow('gpt-5.5-pro'), 256_000);
   assert.equal(resolveContextWindow('gpt-6-astra'), 1_100_000);
@@ -454,14 +287,14 @@ function testContextWindowFallbacks() {
   assert.equal(resolveContextWindow('gpt-5.4'), 196_000);
   assert.equal(resolveContextWindow('gpt-5.4-mini'), 128_000);
   assert.equal(resolveContextWindow('gpt-5.3-codex'), 400_000);
-  // Pi and OpenCode ids carry the provider prefix; the family must still match.
+  // Pi ids carry the provider prefix; the family must still match.
   assert.equal(resolveContextWindow('openai/gpt-5.5'), 256_000);
   assert.equal(resolveContextWindow('antigravity/gemini-3.7-flash'), 1_000_000);
   assert.equal(resolveContextWindow('z-ai/glm-5.1'), 200_000);
   assert.equal(resolveContextWindow('z-ai/glm-4.7'), 200_000);
   assert.equal(resolveContextWindow('z-ai/glm-4.5-air'), 128_000);
   assert.equal(resolveContextWindow('kimi-for-coding/k2p5'), 256_000);
-  assert.equal(resolveContextWindow('opencode/gpt-oss-120b'), 128_000);
+  assert.equal(resolveContextWindow('groq/gpt-oss-120b'), 128_000);
   // Unknown families: display falls back to the default, config writers get null.
   assert.equal(resolveContextWindow('alibaba-token-plan/qwen3.8-max-preview'), 200_000);
   assert.equal(lookupContextWindow('alibaba-token-plan/qwen3.8-max-preview'), null);
@@ -1435,6 +1268,8 @@ async function testCodexTurnFailedBooksUsageFromThreadState() {
 }
 
 function makePiManagerFixture(sessionId: string, overrides: Record<string, unknown> = {}) {
+  // Never the real data directory: dispatch and settle write the run journal.
+  setPiRunJournalPath(path.join(os.tmpdir(), `plum-pi-journal-${process.pid}.json`));
   const emitted: EmittedSocketEvent[] = [];
   const ioStub = {
     to: () => ({
@@ -1451,10 +1286,19 @@ function makePiManagerFixture(sessionId: string, overrides: Record<string, unkno
     processes: Map<string, Record<string, unknown>>;
     emitCompact: (...args: unknown[]) => void;
     resetCurrentContextUsage: (...args: unknown[]) => void;
+    emitUsage: (...args: unknown[]) => Promise<void>;
+    emitLifecycle: (...args: unknown[]) => Promise<void>;
+    saveUsageToDatabase: (...args: unknown[]) => Promise<void>;
+    saveAssistantMessage: (sessionId: string, content: string) => Promise<void>;
+    dispatchPiTurn: (sessionId: string, proc: unknown, turn: unknown) => void;
     translatePiMessage: (sessionId: string, raw: unknown) => unknown;
   };
   managerPrivate.emitCompact = () => undefined;
   managerPrivate.resetCurrentContextUsage = () => undefined;
+  managerPrivate.emitUsage = async () => undefined;
+  managerPrivate.emitLifecycle = async () => undefined;
+  const bookedUsage: Array<Record<string, number>> = [];
+  const savedMessages: string[] = [];
 
   const written: string[] = [];
   const proc: Record<string, unknown> = {
@@ -1479,7 +1323,18 @@ function makePiManagerFixture(sessionId: string, overrides: Record<string, unkno
     ...overrides,
   };
   managerPrivate.processes.set(sessionId, proc);
-  return { managerPrivate, proc, written, emitted };
+  managerPrivate.saveUsageToDatabase = async (_sessionId: unknown, booked: unknown) => {
+    const p = booked as Record<string, number>;
+    bookedUsage.push({
+      input: p.turnInputTokens,
+      output: p.turnOutputTokens,
+      cacheRead: p.turnCacheReadTokens,
+    });
+  };
+  managerPrivate.saveAssistantMessage = async (_sessionId: string, content: string) => {
+    savedMessages.push(content);
+  };
+  return { managerPrivate, proc, written, emitted, bookedUsage, savedMessages };
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -1569,7 +1424,7 @@ async function testPiResumesAfterPostTurnThresholdCompaction() {
     toolResults: [],
   });
   await managerPrivate.translatePiMessage(sessionId, { type: 'agent_end', messages: [] });
-  assert.equal(proc.piTurnInFlight, false);
+  assert.equal(proc.piTurnInFlight, true, 'agent_end is not the end of the run either');
 
   await managerPrivate.translatePiMessage(sessionId, {
     type: 'compaction_end',
@@ -1640,6 +1495,11 @@ async function testPiFailedCompactionDoesNotResume() {
   await sleep(6_400);
 
   assert.equal(written.length, 0, 'no nudge after a failed compaction');
+  const settled = await managerPrivate.translatePiMessage(sessionId, {
+    type: 'agent_settled',
+    aborted: false,
+  });
+  assert.deepEqual(settled, { type: 'result' });
   assert.equal(proc.piTurnInFlight, false);
   assert.equal(compactEvents.length, 1);
   assert.match(String(compactEvents[0]?.error), /overflow recovery failed/);
@@ -1652,6 +1512,208 @@ async function testPiFailedCompactionDoesNotResume() {
     ),
     'thinking indicator is switched off'
   );
+}
+
+/**
+ * Regression: every model round (`turn_end`) was reported as a finished turn.
+ * The spinner vanished between tool rounds, "done" notifications fired and
+ * parked setting restarts killed the running task. Only `agent_settled` ends a
+ * run, and the run's usage is booked once with every round in it.
+ */
+async function testPiRunEndsAtAgentSettledAndBooksAllRounds() {
+  const sessionId = 'session-pi-run-settled';
+  const { managerPrivate, proc, bookedUsage } = makePiManagerFixture(sessionId);
+
+  for (const input of [100, 200, 300]) {
+    const round = await managerPrivate.translatePiMessage(sessionId, {
+      type: 'turn_end',
+      message: {
+        role: 'assistant',
+        stopReason: 'toolUse',
+        usage: { input, output: 10, cacheRead: 5 },
+      },
+      toolResults: [],
+    });
+    assert.equal(round, null, 'a round is not a result');
+  }
+  assert.equal(
+    await managerPrivate.translatePiMessage(sessionId, { type: 'agent_end', messages: [] }),
+    null
+  );
+  assert.equal(proc.piTurnInFlight, true);
+  assert.equal(bookedUsage.length, 0, 'nothing booked before the run settles');
+
+  const settled = await managerPrivate.translatePiMessage(sessionId, {
+    type: 'agent_settled',
+    aborted: false,
+  });
+  assert.deepEqual(settled, { type: 'result' });
+  assert.equal(proc.piTurnInFlight, false);
+  assert.deepEqual(bookedUsage, [{ input: 600, output: 30, cacheRead: 15 }]);
+  assert.equal(proc.turnInputTokens, 300, 'the live readout keeps the last request');
+}
+
+/** A provider error that outlived Pi's retries is said in the chat, not swallowed. */
+async function testPiProviderErrorIsSurfaced() {
+  const sessionId = 'session-pi-error';
+  const { managerPrivate, proc, emitted, savedMessages } = makePiManagerFixture(sessionId);
+
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'auto_retry_start',
+    attempt: 1,
+    maxAttempts: 8,
+    delayMs: 3_000,
+    errorMessage: '529 overloaded',
+  });
+  assert.match(String(proc.currentActivitySummary), /Erneuter Versuch 1\/8 in 3 s: 529 overloaded/);
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'message_end',
+    message: { role: 'assistant', stopReason: 'error', errorMessage: 'credit balance is too low' },
+  });
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'auto_retry_end',
+    success: false,
+    attempt: 8,
+    finalError: 'credit balance is too low',
+  });
+  await managerPrivate.translatePiMessage(sessionId, { type: 'agent_settled', aborted: false });
+
+  assert.equal(savedMessages.length, 1);
+  assert.match(savedMessages[0]!, /Pi-Fehler:\*\* credit balance is too low/);
+  assert.ok(
+    emitted.some(
+      (entry) =>
+        entry.event === 'session:error' &&
+        /credit balance/.test(String((entry.data as { error?: string }).error))
+    )
+  );
+}
+
+/** A later round that gets through clears an earlier error; an abort says nothing. */
+async function testPiRecoveredOrAbortedRunStaysQuiet() {
+  const sessionId = 'session-pi-error-recovered';
+  const { managerPrivate, savedMessages } = makePiManagerFixture(sessionId);
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'message_end',
+    message: { role: 'assistant', stopReason: 'error', errorMessage: 'timeout' },
+  });
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'message_end',
+    message: { role: 'assistant', stopReason: 'stop' },
+  });
+  await managerPrivate.translatePiMessage(sessionId, { type: 'agent_settled', aborted: false });
+  assert.equal(savedMessages.length, 0);
+
+  const aborted = 'session-pi-error-aborted';
+  const second = makePiManagerFixture(aborted);
+  await second.managerPrivate.translatePiMessage(aborted, {
+    type: 'message_end',
+    message: { role: 'assistant', stopReason: 'error', errorMessage: 'timeout' },
+  });
+  await second.managerPrivate.translatePiMessage(aborted, { type: 'agent_settled', aborted: true });
+  assert.equal(second.savedMessages.length, 0);
+}
+
+/** Threshold compaction after a finished task must not start new work. */
+async function testPiNoContinueAfterCleanStop() {
+  const sessionId = 'session-pi-compact-after-stop';
+  const { managerPrivate, written } = makePiManagerFixture(sessionId);
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'turn_end',
+    message: { role: 'assistant', stopReason: 'stop', usage: { input: 1, output: 1 } },
+    toolResults: [],
+  });
+  await managerPrivate.translatePiMessage(sessionId, { type: 'agent_end', messages: [] });
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'compaction_end',
+    reason: 'threshold',
+    aborted: false,
+    willRetry: false,
+    result: { summary: 'ok', tokensBefore: 120_000 },
+  });
+  const settled = await managerPrivate.translatePiMessage(sessionId, {
+    type: 'agent_settled',
+    aborted: false,
+  });
+  assert.deepEqual(settled, { type: 'result' });
+  await sleep(6_400);
+  assert.equal(written.length, 0);
+}
+
+/** A prompt Pi refuses while compacting returns to the head of Plum's queue. */
+async function testPiRejectedPromptIsRequeued() {
+  const sessionId = 'session-pi-rejected';
+  const { managerPrivate, proc, written } = makePiManagerFixture(sessionId, {
+    piTurnInFlight: false,
+  });
+  const turn = {
+    queueId: 'm1',
+    chatId: null,
+    queuedAt: new Date().toISOString(),
+    originalMessage: 'weiter',
+    messageForClaude: 'weiter',
+    updateLastMessage: true,
+  };
+  managerPrivate.dispatchPiTurn(sessionId, proc, turn);
+  assert.equal(written.length, 1);
+  assert.equal((JSON.parse(written[0]!) as { type: string }).type, 'prompt');
+  assert.equal(proc.piTurnInFlight, true);
+
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'response',
+    command: 'prompt',
+    success: false,
+    error: 'Cannot submit a prompt while compaction is in progress',
+  });
+  assert.equal(proc.piTurnInFlight, false);
+  assert.equal(proc.piCompacting, true);
+  assert.deepEqual(
+    (proc.piQueuedTurns as Array<{ queueId: string }>).map((queued) => queued.queueId),
+    ['m1']
+  );
+}
+
+/**
+ * A run is journalled from dispatch to settle, with the running tool and the
+ * queued messages, so a crash or a backend restart can resume it.
+ */
+async function testPiRunIsJournalledUntilItSettles() {
+  const sessionId = 'session-pi-journal';
+  const { managerPrivate, proc } = makePiManagerFixture(sessionId, { piTurnInFlight: false });
+  managerPrivate.dispatchPiTurn(sessionId, proc, {
+    queueId: 'm1',
+    chatId: 'chat-1',
+    queuedAt: new Date().toISOString(),
+    originalMessage: 'baue das feature',
+    messageForClaude: 'baue das feature',
+    updateLastMessage: true,
+  });
+  assert.equal(getPiRun(sessionId)?.chatId, 'chat-1');
+
+  await managerPrivate.translatePiMessage(sessionId, {
+    type: 'tool_execution_start',
+    toolCallId: 't1',
+    toolName: 'bash',
+    args: { command: 'npm test --   --watch=false' },
+  });
+  assert.deepEqual(getPiRun(sessionId)?.tool, { name: 'bash', input: 'npm test -- --watch=false' });
+
+  proc.piQueuedTurns = [
+    {
+      queueId: 'm2',
+      chatId: 'chat-1',
+      queuedAt: '',
+      originalMessage: 'und dann deploy',
+      messageForClaude: '',
+    },
+  ];
+  (
+    managerPrivate as unknown as { emitQueueState: (id: string, p: unknown) => void }
+  ).emitQueueState(sessionId, proc);
+  assert.deepEqual(getPiRun(sessionId)?.queued, [{ message: 'und dann deploy', chatId: 'chat-1' }]);
+
+  await managerPrivate.translatePiMessage(sessionId, { type: 'agent_settled', aborted: false });
+  assert.equal(getPiRun(sessionId), null, 'a settled run leaves nothing to resume');
 }
 
 /** A manual /compact between turns must not inject a continuation. */
@@ -2337,7 +2399,7 @@ function testProviderCapabilities() {
     assert.equal(caps.modes, provider.supportsModes, provider.id);
   }
   assert.equal(getProviderCapabilities('codex').nativeVision, true);
-  assert.equal(getProviderCapabilities('opencode').imageBridge, true);
+  assert.equal(Object.hasOwn(CLI_PROVIDERS, 'opencode'), false, 'OpenCode was removed');
 }
 
 function testClaudeCurrentModelCatalog() {
@@ -2374,6 +2436,43 @@ function testClaudeCurrentModelCatalog() {
   assert.equal(catalog.labels['claude-sonnet-5'], 'Sonnet 5');
   assert.equal(catalog.labels['claude-haiku-4-5'], 'Haiku 4.5');
   assert.equal(catalog.labels.sonnet, 'Sonnet 5');
+
+  // Claude Code 2.1.318: IDs live in bundled JS arrays, display names in a
+  // separate block. IDs without a display name (legacy, unreleased) never win.
+  const native = parseClaudeCliModelCatalog(
+    [
+      'var _=[["claude-sonnet-5-5","VERTEX_REGION_CLAUDE_5_5_SONNET"],["claude-fable-5-1","X"],["claude-haiku-5-5","X"],["claude-opus-5-5","X"],["claude-opus-6","X"],["claude-haiku-3-55","X"],["claude-opus-4-5-20251101","X"]];',
+      'claude-opus-5',
+      'claude-haiku-4-5-20251001',
+      'Claude Opus 4.1',
+      'the latest Opus',
+      'Claude Fable 5.1',
+      'Claude Mythos 5.1',
+      'Claude Fable 5',
+      'Claude Opus 5.5',
+      'Claude Opus 5',
+      'Claude Sonnet 5.5',
+      'Claude Haiku 5.5',
+      'Claude Sonnet 5',
+      'Claude Haiku 3.5',
+    ].join('\n')
+  );
+  assert.deepEqual(native.models, [
+    'claude-fable-5-1',
+    'claude-opus-5-5',
+    'claude-sonnet-5-5',
+    'claude-haiku-5-5',
+  ]);
+  assert.equal(native.labels['claude-opus-5-5'], 'Opus 5.5');
+  assert.equal(native.labels.haiku, 'Haiku 5.5');
+  assert.equal(native.labels.fable, 'Fable 5.1');
+
+  // JavaScript CLI (one minified line, no standalone display names).
+  const js = parseClaudeCliModelCatalog(
+    'const m={firstParty:"claude-opus-4-8"},n="claude-sonnet-4-6",o="claude-haiku-4-5-20251001";'
+  );
+  assert.deepEqual(js.models, ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5']);
+  assert.equal(js.labels['claude-opus-4-8'], 'Opus 4.8');
 }
 
 function testClaudeContextWindowVariants() {
@@ -2408,7 +2507,7 @@ function testClaudeContextWindowVariants() {
   assert.equal(claudeCliContextWindow('claude-haiku-4-5'), null);
   assert.equal(claudeCliContextWindow('sonnet'), null);
   assert.equal(lookupContextWindow('claude-opus-5-5[1m]'), 1_000_000);
-  // Other providers (Pi, OpenCode) keep the native 1M window for bare ids.
+  // Other providers (Pi) keep the native 1M window for bare ids.
   assert.equal(lookupContextWindow('anthropic/claude-opus-5'), 1_000_000);
 
   const pinned = normalizeUsageSnapshot({
@@ -2429,7 +2528,9 @@ function testClaudeContextWindowVariants() {
 }
 
 function testCodexFastTierArgs() {
-  assert.deepEqual(CLI_PROVIDERS.codex.models.slice(0, 5), [
+  // Fallback list (cli-providers.ts): gpt-6.1-sol is the default since codex 0.162.
+  assert.deepEqual(CLI_PROVIDERS.codex.models.slice(0, 6), [
+    'gpt-6.1-sol',
     'gpt-6-astra',
     'gpt-5.5',
     'gpt-5.6-sol',
@@ -2604,29 +2705,35 @@ async function testCodexModelsCacheChangeInvalidatesDiscovery() {
 async function testCodexReasoningUiListsExposeFullEffortRange() {
   const expected = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
   const { getConversationReasoningOptions } = await import('../../frontend/src/lib/providers.js');
-  const actual = getConversationReasoningOptions('codex').map(option => option.value);
+  const actual = getConversationReasoningOptions('codex').map((option) => option.value);
   for (const value of expected) assert(actual.includes(value), `Codex picker lacks ${value}`);
-  const sessionPage = await fs.readFile(path.join(repoRoot, 'packages/frontend/src/pages/SessionPage.tsx'), 'utf8');
+  const sessionPage = await fs.readFile(
+    path.join(repoRoot, 'packages/frontend/src/pages/SessionPage.tsx'),
+    'utf8'
+  );
   assert.match(sessionPage, /getConversationReasoningOptions\(/);
-  const dashboard = await fs.readFile(path.join(repoRoot, 'packages/frontend/src/pages/DashboardPage.tsx'), 'utf8');
+  const dashboard = await fs.readFile(
+    path.join(repoRoot, 'packages/frontend/src/pages/DashboardPage.tsx'),
+    'utf8'
+  );
   for (const value of expected) assert.match(dashboard, new RegExp(`value: '${value}'`));
 }
 
-function testOpenCodeConfiguredModelAllowList() {
+function testConfiguredModelAllowList() {
   assert.equal(
-    resolveOpenCodeConfiguredModel('z-ai/glm-5.1', ['z-ai/glm-5.1', 'openai/gpt-5.2']),
+    resolveConfiguredModel('z-ai/glm-5.1', ['z-ai/glm-5.1', 'openai/gpt-5.2']),
     'z-ai/glm-5.1'
   );
   assert.equal(
-    resolveOpenCodeConfiguredModel('ollama/qwopus', ['z-ai/glm-5.1', 'openai/gpt-5.2']),
+    resolveConfiguredModel('ollama/qwopus', ['z-ai/glm-5.1', 'openai/gpt-5.2']),
     'z-ai/glm-5.1'
   );
-  assert.equal(resolveOpenCodeConfiguredModel('ollama/qwopus', []), 'ollama/qwopus');
-  assert.equal(resolveOpenCodeConfiguredModel(null, ['openai/gpt-5.2']), 'openai/gpt-5.2');
+  assert.equal(resolveConfiguredModel('ollama/qwopus', []), 'ollama/qwopus');
+  assert.equal(resolveConfiguredModel(null, ['openai/gpt-5.2']), 'openai/gpt-5.2');
 }
 
-function testOpenCodeZaiCredentialAliases() {
-  const envVars = getOpenCodeCredentialEnvVars('z-ai', {
+function testModelProviderZaiCredentialAliases() {
+  const envVars = getModelProviderCredentialEnvVars('z-ai', {
     'z-ai': {
       name: 'Z-AI',
       models: ['glm-5.1'],
@@ -2641,183 +2748,15 @@ function testOpenCodeZaiCredentialAliases() {
   assert.ok(envVars.includes('Z_AI_API_KEY'));
 }
 
-function testOpenCodeWebuiProviderConfig() {
-  const block = buildWebuiOpenCodeProviderConfig(
-    {
-      id: 'z-ai',
-      name: 'Z-AI',
-      apiKey: 'encrypted-secret',
-      baseUrl: 'https://api.z.ai/api/coding/paas/v4',
-      enabled: true,
-      createdAt: '2026-06-08T00:00:00.000Z',
-      updatedAt: '2026-06-08T00:00:00.000Z',
-    },
-    {
-      'z-ai': {
-        name: 'Z-AI',
-        models: ['glm-5.1', 'glm-5'],
-        description: 'test',
-        env: ['ZAI_API_KEY'],
-        api: 'https://api.z.ai/api/coding/paas/v4',
-        source: 'fallback',
-      },
-    }
-  );
-
-  assert.ok(block);
-  assert.equal(block?.npm, '@ai-sdk/openai-compatible');
-  assert.equal(block?.api, 'https://api.z.ai/api/coding/paas/v4');
-  assert.equal(block?.options?.baseURL, 'https://api.z.ai/api/coding/paas/v4');
-  assert.ok(block?.env?.includes('ZAI_API_KEY'));
-  assert.ok(block?.env?.includes('ZHIPU_API_KEY'));
-  assert.ok(block?.models?.['glm-5.1']);
-  assert.equal(block?.options?.apiKey, '{env:ZAI_API_KEY}');
-  assert.notEqual(block?.options?.apiKey, 'encrypted-secret');
-
-  const defaultUrlBlock = buildWebuiOpenCodeProviderConfig(
-    {
-      id: 'z-ai',
-      name: 'Z-AI',
-      apiKey: 'encrypted-secret',
-      enabled: true,
-      createdAt: '2026-06-08T00:00:00.000Z',
-      updatedAt: '2026-06-08T00:00:00.000Z',
-    },
-    {
-      'z-ai': {
-        name: 'Z-AI',
-        models: ['glm-5.1'],
-        description: 'test',
-        env: ['ZAI_API_KEY'],
-        api: 'https://api.z.ai/api/coding/paas/v4',
-        source: 'fallback',
-      },
-    }
-  );
-
-  assert.equal(defaultUrlBlock?.api, 'https://api.z.ai/api/coding/paas/v4');
-  assert.equal(defaultUrlBlock?.options?.baseURL, 'https://api.z.ai/api/coding/paas/v4');
-}
-
-function testZaiVisionMcpPolicyManagedConfig() {
-  assert.equal(resolveZaiVisionMcpPolicy(undefined), 'auto');
-  assert.equal(resolveZaiVisionMcpPolicy('always'), 'always');
-  assert.equal(resolveZaiVisionMcpPolicy('off'), 'off');
-  assert.equal(resolveZaiVisionMcpPolicy('false'), 'off');
-  assert.equal(resolveZaiVisionMcpPolicy('unexpected'), 'auto');
-
-  const provider = {
-    id: 'z-ai',
-    name: 'Z-AI',
-    apiKey: 'encrypted-secret',
-    baseUrl: 'https://api.z.ai/api/coding/paas/v4',
-    enabled: true,
-    createdAt: '2026-07-05T00:00:00.000Z',
-    updatedAt: '2026-07-05T00:00:00.000Z',
-  };
-
-  const autoConfig: Record<string, unknown> = {};
-  applyZaiVisionMcpConfig(autoConfig, { policy: 'auto', providers: [provider] });
-  const autoMcp = autoConfig.mcp as Record<string, OpenCodeMcpEntry>;
-  assert.deepEqual(autoMcp['zai-vision']?.command, ['npx', '-y', '@z_ai/mcp-server@latest']);
-  assert.equal(autoMcp['zai-vision']?.type, 'local');
-  assert.equal(autoMcp['zai-vision']?.enabled, true);
-  assert.equal(autoMcp['zai-vision']?.webuiManaged, 'zai-vision-v1');
-  assert.equal(autoMcp['zai-vision']?.environment?.Z_AI_MODE, 'ZAI');
-  assert.equal(autoMcp['zai-vision']?.environment?.Z_AI_API_KEY, undefined);
-
-  const missingKeyConfig: Record<string, unknown> = {};
-  applyZaiVisionMcpConfig(missingKeyConfig, {
-    policy: 'auto',
-    providers: [{ ...provider, apiKey: '' }],
-  });
-  assert.equal((missingKeyConfig.mcp as Record<string, unknown>)?.['zai-vision'], undefined);
-
-  const globalAutoConfig: Record<string, unknown> = {
-    mcp: {
-      'zai-vision': {
-        type: 'local',
-        command: ['npx', '-y', '@z_ai/mcp-server@latest'],
-        enabled: true,
-        webuiManaged: 'zai-vision-v1',
-      },
-    },
-  };
-  applyZaiVisionMcpConfig(globalAutoConfig, { policy: 'auto' });
-  assert.equal(
-    (globalAutoConfig.mcp as Record<string, OpenCodeMcpEntry>)['zai-vision']?.webuiManaged,
-    'zai-vision-v1'
-  );
-
-  const explicitNoKeyConfig: Record<string, unknown> = {
-    mcp: {
-      'zai-vision': {
-        type: 'local',
-        command: ['npx', '-y', '@z_ai/mcp-server@latest'],
-        enabled: true,
-        webuiManaged: 'zai-vision-v1',
-      },
-    },
-  };
-  applyZaiVisionMcpConfig(explicitNoKeyConfig, {
-    policy: 'auto',
-    providers: [{ ...provider, apiKey: '' }],
-  });
-  assert.equal((explicitNoKeyConfig.mcp as Record<string, unknown>)['zai-vision'], undefined);
-
-  const alwaysConfig: Record<string, unknown> = {};
-  applyZaiVisionMcpConfig(alwaysConfig, {
-    policy: 'always',
-    providers: [],
-    inheritedEnv: { Z_AI_API_KEY: 'redacted' },
-  });
-  const alwaysMcp = alwaysConfig.mcp as Record<string, OpenCodeMcpEntry>;
-  assert.equal(alwaysMcp['zai-vision']?.enabled, true);
-  assert.equal(alwaysMcp['zai-vision']?.environment?.Z_AI_API_KEY, undefined);
-
-  const offConfig: Record<string, unknown> = {
-    mcp: {
-      'zai-vision': {
-        type: 'local',
-        command: ['npx', '-y', '@z_ai/mcp-server@latest'],
-        enabled: true,
-        webuiManaged: 'zai-vision-v1',
-      },
-    },
-  };
-  applyZaiVisionMcpConfig(offConfig, { policy: 'off', providers: [provider] });
-  assert.equal((offConfig.mcp as Record<string, unknown>)['zai-vision'], undefined);
-
-  const userOwnedConfig: Record<string, unknown> = {
-    mcp: {
-      'zai-vision': {
-        type: 'local',
-        command: ['custom-zai-vision'],
-        enabled: true,
-      },
-    },
-  };
-  applyZaiVisionMcpConfig(userOwnedConfig, { policy: 'auto', providers: [provider] });
-  assert.deepEqual(
-    ((userOwnedConfig.mcp as Record<string, OpenCodeMcpEntry>)['zai-vision'] as OpenCodeMcpEntry)
-      .command,
-    ['custom-zai-vision']
-  );
-}
-
-function testOpenCodeSessionModelSelection() {
+function testPiSessionModelSelection() {
   const configured = ['z-ai/glm-5.1', 'openai/gpt-5.2', 'moonshot/kimi-k2'];
 
   assert.equal(
-    resolveCliProviderSelectedModel('opencode', 'z-ai/glm-5.1', configured, 'openai/gpt-5.2'),
-    'openai/gpt-5.2'
-  );
-  assert.equal(
-    resolveCliProviderSelectedModel('opencode', 'z-ai/glm-5.1', configured, null),
+    resolveCliProviderSelectedModel('pi', 'z-ai/glm-5.1', configured, null),
     'z-ai/glm-5.1'
   );
   assert.equal(
-    resolveCliProviderSelectedModel('opencode', 'z-ai/glm-5.1', configured, 'unknown/model'),
+    resolveCliProviderSelectedModel('pi', 'z-ai/glm-5.1', configured, 'unknown/model'),
     'z-ai/glm-5.1'
   );
   assert.equal(
@@ -2830,7 +2769,7 @@ function testOpenCodeSessionModelSelection() {
   );
 }
 
-function testPiSharesOpenCodeProviderConfigWithoutPersistingSecrets() {
+function testPiProviderConfigDoesNotPersistSecrets() {
   const entry = buildPiProviderConfig(
     {
       id: 'z-ai',
@@ -2910,7 +2849,7 @@ function testPiModelsCarryContextWindow() {
   assert.equal(catalogModel?.contextWindow, 204_800);
   assert.equal(catalogModel?.maxTokens, 32_768, 'output ceiling is capped for the request budget');
 
-  const parsed = parseOpenCodeModelsCache(
+  const parsed = parseModelsCache(
     JSON.stringify({
       'z-ai': {
         id: 'z-ai',
@@ -2930,36 +2869,18 @@ function testPiModelsCarryContextWindow() {
 }
 
 function testPiUsesOnlyEnabledUserProviderModels() {
-  const configured = parsePiProviderModels({
-    provider: {
-      'llama-local': {
-        models: {
-          'Qwopus3.6-35B-A3B-v1-Q4_K_M.gguf': {},
-        },
-      },
-      'z-ai': {
-        models: {
-          'glm-5.2': {},
-          'glm-5.1': {},
-        },
-      },
-      deepseek: {
-        models: {
-          'deepseek-chat': {},
-          'deepseek-reasoner': {},
-        },
-      },
-      'alibaba-token-plan': {
-        models: {
-          'qwen3.8-max-preview': {},
-          'qwen3.7-plus': {},
-          'qwen-image-2.0': {},
-          'wan2.7-image-pro': {},
-          'happyhorse-1.1-t2v': {},
-        },
-      },
-    },
-  });
+  const configured: Record<string, string[]> = {
+    'llama-local': ['Qwopus3.6-35B-A3B-v1-Q4_K_M.gguf'],
+    'z-ai': ['glm-5.2', 'glm-5.1'],
+    deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+    'alibaba-token-plan': [
+      'qwen3.8-max-preview',
+      'qwen3.7-plus',
+      'qwen-image-2.0',
+      'wan2.7-image-pro',
+      'happyhorse-1.1-t2v',
+    ],
+  };
   const provider = (
     id: string,
     enabled = true
@@ -3005,7 +2926,7 @@ function testPiUsesOnlyEnabledUserProviderModels() {
   assert.equal(isPiRunnableModel('qwen-image-2.0-pro'), false);
 }
 
-function testPiMergesModelSourcesAndSurvivesWithoutOpenCodeConfig() {
+function testPiMergesModelSources() {
   const provider = (
     id: string,
     models?: string[]
@@ -3020,7 +2941,7 @@ function testPiMergesModelSourcesAndSurvivesWithoutOpenCodeConfig() {
     updatedAt: '2026-01-01T00:00:00.000Z',
   });
 
-  // A model known only to the catalog and one known only to the OpenCode config
+  // A model known only to the catalog and one known only to the configured list
   // must both survive: taking one source and ignoring the other used to hide
   // every model the winning source had never heard of.
   const merged = buildPiModelCatalog(
@@ -3039,8 +2960,8 @@ function testPiMergesModelSourcesAndSurvivesWithoutOpenCodeConfig() {
   );
   assert.deepEqual(merged.models, ['z-ai/glm-4.7', 'z-ai/glm-5.1', 'z-ai/glm-5.2']);
 
-  // The registry alone is enough: no catalog entry, no OpenCode config. This is
-  // what keeps a self-hosted endpoint working when OpenCode is not installed.
+  // The registry alone is enough: no catalog entry, no configured list. This is
+  // what keeps a self-hosted endpoint working.
   const registryOnly = buildPiModelCatalog(
     [provider('alibaba-token-plan', ['qwen3.8-max-preview', 'qwen-image-2.0'])],
     {},
@@ -3101,22 +3022,6 @@ function testPiUsesNativeMistralProvider() {
   }
 }
 
-function testOpenCodeAllowedDirectories() {
-  const rules = buildOpenCodePermissionRules('manual', {
-    workingDirectory: '/workspace/project',
-    allowedDirectories: ['/mnt/shared'],
-  });
-  assert.deepEqual(
-    rules.filter((rule) => rule.permission === 'external_directory' && rule.action === 'allow'),
-    [
-      { permission: 'external_directory', pattern: '/workspace/project', action: 'allow' },
-      { permission: 'external_directory', pattern: '/workspace/project/**', action: 'allow' },
-      { permission: 'external_directory', pattern: '/mnt/shared', action: 'allow' },
-      { permission: 'external_directory', pattern: '/mnt/shared/**', action: 'allow' },
-    ]
-  );
-}
-
 function testAttachmentNormalization() {
   assert.equal(classifyAttachment('image/png', 'shot.png'), 'image');
   assert.equal(classifyAttachment('application/pdf', 'paper.pdf'), 'pdf');
@@ -3124,100 +3029,6 @@ function testAttachmentNormalization() {
   assert.equal(extensionForAttachment('image/jpeg'), 'jpg');
   assert.equal(sanitizeAttachmentFilename('../bad name?.png'), '.._bad_name_.png');
   assert.equal(sanitizeAttachmentDisplayName('../Überblick 2026.pdf'), 'Überblick 2026.pdf');
-}
-
-function testOpenCodePromptContext() {
-  const previousStyle = process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT;
-  const previousAgent = process.env.CLI_PROVIDER_OPENCODE_DEFAULT_AGENT;
-  try {
-    delete process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT;
-    delete process.env.CLI_PROVIDER_OPENCODE_DEFAULT_AGENT;
-    const text = buildOpenCodePromptText('Generate an image', 'webui-session-1');
-    assert.match(text, /Plum Code WebUI communication contract:/);
-    assert.match(text, /capable colleague/);
-    assert.match(text, /Plum WebUI session id: webui-session-1/);
-    assert.match(text, new RegExp(OPENCODE_WEBUI_SESSION_ARG));
-    assert.ok(text.endsWith('Generate an image'));
-
-    const styleOnly = buildOpenCodePromptText('Plain turn');
-    assert.match(styleOnly, new RegExp(DEFAULT_OPENCODE_STYLE_PROMPT.split('\n')[0]));
-    assert.ok(styleOnly.endsWith('Plain turn'));
-
-    const contextual = buildOpenCodePromptText('Implement the fix', {
-      webuiSessionId: 'webui-session-2',
-      mode: 'planning',
-      reasoningLevel: 'xhigh',
-    });
-    assert.match(contextual, /Mode is planning/);
-    assert.match(contextual, /Effort is max/);
-    assert.match(contextual, /webui-session-2/);
-
-    process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT = '';
-    const emptyEnvStyle = buildOpenCodePromptText('Empty env turn');
-    assert.match(emptyEnvStyle, /capable colleague/);
-    assert.ok(emptyEnvStyle.endsWith('Empty env turn'));
-
-    process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT = 'Use terse test style.';
-    const custom = buildOpenCodePromptText('Custom turn');
-    assert.match(custom, /Use terse test style\./);
-    assert.doesNotMatch(custom, /capable colleague/);
-
-    process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT = '0';
-    assert.equal(buildOpenCodePromptText('No style'), 'No style');
-    assert.match(
-      buildOpenCodePromptText('Runtime only', { mode: 'auto-accept', reasoningLevel: 'low' }),
-      /Mode is auto-accept/
-    );
-  } finally {
-    if (previousStyle === undefined) {
-      delete process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT;
-    } else {
-      process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT = previousStyle;
-    }
-    if (previousAgent === undefined) {
-      delete process.env.CLI_PROVIDER_OPENCODE_DEFAULT_AGENT;
-    } else {
-      process.env.CLI_PROVIDER_OPENCODE_DEFAULT_AGENT = previousAgent;
-    }
-  }
-}
-
-function testOpenCodeRuntimePrompt() {
-  const manualPrompt = buildOpenCodeRuntimePrompt({ mode: 'manual' });
-  assert.match(manualPrompt, /Mode is manual/);
-  assert.match(manualPrompt, /Bound shell and browser checks/);
-  assert.match(manualPrompt, /avoid broad `pkill -f`/);
-  assert.match(buildOpenCodeRuntimePrompt({ reasoningLevel: 'extra-high' }), /Effort is max/);
-  assert.match(
-    buildOpenCodeRuntimePrompt({ mode: 'danger', reasoningLevel: 'extra-high' }),
-    /product goal/i
-  );
-  assert.match(
-    buildOpenCodeRuntimePrompt({ mode: 'danger', reasoningLevel: 'extra-high' }),
-    /visible|screenshot/i
-  );
-  assert.match(
-    buildOpenCodeRuntimePrompt({ mode: 'danger', reasoningLevel: 'extra-high' }),
-    /real blocker/i
-  );
-  assert.match(
-    buildOpenCodeRuntimePrompt({ mode: 'danger', reasoningLevel: 'extra-high' }),
-    /does not mean/i
-  );
-  assert.match(
-    buildOpenCodeRuntimePrompt({ mode: 'danger', reasoningLevel: 'extra-high' }),
-    /Vale decision proxy/i
-  );
-  assert.match(
-    buildOpenCodeRuntimePrompt({ mode: 'danger', reasoningLevel: 'extra-high' }),
-    /silently choose/i
-  );
-  assert.doesNotMatch(
-    buildOpenCodeRuntimePrompt({ mode: 'danger', reasoningLevel: 'high' }),
-    /consider edge cases/i
-  );
-  assert.match(buildOpenCodeRuntimePrompt({ reasoningLevel: 'medium' }), /Effort is medium/);
-  assert.equal(buildOpenCodeRuntimePrompt(), '');
 }
 
 function testDangerModeProvidesAutonomousExecutionContract() {
@@ -3378,82 +3189,8 @@ async function testCodexImageGenerationEventQueuesOnlyManagedOutput() {
   }
 }
 
-function testOpenCodePrimaryAgentConfig() {
-  const previousStyle = process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT;
-  const previousAgent = process.env.CLI_PROVIDER_OPENCODE_DEFAULT_AGENT;
-  try {
-    delete process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT;
-    delete process.env.CLI_PROVIDER_OPENCODE_DEFAULT_AGENT;
-
-    assert.equal(getOpenCodePrimaryAgent(), 'build');
-    assert.match(
-      getOpenCodeBuildAgentPrompt(),
-      new RegExp(OPENCODE_WEBUI_BUILD_AGENT_PROMPT_MARKER)
-    );
-
-    const config: Record<string, unknown> = {};
-    applyOpenCodePrimaryAgentConfig(config);
-    const build = (config.agent as Record<string, Record<string, unknown>>).build;
-    assert.equal(build.mode, 'primary');
-    assert.equal(build.description, 'Primary Plum Code WebUI coding agent.');
-    assert.match(String(build.prompt), /capable colleague/);
-
-    process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT = '';
-    const emptyEnvConfig: Record<string, unknown> = {};
-    applyOpenCodePrimaryAgentConfig(emptyEnvConfig);
-    const emptyEnvBuild = (emptyEnvConfig.agent as Record<string, Record<string, unknown>>).build;
-    assert.match(String(emptyEnvBuild.prompt), /capable colleague/);
-
-    const customConfig: Record<string, unknown> = {
-      agent: { build: { mode: 'primary', prompt: 'Keep my own build prompt.' } },
-    };
-    applyOpenCodePrimaryAgentConfig(customConfig);
-    const customBuild = (customConfig.agent as Record<string, Record<string, unknown>>).build;
-    assert.equal(customBuild.prompt, 'Keep my own build prompt.');
-
-    const oldManagedConfig: Record<string, unknown> = {
-      agent: {
-        build: {
-          prompt: '<!-- plum-webui-opencode-style-v2 -->\nold managed prompt',
-        },
-      },
-    };
-    applyOpenCodePrimaryAgentConfig(oldManagedConfig);
-    const oldManagedBuild = (oldManagedConfig.agent as Record<string, Record<string, unknown>>)
-      .build;
-    assert.match(
-      String(oldManagedBuild.prompt),
-      new RegExp(OPENCODE_WEBUI_BUILD_AGENT_PROMPT_MARKER)
-    );
-    assert.equal(isOpenCodeManagedBuildAgentPrompt(String(oldManagedBuild.prompt)), true);
-
-    process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT = '0';
-    const disabledConfig: Record<string, unknown> = {
-      agent: {
-        build: {
-          prompt: `<!-- ${OPENCODE_WEBUI_BUILD_AGENT_PROMPT_MARKER} -->\nold managed prompt`,
-        },
-      },
-    };
-    applyOpenCodePrimaryAgentConfig(disabledConfig);
-    const disabledBuild = (disabledConfig.agent as Record<string, Record<string, unknown>>).build;
-    assert.equal(disabledBuild.prompt, undefined);
-  } finally {
-    if (previousStyle === undefined) {
-      delete process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT;
-    } else {
-      process.env.CLI_PROVIDER_OPENCODE_STYLE_PROMPT = previousStyle;
-    }
-    if (previousAgent === undefined) {
-      delete process.env.CLI_PROVIDER_OPENCODE_DEFAULT_AGENT;
-    } else {
-      process.env.CLI_PROVIDER_OPENCODE_DEFAULT_AGENT = previousAgent;
-    }
-  }
-}
-
-function testOpenCodeModelsCacheParsing() {
-  const catalog = parseOpenCodeModelsCache(
+function testModelsCacheParsing() {
+  const catalog = parseModelsCache(
     JSON.stringify({
       openai: {
         id: 'openai',
@@ -3473,156 +3210,19 @@ function testOpenCodeModelsCacheParsing() {
           'solar-pro3': { id: 'solar-pro3' },
         },
       },
+      // models.dev lists the OpenCode gateways; the registry must not offer them.
+      opencode: { id: 'opencode', name: 'OpenCode Zen', models: { 'kimi-k2.7': {} } },
+      'opencode-go': { id: 'opencode-go', name: 'OpenCode Go', models: { 'glm-5.1': {} } },
     })
   );
+
+  assert.equal(catalog.opencode, undefined);
+  assert.equal(catalog['opencode-go'], undefined);
 
   assert.deepEqual(catalog.openai?.models, ['gpt-5.2', 'gpt-4o']);
   assert.equal(catalog.openai?.env?.[0], 'OPENAI_API_KEY');
   assert.equal(catalog.openai?.source, 'models.dev');
   assert.ok(Object.keys(catalog).indexOf('openai') < Object.keys(catalog).indexOf('upstage'));
-}
-
-function testOpenCodeFallbackCatalogIncludesKimiK27() {
-  const catalog = getOpenCodeProviderCatalog();
-
-  assert.ok(catalog['opencode-go']?.models.includes('kimi-k2.7'));
-  assert.ok(catalog.opencode?.models.includes('kimi-k2.7'));
-}
-
-function testOpenCodeNoProgressTimeoutAllowsSlowFirstTokenModels() {
-  assert.equal(resolveOpenCodeNoProgressTimeoutMs(undefined), 10 * 60 * 1000);
-  assert.equal(resolveOpenCodeNoProgressTimeoutMs('120000'), 120_000);
-  assert.equal(resolveOpenCodeNoProgressTimeoutMs('0'), 0);
-  assert.equal(resolveOpenCodeNoProgressTimeoutMs('5000'), 30_000);
-  assert.equal(resolveOpenCodeNoProgressTimeoutMs('not-a-number'), 10 * 60 * 1000);
-}
-
-function testOpenCodeStallTimeoutCoversSilentToolHangs() {
-  const startedAt = 1_000_000;
-  const timeoutMs = 10 * 60 * 1000;
-
-  assert.equal(
-    resolveOpenCodeStallTimeout({
-      now: startedAt + timeoutMs + 1,
-      startedAt,
-      lastObservedAt: null,
-      observedChange: false,
-      timeoutMs,
-    }),
-    'no-progress'
-  );
-
-  assert.equal(
-    resolveOpenCodeStallTimeout({
-      now: startedAt + 30_000,
-      startedAt,
-      lastObservedAt: startedAt + 10_000,
-      observedChange: true,
-      timeoutMs,
-    }),
-    null
-  );
-
-  assert.equal(
-    resolveOpenCodeStallTimeout({
-      now: startedAt + 10_000 + timeoutMs + 1,
-      startedAt,
-      lastObservedAt: startedAt + 10_000,
-      observedChange: true,
-      timeoutMs,
-    }),
-    'stalled'
-  );
-
-  assert.equal(
-    resolveOpenCodeStallTimeout({
-      now: startedAt + 10_000 + timeoutMs + 1,
-      startedAt,
-      lastObservedAt: startedAt + 10_000,
-      observedChange: true,
-      timeoutMs: 0,
-    }),
-    null
-  );
-}
-
-function testOpenCodeHardSafetyTimeoutAlwaysStopsTurn() {
-  const startedAt = 1_000_000;
-  assert.equal(hasOpenCodeHardSafetyTimeoutElapsed(startedAt + 30 * 60 * 1000, startedAt), false);
-  assert.equal(
-    hasOpenCodeHardSafetyTimeoutElapsed(startedAt + 30 * 60 * 1000 + 1, startedAt),
-    true
-  );
-}
-
-async function testOpenCodeZaiTurnsAreSerializedByProviderGate() {
-  assert.equal(resolveOpenCodeProviderTurnGateKey('z-ai/glm-5.2'), 'z-ai');
-  assert.equal(resolveOpenCodeProviderTurnGateKey('zai/glm-5.2'), 'z-ai');
-  assert.equal(resolveOpenCodeProviderTurnGateKey('opencode-go/glm-5.2'), null);
-  assert.equal(resolveOpenCodeProviderTurnGateKey('codex/gpt-5.5'), null);
-  assert.equal(resolveOpenCodeProviderTurnGateKey(null), null);
-
-  const gate = new OpenCodeProviderTurnGate();
-  const releaseFirst = await gate.acquire('z-ai', 'session-a');
-  let secondStarted = false;
-  const secondAcquire = gate.acquire('z-ai', 'session-b').then((release) => {
-    secondStarted = true;
-    return release;
-  });
-
-  await Promise.resolve();
-  assert.equal(secondStarted, false);
-
-  releaseFirst();
-  const releaseSecond = await promiseWithTimeout(secondAcquire, 100);
-  assert.equal(secondStarted, true);
-  releaseSecond();
-
-  const releaseZai = await gate.acquire('z-ai', 'session-c');
-  const releaseOther = await promiseWithTimeout(gate.acquire(null, 'session-d'), 100);
-  releaseOther();
-  releaseZai();
-}
-
-async function testOpenCodeQueuedProviderTurnCancellationDoesNotHang() {
-  const gate = new OpenCodeProviderTurnGate();
-  const releaseFirst = await gate.acquire('z-ai', 'session-active');
-  const queuedAcquire = gate.acquire('z-ai', 'session-cancelled');
-
-  gate.releaseForSession('session-cancelled');
-
-  await assert.rejects(
-    promiseWithTimeout(queuedAcquire, 100),
-    /cancelled.*session-cancelled/i,
-    'unsubscribing a queued session must settle its pending gate acquisition'
-  );
-
-  releaseFirst();
-  const releaseNext = await promiseWithTimeout(gate.acquire('z-ai', 'session-next'), 100);
-  releaseNext();
-}
-
-async function testOpenCodeProviderTurnGateShutdownCancelsAllWaiters() {
-  const gate = new OpenCodeProviderTurnGate();
-  const releaseActive = await gate.acquire('z-ai', 'session-active');
-  const queuedAcquire = gate.acquire('z-ai', 'session-waiting');
-
-  (gate as OpenCodeProviderTurnGate & { cancelAll(reason: string): void }).cancelAll(
-    'OpenCode server restarted'
-  );
-
-  await assert.rejects(
-    promiseWithTimeout(queuedAcquire, 100),
-    /OpenCode server restarted/,
-    'server shutdown must settle every queued gate acquisition'
-  );
-  releaseActive();
-
-  const releaseAfterRestart = await promiseWithTimeout(
-    gate.acquire('z-ai', 'session-after-restart'),
-    100
-  );
-  releaseAfterRestart();
 }
 
 function testSettingsThemeSchemaAcceptsEink() {
@@ -3652,7 +3252,10 @@ function testVibeProviderIsRegistered() {
   assert.ok(args.includes('z-ai/glm-5.1'));
   assert.ok(args.includes('xhigh'));
   assert.ok(args.includes('pi-session-123'));
-  assert.equal(CLI_PROVIDERS.pi.defaultModel, CLI_PROVIDERS.opencode.defaultModel);
+  assert.equal(
+    CLI_PROVIDERS.pi.defaultModel,
+    process.env.CLI_PROVIDER_PI_DEFAULT_MODEL || 'z-ai/glm-5.1'
+  );
 }
 
 function testSessionSchemasAcceptVibe() {
@@ -3685,7 +3288,6 @@ function testPerTurnModeChangesDoNotRestartActiveChildren() {
   assert.equal(appliesModeOnNextTurnWithoutRestart('vibe'), true);
   assert.equal(appliesModeOnNextTurnWithoutRestart('codex'), true);
   assert.equal(appliesModeOnNextTurnWithoutRestart('claude'), false);
-  assert.equal(appliesModeOnNextTurnWithoutRestart('opencode'), false);
   assert.equal(appliesModeOnNextTurnWithoutRestart('pi'), false);
 }
 
@@ -4026,289 +3628,6 @@ function testZaiAccountUsageShape() {
   );
 }
 
-function testOpenCodeGoMonitorHtmlShape() {
-  const snapshot = parseOpenCodeGoQuotaHtml(
-    'rollingUsage:$R[30]={status:"ok",resetInSec:17562,usagePercent:1},' +
-      'weeklyUsage:$R[31]={status:"ok",resetInSec:533388,usagePercent:5},' +
-      'monthlyUsage:$R[32]={status:"ok",resetInSec:2485309,usagePercent:19}'
-  );
-
-  assert.equal(snapshot?.source, 'scraping');
-  assert.equal(snapshot?.rolling.usagePercent, 1);
-  assert.equal(snapshot?.weekly.resetsInSeconds, 533_388);
-  assert.equal(snapshot?.monthly.usagePercent, 19);
-  assert.equal(parseOpenCodeGoQuotaHtml('<html>No quota here</html>'), null);
-
-  const resetFirst = parseOpenCodeGoQuotaHtml(
-    'rollingUsage:$R[30]={resetInSec:3600,usagePercent:7.5},' +
-      'weeklyUsage:$R[31]={resetInSec:7200,usagePercent:2.25},' +
-      'monthlyUsage:$R[32]={resetInSec:14400,usagePercent:16.75}'
-  );
-  assert.equal(resetFirst?.rolling.usagePercent, 7.5);
-  assert.equal(resetFirst?.weekly.resetsInSeconds, 7200);
-  assert.equal(resetFirst?.monthly.usagePercent, 16.75);
-
-  const dataSlot = parseOpenCodeGoQuotaHtml(`<div data-slot="usage">
-    <div data-slot="usage-item">
-      <span data-slot="usage-label">Rolling Usage</span>
-      <span data-slot="usage-value"><!--$-->1<!--/-->%</span>
-      <span data-slot="reset-time"><!--$-->Resets in<!--/--> <!--$-->1 hour 56 minutes<!--/--></span>
-    </div>
-    <div data-slot="usage-item">
-      <span data-slot="usage-label">Weekly Usage</span>
-      <span data-slot="usage-value"><!--$-->2.5<!--/-->%</span>
-      <span data-slot="reset-time"><!--$-->Resets in<!--/--> <!--$-->6 days 2 hours<!--/--></span>
-    </div>
-    <div data-slot="usage-item">
-      <span data-slot="usage-label">Monthly Usage</span>
-      <span data-slot="usage-value"><!--$-->0<!--/-->%</span>
-      <span data-slot="reset-now"><!--$-->reset-now<!--/--></span>
-    </div>
-  </div>`);
-  assert.equal(dataSlot?.rolling.resetsInSeconds, 6960);
-  assert.equal(dataSlot?.weekly.usagePercent, 2.5);
-  assert.equal(dataSlot?.monthly.resetsInSeconds, 0);
-}
-
-function testOpenCodeGoLocalEstimateRequiresUsage() {
-  assert.equal(hasOpenCodeGoLocalUsage([{ requests: 0 }, { requests: 0 }, { requests: 0 }]), false);
-  assert.equal(hasOpenCodeGoLocalUsage([{ requests: 0 }, { requests: 1 }, { requests: 0 }]), true);
-}
-
-function testOpenCodeTerminalMessageDetection() {
-  const providerError = {
-    info: {
-      id: 'msg-error',
-      role: 'assistant',
-      error: {
-        name: 'APIError',
-        data: {
-          message: 'Model qwen3.7-max is not supported for format oa-compat',
-          statusCode: 401,
-          responseBody:
-            '{"type":"error","error":{"type":"ModelError","message":"Model qwen3.7-max is not supported for format oa-compat"}}',
-        },
-      },
-      time: { completed: 1781991715787 },
-    },
-    parts: [],
-  };
-
-  assert.equal(
-    extractOpenCodeAssistantErrorMessage(providerError),
-    'Model qwen3.7-max is not supported for format oa-compat'
-  );
-  assert.equal(isTerminalOpenCodeAssistantMessage(providerError), true);
-
-  assert.equal(
-    isTerminalOpenCodeAssistantMessage({
-      info: { role: 'assistant', finish: 'unknown', time: { completed: 1780863102766 } },
-      parts: [
-        { type: 'reasoning', text: 'Thinking' },
-        {
-          type: 'tool',
-          state: { status: 'error', error: 'Tool execution aborted' },
-        },
-        { type: 'step-finish' },
-      ],
-    }),
-    true
-  );
-  assert.equal(
-    isTerminalOpenCodeAssistantMessage({
-      info: { role: 'assistant', finish: 'unknown' },
-      parts: [{ type: 'reasoning', text: 'Still working' }],
-    }),
-    false
-  );
-}
-
-function testOpenCodePollCursorPriming() {
-  const cursor = collectOpenCodePollCursor([
-    {
-      info: { id: 'msg-old', role: 'assistant', finish: 'stop' },
-      parts: [
-        { id: 'text-old', type: 'text', text: 'Already shown' },
-        { id: 'reasoning-old', type: 'reasoning', text: 'Internal reasoning' },
-        { id: 'tool-old', type: 'tool', state: { status: 'completed' } },
-        { id: 'finish-old', type: 'step-finish' },
-      ],
-    },
-    {
-      info: { id: 'msg-user', role: 'user' },
-      parts: [{ id: 'user-text', type: 'text', text: 'Ignore me' }],
-    },
-    {
-      info: {
-        id: 'msg-error',
-        role: 'assistant',
-        error: { data: { message: 'Provider rejected the selected model' } },
-      },
-      parts: [],
-    },
-  ]);
-
-  assert.equal(cursor.textLens.get('text-old'), 'Already shown'.length);
-  assert.equal(cursor.textLens.get('reasoning-old'), 'Internal reasoning'.length);
-  assert.equal(cursor.textLens.get('finish-old'), 1);
-  assert.equal(cursor.textLens.has('user-text'), false);
-  assert.equal(cursor.toolStatus.get('tool-old'), 'completed');
-  assert.equal(cursor.finishedMessages.has('msg-old'), true);
-  assert.equal(cursor.finishedMessages.has('msg-error'), true);
-}
-
-function testOpenCodePollingIsBoundedToCurrentTurn() {
-  const turnMessageId = buildOpenCodeTurnMessageId('webui-turn-123');
-  assert.equal(turnMessageId, 'msg_plum_webui-turn-123');
-
-  const pollUrl = new URL(buildOpenCodePollMessagesUrl('http://127.0.0.1:4321', 'ses/a'));
-  assert.equal(pollUrl.pathname, '/session/ses%2Fa/message');
-  assert.equal(pollUrl.searchParams.get('limit'), String(OPENCODE_POLL_MESSAGE_LIMIT));
-
-  const selected = selectOpenCodeTurnMessages(
-    [
-      {
-        info: { id: 'msg-old-assistant', role: 'assistant', parentID: 'msg-old-user' },
-        parts: [{ id: 'part-old', type: 'text', text: 'Old history' }],
-      },
-      {
-        info: { id: turnMessageId, role: 'user' },
-        parts: [{ id: 'part-user', type: 'text', text: 'Current prompt' }],
-      },
-      {
-        info: { id: 'msg-current-assistant', role: 'assistant', parentID: turnMessageId },
-        parts: [{ id: 'part-current', type: 'text', text: 'Current answer' }],
-      },
-      {
-        info: { id: 'msg-unrelated', role: 'assistant', parentID: 'msg-other-user' },
-        parts: [{ id: 'part-unrelated', type: 'text', text: 'Unrelated answer' }],
-      },
-    ],
-    turnMessageId
-  );
-
-  assert.deepEqual(
-    selected.map((message) => message.info?.id),
-    [turnMessageId, 'msg-current-assistant']
-  );
-}
-
-function testOpenCodeServerUsesProcessGroupsOnPosix() {
-  assert.equal(shouldDetachOpenCodeServer('linux'), true);
-  assert.equal(shouldDetachOpenCodeServer('darwin'), true);
-  assert.equal(shouldDetachOpenCodeServer('win32'), false);
-}
-
-async function testOpenCodePollingSerializesAndAbortsRequests() {
-  const server = new OpencodeServer();
-  const harness = server as unknown as {
-    baseUrl: string | null;
-    startPolling: (sessionId: string, turnMessageId: string) => void;
-    stopPolling: (sessionId: string) => void;
-  };
-  const originalFetch = globalThis.fetch;
-  const pending: Array<{ resolve: () => void }> = [];
-  let calls = 0;
-  let active = 0;
-  let maxActive = 0;
-  let aborted = 0;
-
-  globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit) => {
-    calls += 1;
-    active += 1;
-    maxActive = Math.max(maxActive, active);
-
-    return new Promise<Response>((resolve, reject) => {
-      let settled = false;
-      const finish = (callback: () => void) => {
-        if (settled) return;
-        settled = true;
-        active -= 1;
-        init?.signal?.removeEventListener('abort', onAbort);
-        callback();
-      };
-      const onAbort = () => {
-        finish(() => {
-          aborted += 1;
-          reject(new DOMException('Polling aborted', 'AbortError'));
-        });
-      };
-      init?.signal?.addEventListener('abort', onAbort, { once: true });
-      pending.push({
-        resolve: () =>
-          finish(() => {
-            resolve(
-              new Response('[]', {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' },
-              })
-            );
-          }),
-      });
-    });
-  }) as typeof fetch;
-
-  try {
-    harness.baseUrl = 'http://127.0.0.1:4321';
-    harness.startPolling('ses-serialized', 'msg_plum_serialized-turn');
-
-    // A setInterval implementation would start a second request at 500ms even
-    // though the first one is still pending.
-    await new Promise((resolve) => setTimeout(resolve, 620));
-    assert.equal(calls, 1);
-    assert.equal(maxActive, 1);
-
-    pending[0]?.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 620));
-    assert.equal(calls, 2);
-    assert.equal(maxActive, 1);
-
-    harness.stopPolling('ses-serialized');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(aborted, 1);
-    assert.equal(active, 0);
-  } finally {
-    harness.stopPolling('ses-serialized');
-    globalThis.fetch = originalFetch;
-  }
-}
-
-function testOpenCodeStallErrorDescribesLastToolWithoutSecrets() {
-  const cursor = collectOpenCodePollCursor([
-    {
-      info: { id: 'msg-running', role: 'assistant' },
-      parts: [
-        {
-          id: 'tool-running',
-          type: 'tool',
-          tool: 'bash',
-          callID: 'call-running',
-          state: {
-            status: 'running',
-            title:
-              'API_TOKEN=secret-value curl -H "Authorization: Bearer hidden-token" http://127.0.0.1:8787/api/dashboard',
-          },
-        },
-      ],
-    },
-  ]);
-
-  assert.equal(cursor.lastToolActivity?.tool, 'bash');
-  assert.equal(cursor.lastToolActivity?.status, 'running');
-  assert.match(cursor.lastToolActivity?.preview ?? '', /API_TOKEN=<redacted>/);
-  assert.doesNotMatch(cursor.lastToolActivity?.preview ?? '', /secret-value|hidden-token/);
-
-  const message = formatOpenCodeStallErrorMessage('stalled', 600, cursor.lastToolActivity);
-  assert.match(message, /Last observed tool: bash/);
-  assert.match(message, /status: running/);
-  assert.match(message, /API_TOKEN=<redacted>/);
-}
-
-/**
- * A single shared `cli` account predates per-user proxy identities. The first
- * proxy login adopts it rather than creating a second user, so the sessions,
- * settings and usage history that account already owns stay attached to it.
- */
 async function testProxyUserAdoptsLegacySharedCliUser() {
   await pgRun(
     `INSERT INTO users (id, email, name, provider, provider_id, role)
@@ -4424,121 +3743,6 @@ function testDisconnectedSessionStaysRunning() {
 
   assert.equal(manager.isSessionRunning(sessionId), true);
   assert.notEqual(harness.processes.get(sessionId)?.disconnectedAt, null);
-}
-
-async function testOpenCodeRestartCleanupAbortsAndUnsubscribesRemoteTurn() {
-  const ioStub = {
-    to: () => ({ emit: () => undefined }),
-  };
-  const manager = new ClaudeProcessManager(
-    ioStub as unknown as ClaudeProcessManagerIo,
-    createTestEventSequenceAllocator()
-  );
-  const restartHarness = manager as unknown as {
-    detachProcessForRestart: (proc: Record<string, unknown>) => void;
-  };
-  const abortCalls: string[] = [];
-  const unsubscribeCalls: string[] = [];
-  let localKillCalls = 0;
-  const originalAbort = opencodeServer.abort;
-  const originalUnsubscribe = opencodeServer.unsubscribe;
-
-  opencodeServer.abort = async (sessionId: string) => {
-    abortCalls.push(sessionId);
-  };
-  opencodeServer.unsubscribe = (sessionId: string) => {
-    unsubscribeCalls.push(sessionId);
-  };
-
-  try {
-    restartHarness.detachProcessForRestart({
-      cliProvider: 'opencode',
-      serverBacked: true,
-      claudeSessionId: 'remote-opencode-session',
-      process: {
-        kill: () => {
-          localKillCalls += 1;
-          return true;
-        },
-      },
-    });
-
-    assert.deepEqual(abortCalls, ['remote-opencode-session']);
-    assert.deepEqual(unsubscribeCalls, ['remote-opencode-session']);
-    assert.equal(localKillCalls, 0);
-  } finally {
-    opencodeServer.abort = originalAbort;
-    opencodeServer.unsubscribe = originalUnsubscribe;
-  }
-}
-
-function testOpenCodeQueueStateAndRuntime() {
-  const emitted: EmittedSocketEvent[] = [];
-  const ioStub = {
-    to: () => ({
-      emit: (event: string, data: unknown) => {
-        emitted.push({ event, data });
-      },
-    }),
-  };
-  const manager = new ClaudeProcessManager(
-    ioStub as unknown as ClaudeProcessManagerIo,
-    createTestEventSequenceAllocator()
-  );
-  const harness = asProcessStore<OpenCodeQueueProcessStub>(manager);
-  const queueHarness = manager as unknown as {
-    emitQueueState: (sessionId: string, proc: OpenCodeQueueProcessStub) => void;
-  };
-  const sessionId = 'opencode-queue-session';
-  const proc: OpenCodeQueueProcessStub = {
-    cliProvider: 'opencode',
-    opencodeIdle: false,
-    opencodeQueuedTurns: [
-      {
-        queueId: 'queued-1',
-        queuedAt: '2026-06-13T22:00:00.000Z',
-        originalMessage: 'follow-up while opencode is still working',
-        attachments: [{ mimeType: 'text/plain' }],
-      },
-    ],
-    currentToolName: null,
-    currentActivitySummary: null,
-    currentAgentType: null,
-    currentAgentDescription: null,
-    subagentRuns: new Map(),
-    isStreaming: false,
-    mode: 'auto-accept',
-    model: 'z-ai/glm-5.1',
-    workingDirectory: '/workspace/demo',
-    claudeSessionId: 'remote-session',
-    lastActivityAt: Date.now(),
-    disconnectedAt: null,
-  };
-
-  harness.processes.set(sessionId, proc);
-  queueHarness.emitQueueState(sessionId, proc);
-
-  const queueEvent = emitted.find((entry) => entry.event === 'session:queue');
-  assert.deepEqual(queueEvent?.data, {
-    sessionId,
-    provider: 'opencode',
-    depth: 1,
-    items: [
-      {
-        id: 'queued-1',
-        preview: 'follow-up while opencode is still working',
-        createdAt: '2026-06-13T22:00:00.000Z',
-        attachments: 1,
-      },
-    ],
-    busy: true,
-    preempting: false,
-  });
-
-  const runtime = manager.getSessionRuntimeSnapshot(sessionId);
-  assert.equal(runtime.queueDepth, 1);
-  assert.equal(runtime.busy, true);
-  assert.equal(runtime.activitySummary, '1 turn queued');
 }
 
 function queuedTurn(id: string): CodexQueueTurnStub {
@@ -4735,7 +3939,8 @@ async function testCodexConfigSyncIdempotence() {
     const firstConfig = await fs.readFile(configPath, 'utf8');
     assert.equal(firstConfig.startsWith('\n'), false);
     assert.match(firstConfig, /\[profiles\.fast\]/);
-    assert.match(firstConfig, /model = "gpt-5\.5"/);
+    // The managed block follows the shared default (gpt-6.1-sol since codex 0.162).
+    assert.ok(firstConfig.includes(`model = "${DEFAULT_CODEX_MODEL}"`));
     assert.match(firstConfig, /service_tier = "fast"/);
     assert.match(firstConfig, /\[mcp_servers\.oracle\]/);
     assert.match(firstConfig, /command = "node"/);
@@ -4795,7 +4000,7 @@ async function testDefaultMcpServerSeeding() {
     assert.deepEqual(parsed.mcpServers.subagents.args, ['/app/scripts/mcp-servers/subagents.mjs']);
     assert.deepEqual(parsed.mcpServers.firefox.args, ['/app/scripts/mcp-servers/firefox.mjs']);
     assert.equal(parsed.mcpServers.rea.command, 'npx');
-    assert.deepEqual(parsed.mcpServers.rea.args, ['--yes', 'rea-agents@6.3.0', 'mcp']);
+    assert.deepEqual(parsed.mcpServers.rea.args, ['--yes', 'rea-agents@6.7.0', 'mcp']);
     assert.equal(parsed.env?.KEEP, '1');
 
     const second = await ensureDefaultClaudeMcpServers({ settingsPath });
@@ -5473,7 +4678,14 @@ function testPricingTable() {
   assert.deepEqual(resolveModelPricing('gpt-5.5')?.input, 5);
   assert.deepEqual(resolveModelPricing('gpt-5.4-mini')?.output, 4.5);
   assert.deepEqual(resolveModelPricing('gpt-5.2')?.input, 1.75);
+  assert.deepEqual(resolveModelPricing('claude-fable-5-1')?.cacheRead, 0.25);
+  assert.deepEqual(resolveModelPricing('claude-opus-5-5')?.input, 4);
+  assert.deepEqual(resolveModelPricing('claude-opus-5-5[1m]')?.output, 20);
+  assert.deepEqual(resolveModelPricing('claude-sonnet-5-5')?.label, 'Claude Sonnet 5.5');
+  assert.deepEqual(resolveModelPricing('claude-haiku-5-5')?.input, 0.1);
+  assert.deepEqual(resolveModelPricing('opus')?.label, 'Claude Opus 5.5');
   assert.deepEqual(resolveModelPricing('claude-fable-5')?.output, 50);
+  assert.deepEqual(resolveModelPricing('claude-fable-5')?.cacheRead, 1);
   assert.deepEqual(resolveModelPricing('claude-opus-5')?.cacheWrite, 6.25);
   assert.deepEqual(resolveModelPricing('claude-sonnet-5')?.input, 2);
   assert.deepEqual(resolveModelPricing('claude-sonnet-5')?.output, 10);
@@ -5500,8 +4712,13 @@ function testPricingTable() {
     label: 'Kimi K3',
   });
   assert.deepEqual(resolveModelPricing('moonshot/kimi-k3')?.input, 3);
-  assert.deepEqual(resolveModelPricing('deepseek/deepseek-v4-flash')?.cacheRead, 0.0028);
-  assert.deepEqual(resolveModelPricing('deepseek/deepseek-v4-pro')?.output, 0.87);
+  // Peak rates (2026-11); retired Flash names bill as V4.1 Flash.
+  assert.deepEqual(resolveModelPricing('deepseek/deepseek-flash')?.input, 0.3);
+  assert.deepEqual(resolveModelPricing('deepseek/deepseek-v4-flash')?.cacheRead, 0.006);
+  assert.deepEqual(resolveModelPricing('deepseek/deepseek-v4-pro')?.output, 3.96);
+  assert.equal(resolveContextWindow('deepseek-flash'), 1_000_000);
+  assert.equal(resolveContextWindow('deepseek-v4-pro'), 1_000_000);
+  assert.equal(resolveContextWindow('deepseek-r1'), 128_000);
   assert.deepEqual(resolveModelPricing('gemini-3.1-pro-preview')?.cacheRead, 0.2);
   assert.deepEqual(resolveModelPricing('mistral-vibe-cli-latest')?.output, 7.5);
   assert.deepEqual(resolveModelPricing('devstral-small-latest')?.input, 0.1);
@@ -5664,6 +4881,12 @@ await testPiManualCompactWithoutTurnDoesNotResume();
 await testPiResumesAfterPostTurnThresholdCompaction();
 await testPiCompactionBudgetRefillsOnlyAfterCleanStop();
 await testPiFailedCompactionDoesNotResume();
+await testPiRunEndsAtAgentSettledAndBooksAllRounds();
+await testPiProviderErrorIsSurfaced();
+await testPiRecoveredOrAbortedRunStaysQuiet();
+await testPiNoContinueAfterCleanStop();
+await testPiRejectedPromptIsRequeued();
+await testPiRunIsJournalledUntilItSettles();
 await testCodexContextFallbackUsesThreadState();
 await testCodexContextFallbackCapsThreadStateAtWindow();
 await testCodexCompactEventRetainsCompactedContext();
@@ -5679,32 +4902,19 @@ testCodexSharedRegistryDoesNotRepeatLongDescriptions();
 testSessionStyleContextIsSentOnlyWhenItChanges();
 await testCodexModelsCacheChangeInvalidatesDiscovery();
 await testCodexReasoningUiListsExposeFullEffortRange();
-testOpenCodeConfiguredModelAllowList();
-testOpenCodeZaiCredentialAliases();
-testOpenCodeWebuiProviderConfig();
-testZaiVisionMcpPolicyManagedConfig();
-testOpenCodeSessionModelSelection();
-testPiSharesOpenCodeProviderConfigWithoutPersistingSecrets();
+testConfiguredModelAllowList();
+testModelProviderZaiCredentialAliases();
+testPiSessionModelSelection();
+testPiProviderConfigDoesNotPersistSecrets();
 testPiModelsCarryContextWindow();
 testPiUsesOnlyEnabledUserProviderModels();
-testPiMergesModelSourcesAndSurvivesWithoutOpenCodeConfig();
+testPiMergesModelSources();
 testPiUsesNativeMistralProvider();
-testOpenCodeAllowedDirectories();
 testAttachmentNormalization();
-testOpenCodePromptContext();
-testOpenCodeRuntimePrompt();
 testDangerModeProvidesAutonomousExecutionContract();
 await testExplicitWorkspaceImagesBecomePathFreePendingMedia();
 await testCodexImageGenerationEventQueuesOnlyManagedOutput();
-testOpenCodePrimaryAgentConfig();
-testOpenCodeModelsCacheParsing();
-testOpenCodeFallbackCatalogIncludesKimiK27();
-testOpenCodeNoProgressTimeoutAllowsSlowFirstTokenModels();
-testOpenCodeStallTimeoutCoversSilentToolHangs();
-testOpenCodeHardSafetyTimeoutAlwaysStopsTurn();
-await testOpenCodeZaiTurnsAreSerializedByProviderGate();
-await testOpenCodeQueuedProviderTurnCancellationDoesNotHang();
-await testOpenCodeProviderTurnGateShutdownCancelsAllWaiters();
+testModelsCacheParsing();
 testSettingsThemeSchemaAcceptsEink();
 testVibeProviderIsRegistered();
 testSessionSchemasAcceptVibe();
@@ -5724,19 +4934,9 @@ await testGeneratedSessionIconImageReadsOneShotOutput();
 testLegacySessionIconMessageIsNotUsedForGeneratedIcons();
 await testProjectIconCandidateFindsMonorepoDesktopIcon();
 testZaiUsageTrackerQuotaShape();
-testOpenCodeGoMonitorHtmlShape();
-testOpenCodeGoLocalEstimateRequiresUsage();
-testOpenCodeTerminalMessageDetection();
-testOpenCodePollCursorPriming();
-testOpenCodePollingIsBoundedToCurrentTurn();
-testOpenCodeServerUsesProcessGroupsOnPosix();
-await testOpenCodePollingSerializesAndAbortsRequests();
-testOpenCodeStallErrorDescribesLastToolWithoutSecrets();
 await testProxyUserAdoptsLegacySharedCliUser();
 testCodexSessionIdExtraction();
 testDisconnectedSessionStaysRunning();
-await testOpenCodeRestartCleanupAbortsAndUnsubscribesRemoteTurn();
-testOpenCodeQueueStateAndRuntime();
 testCodexQueueModeIsFifoAndSteeringPreservesAcceptedTurns();
 await testAcpQueueDrainsEveryWaitingFollowup();
 testMemoryOptimizerUsesConfigHomeAndStrictManagedPlaceholders();
@@ -5754,8 +4954,16 @@ testClaudeCliUpdaterPromotesAndExecutesNativeBinary();
 testPiUpdaterIncludesHarnessAndMcpBridge();
 testPricingTable();
 
-assert.equal(Object.hasOwn(CLI_PROVIDERS, 'kimi'), false, 'retired Kimi Code must not be spawnable');
-assert.equal(createSessionSchema.safeParse({ name: 'retired', workingDirectory: '/tmp', cliProvider: 'kimi' }).success, false);
+assert.equal(
+  Object.hasOwn(CLI_PROVIDERS, 'kimi'),
+  false,
+  'retired Kimi Code must not be spawnable'
+);
+assert.equal(
+  createSessionSchema.safeParse({ name: 'retired', workingDirectory: '/tmp', cliProvider: 'kimi' })
+    .success,
+  false
+);
 assert.equal(updateProviderSchema.safeParse({ cliProvider: 'kimi' }).success, false);
 
 await dropTestSchema();

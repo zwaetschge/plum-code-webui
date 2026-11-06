@@ -66,6 +66,14 @@ function hasKeyIn(text: string): boolean {
   return /^\s*MISTRAL_API_KEY\s*=\s*['"]?[^'"\s]+/m.test(text);
 }
 
+/** The key Vibe signs in with; a non-empty process value wins over `.env`, as in Vibe. */
+export function readVibeApiKey(): string | null {
+  const fromProcess = process.env.MISTRAL_API_KEY?.trim();
+  if (fromProcess) return fromProcess;
+  const match = /^\s*MISTRAL_API_KEY\s*=\s*['"]?([^'"\s]+)/m.exec(readEnvFile());
+  return match?.[1] ?? null;
+}
+
 function resolveVibeBinary(): string | null {
   const command = CLI_PROVIDERS.vibe.command;
   if (!command) return null;

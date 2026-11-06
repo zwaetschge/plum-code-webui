@@ -20,9 +20,10 @@ const LOGO_BY_PROVIDER: Record<string, UiProvider> = {
   Claude: 'claude',
   Codex: 'codex',
   'Z.AI': 'zai',
+  // Historical rows of removed harnesses keep their label but no brand mark.
   Kimi: 'plum',
+  OpenCode: 'plum',
   Pi: 'pi',
-  OpenCode: 'opencode',
   Vibe: 'vibe',
 };
 

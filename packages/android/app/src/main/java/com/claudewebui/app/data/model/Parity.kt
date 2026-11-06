@@ -30,6 +30,8 @@ data class BrowserToken(
     val id: String,
     val name: String = "",
     val tokenPrefix: String = "",
+    /** "browser", or "watch" for a token this phone handed to its Wear OS watch. */
+    val scope: String = "browser",
     val revoked: Boolean = false,
     val lastUsedAt: String? = null,
     val createdAt: String = "",
@@ -39,6 +41,20 @@ data class BrowserToken(
 
 @Serializable
 data class CreateBrowserTokenInput(val name: String)
+
+/**
+ * POST /api/browser-bridge/watch-token — a watch-scope bridge token the phone
+ * hands to its Wear OS watch over the Data Layer. [token] is returned only here.
+ */
+@Serializable
+data class WatchToken(
+    val id: String,
+    val name: String = "",
+    val token: String = "",
+)
+
+@Serializable
+data class CreateWatchTokenInput(val name: String)
 
 @Serializable
 data class BrowserClientInfo(

@@ -104,7 +104,8 @@ fun LegacyPermissionCard(
 }
 
 /**
- * Card for OpenCode question prompts (`session:question_request`).
+ * Card for agent question prompts (`session:question_request`, e.g. Vibe's
+ * ask_user_question).
  * answers[i] carries the selected labels (or custom text) for question i.
  */
 @OptIn(ExperimentalMaterial3Api::class)

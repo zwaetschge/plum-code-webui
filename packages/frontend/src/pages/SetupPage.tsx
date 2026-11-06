@@ -162,8 +162,8 @@ function HarnessCard({ harness, onChanged }: { harness: SetupHarness; onChanged:
 }
 
 /**
- * Endpoints are stored in the WebUI provider registry, so both Pi and OpenCode
- * pick them up without either harness having to be installed first.
+ * Endpoints are stored in the WebUI model provider registry, so Pi, model chat
+ * and voice pick them up without any harness having to be installed first.
  */
 function EndpointForm({ onSaved }: { onSaved: () => void }) {
   const [id, setId] = useState('');
@@ -174,7 +174,7 @@ function EndpointForm({ onSaved }: { onSaved: () => void }) {
 
   const save = useMutation({
     mutationFn: async () => {
-      await api.put('/api/opencode/providers', {
+      await api.put('/api/model-providers/providers', {
         id: id.trim(),
         name: name.trim() || id.trim(),
         apiKey: apiKey.trim(),

@@ -4,10 +4,13 @@ import com.claudewebui.app.core.network.ApiHttp
 import com.claudewebui.app.data.model.*
 import io.ktor.client.request.*
 
-/** CLI providers, the harness login flow, and OpenCode provider entries. */
+/** CLI providers, the harness login flow, and the model provider registry. */
 interface ProvidersApi {
     /** GET /api/cli-providers */
     suspend fun getCLIProviders(): ApiResponse<List<CLIProviderConfig>>
+
+    /** GET /api/cli-providers/diagnostics — install state and every runnable model. */
+    suspend fun getCliProviderDiagnostics(): ApiResponse<List<CliProviderDiagnostic>>
 
     // ---- CLI harness login -------------------------------------------------
 
@@ -37,21 +40,30 @@ interface ProvidersApi {
     /** DELETE /api/cli-login/vibe/key — sign out by removing the stored key. */
     suspend fun clearVibeApiKey(): ApiResponse<Unit>
 
-    // ---- OpenCode providers ------------------------------------------------
+    // ---- Model provider registry -------------------------------------------
+    // API keys, base URLs and model lists for z-ai, mistral, deepseek,
+    // anthropic and custom endpoints; Pi, model chat and voice read them.
 
-    suspend fun getOpenCodeProviders(): ApiResponse<List<OpenCodeProvider>>
+    /** GET /api/model-providers/providers */
+    suspend fun getModelProviders(): ApiResponse<List<ModelProvider>>
 
-    suspend fun saveOpenCodeProvider(input: SaveOpenCodeProviderInput): ApiResponse<OpenCodeProvider>
+    /** PUT /api/model-providers/providers */
+    suspend fun saveModelProvider(input: SaveModelProviderInput): ApiResponse<ModelProvider>
 
-    suspend fun deleteOpenCodeProvider(id: String): ApiResponse<Unit>
+    /** DELETE /api/model-providers/providers/:id */
+    suspend fun deleteModelProvider(id: String): ApiResponse<Unit>
 
-    suspend fun testOpenCodeProvider(id: String): ApiResponse<OpenCodeProviderTest>
+    /** POST /api/model-providers/providers/:id/test */
+    suspend fun testModelProvider(id: String): ApiResponse<ModelProviderTest>
 }
 
 class ProvidersApiImpl(private val http: ApiHttp) : ProvidersApi {
 
     override suspend fun getCLIProviders(): ApiResponse<List<CLIProviderConfig>> =
         http.get("/api/cli-providers")
+
+    override suspend fun getCliProviderDiagnostics(): ApiResponse<List<CliProviderDiagnostic>> =
+        http.get("/api/cli-providers/diagnostics")
 
     override suspend fun startCliLogin(provider: String): ApiResponse<CliLoginSession> =
         http.post("/api/cli-login/$provider/start")
@@ -74,15 +86,15 @@ class ProvidersApiImpl(private val http: ApiHttp) : ProvidersApi {
     override suspend fun clearVibeApiKey(): ApiResponse<Unit> =
         http.delete("/api/cli-login/vibe/key")
 
-    override suspend fun getOpenCodeProviders(): ApiResponse<List<OpenCodeProvider>> =
-        http.get("/api/opencode/providers")
+    override suspend fun getModelProviders(): ApiResponse<List<ModelProvider>> =
+        http.get("/api/model-providers/providers")
 
-    override suspend fun saveOpenCodeProvider(input: SaveOpenCodeProviderInput): ApiResponse<OpenCodeProvider> =
-        http.put("/api/opencode/providers") { setBody(input) }
+    override suspend fun saveModelProvider(input: SaveModelProviderInput): ApiResponse<ModelProvider> =
+        http.put("/api/model-providers/providers") { setBody(input) }
 
-    override suspend fun deleteOpenCodeProvider(id: String): ApiResponse<Unit> =
-        http.delete("/api/opencode/providers/${http.pathSegment(id)}")
+    override suspend fun deleteModelProvider(id: String): ApiResponse<Unit> =
+        http.delete("/api/model-providers/providers/${http.pathSegment(id)}")
 
-    override suspend fun testOpenCodeProvider(id: String): ApiResponse<OpenCodeProviderTest> =
-        http.post("/api/opencode/providers/${http.pathSegment(id)}/test")
+    override suspend fun testModelProvider(id: String): ApiResponse<ModelProviderTest> =
+        http.post("/api/model-providers/providers/${http.pathSegment(id)}/test")
 }

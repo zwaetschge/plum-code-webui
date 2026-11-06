@@ -170,7 +170,7 @@ const LABELS: Record<string, string> = Object.fromEntries(
 );
 LABELS.sources = 'Quellen';
 for (const [key, info] of Object.entries(SECTION_INFO)) LABELS[key] = info.title;
-const PROVIDERS: CLIProvider[] = ['codex', 'opencode', 'pi', 'vibe', 'zai', 'claude'];
+const PROVIDERS: CLIProvider[] = ['codex', 'pi', 'vibe', 'zai', 'claude'];
 const STATUS: Record<string, string> = {
   draft: 'Entwurf',
   queued: 'Wartet auf Start',

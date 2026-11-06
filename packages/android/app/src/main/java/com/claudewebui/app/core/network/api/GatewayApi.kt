@@ -45,6 +45,15 @@ interface GatewayApi {
     /** DELETE /api/browser-bridge/tokens/:id */
     suspend fun revokeBrowserToken(id: String): ApiResponse<JsonElement>
 
+    /**
+     * POST /api/browser-bridge/watch-token — mints a watch-scope token for the
+     * Wear OS app (replacing an earlier one of the same name). Carries the secret.
+     */
+    suspend fun createWatchToken(name: String): ApiResponse<WatchToken>
+
+    /** DELETE /api/browser-bridge/watch-token/:id — revokes only a watch-scope token. */
+    suspend fun revokeWatchToken(id: String): ApiResponse<JsonElement>
+
     /** GET /api/browser-bridge/live/:sessionId — current picture of the session's tab. */
     suspend fun getBrowserLive(sessionId: String): ApiResponse<BrowserLiveFrame>
 
@@ -100,6 +109,12 @@ class GatewayApiImpl(private val http: ApiHttp) : GatewayApi {
 
     override suspend fun revokeBrowserToken(id: String): ApiResponse<JsonElement> =
         http.delete("/api/browser-bridge/tokens/$id")
+
+    override suspend fun createWatchToken(name: String): ApiResponse<WatchToken> =
+        http.post("/api/browser-bridge/watch-token") { setBody(CreateWatchTokenInput(name)) }
+
+    override suspend fun revokeWatchToken(id: String): ApiResponse<JsonElement> =
+        http.delete("/api/browser-bridge/watch-token/${http.pathSegment(id)}")
 
     override suspend fun getBrowserLive(sessionId: String): ApiResponse<BrowserLiveFrame> =
         http.get("/api/browser-bridge/live/$sessionId")

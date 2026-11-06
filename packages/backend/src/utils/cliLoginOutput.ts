@@ -16,7 +16,6 @@ const DEVICE_CODE_REGEX = /\b[A-Z0-9]{4,}(?:-[A-Z0-9]{3,})+\b/;
 const CLI_LOGIN_INVOCATIONS = {
   claude: ['auth', 'login'],
   codex: ['login', '--device-auth'],
-  opencode: ['auth', 'login'],
   // Pi has no CLI-level login: /login is a built-in TUI command, and its own RPC
   // docs state built-in commands "would not execute if sent via prompt". So the
   // TUI is started bare and the command is typed into it (see PI_LOGIN_INPUT).

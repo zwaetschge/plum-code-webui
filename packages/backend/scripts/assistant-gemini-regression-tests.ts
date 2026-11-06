@@ -7,7 +7,7 @@ const { useTestSchema, createTestSchema, dropTestSchema, databaseReachable } =
 useTestSchema();
 const { run, closePool } = await import('../src/db/pg.js');
 const { safeEncrypt } = await import('../src/utils/encryption.js');
-const { writeOpenCodeProvidersForUser } = await import('../src/utils/opencodeProviderKeys.js');
+const { writeModelProvidersForUser } = await import('../src/utils/modelProviderKeys.js');
 const { apiChatProviders, apiChatEndpoint, streamApiChat } =
   await import('../src/services/assistant/apiTransport.js');
 const { createApiChat, startApiTurn, apiChatTurns } =
@@ -51,7 +51,7 @@ try {
     "INSERT INTO users(id,email,provider,provider_id) VALUES('gemini-alice','gemini@fixture.invalid','test','gemini-alice')"
   );
   const stamp = new Date().toISOString();
-  await writeOpenCodeProvidersForUser('gemini-alice', [
+  await writeModelProvidersForUser('gemini-alice', [
     {
       id: 'google',
       name: 'Own Gemini',

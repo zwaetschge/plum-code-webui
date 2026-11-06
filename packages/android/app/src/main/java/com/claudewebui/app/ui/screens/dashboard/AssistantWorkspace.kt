@@ -88,7 +88,7 @@ fun PlumAreaSelector(
     menu: (@Composable () -> Unit)? = null,
 ) {
     val palette = PlumTheme.palette
-    val tabs = listOf("chat" to R.string.assistant_tab_chat, "task" to R.string.assistant_tab_task, "code" to R.string.assistant_tab_code, "swarm" to R.string.assistant_swarm)
+    val tabs = listOf("chat" to R.string.assistant_tab_chat, "task" to R.string.assistant_tab_task, "code" to R.string.assistant_tab_code, "hermes" to R.string.assistant_hermes)
     val index = tabs.indexOfFirst { it.first == area }
     Row(
         Modifier.fillMaxWidth().padding(vertical = 6.dp),

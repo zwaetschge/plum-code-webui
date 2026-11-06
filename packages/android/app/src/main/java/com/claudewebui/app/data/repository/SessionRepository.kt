@@ -443,7 +443,7 @@ class SessionRepository(
         if (!result.success) error("Permission response rejected")
     }
 
-    /** Answer an OpenCode question prompt so the turn can continue. */
+    /** Answer an agent question prompt so the turn can continue. */
     suspend fun respondToQuestion(
         requestId: String,
         answers: List<List<String>>,
@@ -455,7 +455,7 @@ class SessionRepository(
         }
     }
 
-    /** Dismiss an OpenCode question prompt. */
+    /** Dismiss an agent question prompt. */
     suspend fun rejectQuestion(requestId: String, providerSessionId: String?): Result<Unit> =
         apiCall {
             val response = api.rejectQuestion(requestId, providerSessionId)

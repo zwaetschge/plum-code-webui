@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="web_sources_title">Quellen</string>
+    <string name="web_source_open">Öffnen</string>
+    <string name="web_search_done">Web durchsucht</string>
+    <string name="web_search_running">Web wird durchsucht</string>
+    <string name="web_search_failed">Websuche fehlgeschlagen</string>
+    <string name="web_search_queries">Suchanfragen anzeigen</string>
+    <plurals name="web_search_searches">
+        <item quantity="one">%d Suche</item>
+        <item quantity="other">%d Suchen</item>
+    </plurals>
+    <plurals name="web_search_sources">
+        <item quantity="one">%d Quelle</item>
+        <item quantity="other">%d Quellen</item>
+    </plurals>
+    <plurals name="web_search_pages">
+        <item quantity="one">%d Seite</item>
+        <item quantity="other">%d Seiten</item>
+    </plurals>
+</resources>

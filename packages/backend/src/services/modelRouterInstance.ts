@@ -67,7 +67,8 @@ async function loadUserRouting(userId: string) {
  */
 export async function resolveSubagentUpstream(
   userId: string,
-  model: string
+  model: string,
+  opts: { customOnly?: boolean } = {}
 ): Promise<ResolvedUpstream | null> {
   const routing = await loadUserRouting(userId);
 
@@ -85,7 +86,7 @@ export async function resolveSubagentUpstream(
     }
   }
 
-  if (isZaiModel(model) && routing.zai) {
+  if (!opts.customOnly && isZaiModel(model) && routing.zai) {
     return {
       baseUrl: routing.zai.baseUrl,
       authToken: routing.zai.authToken,
@@ -94,8 +95,17 @@ export async function resolveSubagentUpstream(
     };
   }
 
-
   return null;
+}
+
+/**
+ * True when a Z.AI Code session should run through the router: only then can
+ * its model picker offer a user-defined endpoint (Strata, a homelab server)
+ * next to the GLM models. Without one the session keeps talking to Z.AI
+ * directly.
+ */
+export async function userHasCustomUpstreams(userId: string): Promise<boolean> {
+  return (await loadUserRouting(userId)).upstreams.length > 0;
 }
 
 /** True when a claude session should be spawned through the router at all. */

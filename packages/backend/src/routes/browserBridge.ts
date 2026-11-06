@@ -16,6 +16,7 @@ import {
   listBrowserTokens,
   resolveBrowserToken,
   revokeBrowserToken,
+  revokeScopedTokensByName,
 } from '../services/browserBridge/tokens.js';
 import { deskSpeech, deskTranscribe, deskTurn, deskWake } from '../services/browserBridge/desk.js';
 import {
@@ -76,6 +77,37 @@ router.delete('/tokens/:id', requireAuth, async (req: Request, res: Response) =>
   const userId = (req as AuthenticatedRequest).userId;
   const removed = await revokeBrowserToken(userId, req.params.id!);
   if (!removed) throw new AppError('Token not found', 404, 'NOT_FOUND');
+  browserBridge.disconnectToken(req.params.id!);
+  res.json({ success: true, data: { id: req.params.id } });
+});
+
+/**
+ * Wear OS pairing. The phone app mints a watch-scope token and hands it to the
+ * watch over the Wearable Data Layer. Allowed through the /mobile gateway (the
+ * phone's JWT authenticates it there): a watch token is narrower than the
+ * caller's own access, it only opens the bridge socket as kind `watch` with the
+ * watch RPC allowlist. Pairing the same watch again replaces its old token.
+ */
+router.post(
+  '/watch-token',
+  requireAuth,
+  rateLimiters.strict,
+  async (req: Request, res: Response) => {
+    const parsed = z.object({ name: z.string().trim().min(1).max(80) }).safeParse(req.body);
+    if (!parsed.success) throw new AppError('A watch name is required', 400, 'VALIDATION_ERROR');
+    const userId = (req as AuthenticatedRequest).userId;
+    const replaced = await revokeScopedTokensByName(userId, parsed.data.name, 'watch');
+    for (const id of replaced) browserBridge.disconnectToken(id);
+    const { token, row } = await createBrowserToken(userId, parsed.data.name, 'watch');
+    // The only time the secret is ever returned.
+    res.json({ success: true, data: { id: row.id, name: row.name, token } });
+  }
+);
+
+router.delete('/watch-token/:id', requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const removed = await revokeBrowserToken(userId, req.params.id!, 'watch');
+  if (!removed) throw new AppError('Watch token not found', 404, 'NOT_FOUND');
   browserBridge.disconnectToken(req.params.id!);
   res.json({ success: true, data: { id: req.params.id } });
 });
@@ -437,7 +469,9 @@ router.use('/internal', internalRouter);
 async function deskOwner(req: Request): Promise<string> {
   const token = String(req.get('authorization') || '').replace(/^Bearer\s+/i, '');
   const resolved = await resolveBrowserToken(token);
-  if (!resolved) throw new AppError('Invalid device token', 401, 'UNAUTHORIZED');
+  // A watch token opens the bridge socket for the watch and nothing else.
+  if (!resolved || resolved.scope !== 'browser')
+    throw new AppError('Invalid device token', 401, 'UNAUTHORIZED');
   return resolved.userId;
 }
 

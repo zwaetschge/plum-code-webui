@@ -4,7 +4,7 @@ import com.claudewebui.app.core.network.ApiHttp
 import com.claudewebui.app.data.model.*
 import io.ktor.client.request.*
 
-/** Tool-approval prompts and OpenCode question prompts. */
+/** Tool-approval prompts and agent question prompts. */
 interface PermissionsApi {
     /**
      * POST /api/permissions/respond — answer a hooks-based permission request.
@@ -16,14 +16,14 @@ interface PermissionsApi {
     /** GET /api/permissions/pending/:sessionId — outstanding approval prompts. */
     suspend fun getPendingPermissions(sessionId: String): ApiResponse<List<PendingPermissionItem>>
 
-    /** POST /api/opencode/questions/respond — answer an OpenCode question prompt. */
+    /** POST /api/permissions/questions/respond — answer an agent question prompt. */
     suspend fun respondToQuestion(
         requestId: String,
         answers: List<List<String>>,
         providerSessionId: String?,
     ): ApiResponse<Unit>
 
-    /** POST /api/opencode/questions/reject — dismiss an OpenCode question prompt. */
+    /** POST /api/permissions/questions/reject — dismiss an agent question prompt. */
     suspend fun rejectQuestion(requestId: String, providerSessionId: String?): ApiResponse<Unit>
 }
 
@@ -40,12 +40,12 @@ class PermissionsApiImpl(private val http: ApiHttp) : PermissionsApi {
         answers: List<List<String>>,
         providerSessionId: String?,
     ): ApiResponse<Unit> =
-        http.post("/api/opencode/questions/respond") {
+        http.post("/api/permissions/questions/respond") {
             setBody(QuestionRespondInput(requestId, answers, providerSessionId))
         }
 
     override suspend fun rejectQuestion(requestId: String, providerSessionId: String?): ApiResponse<Unit> =
-        http.post("/api/opencode/questions/reject") {
+        http.post("/api/permissions/questions/reject") {
             setBody(QuestionRejectInput(requestId, providerSessionId))
         }
 }

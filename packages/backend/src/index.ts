@@ -20,9 +20,9 @@ import { config } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 import { initDatabase } from './db/index.js';
-import { refreshOpenCodeModelsCache } from './utils/opencodeCatalog.js';
+import { refreshModelsCache } from './utils/modelCatalog.js';
 import { setupPassport } from './auth/passport.js';
-import { setupWebSocket } from './websocket/index.js';
+import { getProcessManager, setupWebSocket } from './websocket/index.js';
 import { setupRealtimeVoice } from './services/assistant/realtimeVoice.js';
 import { errorHandler, requestIdMiddleware } from './middleware/errorHandler.js';
 import { modelRouter } from './services/modelRouterInstance.js';
@@ -37,7 +37,6 @@ import {
   ensureDefaultClaudeMcpServers,
   sanitizeClaudeSettingsProviderEnv,
 } from './utils/mcpDefaults.js';
-import { syncProviderLinks } from './utils/providerLinks.js';
 import { resolveConfigHome } from './utils/configPaths.js';
 import { listSkillLibrary } from './utils/skillLibrary.js';
 import { buildSessionCookieOptions } from './utils/sessionCookie.js';
@@ -77,9 +76,10 @@ import agentsRoutes from './routes/agents.js';
 import notesRoutes from './routes/notes.js';
 import categoriesRoutes from './routes/categories.js';
 import cliProvidersRoutes from './routes/cli-providers.js';
+import hermesRoutes from './routes/hermes.js';
 import cliLoginRoutes from './routes/cli-login.js';
 import codexRoutes from './routes/codex.js';
-import opencodeRoutes from './routes/opencode.js';
+import modelProvidersRoutes from './routes/modelProviders.js';
 import setupRoutes from './routes/setup.js';
 import gatewayRoutes from './routes/gateway.js';
 import browserBridgeRoutes from './routes/browserBridge.js';
@@ -87,6 +87,7 @@ import deviceBridgeRoutes from './routes/deviceBridge.js';
 import connectionsRoutes, { sessionConnectionsRouter } from './routes/connections.js';
 import { resetSessionSshBundles } from './services/connections/sshRuntime.js';
 import { browserBridge } from './services/browserBridge/bridge.js';
+import { startUsagePush } from './services/browserBridge/usagePush.js';
 import { deviceBridge } from './services/deviceBridge/bridge.js';
 import memoriesRoutes from './routes/memories.js';
 import androidRoutes from './routes/android.js';
@@ -247,10 +248,9 @@ async function main() {
   } catch (err) {
     console.warn('[skills] startup reconciliation skipped:', err);
   }
-  await syncProviderLinks();
   // models.dev limits feed Pi's per-model context windows; fetched at most
   // daily and never awaited on the startup path.
-  void refreshOpenCodeModelsCache();
+  void refreshModelsCache();
 
   const app = express();
   app.use('/.well-known', appLinksRoutes);
@@ -286,6 +286,7 @@ async function main() {
   await resetSessionSshBundles();
   // Firefox extension relay; its own upgrade path and token auth.
   browserBridge.attach(httpServer);
+  startUsagePush(browserBridge);
   // Android device control relay (Plum app accessibility bridge, no adb).
   deviceBridge.attach(httpServer);
   attachNotificationIo(io);
@@ -470,13 +471,14 @@ async function main() {
   app.use('/api/notes', notesRoutes);
   app.use('/api/categories', categoriesRoutes);
   app.use('/api/cli-providers', cliProvidersRoutes);
+  app.use('/api/hermes', hermesRoutes);
   app.use('/api/cli-login', cliLoginRoutes);
   app.use('/api/setup', setupRoutes);
   app.use('/api/gateway', gatewayRoutes);
   app.use('/api/browser-bridge', browserBridgeRoutes);
   app.use('/api/device-bridge', deviceBridgeRoutes);
   app.use('/api/codex', codexRoutes);
-  app.use('/api/opencode', opencodeRoutes);
+  app.use('/api/model-providers', modelProvidersRoutes);
   app.use('/api/memories', memoriesRoutes);
   app.use('/api/android', androidRoutes);
   app.use('/api/app', appRoutes);
@@ -639,6 +641,13 @@ async function main() {
     // In-process, over the connection this server already owns. See
     // services/backup.ts for why a second connection is what corrupts the file.
     startBackupSchedule();
+    // Pi runs the previous backend left unfinished (a rebuild, a crash) carry on
+    // once the server has settled; see services/claude/piRunJournal.ts.
+    setTimeout(() => {
+      void getProcessManager()
+        .resumeInterruptedPiRuns()
+        .catch((error) => console.error('[PI] Resuming interrupted runs failed:', error));
+    }, 20_000).unref();
   });
 
   registerGracefulShutdown(httpServer, io);

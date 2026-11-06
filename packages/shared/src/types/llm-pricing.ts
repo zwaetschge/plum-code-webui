@@ -72,6 +72,9 @@ function price(
   return { input, output, cacheRead, cacheWrite, source, label };
 }
 
+// Historical only: the OpenCode provider was removed on 2026-10-27. Old usage
+// rows still carry `opencode/…` and `opencode-go/…` model ids, and a rate-card
+// reprice must keep them priced instead of dropping them to "missing price".
 function resolveOpenCodeZenPricing(id: string): ModelPricing | null {
   const source = 'OpenCode Go/Zen pricing, 2026-07-06';
 
@@ -169,7 +172,7 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
   if (
     provider === 'lmstudio' ||
     provider === 'ollama' ||
-    // qwen-local, llama-local, strata-local …: OpenCode providers named for
+    // qwen-local, llama-local, strata-local …: registry providers named for
     // a model served on the user's own machines.
     (provider?.endsWith('-local') ?? false)
   ) {
@@ -247,16 +250,30 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
   }
 
   // Anthropic, USD per 1M tokens. Cache write uses the 5 minute write rate.
-  if (/^claude-fable-5(?:\b|-|$)/.test(id) || id === 'fable') {
+  // Claude Code's bare aliases resolve to the current generation.
+  if (/^claude-fable-5-1(?:\b|-|$)/.test(id) || id === 'fable') {
+    return price(10, 50, 0.25, 12.5, 'Anthropic API pricing, 2026-10-06', 'Claude Fable 5.1');
+  }
+  if (/^claude-opus-5-5(?:\b|-|$)/.test(id) || id === 'opus') {
+    return price(4, 20, 0.2, 5, 'Anthropic API pricing, 2026-10-06', 'Claude Opus 5.5');
+  }
+  if (/^claude-sonnet-5-5(?:\b|-|$)/.test(id) || id === 'sonnet') {
+    return price(2, 10, 0.2, 2.5, 'Anthropic API pricing, 2026-10-06', 'Claude Sonnet 5.5');
+  }
+  if (/^claude-haiku-5-5(?:\b|-|$)/.test(id) || id === 'haiku') {
+    // Prompts up to 100K tokens; cache rates follow the usual 0.1x / 1.25x.
+    return price(0.1, 0.5, 0.01, 0.125, 'Anthropic API pricing, 2026-10-06', 'Claude Haiku 5.5');
+  }
+  if (/^claude-fable-5(?:\b|-|$)/.test(id)) {
     return price(10, 50, 1, 12.5, 'Anthropic API pricing, 2026-07-25', 'Claude Fable 5');
   }
-  if (/^claude-opus-(?:5|4[.-](5|6|7|8))(?:\b|-|$)/.test(id) || id === 'opus') {
+  if (/^claude-opus-(?:5|4[.-](5|6|7|8))(?:\b|-|$)/.test(id)) {
     return price(5, 25, 0.5, 6.25, 'Anthropic API pricing, 2026-07-25', 'Claude Opus 5/4.5+');
   }
   if (/^claude-opus-4(?:$|-202|[.-](?:0|1)(?:\b|-|$))/.test(id)) {
     return price(15, 75, 1.5, 18.75, 'Anthropic API pricing, 2026-06-01', 'Claude Opus 4/4.1');
   }
-  if (/^claude-sonnet-5(?:\b|-|$)/.test(id) || id === 'sonnet') {
+  if (/^claude-sonnet-5(?:\b|-|$)/.test(id)) {
     return price(
       2,
       10,
@@ -272,15 +289,15 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
   if (/^claude-3[.-]5-sonnet/.test(id)) {
     return price(3, 15, 0.3, 3.75, 'Anthropic API pricing, 2026-06-01', 'Claude Sonnet 3.5');
   }
-  if (/^claude-haiku-4[.-]5(?:\b|-|$)/.test(id) || id === 'haiku') {
+  if (/^claude-haiku-4[.-]5(?:\b|-|$)/.test(id)) {
     return price(1, 5, 0.1, 1.25, 'Anthropic API pricing, 2026-06-01', 'Claude Haiku 4.5');
   }
   if (/^claude-3[.-]5-haiku/.test(id)) {
     return price(0.8, 4, 0.08, 1, 'Anthropic API pricing, 2026-06-01', 'Claude Haiku 3.5');
   }
 
-  // Moonshot/Kimi, USD per 1M tokens. OpenCode Go is subscription-based, but
-  // analytics use API-equivalent spend so Go-routed Kimi rows stay priced.
+  // Moonshot/Kimi, USD per 1M tokens. Subscription-routed Kimi rows use
+  // API-equivalent spend so they stay priced.
   if (id === 'k3' || id === 'kimi-k3') {
     return price(3, 15, 0.3, 0, 'Kimi K3 API pricing, 2026-07-18', 'Kimi K3');
   }
@@ -356,13 +373,35 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
     return price(0.6, 2.2, 0.11, 0, 'Z.AI pricing, 2026-06-01', 'GLM-4.5');
   }
 
-  // DeepSeek, USD per 1M tokens. deepseek-chat and deepseek-reasoner are
-  // compatibility aliases for the V4 Flash non-thinking/thinking modes.
-  if (id === 'deepseek-chat' || id === 'deepseek-reasoner' || id === 'deepseek-v4-flash') {
-    return price(0.14, 0.28, 0.0028, 0, 'DeepSeek API pricing, 2026-06-09', 'DeepSeek V4 Flash');
+  // DeepSeek, USD per 1M tokens at the peak rate (UTC 01-04 and 06-10 on
+  // weekdays); off-peak is half. The retired names (deepseek-v4-flash and its
+  // vision preview, deepseek-chat, deepseek-reasoner) are served by V4.1 Flash
+  // and billed at its price.
+  if (
+    id === 'deepseek-flash' ||
+    id === 'deepseek-v4-flash' ||
+    id === 'deepseek-v4-flash-vision-exp' ||
+    id === 'deepseek-chat' ||
+    id === 'deepseek-reasoner'
+  ) {
+    return price(
+      0.3,
+      1.2,
+      0.006,
+      0,
+      'DeepSeek API pricing (peak), 2026-11-05',
+      'DeepSeek V4.1 Flash'
+    );
   }
   if (id === 'deepseek-v4-pro') {
-    return price(0.435, 0.87, 0.003625, 0, 'DeepSeek API pricing, 2026-06-09', 'DeepSeek V4 Pro');
+    return price(
+      1.32,
+      3.96,
+      0.044,
+      0,
+      'DeepSeek API pricing (peak), 2026-11-05',
+      'DeepSeek V4 Pro'
+    );
   }
 
   // Google Gemini API, USD per 1M tokens. Use the standard <=200k prompt tier

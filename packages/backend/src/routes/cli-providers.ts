@@ -25,8 +25,10 @@ import {
   getEnabledCliProvidersForUser,
   getZaiApiConfigForUser,
   getClaudeApiModelLabels,
+  getSubagentUpstreamsForUser,
+  getPiModelListForUser,
 } from './settings.js';
-import { getPiModelsForUser } from '../utils/piConfig.js';
+import { getPiModelsForUser, selectVisiblePiModels } from '../utils/piConfig.js';
 
 const router = Router();
 
@@ -85,13 +87,8 @@ function getCommandVersion(command: string): string | null {
   }
 }
 
-function countMcpServers(provider: CLIProvider): number {
+function countMcpServers(): number {
   try {
-    if (provider === 'opencode') {
-      const configPath = path.join(os.homedir(), '.config', 'opencode', 'opencode.json');
-      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as { mcp?: unknown };
-      return parsed.mcp && typeof parsed.mcp === 'object' ? Object.keys(parsed.mcp).length : 0;
-    }
     const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
     const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as { mcpServers?: unknown };
     return parsed.mcpServers && typeof parsed.mcpServers === 'object'
@@ -122,19 +119,54 @@ function getCodexModelsCacheInfo() {
   }
 }
 
+/**
+ * Models of the user's own Anthropic-compatible endpoints, offered in Z.AI Code
+ * next to GLM; the model router sends them there (see buildClaudeTransportEnv).
+ * Wildcard patterns name no concrete model and stay out of the picker.
+ */
+async function getZaiUpstreamModels(userId: string): Promise<Record<string, string>> {
+  const models: Record<string, string> = {};
+  for (const upstream of await getSubagentUpstreamsForUser(userId)) {
+    for (const model of upstream.models) {
+      if (!model.endsWith('*') && !models[model]) models[model] = `${upstream.label} · ${model}`;
+    }
+  }
+  return models;
+}
+
+/**
+ * Pi offers only the models the user picked in the Pi settings (all when none
+ * were picked); `allPiModels` lists every runnable one for that selection.
+ */
 async function getProviderModelsForUser(
   provider: CLIProvider,
   userId: string,
-  zaiConfig: Awaited<ReturnType<typeof getZaiApiConfigForUser>>
+  zaiConfig: Awaited<ReturnType<typeof getZaiApiConfigForUser>>,
+  options: { allPiModels?: boolean } = {}
 ): Promise<string[]> {
-  if (provider === 'pi') return getPiModelsForUser(userId);
+  if (provider === 'pi') {
+    const available = await getPiModelsForUser(userId);
+    if (options.allPiModels) return available;
+    return selectVisiblePiModels(available, await getPiModelListForUser(userId));
+  }
   if (provider !== 'zai') return getCliModels(provider);
 
   const configuredLabels = getClaudeApiModelLabels(zaiConfig);
   const configuredAliases = (['opus', 'sonnet', 'haiku'] as const).filter(
     (alias) => configuredLabels?.[alias]
   );
-  return configuredAliases.length > 0 ? configuredAliases : getCliModels('zai');
+  const glmModels = configuredAliases.length > 0 ? configuredAliases : getCliModels('zai');
+  return [...glmModels, ...Object.keys(await getZaiUpstreamModels(userId))];
+}
+
+/** A picked Pi list starts with the user's default, as every picker assumes. */
+async function providerDefaultModelForUser(
+  provider: CLIProviderConfig,
+  models: string[],
+  userId: string
+): Promise<string | undefined> {
+  if (provider.id !== 'pi' || !models[0]) return provider.defaultModel;
+  return (await getPiModelListForUser(userId)).length > 0 ? models[0] : provider.defaultModel;
 }
 
 // Get all CLI providers (with availability status)
@@ -158,12 +190,13 @@ router.get('/', requireAuth, async (req, res) => {
         if (provider.defaultModel && labels[provider.defaultModel]) {
           providerLabels[provider.defaultModel] = labels[provider.defaultModel]!;
         }
-        if (provider.id === 'zai' && zaiModelLabels) {
-          Object.assign(providerLabels, zaiModelLabels);
+        if (provider.id === 'zai') {
+          Object.assign(providerLabels, zaiModelLabels ?? {}, await getZaiUpstreamModels(userId));
         }
         const enabled = enabledIds.has(provider.id);
         return {
           ...provider,
+          defaultModel: await providerDefaultModelForUser(provider, models, userId),
           models,
           modelLabels: providerLabels,
           enabled,
@@ -200,10 +233,14 @@ router.get('/available', requireAuth, async (req, res) => {
     );
 
     const providersWithModels = await Promise.all(
-      providers.map(async (provider) => ({
-        ...provider,
-        models: await getProviderModelsForUser(provider.id, userId, zaiConfig),
-      }))
+      providers.map(async (provider) => {
+        const models = await getProviderModelsForUser(provider.id, userId, zaiConfig);
+        return {
+          ...provider,
+          defaultModel: await providerDefaultModelForUser(provider, models, userId),
+          models,
+        };
+      })
     );
 
     const response: ApiResponse<CLIProviderConfig[]> = {
@@ -225,7 +262,10 @@ router.get('/diagnostics', requireAuth, async (req, res) => {
   const zaiConfig = await getZaiApiConfigForUser(userId);
   const diagnostics = await Promise.all(
     Object.values(CLI_PROVIDERS).map(async (provider) => {
-      const models = await getProviderModelsForUser(provider.id, userId, zaiConfig);
+      // Every runnable Pi model: the Pi settings pick the menu from this list.
+      const models = await getProviderModelsForUser(provider.id, userId, zaiConfig, {
+        allPiModels: true,
+      });
       const commandInfo = getCommandInfoCached(provider.command);
       const binaryPath = commandInfo.path;
       const credentialsPath = expandHome(provider.credentialsPath);
@@ -243,7 +283,7 @@ router.get('/diagnostics', requireAuth, async (req, res) => {
         modelCount: models.length,
         models,
         capabilities: getProviderCapabilities(provider.id),
-        mcpServerCount: countMcpServers(provider.id),
+        mcpServerCount: countMcpServers(),
         codexModelsCache: provider.id === 'codex' ? getCodexModelsCacheInfo() : null,
       };
     })
@@ -329,8 +369,8 @@ router.post('/refresh-models', requireAuth, requireAdmin, rateLimiters.strict, a
       if (provider.defaultModel && labels[provider.defaultModel]) {
         providerLabels[provider.defaultModel] = labels[provider.defaultModel]!;
       }
-      if (provider.id === 'zai' && zaiModelLabels) {
-        Object.assign(providerLabels, zaiModelLabels);
+      if (provider.id === 'zai') {
+        Object.assign(providerLabels, zaiModelLabels ?? {}, await getZaiUpstreamModels(userId));
       }
       return { id: provider.id, models, modelLabels: providerLabels };
     })

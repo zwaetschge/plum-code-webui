@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { resolveConfigHome } from '../../utils/configPaths.js';
 import { AppError } from '../../middleware/errorHandler.js';
-import { readOpenCodeProvidersForUser } from '../../utils/opencodeProviderKeys.js';
+import { readModelProvidersForUser } from '../../utils/modelProviderKeys.js';
 import { safeDecrypt } from '../../utils/encryption.js';
 
 /** Voices from the Mistral API are addressed as `mistral:<voice_id>`; everything else is OmniVoice. */
@@ -14,7 +14,7 @@ const MISTRAL_TTS_MODEL = 'voxtral-mini-tts-2603';
 const MISTRAL_PRESET_VOICES = [{ id: 'gb_jane_neutral', name: 'Jane (Neutral)' }];
 
 async function mistralKey(userId: string): Promise<string | null> {
-  const providers = await readOpenCodeProvidersForUser(userId);
+  const providers = await readModelProvidersForUser(userId);
   const mistral = providers.find((provider) => provider.id === 'mistral');
   if (!mistral?.enabled || !mistral.apiKey) return null;
   return safeDecrypt(mistral.apiKey) || null;

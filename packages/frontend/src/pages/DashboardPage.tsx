@@ -155,7 +155,7 @@ function getDashboardReasoningOptions(provider: CLIProvider) {
   if (provider === 'claude' || provider === 'zai') {
     return CLAUDE_CODE_EFFORT_OPTIONS;
   }
-  if (provider === 'opencode' || provider === 'pi') {
+  if (provider === 'pi') {
     return [
       { value: 'minimal', label: 'Minimal' },
       { value: 'low', label: 'Low' },
@@ -163,7 +163,7 @@ function getDashboardReasoningOptions(provider: CLIProvider) {
       { value: 'high', label: 'High' },
       { value: 'max', label: 'Max' },
       // Pi runs Ultracode workflows through scripts/pi-ultracode-extension.ts.
-      ...(provider === 'pi' ? [{ value: 'ultracode', label: 'Ultracode (workflows)' }] : []),
+      { value: 'ultracode', label: 'Ultracode (workflows)' },
     ];
   }
   if (provider === 'vibe') {
@@ -747,26 +747,16 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
   const selectedProviderInfo = cliProviders?.find(
     (provider) => provider.id === selectedCliProvider
   );
+  // Pi's list and default arrive already narrowed to the Pi settings' pick.
   const configuredModelsForProvider = useMemo(() => {
+    if (selectedCliProvider === 'pi') return [];
     return settings?.cliProviderModelLists?.[selectedCliProvider] || [];
   }, [selectedCliProvider, settings?.cliProviderModelLists]);
   const selectedProviderModelLabels = selectedProviderInfo?.modelLabels || {};
   const providerDefaultModel =
     selectedProviderInfo?.defaultModel || CLI_PROVIDER_DEFAULT_MODEL[selectedCliProvider];
-  const resolvedDefaultModel =
-    selectedCliProvider === 'opencode' || selectedCliProvider === 'pi'
-      ? configuredModelsForProvider[0] || providerDefaultModel
-      : providerDefaultModel;
+  const resolvedDefaultModel = providerDefaultModel;
   const modelOptions = useMemo(() => {
-    if (selectedCliProvider === 'opencode' || selectedCliProvider === 'pi') {
-      return Array.from(
-        new Set(
-          configuredModelsForProvider.length > 0
-            ? configuredModelsForProvider
-            : selectedProviderInfo?.models || []
-        )
-      );
-    }
     const options = new Set<string>();
     for (const model of selectedProviderInfo?.models || []) options.add(model);
     for (const model of configuredModelsForProvider) options.add(model);
@@ -778,10 +768,6 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
     selectedModel,
     selectedProviderInfo?.models,
   ]);
-  const showDefaultModelOption =
-    selectedCliProvider === 'pi' ||
-    selectedCliProvider !== 'opencode' ||
-    configuredModelsForProvider.length > 0;
   const reasoningOptions = useMemo(
     () => getDashboardReasoningOptions(selectedCliProvider),
     [selectedCliProvider]
@@ -1583,14 +1569,12 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
                   }
                   aria-label="Model"
                 >
-                  {showDefaultModelOption && (
-                    <option value="__default__">
-                      Default
-                      {resolvedDefaultModel
-                        ? ` · ${selectedProviderModelLabels[resolvedDefaultModel] || resolvedDefaultModel}`
-                        : ''}
-                    </option>
-                  )}
+                  <option value="__default__">
+                    Default
+                    {resolvedDefaultModel
+                      ? ` · ${selectedProviderModelLabels[resolvedDefaultModel] || resolvedDefaultModel}`
+                      : ''}
+                  </option>
                   {modelOptions.map((model) => (
                     <option key={model} value={model}>
                       {selectedProviderModelLabels[model] || model}

@@ -76,7 +76,6 @@ const DESIGN_PREVIEW_TEMPLATE_SLUGS = new Set([
   'refined-premium',
   'plum-style-claude',
   'plum-style-codex',
-  'plum-style-opencode',
   'premium',
   'professional',
   'publication',

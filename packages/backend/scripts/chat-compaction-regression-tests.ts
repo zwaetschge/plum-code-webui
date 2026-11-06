@@ -6,7 +6,7 @@ const testing = await import('../src/db/testing.js');
 testing.useTestSchema();
 const { run, get, all } = await import('../src/db/pg.js');
 const { safeEncrypt } = await import('../src/utils/encryption.js');
-const { writeOpenCodeProvidersForUser } = await import('../src/utils/opencodeProviderKeys.js');
+const { writeModelProvidersForUser } = await import('../src/utils/modelProviderKeys.js');
 const { createApiChat, startApiTurn, apiChatTurns, stopApiTurn } =
   await import('../src/services/assistant/apiChats.js');
 const { createResource, BODY_SCHEMAS } = await import('../src/services/assistant/resources.js');
@@ -77,7 +77,7 @@ try {
     user + '@example.invalid',
     user
   );
-  await writeOpenCodeProvidersForUser(user, [
+  await writeModelProvidersForUser(user, [
     {
       id: 'fixture',
       name: 'Fixture',

@@ -1,6 +1,6 @@
 # Plum Code WebUI
 
-Self-hosted control center for Codex, OpenCode, Pi, Kimi Code, and Claude Code — with **two first-class clients**: a browser workspace and a **native Android app** (Kotlin/Jetpack Compose, plus a Wear OS companion). Both talk to the same backend: streaming chat, tool approvals, file and git panes, provider analytics, shared agents/skills/plugins, preview tooling, and built-in MCP servers inside one Docker deployment.
+Self-hosted control center for Codex, Pi, Mistral Vibe, and Claude Code — with **two first-class clients**: a browser workspace and a **native Android app** (Kotlin/Jetpack Compose, plus a Wear OS companion). Both talk to the same backend: streaming chat, tool approvals, file and git panes, provider analytics, shared agents/skills/plugins, preview tooling, and built-in MCP servers inside one Docker deployment.
 
 > **Default provider: Codex.** Anthropic is restricting `claude -p` / introducing a credit system, so Codex is now the primary CLI. Claude stays available as a legacy option.
 
@@ -14,7 +14,7 @@ Self-hosted control center for Codex, OpenCode, Pi, Kimi Code, and Claude Code �
 ## Desktop
 
 ![Sessions dashboard](docs/screenshots/plum-dashboard.png)
-_Sessions dashboard - create or resume projects, filter by provider, and start Codex/OpenCode/Claude sessions from one place._
+_Sessions dashboard - create or resume projects, filter by provider, and start Codex/Pi/Claude sessions from one place._
 
 ![Codex chat](docs/screenshots/plum-chat-codex.png)
 _Codex chat - streaming output, tool execution, provider/model controls, YOLO mode, usage limits, and right-rail workspace controls._
@@ -70,18 +70,17 @@ Screenshots are being recaptured; see `scripts/capture-android-screenshots.sh`.
 ### Multi-Provider Support
 
 - **Codex** (OpenAI) - **default provider**, per-turn `codex exec` process model with auto-respawn, chunk-level streaming, transcript-prefix resume, and model discovery from `~/.codex/models_cache.json`
-- **OpenCode** - server-backed HTTP/SSE provider routing for GLM (`z-ai/glm-*`), Kimi, Anthropic/OpenAI/Gemini routes, and 75+ other LLMs
-- **Pi** - alternative persistent RPC harness that reuses OpenCode's API connections/models plus shared skills, agents, and MCP servers
+- **Pi** - persistent JSONL RPC harness for GLM (`z-ai/glm-*`), DeepSeek, Mistral, the Anthropic API and custom OpenAI-compatible endpoints, configured per user in the model provider registry („Modellanbieter“), plus shared skills, agents, and MCP servers
 - **Kimi Code** - Moonshot's native persistent ACP agent with device-code login, live token/tool streaming, queued follow-ups, cancel, and persisted native sessions
 - **Claude Code** (Anthropic) - legacy persistent stream-json provider with a configurable Anthropic-compatible API endpoint
 - Per-session provider selection; switching providers restarts the underlying CLI cleanly
-- Dedicated auth routes: `/auth/codex`, `/auth/opencode`, `/auth/pi`, `/auth/claude`
-- Independent harness state with persisted config (`~/.codex`, `~/.local/share/opencode`, `~/.pi`, `~/.claude`); Pi deliberately reuses OpenCode credentials
+- Dedicated auth routes: `/auth/codex`, `/auth/pi`, `/auth/vibe`, `/auth/claude`
+- Independent harness state with persisted config (`~/.codex`, `~/.pi`, `~/.vibe`, `~/.claude`); Pi takes its API keys from the model provider registry
 - Admin/helper LLM calls, such as commit message generation, route through the same Codex-first provider preference
 
 ### Analytics
 
-- Idempotent `usage_history` ledger keyed by provider and turn, with Pi and OpenCode reported separately
+- Idempotent `usage_history` ledger keyed by provider and turn; historical OpenCode rows keep their own label next to Pi
 - Token volume, request count, cache efficiency, pricing coverage, and API-equivalent spend
 - Per-model pricing with explicit unpriced-model handling
 - Provider grouping shared between backend analytics and frontend charts
@@ -145,7 +144,7 @@ Screenshots are being recaptured; see `scripts/capture-android-screenshots.sh`.
 - Consolidated legacy names stay discoverable through aliases; retired packages are blocked from external re-import
 - Plugin management for user and marketplace plugins
 - Codex plugin browser/install flow for OpenAI-curated plugins
-- Auto-sync of external skill packs and provider links for OpenCode where supported
+- Auto-sync of external skill packs
 
 ### Mobile Support
 
@@ -159,7 +158,7 @@ Screenshots are being recaptured; see `scripts/capture-android-screenshots.sh`.
 
 - Tabbed settings interface
 - Theme configuration
-- Per-provider API key / OAuth management (Codex, OpenCode, Claude, GitHub, Google)
+- Per-provider API key / OAuth management (Codex, Claude, Mistral Vibe, GitHub, Google) and the model provider registry („Modellanbieter“) for Pi and model chat
 - MCP Server management with connection testing
 - Per-user Claude API URL, encrypted token, and optional model mappings for Anthropic-compatible services such as Z.AI
 - ComfyUI URL testing and persistence
@@ -249,7 +248,7 @@ The installer walks you through:
 
 Re-run any time to reconfigure (existing `.env` values are preserved unless you pass `--reset`). Non-interactive mode (`--non-interactive`) takes all defaults and is useful for CI bootstraps.
 
-**Requirements:** Docker 24+, Docker Compose plugin, openssl. The container ships Node 22 plus the `codex`, `opencode`, `pi`, and `claude` harnesses.
+**Requirements:** Docker 24+, Docker Compose plugin, openssl. The container ships Node 22 plus the `codex`, `pi`, `vibe`, and `claude` harnesses.
 
 ### Site-specific deployment (Traefik, Unraid, etc.)
 
@@ -273,7 +272,7 @@ pnpm dev                    # backend (3006) + frontend (5173) in parallel
 ./scripts/start-webui.sh    # generates ephemeral secrets, kills stale PIDs, tails logs
 ```
 
-Prerequisites: Node 22.19+, pnpm 9+, and whichever harnesses you want to run locally (`codex`, `opencode`, `pi`, `claude`).
+Prerequisites: Node 22.19+, pnpm 9+, and whichever harnesses you want to run locally (`codex`, `pi`, `vibe`, `claude`).
 
 ### Production build (no Docker)
 
@@ -319,11 +318,10 @@ Full schema in `packages/backend/src/config.ts` (zod-validated, fails fast on st
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL`                      | Optional Google OAuth. Callback: `${FRONTEND_URL}/auth/google/callback`.                                                                                                                           | No          |
 | `ENCRYPTION_KEY`                                                                         | Enables encrypted storage for provider API tokens, including the per-user Claude custom API token managed in Settings.                                                                             | Recommended |
 | `CLI_RUNNER_ACCESS` / `CLI_RUNNER_ALLOWED_EMAILS`                                        | Runner execution defaults to admin-only while processes share one Unix/provider home. Allow only explicitly trusted non-admin emails; `trusted-users` is an intentional private-deployment opt-in. | No          |
-| `CLI_PROVIDER_<PROVIDER>_MODELS`                                                         | Override model menus for `CODEX`, `OPENCODE`, or `CLAUDE`; empty means auto-discover or use provider fallback.                                                                                     | No          |
-| `CLI_PROVIDER_<PROVIDER>_DEFAULT_MODEL`                                                  | Override defaults such as Codex `gpt-5.5`, OpenCode `z-ai/glm-5.1`, or Claude `sonnet`.                                                                                                            | No          |
-| `CLI_PROVIDER_OPENCODE_DEFAULT_AGENT` / `CLI_PROVIDER_OPENCODE_STYLE_PROMPT`             | OpenCode WebUI primary agent and Codex-like communication style. Defaults to `build`; set style prompt to `0` or `false` to disable the injected reminder.                                         | No          |
+| `CLI_PROVIDER_<PROVIDER>_MODELS`                                                         | Override model menus for `CODEX`, `PI`, or `CLAUDE`; empty means auto-discover or use provider fallback.                                                                                           | No          |
+| `CLI_PROVIDER_<PROVIDER>_DEFAULT_MODEL`                                                  | Override defaults such as Codex `gpt-5.5`, Pi `z-ai/glm-5.1`, or Claude `sonnet`.                                                                                                                  | No          |
 | `CLI_AUTO_UPDATE` / `CLI_AUTO_UPDATE_PROVIDERS` / `CLI_AUTO_UPDATE_INTERVAL_HOURS`       | Runtime CLI autoupdater. Docker Compose defaults to Codex-only updates on boot and every 24 hours; set providers to a comma-separated list to opt in more CLIs.                                    | No          |
-| `ADMIN_LLM_PROVIDER`                                                                     | Pin admin/helper calls to `codex`, `opencode`, or `claude`. Default preference is Codex first.                                                                                                     | No          |
+| `ADMIN_LLM_PROVIDER`                                                                     | Pin admin/helper calls to `codex` or `claude`. Default preference is Codex first.                                                                                                                  | No          |
 | `CODEX_WEBUI_SANDBOX_MODE` / `CODEX_WEBUI_APPROVAL_POLICY`                               | Codex Docker defaults. The image defaults to `danger-full-access` / `never` because Codex's Landlock `workspace-write` sandbox is unreliable inside Docker.                                        | No          |
 | `CODEX_USAGE_URL` / `CODEX_USER_AGENT`                                                   | Override the ChatGPT Codex usage endpoint or User-Agent used for `/api/usage/limits?provider=codex`.                                                                                               | No          |
 | `CODEX_USAGE_TIMEOUT_MS` / `CODEX_USAGE_CACHE_TTL_MS`                                    | Bound Codex quota requests and singleflight-cache successful responses. Defaults: 10 seconds / 60 seconds.                                                                                         | No          |
@@ -346,15 +344,15 @@ The backend spawns each provider as a child process and bridges its stream over 
 # Codex - default, single-shot per turn; WebUI respawns after turn.completed
 codex exec --json --skip-git-repo-check --cd /workspace/my-project ...
 
-# OpenCode - server-backed model routing for GLM, Kimi, Anthropic, OpenAI, etc.
-opencode run --format json --model z-ai/glm-5.1 ...
+# Pi - persistent JSONL RPC harness over the per-user model provider registry
+pi --mode rpc --approve --model z-ai/glm-5.1 ...
 
 # Claude Code - legacy persistent stream-json provider
 claude --print --verbose --output-format stream-json --input-format stream-json \
        --include-partial-messages --dangerously-skip-permissions
 ```
 
-All harnesses ship inside the container; their auth/state directories (`~/.codex`, `~/.opencode`, `~/.pi`, `~/.kimi-code`, `~/.claude`) survive rebuilds via the `${CONFIG_DIR}` bind mount. Plum gives each WebUI user an isolated OpenCode server, SSE stream, configuration, data and OAuth/account directory under `~/.opencode/users/<sha256-user-key>`; legacy global OpenCode OAuth state is not auto-assigned, so affected users reconnect once through the WebUI. Pi receives a per-user generated config that references the same encrypted OpenCode provider store. The runtime image also includes system Chromium, Chromedriver, fonts, and Xvfb; sessions inherit `CHROME_BIN=/usr/local/bin/plum-chromium` plus Playwright/Puppeteer executable-path env vars for headless browser checks.
+All harnesses ship inside the container; their auth/state directories (`~/.codex`, `~/.pi`, `~/.vibe`, `~/.claude`) survive rebuilds via the `${CONFIG_DIR}` bind mount. Pi receives a per-user generated agent directory (`~/.pi/webui-users/<user>/agent`) that references the encrypted per-user model provider registry; API keys reach the process as environment variables and are never written into its config. The runtime image also includes system Chromium, Chromedriver, fonts, and Xvfb; sessions inherit `CHROME_BIN=/usr/local/bin/plum-chromium` plus Playwright/Puppeteer executable-path env vars for headless browser checks.
 
 ## Project Structure
 
@@ -364,7 +362,7 @@ packages/
 │   ├── src/
 │   │   ├── routes/       # REST API endpoints (~30 modules)
 │   │   ├── services/
-│   │   │   └── claude/   # Legacy folder name; owns Codex / OpenCode / Claude lifecycle
+│   │   │   └── claude/   # Legacy folder name; owns Codex / Pi / Vibe / Claude lifecycle
 │   │   ├── auth/         # Passport (GitHub, Google) + basic-auth + allowlist
 │   │   ├── middleware/   # CSP, rate limiting, error handling
 │   │   └── db/           # Postgres schema, dialect translation, migrations
@@ -493,6 +491,5 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Acknowledgments
 
 - [OpenAI](https://openai.com) for Codex
-- [OpenCode](https://opencode.ai/) for multi-provider CLI routing
 - [Pi](https://github.com/earendil-works/pi) for the alternative extensible agent harness
 - [Anthropic](https://anthropic.com) for Claude and Claude Code

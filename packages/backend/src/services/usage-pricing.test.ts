@@ -80,8 +80,8 @@ test('estimateModelCost flags an unpriced model instead of inventing a rate', ()
 test('provider grouping keeps each harness separate', () => {
   assert.equal(getProviderLabelForUsage('codex', 'gpt-5.5'), 'Codex');
   assert.equal(getProviderLabelForUsage('claude', 'sonnet'), 'Claude');
+  // Retired harnesses keep a read-only label for their historical rows.
   assert.equal(getProviderLabelForUsage('opencode', 'z-ai/glm-5.1'), 'OpenCode');
-  // Pi runs on OpenCode's connections but must not be merged into it.
   assert.equal(getProviderLabelForUsage('pi', 'z-ai/glm-5.1'), 'Pi');
   assert.equal(getProviderLabelForUsage('kimi', 'kimi-k2'), 'Kimi');
 });
@@ -93,8 +93,9 @@ test('provider grouping is case and whitespace tolerant', () => {
 
 test('two harnesses sharing one model id get different timeline keys', () => {
   const pi = getUsageModelKey('pi', 'z-ai/glm-5.1');
-  const opencode = getUsageModelKey('opencode', 'z-ai/glm-5.1');
-  assert.notEqual(pi, opencode, 'series would collapse into one line otherwise');
+  // Historical OpenCode rows must not fold into Pi's series.
+  const historical = getUsageModelKey('opencode', 'z-ai/glm-5.1');
+  assert.notEqual(pi, historical, 'series would collapse into one line otherwise');
 });
 
 test('GLM 5.3 and Flash resolve independently, including provider aliases', () => {

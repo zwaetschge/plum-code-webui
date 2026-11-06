@@ -298,7 +298,7 @@ fun AreaWorkspace(
 
     // ---- Auto-open: the last opened item of an area, once, two columns only ----
     LaunchedEffect(expanded, area, state.sessions) {
-        if (!expanded || area == "swarm" || ws.isSettled(area) || ws.selection(area) != null) return@LaunchedEffect
+        if (!expanded || area == "hermes" || ws.isSettled(area) || ws.selection(area) != null) return@LaunchedEffect
         if (area == "chat") {
             ws.markSettled("chat")
             AreaLastOpened.get(context, "chat")?.let { ws.select("chat", it) }
@@ -355,7 +355,7 @@ fun AreaWorkspace(
         }
     }
 
-    val fullWidth = area == "swarm" || ws.showPersonalization || ws.workspacePath != null
+    val fullWidth = area == "hermes" || ws.showPersonalization || ws.workspacePath != null
     val selectionHere = if (area == "task" || area == "code") ws.selection(area) else null
     // The list column is shown in two-column windows, except in focus mode —
     // and never hidden while Task/Code has nothing open, or the right column
@@ -459,8 +459,8 @@ fun AreaWorkspace(
                 onNavigateToChat = { openSession(it) },
                 onNativeChat = { ws.workspacePath = null; ws.area = "chat" },
             )
-            key.area == "swarm" -> SwarmPane(selectArea) { onEmergency ->
-                AreaHeaderMenu(area = "swarm", viewModel = viewModel, onNavigateMain = onNavigateMain, onOpenSession = { openSession(it) }, onEmergency = onEmergency)
+            key.area == "hermes" -> HermesPane(selectArea) { onEmergency ->
+                AreaHeaderMenu(area = "hermes", viewModel = viewModel, onNavigateMain = onNavigateMain, onOpenSession = { openSession(it) }, onEmergency = onEmergency)
             }
             key.area == "chat" -> Box(Modifier.fillMaxSize()) {
                 // Focus mode: a slim top band carries the button that brings
@@ -647,19 +647,19 @@ private fun SplitPane(
     }
 }
 
-/** Schwarm at full width, with the area selector floating on top. */
+/** Hermes at full width, with the area selector floating on top. */
 @Composable
-private fun SwarmPane(selectArea: (String) -> Unit, menu: @Composable (onEmergency: () -> Unit) -> Unit) {
+private fun HermesPane(selectArea: (String) -> Unit, menu: @Composable (onEmergency: () -> Unit) -> Unit) {
     var headerPx by remember { mutableIntStateOf(0) }
     var emergency by remember { mutableStateOf(false) }
     val topInset = with(LocalDensity.current) { headerPx.toDp() }
     Box(Modifier.fillMaxSize()) {
-        AssistantSwarmScreen(topInset = topInset, emergencyOpen = emergency, onEmergencyDismiss = { emergency = false }, onAreaSelect = selectArea)
+        AssistantHermesScreen(topInset = topInset, emergencyOpen = emergency, onEmergencyDismiss = { emergency = false }, onAreaSelect = selectArea)
         Box(
             Modifier.align(Alignment.TopCenter).widthIn(max = 640.dp).onSizeChanged { headerPx = it.height }
                 .statusBarsPadding().padding(top = 12.dp, start = 16.dp, end = 16.dp),
         ) {
-            PlumAreaSelector("swarm", selectArea, menu = { menu { emergency = true } })
+            PlumAreaSelector("hermes", selectArea, menu = { menu { emergency = true } })
         }
     }
 }

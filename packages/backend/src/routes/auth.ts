@@ -416,27 +416,7 @@ router.get('/codex', async (req, res) => {
   }
 });
 
-// OpenCode CLI credentials login (uses ~/.config/opencode presence)
-router.get('/opencode', async (req, res) => {
-  try {
-    const user = await getAuthenticatedCliLinkUser(req);
-    if (!user) return redirectCliIdentityRequired(res);
-
-    const available = await isProviderAvailable('opencode');
-    if (!available) {
-      return res.redirect(`${config.frontendUrl}/connect?error=opencode_not_logged_in`);
-    }
-
-    await stampLogin(user.id, 'opencode', req);
-    const token = generateUserToken(user.id);
-    res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
-  } catch (error) {
-    console.error('OpenCode CLI auth error:', error);
-    res.redirect(`${config.frontendUrl}/connect?error=opencode`);
-  }
-});
-
-// Pi shares the OpenCode API connections and therefore the same local login.
+// Pi routes through the model provider registry; a configured endpoint is its login.
 router.get('/pi', async (req, res) => {
   try {
     const user = await getAuthenticatedCliLinkUser(req);
@@ -655,15 +635,13 @@ router.get('/providers', async (req, res) => {
   } catch {
     cliLinkAuthorized = false;
   }
-  const [codexAvailable, opencodeAvailable, piAvailable, vibeAvailable] =
-    cliLinkAuthorized
-      ? await Promise.all([
-          isProviderAvailable('codex'),
-          isProviderAvailable('opencode'),
-          isProviderAvailable('pi'),
-          isProviderAvailable('vibe'),
-        ])
-      : [false, false, false, false];
+  const [codexAvailable, piAvailable, vibeAvailable] = cliLinkAuthorized
+    ? await Promise.all([
+        isProviderAvailable('codex'),
+        isProviderAvailable('pi'),
+        isProviderAvailable('vibe'),
+      ])
+    : [false, false, false];
   res.json({
     success: true,
     data: {
@@ -671,7 +649,6 @@ router.get('/providers', async (req, res) => {
       google: !!(config.google.clientId && config.google.clientSecret),
       claude: config.claude.oauthEnabled && cliLinkAuthorized,
       codex: codexAvailable && cliLinkAuthorized,
-      opencode: opencodeAvailable && cliLinkAuthorized,
       pi: piAvailable && cliLinkAuthorized,
       vibe: vibeAvailable && cliLinkAuthorized,
       proxy: config.proxyAuth.enabled,

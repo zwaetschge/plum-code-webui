@@ -17,7 +17,10 @@ ABORT = {"set": False}
 
 def production_class(name, methods):
     original = next(n for n in TREE.body if isinstance(n, ast.ClassDef) and n.name == name)
-    body = [n for n in original.body if isinstance(n, ast.FunctionDef) and n.name in methods]
+    # Plain class constants come along; Qt signal declarations do not.
+    constants = [n for n in original.body if isinstance(n, ast.Assign)
+                 and isinstance(n.value, ast.Constant)]
+    body = constants + [n for n in original.body if isinstance(n, ast.FunctionDef) and n.name in methods]
     node = ast.ClassDef(name=name, bases=[], keywords=[], body=body, decorator_list=[], type_params=[])
     module = ast.fix_missing_locations(ast.Module(body=[node], type_ignores=[]))
     scope = {"time": time, "json": json, "ABORT": ABORT, "save_state": lambda _: None, "log": lambda *a: None,
@@ -28,6 +31,10 @@ def production_class(name, methods):
 
 App = production_class("App", {"_chat_event", "_finish_turn", "record_step", "describe_action", "_human_input", "set_mode", "_remote_action", "stop_task"})
 Tools = production_class("Tools", {"desktop_task", "_text"})
+tail_node = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == "tail_text")
+tail_scope = {}
+exec(compile(ast.fix_missing_locations(ast.Module(body=[tail_node], type_ignores=[])), str(SOURCE), "exec"), tail_scope)
+tail_text = tail_scope["tail_text"]
 layout_node = next(n for n in TREE.body if isinstance(n, ast.FunctionDef) and n.name == "screenshot_layout")
 layout_scope = {}
 exec(compile(ast.fix_missing_locations(ast.Module(body=[layout_node], type_ignores=[])), str(SOURCE), "exec"), layout_scope)
@@ -57,7 +64,7 @@ def fixture():
     app.released = 0
     app.publish_activity = lambda: setattr(app, "published", app.published + 1)
     app.input = Box(release_all=lambda: setattr(app, "released", app.released + 1))
-    app.overlay = Box(stop_activity=lambda: None, set_note=lambda *a: None, cursor=None)
+    app.overlay = Box(stop_activity=lambda: None, set_note=lambda *a, **k: None, cursor=None)
     widget = Box(hide=lambda: None, isVisible=lambda: False)
     app.dock = Box(present=lambda: None, isVisible=lambda: False, chat_window=widget)
     app.pill = widget
@@ -135,9 +142,28 @@ class DesktopControlTests(unittest.TestCase):
         self.assertEqual(app.activity_state["result"], "Fenster geöffnet")
         self.assertEqual(len(app.chat_lines), 1)
 
+    def test_status_line_starts_at_a_sentence_never_mid_word(self):
+        stream = ("Ich prüfe den Zustand am Palma und nehme A/B zunächst aus der Auswahl. "
+                  "Die ausgegebenen Moduswerte haben ihre sichtbare Funktion nicht belegt. "
+                  "Danach kläre ich, welche zusätzliche Ansteuerung der Originaltreiber dafür benötigt.")
+        line = tail_text(stream, 160)
+        self.assertTrue(line.startswith("Die ausgegebenen") or line.startswith("Danach"), line)
+        self.assertTrue(line.endswith("benötigt."))
+        words = tail_text("wort " * 80, 100)
+        self.assertTrue(words.startswith("… wort"), words)
+        self.assertEqual(tail_text("kurz"), "kurz")
+
+    def test_input_does_not_pause_a_turn_that_is_not_steering_the_desktop(self):
+        app = fixture()
+        app.turn_active = True
+        app.last_action = 0.0
+        app._human_input()
+        self.assertEqual(app.mode, "control")
+
     def test_physical_input_pauses_and_requires_explicit_resume(self):
         app = fixture()
         app.turn_active = True
+        app.last_action = time.time()
         app._human_input()
         self.assertEqual(app.mode, "paused")
         self.assertTrue(ABORT["set"])

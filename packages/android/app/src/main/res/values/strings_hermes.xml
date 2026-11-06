@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="assistant_hermes">Hermes</string>
+    <string name="hermes_subtitle">Every agent of your swarm: state, channels, updates and restarts.</string>
+    <string name="hermes_version_title">Version</string>
+    <string name="hermes_runs_on">Brian runs %1$s</string>
+    <string name="hermes_available">%1$s is available</string>
+    <string name="hermes_current">up to date</string>
+    <string name="hermes_update_to">Update to %1$s</string>
+    <string name="hermes_update">Update</string>
+    <string name="hermes_updating">Update running …</string>
+    <string name="hermes_auto_update">Update Brian automatically every day</string>
+    <string name="hermes_auto_update_on">With backup, channel check and rollback to the old version.</string>
+    <string name="hermes_paused">Paused.</string>
+    <string name="hermes_not_managed">not managed by Plum</string>
+    <string name="hermes_running_since">Running since %1$s</string>
+    <string name="hermes_stopped">Stopped</string>
+    <string name="hermes_healthy">healthy</string>
+    <string name="hermes_connected">connected</string>
+    <string name="hermes_disconnected">disconnected</string>
+    <string name="hermes_swarm_background">Swarm rooms and orders</string>
+    <string name="hermes_back">Back to Hermes</string>
+    <string name="hermes_unreachable">Hermes is not reachable</string>
+    <string name="hermes_latest">Hermes %1$s</string>
+    <string name="hermes_latest_hint">Newest Hermes Agent release. Updates back up first and roll back on failure.</string>
+    <string name="hermes_rebuild">Rebuild</string>
+    <string name="hermes_rebuild_confirm">Rebuild and restart %1$s?</string>
+    <string name="hermes_up_to_date">Up to date</string>
+    <string name="hermes_running_job">Running …</string>
+    <string name="hermes_log">Log</string>
+    <string name="hermes_group_swarm">Swarm</string>
+    <string name="hermes_group_watch">Reporters and guards</string>
+    <string name="hermes_no_container">No container of its own.</string>
+    <string name="hermes_on_phone">Runs on the phone.</string>
+    <string name="hermes_restart">Restart</string>
+    <string name="hermes_start">Start</string>
+    <string name="hermes_cancel">Cancel</string>
+</resources>

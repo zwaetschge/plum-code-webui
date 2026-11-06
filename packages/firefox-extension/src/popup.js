@@ -24,9 +24,68 @@ const picker = plumMountPicker($('picker'), {
 
 const relative = plumRelative;
 
+// Account quotas come from the background page (pushed frames, fallback poll);
+// it fetches fresh rows when the popup opens. Offline the last rows stay, dated.
+let lastState = null;
+let usageKey = '';
+let usageTick = 0;
+function renderUsage(state) {
+  const usage = state.usage || { rows: [], at: null };
+  const connected = state.status === 'connected';
+  // The state is broadcast on every agent action; rebuild only on real changes.
+  const key = JSON.stringify([usage, state.usageHidden, connected, state.configured, usageTick]);
+  if (key === usageKey) return;
+  usageKey = key;
+  $('usageCard').hidden = !state.configured || !usage.rows.length;
+  plumRenderUsage($('usage'), $('noUsage'), usage.rows, {
+    hidden: state.usageHidden || [],
+    onOpen: (row) =>
+      void plumOpenPlum(
+        serverUrl,
+        row.analyticsPath || `/analytics?provider=${encodeURIComponent(row.provider)}`
+      ).then(() => window.close()),
+  });
+  $('usageWhen').textContent = usage.at
+    ? connected
+      ? plumRelative(usage.at)
+      : plumStandText(usage.at)
+    : '';
+  $('usageWhen').classList.toggle('stale', !connected);
+}
+// Ages and forecasts are relative to now.
+setInterval(() => {
+  usageTick += 1;
+  if (lastState) renderUsage(lastState);
+}, 15_000);
+
+// Open approvals and questions; the session list marks their sessions "wartet".
+const approvals = plumMountApprovals($('approvals'), {
+  onOpen: (item) =>
+    void plumOpenPlum(serverUrl, `/session/${encodeURIComponent(item.sessionId)}`).then(() =>
+      window.close()
+    ),
+  onChange: () => recent.render(),
+});
+const recent = plumMountRecentSessions($('recent'), {
+  waiting: () => new Set(approvals.items().map((item) => item.sessionId)),
+});
+// Sessions change state while the popup stays open.
+setInterval(() => {
+  if (lastStatus === 'connected') void recent.refresh();
+}, 30_000);
+
 function render(state) {
-  if (state.status === 'connected' && lastStatus !== 'connected') void picker.refresh();
+  const connected = state.status === 'connected';
+  if (connected && lastStatus !== 'connected') {
+    void picker.refresh();
+    void browser.runtime.sendMessage({ plumUsageRefresh: true }).catch(() => {});
+    void approvals.refresh().then(() => recent.refresh());
+  }
+  approvals.setEnabled(connected);
+  if (!connected) $('recent').hidden = true;
   lastStatus = state.status;
+  lastState = state;
+  renderUsage(state);
   serverUrl = state.serverUrl || '';
   plumRenderUpdate($('updateBanner'), $('updateText'), state);
   // Before pairing only the setup steps make sense.
@@ -77,6 +136,8 @@ $('options').addEventListener('click', () => {
 
 browser.runtime.onMessage.addListener((message) => {
   if (message && message.plumState) render(message.plumState);
+  if (message && message.plumApprovalsChanged && lastStatus === 'connected')
+    void approvals.refresh();
 });
 
 browser.runtime.sendMessage({ plumGetState: true }).then(render);

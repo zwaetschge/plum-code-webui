@@ -39,7 +39,6 @@ services:
     #   - /opt/claude-webui/data:/app/packages/backend/data
     #   - /opt/claude-webui/config/claude:/home/node/.claude
     #   - /opt/claude-webui/config/codex:/home/node/.codex
-    #   - /opt/claude-webui/config/opencode:/home/node/.opencode
     #   - /opt/claude-webui/config/pi:/home/node/.pi
     #   - /opt/claude-webui/config/vibe:/home/node/.vibe
     #   - /opt/projects:/workspace

@@ -2,7 +2,8 @@ import { z } from 'zod';
 
 export const CHAT_OPTIONS = z
   .object({
-    webSearch: z.boolean().default(false),
+    // On like Claude/ChatGPT: the model decides when to search; an explicit false stays off.
+    webSearch: z.boolean().default(true),
     mcpServerIds: z.array(z.string().min(1).max(300)).max(6).default([]),
     allowToolWrites: z.boolean().default(false),
     skillNames: z.array(z.string().min(1).max(150)).max(12).default([]),
@@ -25,5 +26,12 @@ export const CHAT_OPTIONS = z
   })
   .strict();
 export type ChatOptions = z.infer<typeof CHAT_OPTIONS>;
+/** Source-bound research and passage edits stay without web tools unless explicitly enabled. */
+export const offlineChatDefaults = (body: { workflow?: unknown; artifactEdit?: unknown }) =>
+  body.workflow || body.artifactEdit ? { webSearch: false } : {};
+/** Effective options of a stored chat body. */
 export const chatOptions = (body: Record<string, unknown>) =>
-  CHAT_OPTIONS.parse(body.chatOptions ?? {});
+  CHAT_OPTIONS.parse({
+    ...offlineChatDefaults(body),
+    ...((body.chatOptions ?? {}) as Record<string, unknown>),
+  });

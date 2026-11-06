@@ -111,7 +111,7 @@ function testAcpProviderClassification() {
   // Vibe is the active persistent ACP harness.
   assert.equal(isAcpProvider('vibe'), true);
   assert.equal(isAcpProvider('kimi'), false);
-  for (const provider of ['codex', 'opencode', 'pi', 'claude', 'zai'] as const) {
+  for (const provider of ['codex', 'pi', 'claude', 'zai'] as const) {
     assert.equal(isAcpProvider(provider), false, `${provider} is not an ACP harness`);
   }
   assert.equal(isAcpProvider(null), false);
@@ -122,7 +122,6 @@ function testAcpProviderClassification() {
   // session whose last message is a user turn is an interrupted ACP turn.
   assert.equal(appliesModeOnNextTurnWithoutRestart('vibe'), true);
   assert.equal(appliesModeOnNextTurnWithoutRestart('kimi'), false);
-  assert.equal(appliesModeOnNextTurnWithoutRestart('opencode'), false);
   assert.equal(shouldRecoverInterruptedAcpTurn('vibe', 'stopped', 'user'), true);
   assert.equal(shouldRecoverInterruptedAcpTurn('vibe', 'stopped', 'assistant'), false);
   assert.equal(shouldRecoverInterruptedAcpTurn('vibe', 'running', 'user'), false);
@@ -492,7 +491,7 @@ async function testMistralAllowanceSplit() {
   // Far outside any billing month, so the window filter is what excludes it.
   const outOfWindow = '2020-01-15 00:00:00';
 
-  // API/Studio allowance: `mistral/*` traffic routed through Pi/OpenCode.
+  // API/Studio allowance: `mistral/*` traffic routed through Pi.
   // Devstral 2 list price is $0.40 in / $2 out per 1M tokens.
   await insertUsageRow({
     turnId: 'api-1',

@@ -1,0 +1,355 @@
+{
+  "createdAt": "2026-10-11T10:18:09.074Z",
+  "reference": "User-provided ChatGPT personalization screenshots",
+  "scope": "REA passively inspected Plum and a controlled preview, not an authenticated ChatGPT instance.",
+  "before": {
+    "evidenceId": "ev_8bc64f830169423623db8ba9e52fcfaec0b00d23428faa9a0ede9b89138e9ed8",
+    "operation": "inspect_web_page",
+    "provider": {
+      "id": "rea-cdp-browser",
+      "name": "REA Chrome DevTools Protocol observation provider",
+      "version": "2"
+    },
+    "confidence": "observed",
+    "authority": "external-service",
+    "page": "http://127.0.0.1:3001/chat",
+    "completeness": {
+      "status": "policy_filtered",
+      "conditions": [
+        "attach_limited",
+        "policy_filtered"
+      ],
+      "policy_filtered_sections": [
+        "accessibility",
+        "console_text",
+        "json_body_shapes",
+        "resources",
+        "script_sources",
+        "scripts",
+        "storage_keys",
+        "websocket_shapes",
+        "workers"
+      ],
+      "attach_limited_sections": [
+        "console_events",
+        "metadata",
+        "network_requests",
+        "websocket_connections",
+        "websocket_frames"
+      ],
+      "truncated_sections": [],
+      "unavailable_sections": [],
+      "excluded": [
+        {
+          "section": "accessibility",
+          "reason": "not_approved",
+          "count": 129
+        },
+        {
+          "section": "console_text",
+          "reason": "not_approved",
+          "count": null
+        },
+        {
+          "section": "json_body_shapes",
+          "reason": "not_approved",
+          "count": null
+        },
+        {
+          "section": "resources",
+          "reason": "disallowed_origin",
+          "count": 3
+        },
+        {
+          "section": "script_sources",
+          "reason": "not_approved",
+          "count": 12
+        },
+        {
+          "section": "scripts",
+          "reason": "unattributed_origin",
+          "count": 2
+        },
+        {
+          "section": "storage_keys",
+          "reason": "not_approved",
+          "count": null
+        },
+        {
+          "section": "websocket_shapes",
+          "reason": "not_approved",
+          "count": null
+        },
+        {
+          "section": "workers",
+          "reason": "out_of_target_scope",
+          "count": 1
+        }
+      ],
+      "dropped_events": {
+        "scripts": 0,
+        "network_requests": 0,
+        "console_events": 0,
+        "websocket_connections": 0,
+        "websocket_frames": 0,
+        "webmcp_tools": 0,
+        "timeline_events": 0,
+        "total": 0
+      }
+    },
+    "domNodeCount": 315,
+    "accessibilityNodeCount": 156,
+    "limitations": [
+      "Artifact identity is unavailable for this observation.",
+      "Observation starts when REA attaches; prior network and console activity is unavailable.",
+      "Raw network headers, bodies, cookies, storage values, console objects, and WebSocket payloads are never retained; explicitly requested primitive console text is retained verbatim, while payload captures retain value-free shapes.",
+      "Source maps are reported only as declarative URLs and are not fetched.",
+      "URL-less scripts and console events without an allowed source URL are excluded because their origin cannot be proven.",
+      "Browser host platform and architecture were not observed."
+    ]
+  },
+  "after": {
+    "evidenceId": "ev_250590cdd0ff0111c57d3f089893a1d21c77c16cc86757bb28ddf3722e8c8ed9",
+    "operation": "inspect_web_page",
+    "provider": {
+      "id": "rea-cdp-browser",
+      "name": "REA Chrome DevTools Protocol observation provider",
+      "version": "2"
+    },
+    "confidence": "observed",
+    "authority": "external-service",
+    "page": "http://127.0.0.1:5188/chat/personalization",
+    "completeness": {
+      "status": "policy_filtered",
+      "conditions": [
+        "attach_limited",
+        "policy_filtered"
+      ],
+      "policy_filtered_sections": [
+        "console_text",
+        "json_body_shapes",
+        "resources",
+        "script_sources",
+        "scripts",
+        "source_maps",
+        "storage_keys",
+        "websocket_shapes",
+        "workers"
+      ],
+      "attach_limited_sections": [
+        "console_events",
+        "metadata",
+        "network_requests",
+        "websocket_connections",
+        "websocket_frames"
+      ],
+      "truncated_sections": [],
+      "unavailable_sections": [],
+      "excluded": [
+        {
+          "section": "console_text",
+          "reason": "not_approved",
+          "count": null
+        },
+        {
+          "section": "json_body_shapes",
+          "reason": "not_approved",
+          "count": null
+        },
+        {
+          "section": "resources",
+          "reason": "disallowed_origin",
+          "count": 3
+        },
+        {
+          "section": "script_sources",
+          "reason": "not_approved",
+          "count": 126
+        },
+        {
+          "section": "scripts",
+          "reason": "unattributed_origin",
+          "count": 16
+        },
+        {
+          "section": "source_maps",
+          "reason": "unsupported_url",
+          "count": 87
+        },
+        {
+          "section": "storage_keys",
+          "reason": "not_approved",
+          "count": null
+        },
+        {
+          "section": "websocket_shapes",
+          "reason": "not_approved",
+          "count": null
+        },
+        {
+          "section": "workers",
+          "reason": "out_of_target_scope",
+          "count": 1
+        }
+      ],
+      "dropped_events": {
+        "scripts": 0,
+        "network_requests": 0,
+        "console_events": 0,
+        "websocket_connections": 0,
+        "websocket_frames": 0,
+        "webmcp_tools": 0,
+        "timeline_events": 0,
+        "total": 0
+      }
+    },
+    "domNodeCount": 455,
+    "accessibilityNodeCount": 392,
+    "limitations": [
+      "Artifact identity is unavailable for this observation.",
+      "Observation starts when REA attaches; prior network and console activity is unavailable.",
+      "Raw network headers, bodies, cookies, storage values, console objects, and WebSocket payloads are never retained; explicitly requested primitive console text is retained verbatim, while payload captures retain value-free shapes.",
+      "Source maps are reported only as declarative URLs and are not fetched.",
+      "URL-less scripts and console events without an allowed source URL are excluded because their origin cannot be proven.",
+      "Browser host platform and architecture were not observed."
+    ]
+  },
+  "observedControls": [
+    {
+      "role": "heading",
+      "name": "Personalisierung"
+    },
+    {
+      "role": "heading",
+      "name": "Plum-Erinnerungen"
+    },
+    {
+      "role": "switch",
+      "name": "Erinnerungen verwenden"
+    },
+    {
+      "role": "heading",
+      "name": "Erinnerungsübersicht"
+    },
+    {
+      "role": "button",
+      "name": "Verwalten"
+    },
+    {
+      "role": "heading",
+      "name": "Schreibstil"
+    },
+    {
+      "role": "switch",
+      "name": "Meinen Schreibstil berücksichtigen"
+    },
+    {
+      "role": "button",
+      "name": "Schreibprobe bearbeiten Deine gespeicherte Textprobe"
+    },
+    {
+      "role": "heading",
+      "name": "Referenzfotos"
+    },
+    {
+      "role": "heading",
+      "name": "Referenzfoto"
+    },
+    {
+      "role": "heading",
+      "name": "Ganzkörper-Referenzfoto"
+    },
+    {
+      "role": "heading",
+      "name": "Stil und Tonfall"
+    },
+    {
+      "role": "combobox",
+      "name": "Basisstil und Tonfall"
+    },
+    {
+      "role": "combobox",
+      "name": "Herzlichkeit"
+    },
+    {
+      "role": "combobox",
+      "name": "Begeisterung"
+    },
+    {
+      "role": "combobox",
+      "name": "Emoji"
+    },
+    {
+      "role": "combobox",
+      "name": "Layout und visuelle Elemente"
+    },
+    {
+      "role": "combobox",
+      "name": "Überschriften und Listen"
+    },
+    {
+      "role": "heading",
+      "name": "Über dich"
+    },
+    {
+      "role": "heading",
+      "name": "Benutzerdefinierte Anweisungen"
+    },
+    {
+      "role": "button",
+      "name": "Plum Chat"
+    },
+    {
+      "role": "button",
+      "name": "Plum Task"
+    },
+    {
+      "role": "button",
+      "name": "Plum Code"
+    },
+    {
+      "role": "heading",
+      "name": "Weitere Chat-Einstellungen"
+    },
+    {
+      "role": "switch",
+      "name": "Kurze Antworten"
+    },
+    {
+      "role": "switch",
+      "name": "Vorgeschlagene Prompts"
+    },
+    {
+      "role": "switch",
+      "name": "Frühere Sprachnotizen berücksichtigen"
+    },
+    {
+      "role": "switch",
+      "name": "Automatische Websuche"
+    },
+    {
+      "role": "switch",
+      "name": "Sprachchat"
+    },
+    {
+      "role": "switch",
+      "name": "Suche in Projekten"
+    },
+    {
+      "role": "switch",
+      "name": "Konnektorsuche"
+    },
+    {
+      "role": "button",
+      "name": "Speichern"
+    },
+    {
+      "role": "button",
+      "name": "Referenzfoto hinzufügen"
+    },
+    {
+      "role": "button",
+      "name": "Ganzkörper-Referenzfoto hinzufügen"
+    }
+  ]
+}

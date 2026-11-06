@@ -300,28 +300,6 @@ assert.equal(
   getProcessManager().getStreamingSnapshot.call(snapshotManager, 'snapshot-session'),
   null
 );
-Object.assign(liveProcess, {
-  cliProvider: 'opencode',
-  opencodeActiveMessageId: 'reply-2',
-  partStreams: new Map([
-    ['old', { type: 'text', messageId: 'reply-1', text: 'old answer', savedCleanedLength: 10 }],
-    [
-      'new',
-      {
-        type: 'text',
-        messageId: 'reply-2',
-        text: 'savedfresh',
-        cleaned: 'savedfresh',
-        savedCleanedLength: 5,
-      },
-    ],
-  ]),
-});
-assert.equal(
-  getProcessManager().getStreamingSnapshot.call(snapshotManager, 'snapshot-session')?.content,
-  'fresh'
-);
-
 // Sequenced live state is emitted before its cursor; blocking permissions are
 // buffered under an explicit replay type just like questions.
 const managerSource = fs.readFileSync(

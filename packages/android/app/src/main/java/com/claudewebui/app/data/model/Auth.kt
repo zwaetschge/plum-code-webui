@@ -53,7 +53,6 @@ data class AuthProviders(
     val google: Boolean = false,
     val claude: Boolean = false,
     val codex: Boolean = false,
-    val opencode: Boolean = false,
     val pi: Boolean = false,
     val vibe: Boolean = false,
     val zai: Boolean = false,

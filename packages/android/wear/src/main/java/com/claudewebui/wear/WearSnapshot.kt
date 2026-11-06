@@ -4,6 +4,12 @@ import android.content.Context
 import com.google.android.gms.tasks.Tasks
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.Wearable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -58,9 +64,15 @@ object WearSnapshotStore {
     private const val PREFS = "wear_snapshot"
     private const val KEY_CACHED = "snapshot_json"
 
+    private val _changes = MutableStateFlow(0)
+
+    /** Bumped on every cached push so an open screen can re-read the snapshot. */
+    val changes: StateFlow<Int> = _changes.asStateFlow()
+
     fun cache(context: Context, json: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_CACHED, json).apply()
+        _changes.update { it + 1 }
     }
 
     fun cached(context: Context): WearSnapshot =
@@ -152,4 +164,34 @@ object WearSnapshotStore {
         value >= 1_000 -> "%.1fk".format(value / 1_000.0)
         else -> value.toString()
     }
+}
+
+/**
+ * Answers for the snapshot fallback (watch not paired with Plum itself): the
+ * phone's WearBridgeService turns them into the REST calls.
+ */
+object PhoneRelay {
+
+    /** Ships one answer to the phone; true only if a node accepted it. */
+    suspend fun send(context: Context, path: String, payload: JSONObject): Boolean =
+        withContext(Dispatchers.IO) {
+            val bytes = payload.toString().toByteArray(Charsets.UTF_8)
+            // One node, not all of them. Every node that receives this runs
+            // WearBridgeService and POSTs the same answer, so a user paired
+            // with both a phone and a tablet answered the request twice.
+            runCatching {
+                val nodes = Tasks.await(
+                    Wearable.getNodeClient(context).connectedNodes,
+                    3, TimeUnit.SECONDS,
+                )
+                nodes.any { node ->
+                    runCatching {
+                        Tasks.await(
+                            Wearable.getMessageClient(context).sendMessage(node.id, path, bytes),
+                            3, TimeUnit.SECONDS,
+                        )
+                    }.isSuccess
+                }
+            }.getOrDefault(false)
+        }
 }

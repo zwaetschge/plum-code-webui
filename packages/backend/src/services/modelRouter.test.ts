@@ -270,3 +270,83 @@ test('routing, credential boundaries and usage accounting', async () => {
     await zai.close();
   }
 });
+
+test('Z.AI Code fallback: own endpoints for listed models, Z.AI for the rest', async () => {
+  const anthropic = await startStub((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"ok":"anthropic"}');
+  });
+  const zai = await startStub((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"ok":"zai","usage":{"input_tokens":3,"output_tokens":4}}');
+  });
+  const strata = await startStub((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"ok":"strata","usage":{"input_tokens":7,"output_tokens":9}}');
+  });
+
+  const lookups: Array<{ model: string; customOnly: boolean }> = [];
+  const router = createModelRouter({
+    anthropicBaseUrl: anthropic.url,
+    resolveUpstream: async (_userId, model, opts) => {
+      lookups.push({ model, customOnly: opts?.customOnly === true });
+      if (model !== 'qwen3.8-flash-next') return null;
+      return { baseUrl: strata.url, authToken: 'strata-secret', model, provider: 'strata' };
+    },
+  });
+  const mounted = await mountRouter(router.handler);
+  const token = router.registerSession('zai-session', 'user-a', {
+    baseUrl: zai.url + '/api/anthropic',
+  });
+
+  try {
+    // 1. A listed model goes to its endpoint with the stored token; the Z.AI
+    //    token the CLI sends must not travel along.
+    const local = await fetch(`${mounted.url}/${token}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer zai-token' },
+      body: JSON.stringify({ model: 'qwen3.8-flash-next', max_tokens: 5, messages: [] }),
+    });
+    assert.equal(((await local.json()) as { ok: string }).ok, 'strata');
+    assert.equal(strata.seen.at(-1)!.headers.authorization, 'Bearer strata-secret');
+    assert.equal(strata.seen.at(-1)!.path, '/v1/messages');
+
+    // 2. GLM falls back to Z.AI byte-for-byte, with the session's own token.
+    const glmBody = JSON.stringify({ model: 'glm-5.3', max_tokens: 5, messages: [] });
+    const glm = await fetch(`${mounted.url}/${token}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer zai-token' },
+      body: glmBody,
+    });
+    assert.equal(((await glm.json()) as { ok: string }).ok, 'zai');
+    assert.equal(zai.seen.at(-1)!.path, '/api/anthropic/v1/messages');
+    assert.equal(zai.seen.at(-1)!.headers.authorization, 'Bearer zai-token');
+    assert.equal(zai.seen.at(-1)!.body, glmBody);
+
+    // 3. Claude names and non-messages calls never reach Anthropic.
+    await fetch(`${mounted.url}/${token}/v1/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5', messages: [] }),
+    });
+    await fetch(`${mounted.url}/${token}/api/hello`);
+    assert.equal(anthropic.seen.length, 0);
+    assert.equal(zai.seen.at(-1)!.path, '/api/anthropic/api/hello');
+
+    // 4. Only own endpoints are looked up, and only their usage is booked:
+    //    the Z.AI turn itself is booked by the session as before.
+    assert.ok(lookups.every((lookup) => lookup.customOnly));
+    assert.deepEqual(router.drainRoutedUsage('zai-session'), {
+      inputTokens: 7,
+      outputTokens: 9,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      requests: 1,
+    });
+  } finally {
+    await mounted.close();
+    await anthropic.close();
+    await zai.close();
+    await strata.close();
+  }
+});

@@ -94,10 +94,11 @@
     <string name="analytics_compare_month">ggü. gleicher Zeit Vormonat</string>
     <string name="analytics_compare_90d">ggü. vorherigen 90 Tagen</string>
     <string name="analytics_mistral_month_summary">%1$s diesen Monat · %2$s Tokens · %3$s Anfragen</string>
+    <string name="analytics_mistral_exhausted">Laut Mistral ist dieses Kontingent aufgebraucht. Der Betrag oben ist das, was Plum erfasst hat.</string>
     <string name="analytics_mistral_no_budget">Kein Kontingent gesetzt – Mistral bietet für Pro-Pläne keine Kontingent-API.</string>
     <string name="analytics_mistral_set_budget">Kontingent festlegen</string>
     <string name="analytics_mistral_budget_title">Mistral-Monatskontingent</string>
-    <string name="analytics_mistral_budget_hint">Ein normaler API-Key (Pi, OpenCode) verbraucht das API/Studio-Kontingent, ein Key aus Code › Vibe CLI das Vibe-Code-Kontingent. Plum zählt seine eigenen Mistral-Züge zu Listenpreisen (€ = $); Le Chat, Studio und das Vibe-CLI sind nicht enthalten.</string>
+    <string name="analytics_mistral_budget_hint">Ein normaler API-Key (Pi, Chat) verbraucht das API/Studio-Kontingent, ein Key aus Code › Vibe CLI das Vibe-Code-Kontingent. Plum zählt seine eigenen Mistral-Züge zu Listenpreisen (€ = $); Le Chat, Studio und das Vibe-CLI sind nicht enthalten.</string>
     <string name="analytics_mistral_budget_field">Monatliches Kontingent</string>
     <string name="analytics_mistral_billing_day">Zurückgesetzt am Tag (1–28)</string>
     <string name="analytics_mistral_save">Speichern</string>

@@ -61,7 +61,7 @@ const DELTA_MS = 15_000
 const DELTA_MAX = 20
 /** So lange wartet der Hub nach `cancel` auf das `error` des Workers. */
 const ABBRUCH_FRIST_MS = 60_000
-const ERGEBNIS_MAX = 12_000
+const _ERGEBNIS_MAX = 12_000
 /** Dieselbe Rückfrage kommt in dieser Zeit nicht zweimal in den Thread. */
 const FRAGE_WIEDERHOLUNG_MS = 10 * 60_000
 const STATUS_MAX = 60

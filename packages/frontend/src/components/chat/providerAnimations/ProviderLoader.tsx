@@ -73,33 +73,6 @@ function CodexLoader({ size = 44, className, accent }: LoaderProps) {
   );
 }
 
-// Template A #07 — Lava lamp
-function OpenCodeLoader({ size = 44, className, accent }: LoaderProps) {
-  const id = useId().replace(/:/g, '');
-  const fill = accent ? 'rgb(59 130 246)' : 'currentColor';
-  // Container is a vertical pill; size controls height, width ~= size * 0.625
-  const w = Math.round(size * 0.625);
-  const h = size;
-  return (
-    <div
-      className={`pl-opencode-lamp ${className ?? ''}`}
-      style={{ width: w, height: h }}
-      aria-hidden="true"
-    >
-      <svg viewBox="0 0 100 160" preserveAspectRatio="none" style={{ filter: `url(#${id}-goo)` }}>
-        <defs>
-          <GooFilter id={`${id}-goo`} stdDeviation={6} />
-        </defs>
-        <g fill={fill}>
-          <circle className="pl-opencode-b1" cx="30" cy="80" r="14" />
-          <circle className="pl-opencode-b2" cx="55" cy="90" r="10" />
-          <circle className="pl-opencode-b3" cx="70" cy="85" r="12" />
-        </g>
-      </svg>
-    </div>
-  );
-}
-
 export function ProviderLoader({
   provider,
   size,
@@ -114,8 +87,6 @@ export function ProviderLoader({
   switch (provider) {
     case 'codex':
       return <CodexLoader size={size} className={className} accent={accent} />;
-    case 'opencode':
-      return <OpenCodeLoader size={size} className={className} accent={accent} />;
     case 'claude':
     case 'plum':
     default:

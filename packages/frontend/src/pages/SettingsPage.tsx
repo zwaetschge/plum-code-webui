@@ -58,14 +58,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { FolderBrowserDialog } from '@/components/ui/folder-browser';
 import { PluginEditorDialog } from '@/components/ui/plugin-editor';
 import { MarketplaceBrowserDialog } from '@/components/ui/marketplace-browser';
@@ -122,6 +114,8 @@ import { SshConnectionsPanel } from '@/components/settings/SshConnectionsPanel';
 import { SubagentUpstreamsSection } from '@/components/settings/SubagentUpstreamsSection';
 import { CliSubagentsSection } from '@/components/settings/CliSubagentsSection';
 import { ProviderLoginsPanel } from '@/components/settings/ProviderLoginsPanel';
+import { ModelProvidersPanel } from '@/components/settings/ModelProvidersPanel';
+import { PiModelMenuPicker } from '@/components/settings/PiModelMenuPicker';
 
 interface PluginInfo {
   id: string;
@@ -135,28 +129,6 @@ interface PluginInfo {
   enabled: boolean;
   marketplace?: string;
   installedAt?: string;
-}
-
-interface OpenCodeProvider {
-  id: string;
-  name: string;
-  apiKey: string;
-  hasKey: boolean;
-  envVars?: string[];
-  baseUrl?: string;
-  enabled: boolean;
-}
-
-interface OpenCodeAvailableProvider {
-  name: string;
-  models?: string[];
-  description?: string;
-  env?: string[];
-  api?: string;
-  doc?: string;
-  source?: string;
-  configured?: boolean;
-  hasKey?: boolean;
 }
 
 interface CodexStatus {
@@ -263,8 +235,7 @@ const ACTIVATABLE_CLI_PROVIDERS: Array<{
   { id: 'codex', description: 'OpenAI Codex subscription sessions' },
   { id: 'claude', description: 'Anthropic Claude subscription sessions' },
   { id: 'zai', description: 'Z.AI GLM Coding Plan via Claude Code' },
-  { id: 'opencode', description: 'OpenCode multi-provider harness' },
-  { id: 'pi', description: 'Pi harness with OpenCode connections' },
+  { id: 'pi', description: 'Pi harness over your Modellanbieter' },
   { id: 'vibe', description: 'Mistral Vibe CLI (persistent ACP session)' },
 ];
 
@@ -289,12 +260,13 @@ type GeneralSettingsTab =
   | 'pi'
   | 'oracle'
   | 'interface'
-  | 'opencode';
+  | 'model-providers';
 type AdminSettingsTab = 'overview' | 'users' | 'audit-log';
 type SettingsDestination =
   | 'appearance'
   | 'workspace'
   | 'providers'
+  | 'model-providers'
   | 'agents'
   | 'extensions'
   | 'integrations'
@@ -420,11 +392,11 @@ const GENERAL_SETTINGS_TABS: GeneralSettingsTabDescriptor[] = [
     ],
   },
   {
-    value: 'opencode',
-    label: 'OpenCode',
-    description: 'Curated OpenCode model menu.',
+    value: 'model-providers',
+    label: 'Modellanbieter',
+    description: 'API-Keys, Endpunkte und Modelle für Pi, Chat und Voice.',
     icon: Server,
-    sections: [{ id: 'opencode-models', label: 'OpenCode models' }],
+    sections: [{ id: 'model-providers', label: 'Modellanbieter' }],
   },
   {
     value: 'pi',
@@ -501,14 +473,34 @@ const SETTINGS_NAV_ITEMS: SettingsNavItem[] = [
         id: 'provider-logins',
         label: 'Provider accounts',
         generalTab: 'logins',
-        keywords: ['opencode api keys', 'vibe login', 'mistral api key'],
+        keywords: ['vibe login', 'mistral api key'],
       },
       { id: 'codex-cli', label: 'Codex', generalTab: 'codex' },
       { id: 'claude-cli', label: 'Claude Code', generalTab: 'claude' },
       { id: 'zai-cli', label: 'Z.AI', generalTab: 'zai', keywords: ['glm', 'token'] },
-      { id: 'opencode-models', label: 'OpenCode models', generalTab: 'opencode' },
       { id: 'pi-cli', label: 'Pi', generalTab: 'pi' },
     ],
+  },
+  {
+    value: 'model-providers',
+    tab: 'general',
+    generalTab: 'model-providers',
+    group: 'Coding',
+    label: 'Modellanbieter',
+    description: 'API-Keys, Endpunkte und Modelle für Pi, Chat und Voice',
+    icon: Server,
+    keywords: [
+      'api key',
+      'base url',
+      'endpoint',
+      'model provider',
+      'z-ai',
+      'glm',
+      'deepseek',
+      'mistral',
+      'anthropic',
+    ],
+    sections: [{ id: 'model-providers', label: 'Modellanbieter' }],
   },
   {
     value: 'agents',
@@ -710,7 +702,7 @@ function getAdminSettingsTab(tab: string | null, adminTab: string | null): Admin
 }
 
 function getGeneralSettingsTab(tab: string | null, sectionId?: string | null): GeneralSettingsTab {
-  if (sectionId === 'opencode-providers' || sectionId === 'active-providers') return 'logins';
+  if (sectionId === 'active-providers') return 'logins';
   if (sectionId) {
     return GENERAL_SECTION_TO_TAB.get(sectionId) || 'interface';
   }
@@ -752,7 +744,7 @@ export function SettingsPage() {
   const activeGeneralTab = useMemo(
     () =>
       getGeneralSettingsTab(
-        searchParams.get('tab') === 'api-keys' ? 'logins' : searchParams.get('generalTab'),
+        searchParams.get('tab') === 'api-keys' ? 'model-providers' : searchParams.get('generalTab'),
         searchParams.get('section') || location.hash.slice(1)
       ),
     [location.hash, searchParams]
@@ -897,33 +889,6 @@ export function SettingsPage() {
       return response.data.data || [];
     },
     enabled: activeTab === 'extensions',
-  });
-
-  // Fetch OpenCode providers
-  const { data: openCodeProviders, refetch: refetchOpenCodeProviders } = useQuery({
-    queryKey: ['opencode-providers'],
-    queryFn: async () => {
-      const response = await api.get<{ success: boolean; data?: OpenCodeProvider[] }>(
-        '/api/opencode/providers'
-      );
-      return response.data.data || [];
-    },
-    enabled:
-      activeTab === 'api-keys' || (activeTab === 'general' && activeGeneralTab === 'opencode'),
-  });
-
-  // Fetch available OpenCode providers (with models)
-  const { data: availableProviders } = useQuery({
-    queryKey: ['opencode-available-providers'],
-    queryFn: async () => {
-      const response = await api.get<{
-        success: boolean;
-        data?: Record<string, OpenCodeAvailableProvider>;
-      }>('/api/opencode/available-providers');
-      return response.data.data || {};
-    },
-    enabled:
-      activeTab === 'api-keys' || (activeTab === 'general' && activeGeneralTab === 'opencode'),
   });
 
   // Check Claude CLI status
@@ -1555,63 +1520,6 @@ export function SettingsPage() {
     },
   });
 
-  // OpenCode providers mutations
-  const deleteOpenCodeProviderMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await api.delete(`/api/opencode/providers/${id}`);
-      return id;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['opencode-providers'] });
-      queryClient.invalidateQueries({ queryKey: ['opencode-available-providers'] });
-      toast({ title: 'Provider deleted' });
-    },
-    onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
-    },
-  });
-
-  const [testingOpenCodeProviderId, setTestingOpenCodeProviderId] = useState<string | null>(null);
-
-  const testOpenCodeProvider = async (id: string) => {
-    setTestingOpenCodeProviderId(id);
-    try {
-      const response = await api.post<
-        ApiResponse<{
-          connected: boolean;
-          message: string;
-          envVars?: string[];
-          modelCount?: number;
-        }>
-      >(`/api/opencode/providers/${encodeURIComponent(id)}/test`);
-      const result = response.data.data;
-      toast({
-        title: result?.connected ? 'Provider ready' : 'Provider not ready',
-        description: result?.message || 'No response from OpenCode.',
-        variant: result?.connected ? undefined : 'destructive',
-      });
-    } catch (error) {
-      toast({
-        title: 'Provider test failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
-        variant: 'destructive',
-      });
-    } finally {
-      setTestingOpenCodeProviderId(null);
-    }
-  };
-
-  // OpenCode models state
-  const [modelProviderId, setModelProviderId] = useState<string>('');
-  const [modelModelId, setModelModelId] = useState<string>('');
-  const openCodeModels = settings?.cliProviderModelLists?.opencode || [];
-  const openCodeProviderById = useMemo(() => {
-    const map = new Map<string, OpenCodeProvider>();
-    for (const provider of openCodeProviders || []) {
-      map.set(provider.id, provider);
-    }
-    return map;
-  }, [openCodeProviders]);
   const piDiagnostic = useMemo(
     () => providerDiagnostics?.find((provider) => provider.id === 'pi'),
     [providerDiagnostics]
@@ -1627,84 +1535,14 @@ export function SettingsPage() {
     }
     return Array.from(groups.entries());
   }, [piDiagnostic?.models]);
-  const selectedModelProvider = modelProviderId ? availableProviders?.[modelProviderId] : undefined;
-  const selectedStoredModelProvider = modelProviderId
-    ? openCodeProviderById.get(modelProviderId)
-    : undefined;
-
-  const removeOpenCodeModel = (model: string) => {
-    const current = openCodeModels || [];
-    const updated = current.filter((m) => m !== model);
-    updateSettingsMutation.mutate({
-      cliProviderModelLists: {
-        ...settings?.cliProviderModelLists,
-        opencode: updated.length > 0 ? updated : undefined,
-      },
-    });
-  };
-
-  // OpenCode providers state
-  const [openCodeProviderDialog, setOpenCodeProviderDialog] = useState(false);
-  const [selectedProviderId, setSelectedProviderId] = useState<string>('');
-  const [openCodeProviderForm, setOpenCodeProviderForm] = useState({
-    id: '',
-    name: '',
-    apiKey: '',
-    baseUrl: '',
-  });
-  const [showOpenCodeApiKey, setShowOpenCodeApiKey] = useState(false);
-
-  const openOpenCodeProviderDialog = (providerId?: string) => {
-    const stored = providerId ? openCodeProviderById.get(providerId) : undefined;
-    const available = providerId ? availableProviders?.[providerId] : undefined;
-    setSelectedProviderId(providerId || '');
-    setOpenCodeProviderForm({
-      id: providerId || '',
-      name: stored?.name || available?.name || '',
-      apiKey: '',
-      baseUrl: stored?.baseUrl || available?.api || '',
-    });
-    setShowOpenCodeApiKey(false);
-    setOpenCodeProviderDialog(true);
-  };
-  const dialogAvailableProvider = selectedProviderId
-    ? availableProviders?.[selectedProviderId]
-    : undefined;
-  const dialogStoredProvider = selectedProviderId
-    ? openCodeProviderById.get(selectedProviderId)
-    : undefined;
-  const dialogEnvVars = dialogStoredProvider?.envVars || dialogAvailableProvider?.env || [];
-
-  const saveOpenCodeProvider = async () => {
-    try {
-      const response = await api.put<ApiResponse<OpenCodeProvider>>('/api/opencode/providers', {
-        id: openCodeProviderForm.id,
-        name: openCodeProviderForm.name,
-        apiKey: openCodeProviderForm.apiKey || undefined,
-        baseUrl: openCodeProviderForm.baseUrl || undefined,
-        enabled: true,
-      });
-
-      if (response.data.success) {
-        toast({ title: 'Provider erfolgreich gespeichert' });
-        setOpenCodeProviderDialog(false);
-        setSelectedProviderId('');
-        setOpenCodeProviderForm({ id: '', name: '', apiKey: '', baseUrl: '' });
-        refetchOpenCodeProviders();
-        queryClient.invalidateQueries({ queryKey: ['opencode-available-providers'] });
-      } else {
-        toast({
-          title: 'Error saving provider',
-          description: response.data.error?.toString() || 'Unknown error',
-          variant: 'destructive',
-        });
-      }
-    } catch (error: unknown) {
-      console.error('Failed to save OpenCode provider:', error);
-      const errorMsg = error instanceof Error ? error.message : 'Failed to save provider';
-      toast({ title: 'Error', description: errorMsg, variant: 'destructive' });
-    }
-  };
+  /** Models in the Pi picker when a pick is stored; null means all of them. */
+  const piMenuCount = useMemo(() => {
+    const available = new Set(piDiagnostic?.models ?? []);
+    const picked = (settings?.cliProviderModelLists?.pi ?? []).filter((model) =>
+      available.has(model)
+    );
+    return picked.length > 0 ? picked.length : null;
+  }, [piDiagnostic?.models, settings?.cliProviderModelLists?.pi]);
 
   const handleThemeChange = (theme: Theme) => {
     const nextTheme = normalizeTheme(theme);
@@ -1850,13 +1688,15 @@ export function SettingsPage() {
           ? 'workspace'
           : activeGeneralTab === 'subagents'
             ? 'agents'
-            : 'providers'
+            : activeGeneralTab === 'model-providers'
+              ? 'model-providers'
+              : 'providers'
       : activeTab === 'analytics'
         ? 'usage'
         : activeTab === 'diagnostics'
           ? 'system'
           : activeTab === 'api-keys'
-            ? 'providers'
+            ? 'model-providers'
             : activeTab;
   const settingsNavItems = useMemo(
     () => SETTINGS_NAV_ITEMS.filter((item) => item.value !== 'admin' || isAdmin),
@@ -1939,8 +1779,7 @@ export function SettingsPage() {
       ? decodeURIComponent(location.hash.slice(1))
       : '';
     const requestedSection = searchParams.get('section') || hashSection;
-    const sectionId =
-      requestedSection === 'opencode-providers' ? 'provider-logins' : requestedSection;
+    const sectionId = requestedSection;
     if (!sectionId || activeTab === 'admin') return;
 
     const scrollToSection = () => {
@@ -2117,7 +1956,7 @@ export function SettingsPage() {
                     onChange={(event) => handleGeneralTabChange(event.target.value)}
                   >
                     {GENERAL_SETTINGS_TABS.filter((tab) =>
-                      ['logins', 'codex', 'claude', 'zai', 'opencode', 'pi'].includes(tab.value)
+                      ['logins', 'codex', 'claude', 'zai', 'pi'].includes(tab.value)
                     ).map((tab) => (
                       <option key={tab.value} value={tab.value}>
                         {tab.label}
@@ -2465,7 +2304,7 @@ export function SettingsPage() {
                           id="provider-logins"
                           eyebrow="Access"
                           title="Provider logins"
-                          description="Harness sign-in, API endpoints, and Antigravity — each with the method it actually uses."
+                          description="Harness sign-in and Antigravity — each with the method it actually uses."
                         >
                           <ProviderLoginsPanel />
                         </SettingsPanel>
@@ -3285,215 +3124,15 @@ export function SettingsPage() {
                       </div>
                     </TabsContent>
 
-                    {/* OpenCode Models */}
-                    <TabsContent value="opencode" className="settings-general-pane mt-0">
+                    <TabsContent value="model-providers" className="settings-general-pane mt-0">
                       <div className="settings-pane-column">
-                        <section id="opencode-models">
-                          <Card className="border border-border/70">
-                            <CardHeader className="pb-4">
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <CardTitle className="text-base">OpenCode Models</CardTitle>
-                                  <CardDescription>
-                                    Curate the model menu for OpenCode sessions from the providers
-                                    you have available.
-                                  </CardDescription>
-                                </div>
-                                <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-                                  75+ routed providers
-                                </span>
-                              </div>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                              {/* Provider Selection */}
-                              <div className="space-y-2">
-                                <label className="text-sm font-medium">1. Choose provider</label>
-                                <Select
-                                  value={modelProviderId}
-                                  onValueChange={(value) => {
-                                    setModelProviderId(value);
-                                    setModelModelId('');
-                                  }}
-                                >
-                                  <SelectTrigger className="w-full">
-                                    <SelectValue placeholder="Choose a provider..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {Object.entries(availableProviders || {}).map(
-                                      ([id, provider]) => (
-                                        <SelectItem key={id} value={id}>
-                                          <div className="flex flex-col">
-                                            <span className="font-medium">{provider.name}</span>
-                                            <span className="text-xs text-muted-foreground">
-                                              {id}
-                                              {provider.models?.length
-                                                ? ` - ${provider.models.length} models`
-                                                : ''}
-                                              {provider.configured ? ' - configured' : ''}
-                                            </span>
-                                          </div>
-                                        </SelectItem>
-                                      )
-                                    )}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-
-                              {modelProviderId && (
-                                <div
-                                  className={cn(
-                                    'flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between',
-                                    selectedModelProvider?.hasKey ||
-                                      selectedStoredModelProvider?.hasKey
-                                      ? 'border-green-500/25 bg-green-500/5'
-                                      : 'border-amber-500/25 bg-amber-500/5'
-                                  )}
-                                >
-                                  <div className="flex min-w-0 items-start gap-3">
-                                    <div
-                                      className={cn(
-                                        'mt-0.5 rounded-lg p-2',
-                                        selectedModelProvider?.hasKey ||
-                                          selectedStoredModelProvider?.hasKey
-                                          ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-                                          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                                      )}
-                                    >
-                                      <Key className="h-4 w-4" />
-                                    </div>
-                                    <div className="min-w-0">
-                                      <p className="text-sm font-medium">
-                                        {selectedModelProvider?.hasKey ||
-                                        selectedStoredModelProvider?.hasKey
-                                          ? 'API key saved for this provider'
-                                          : 'No API key saved for this provider'}
-                                      </p>
-                                      <p className="truncate text-xs text-muted-foreground">
-                                        {(
-                                          selectedStoredModelProvider?.envVars ||
-                                          selectedModelProvider?.env ||
-                                          []
-                                        )
-                                          .slice(0, 4)
-                                          .join(', ') || 'OpenCode default credential lookup'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => openOpenCodeProviderDialog(modelProviderId)}
-                                    className="h-8 shrink-0 gap-1.5 text-xs"
-                                  >
-                                    <KeyRound className="h-3.5 w-3.5" />
-                                    {selectedModelProvider?.hasKey ||
-                                    selectedStoredModelProvider?.hasKey
-                                      ? 'Update key'
-                                      : 'Add key'}
-                                  </Button>
-                                </div>
-                              )}
-
-                              {/* Model Selection */}
-                              {modelProviderId && availableProviders?.[modelProviderId]?.models && (
-                                <div className="space-y-2">
-                                  <label className="text-sm font-medium">2. Choose model</label>
-                                  <Select value={modelModelId} onValueChange={setModelModelId}>
-                                    <SelectTrigger className="w-full">
-                                      <SelectValue placeholder="Choose a model..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {availableProviders[modelProviderId].models?.map((model) => (
-                                        <SelectItem key={model} value={model}>
-                                          <code className="text-xs">{model}</code>
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              )}
-
-                              {/* Add Button */}
-                              <div className="flex gap-2">
-                                <Button
-                                  onClick={() => {
-                                    if (modelProviderId && modelModelId) {
-                                      const fullModel = `${modelProviderId}/${modelModelId}`;
-                                      const current = openCodeModels || [];
-                                      if (!current.includes(fullModel)) {
-                                        updateSettingsMutation.mutate({
-                                          cliProviderModelLists: {
-                                            ...settings?.cliProviderModelLists,
-                                            opencode: [...current, fullModel],
-                                          },
-                                        });
-                                      }
-                                      setModelModelId('');
-                                    }
-                                  }}
-                                  disabled={!modelProviderId || !modelModelId}
-                                  className="bg-purple-600 hover:bg-purple-700"
-                                >
-                                  <Plus className="h-4 w-4 mr-1" />
-                                  Add model
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  onClick={() => {
-                                    setModelProviderId('');
-                                    setModelModelId('');
-                                  }}
-                                >
-                                  Reset
-                                </Button>
-                              </div>
-
-                              {/* Configured Models */}
-                              {openCodeModels && openCodeModels.length > 0 && (
-                                <div className="space-y-2 pt-4 border-t">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm font-medium">
-                                      Curated models ({openCodeModels.length})
-                                    </span>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 text-xs text-destructive"
-                                      onClick={() => {
-                                        updateSettingsMutation.mutate({
-                                          cliProviderModelLists: {
-                                            ...settings?.cliProviderModelLists,
-                                            opencode: undefined,
-                                          },
-                                        });
-                                      }}
-                                    >
-                                      Clear all
-                                    </Button>
-                                  </div>
-                                  <div className="flex min-w-0 max-w-full flex-wrap gap-2 overflow-hidden">
-                                    {openCodeModels.map((model) => (
-                                      <div
-                                        key={model}
-                                        title={model}
-                                        className="group flex min-w-0 max-w-full items-center gap-1 rounded-lg border border-purple-500/30 bg-purple-500/10 px-2.5 py-1 font-mono text-sm sm:max-w-[calc(50%_-_0.25rem)] 2xl:max-w-[calc(33.333%_-_0.35rem)]"
-                                      >
-                                        <span className="block min-w-0 truncate">{model}</span>
-                                        <button
-                                          type="button"
-                                          onClick={() => removeOpenCodeModel(model)}
-                                          className="shrink-0 opacity-0 transition-opacity text-muted-foreground hover:text-destructive group-hover:opacity-100"
-                                        >
-                                          <X className="h-3 w-3" />
-                                        </button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        </section>
+                        <SettingsPanel
+                          id="model-providers"
+                          eyebrow="Registry"
+                          title="API-Keys und Endpunkte"
+                        >
+                          <ModelProvidersPanel />
+                        </SettingsPanel>
                       </div>
                     </TabsContent>
 
@@ -3507,8 +3146,7 @@ export function SettingsPage() {
                                 <div>
                                   <CardTitle className="text-base">Pi</CardTitle>
                                   <CardDescription>
-                                    Pi uses your enabled OpenCode provider accounts with its own
-                                    persistent RPC session runtime.
+                                    Persistent RPC sessions over your enabled Modellanbieter.
                                   </CardDescription>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -3571,7 +3209,9 @@ export function SettingsPage() {
                                   <p className="text-sm font-medium">Model menu</p>
                                   <p className="mt-1 text-xs text-muted-foreground">
                                     {piDiagnostic
-                                      ? `${piDiagnostic.modelCount} runnable models`
+                                      ? piMenuCount !== null
+                                        ? `${piMenuCount} von ${piDiagnostic.modelCount} im Menü`
+                                        : `Alle ${piDiagnostic.modelCount} Modelle im Menü`
                                       : 'Loading user-specific models'}
                                   </p>
                                 </div>
@@ -3582,74 +3222,46 @@ export function SettingsPage() {
                                   Loading Pi runtime and model discovery...
                                 </div>
                               ) : piDiagnostic && piDiagnostic.modelCount > 0 ? (
-                                <div className="space-y-3">
-                                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                                    <div>
-                                      <p className="text-sm font-medium">Available models</p>
-                                      <p className="text-xs text-muted-foreground">
-                                        Generated from your enabled provider accounts. Image- and
-                                        video-only models are excluded.
-                                      </p>
-                                    </div>
-                                    <p className="shrink-0 text-xs text-muted-foreground">
-                                      Default: <code>{piDiagnostic.defaultModel || 'auto'}</code>
-                                    </p>
-                                  </div>
-                                  <div className="grid max-h-[440px] gap-3 overflow-y-auto pr-1 md:grid-cols-2">
-                                    {piModelGroups.map(([providerId, models]) => (
-                                      <div
-                                        key={providerId}
-                                        className="min-w-0 rounded-lg border border-border/70 bg-card/40 p-3"
-                                      >
-                                        <div className="mb-2 flex items-center justify-between gap-2">
-                                          <p className="truncate text-sm font-semibold">
-                                            {providerId}
-                                          </p>
-                                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                                            {models.length}
-                                          </span>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                          {models.map((model) => (
-                                            <div
-                                              key={model}
-                                              title={model}
-                                              className="truncate rounded-md bg-muted/55 px-2.5 py-1.5 font-mono text-xs"
-                                            >
-                                              {model}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
+                                <PiModelMenuPicker
+                                  models={piDiagnostic.models}
+                                  stored={settings?.cliProviderModelLists?.pi ?? []}
+                                  providerDefault={piDiagnostic.defaultModel ?? null}
+                                  saving={updateSettingsMutation.isPending}
+                                  onSave={(list) =>
+                                    updateSettingsMutation.mutate({
+                                      cliProviderModelLists: {
+                                        ...(settings?.cliProviderModelLists ?? {}),
+                                        pi: list,
+                                      },
+                                    })
+                                  }
+                                />
                               ) : (
                                 <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-4">
                                   <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
                                     Pi needs an enabled provider account
                                   </p>
                                   <p className="mt-1 text-xs text-muted-foreground">
-                                    Add or enable a Z.AI, Qwen/Alibaba, DeepSeek, or other OpenCode
-                                    connection. Pi will rebuild its model menu automatically.
+                                    Add or enable a Z.AI, Qwen/Alibaba, DeepSeek or other
+                                    Modellanbieter. Pi rebuilds its model menu automatically.
                                   </p>
                                 </div>
                               )}
 
                               <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
                                 <p className="text-xs text-muted-foreground">
-                                  Credentials stay in the per-user OpenCode store. Pi receives only
-                                  the generated, secret-free provider configuration.
+                                  Keys stay in your Modellanbieter registry. Pi receives only the
+                                  generated, secret-free provider configuration.
                                 </p>
                                 <Button
                                   type="button"
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => handleGeneralTabChange('logins')}
+                                  onClick={() => handleGeneralTabChange('model-providers')}
                                   className="shrink-0 gap-2"
                                 >
                                   <KeyRound className="h-3.5 w-3.5" />
-                                  Manage provider accounts
+                                  Modellanbieter
                                 </Button>
                               </div>
                             </CardContent>
@@ -3843,123 +3455,6 @@ export function SettingsPage() {
                     are stored per Plum account and apply on every device.
                   </p>
                 </SettingsPanel>
-              </TabsContent>
-
-              {/* API Keys Tab */}
-              <TabsContent value="api-keys" className="settings-pane-rail mt-0">
-                {/* OpenCode Providers (wrapped in its own section) */}
-                <section id="opencode-providers">
-                  <Card>
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <CardTitle className="text-base">OpenCode Providers</CardTitle>
-                          <CardDescription>
-                            Configure API keys once; OpenCode and Pi use the same connections and
-                            model catalogue
-                          </CardDescription>
-                        </div>
-                        <Button
-                          size="sm"
-                          onClick={() => openOpenCodeProviderDialog()}
-                          className="gap-1.5 h-8 px-3 text-xs"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          Add Provider
-                        </Button>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      {openCodeProviders && openCodeProviders.length > 0 ? (
-                        <div className="space-y-2">
-                          {openCodeProviders.map((provider) => (
-                            <div
-                              key={provider.id}
-                              className="group flex items-center gap-4 p-4 rounded-xl border bg-card transition-all hover:border-primary/30 hover:shadow-sm"
-                            >
-                              <div className="p-2.5 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400">
-                                <Key className="h-4 w-4" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <p className="font-medium">{provider.name}</p>
-                                  <span className="text-xs text-muted-foreground font-mono">
-                                    {provider.id}
-                                  </span>
-                                  {!provider.enabled && (
-                                    <span className="text-xs text-muted-foreground">
-                                      (disabled)
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-xs text-muted-foreground">
-                                  {provider.hasKey ? 'API key configured' : 'No API key'}
-                                  {provider.baseUrl && ` • ${provider.baseUrl}`}
-                                </p>
-                                {(provider.envVars?.length ||
-                                  availableProviders?.[provider.id]?.env?.length) && (
-                                  <p className="mt-0.5 text-[11px] text-muted-foreground font-mono">
-                                    {(
-                                      provider.envVars ||
-                                      availableProviders?.[provider.id]?.env ||
-                                      []
-                                    )
-                                      .slice(0, 3)
-                                      .join(', ')}
-                                  </p>
-                                )}
-                              </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => testOpenCodeProvider(provider.id)}
-                                disabled={testingOpenCodeProviderId === provider.id}
-                                className="h-8 px-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                {testingOpenCodeProviderId === provider.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Zap className="h-4 w-4" />
-                                )}
-                                <span className="ml-1 text-xs">Test</span>
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => openOpenCodeProviderDialog(provider.id)}
-                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                                title="Edit provider key"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => deleteOpenCodeProviderMutation.mutate(provider.id)}
-                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="flex flex-col items-center justify-center py-8 text-center">
-                          <div className="p-4 rounded-full bg-muted/50 mb-4">
-                            <Key className="h-8 w-8 text-muted-foreground/50" />
-                          </div>
-                          <p className="font-medium text-muted-foreground mb-1">
-                            No providers configured
-                          </p>
-                          <p className="text-sm text-muted-foreground/70 max-w-xs">
-                            Add OpenCode-compatible providers like OpenAI, Anthropic, or custom
-                            endpoints
-                          </p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </section>
               </TabsContent>
 
               {/* Connections Tab */}
@@ -4868,9 +4363,7 @@ export function SettingsPage() {
                     <CardHeader className="settings-utility-card-header flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                       <div className="space-y-1">
                         <CardTitle className="text-base">CLI Updates</CardTitle>
-                        <CardDescription>
-                          Update Claude, Codex, and OpenCode CLI tools.
-                        </CardDescription>
+                        <CardDescription>Update the installed harness CLIs.</CardDescription>
                       </div>
                       <Button
                         size="sm"
@@ -5556,208 +5049,6 @@ export function SettingsPage() {
           onOpenChange={setCodexMarketplaceBrowserOpen}
           configProvider="codex"
         />
-
-        {/* OpenCode Provider Dialog */}
-        <Dialog open={openCodeProviderDialog} onOpenChange={setOpenCodeProviderDialog}>
-          <DialogContent className="sm:max-w-lg">
-            <DialogHeader>
-              <DialogTitle>
-                {dialogStoredProvider?.hasKey
-                  ? 'Update OpenCode Provider'
-                  : 'Add OpenCode Provider'}
-              </DialogTitle>
-              <DialogDescription>
-                Wähle einen Provider aus der Liste und hinterlege den passenden API Key
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              {/* Provider Selection */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Provider auswählen</label>
-                <Select
-                  value={selectedProviderId}
-                  onValueChange={(value) => {
-                    setSelectedProviderId(value);
-                    const provider = availableProviders?.[value];
-                    const stored = openCodeProviderById.get(value);
-                    if (provider) {
-                      setOpenCodeProviderForm({
-                        ...openCodeProviderForm,
-                        id: value,
-                        name: stored?.name || provider.name,
-                        baseUrl: stored?.baseUrl || provider.api || '',
-                      });
-                    }
-                  }}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Provider auswählen..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(availableProviders || {}).map(([id, provider]) => (
-                      <SelectItem key={id} value={id}>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{provider.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {id}
-                            {provider.models?.length ? ` - ${provider.models.length} Modelle` : ''}
-                            {provider.configured ? ' - konfiguriert' : ''}
-                            {provider.description ? ` - ${provider.description}` : ''}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {selectedProviderId && (
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">
-                        {dialogAvailableProvider?.name || openCodeProviderForm.name}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {dialogStoredProvider?.hasKey
-                          ? 'A key is already saved. Leave the field empty to keep it.'
-                          : 'No key is saved yet.'}
-                      </p>
-                    </div>
-                    <span
-                      className={cn(
-                        'rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide',
-                        dialogStoredProvider?.hasKey
-                          ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-                          : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                      )}
-                    >
-                      {dialogStoredProvider?.hasKey ? 'configured' : 'missing key'}
-                    </span>
-                  </div>
-                  {dialogEnvVars.length > 0 && (
-                    <p className="mt-2 text-[11px] text-muted-foreground">
-                      OpenCode env:{' '}
-                      <span className="font-mono">{dialogEnvVars.slice(0, 4).join(', ')}</span>
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Available Models for selected provider */}
-              {selectedProviderId && availableProviders?.[selectedProviderId]?.models && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Verfügbare Modelle</label>
-                  <div className="p-3 bg-muted/50 rounded-lg space-y-1">
-                    {availableProviders[selectedProviderId].models?.map((model) => (
-                      <div key={model} className="flex items-center justify-between text-sm">
-                        <code className="text-xs bg-background px-2 py-1 rounded font-mono">
-                          {selectedProviderId}/{model}
-                        </code>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 px-2 text-xs"
-                          onClick={() => {
-                            const fullModel = `${selectedProviderId}/${model}`;
-                            const current = openCodeModels || [];
-                            if (!current.includes(fullModel)) {
-                              updateSettingsMutation.mutate({
-                                cliProviderModelLists: {
-                                  ...settings?.cliProviderModelLists,
-                                  opencode: [...current, fullModel],
-                                },
-                              });
-                            }
-                          }}
-                        >
-                          {openCodeModels.includes(`${selectedProviderId}/${model}`)
-                            ? 'Hinzugefügt'
-                            : 'Hinzufügen'}
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* API Key */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">
-                  API Key {dialogStoredProvider?.hasKey ? '(optional)' : ''}
-                </label>
-                <div className="relative">
-                  <Input
-                    type={showOpenCodeApiKey ? 'text' : 'password'}
-                    value={openCodeProviderForm.apiKey}
-                    onChange={(e) =>
-                      setOpenCodeProviderForm({ ...openCodeProviderForm, apiKey: e.target.value })
-                    }
-                    placeholder={
-                      dialogStoredProvider?.hasKey
-                        ? 'Leer lassen, um den gespeicherten Key zu behalten'
-                        : 'sk-... oder provider-spezifischer Key'
-                    }
-                    className="font-mono text-sm pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowOpenCodeApiKey(!showOpenCodeApiKey)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted"
-                  >
-                    {showOpenCodeApiKey ? (
-                      <EyeOff className="h-4 w-4 text-muted-foreground" />
-                    ) : (
-                      <Eye className="h-4 w-4 text-muted-foreground" />
-                    )}
-                  </button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Der API Key wird verschlüsselt gespeichert und beim OpenCode-Start als Provider
-                  Env gesetzt.
-                </p>
-              </div>
-
-              {/* Optional Base URL */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Base URL (optional)</label>
-                <Input
-                  value={openCodeProviderForm.baseUrl}
-                  onChange={(e) =>
-                    setOpenCodeProviderForm({ ...openCodeProviderForm, baseUrl: e.target.value })
-                  }
-                  placeholder="https://api.example.com/v1"
-                  className="font-mono text-sm"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Nur erforderlich für Custom Endpoints
-                </p>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setOpenCodeProviderDialog(false);
-                  setSelectedProviderId('');
-                  setOpenCodeProviderForm({ id: '', name: '', apiKey: '', baseUrl: '' });
-                }}
-              >
-                Abbrechen
-              </Button>
-              <Button
-                onClick={saveOpenCodeProvider}
-                disabled={
-                  !openCodeProviderForm.id ||
-                  (!openCodeProviderForm.apiKey && !dialogStoredProvider?.hasKey)
-                }
-                className="bg-purple-600 hover:bg-purple-700"
-              >
-                {dialogStoredProvider?.hasKey ? 'Provider aktualisieren' : 'Provider speichern'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
     </div>
   );

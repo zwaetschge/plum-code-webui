@@ -1,6 +1,6 @@
 import type { ChatToolFile } from './chatToolAssets.js';
 import { estimateModelCost } from '@plum-code-webui/shared';
-import type { ChatCompaction } from '@plum-code-webui/shared';
+import type { AssistantWebSource, ChatCompaction } from '@plum-code-webui/shared';
 import {
   apiChatEndpoint,
   streamApiChat,
@@ -9,6 +9,7 @@ import {
   type ApiUsage,
 } from './apiTransport.js';
 import { chatToolset } from './chatTools.js';
+import { WebSourceRegistry } from './chatWebSources.js';
 import type { ChatOptions } from './chatOptions.js';
 import { redactSensitiveText } from '../../utils/sanitize.js';
 
@@ -34,6 +35,8 @@ export interface ChatWorkbench {
   comparisons: ChatComparison[];
   sources: unknown[];
   documentSourceIds: string[];
+  /** Turn-wide numbered web sources; present once web_search/web_fetch returned one. */
+  webSources?: AssistantWebSource[];
 }
 export async function generateChat(options: {
   userId: string;
@@ -64,7 +67,11 @@ export async function generateChat(options: {
 }): Promise<ApiStreamResult & { costUsd: number | null }> {
   const { userId, signal, workbench, settings } = options;
   const ledger: Array<{ model: string; usage: ApiUsage | null }> = [];
-  const tools = await chatToolset(userId, settings, signal);
+  const webSources = new WebSourceRegistry(workbench.webSources ?? [], async () => {
+    workbench.webSources = webSources.sources;
+    await options.onUpdate();
+  });
+  const tools = await chatToolset(userId, settings, signal, { webSources });
   try {
     const endpoint = await apiChatEndpoint(userId, options.providerId, options.model);
     const history = [...options.messages];
@@ -115,6 +122,11 @@ export async function generateChat(options: {
             const args = JSON.parse(call.arguments);
             if (!args || Array.isArray(args) || typeof args !== 'object')
               throw new Error('Ungültige Werkzeugargumente');
+            // The running search line shows its query and filters before results arrive.
+            if (call.name === 'web_search' || call.name === 'web_fetch') {
+              event.arguments = redactSensitiveText(JSON.stringify(args)).slice(0, 16000);
+              await options.onUpdate();
+            }
             if (tools.requiresApproval(call.name)) {
               if (!options.approveTool) throw new Error('Werkzeugentscheidung nicht verfügbar');
               event.status = 'waiting';
@@ -125,11 +137,23 @@ export async function generateChat(options: {
                 event.status = 'failed';
               } else {
                 signal.throwIfAborted();
-                event.result = await tools.call(call.name, args, true, options.onToolResult ? (result) => options.onToolResult!(event, result) : undefined);
+                event.result = await tools.call(
+                  call.name,
+                  args,
+                  true,
+                  options.onToolResult
+                    ? (result) => options.onToolResult!(event, result)
+                    : undefined
+                );
                 event.status = 'completed';
               }
             } else {
-              event.result = await tools.call(call.name, args, false, options.onToolResult ? (result) => options.onToolResult!(event, result) : undefined);
+              event.result = await tools.call(
+                call.name,
+                args,
+                false,
+                options.onToolResult ? (result) => options.onToolResult!(event, result) : undefined
+              );
               event.status = 'completed';
             }
           } catch {
@@ -142,6 +166,7 @@ export async function generateChat(options: {
             name: call.name,
             content: event.result,
           });
+          if (webSources.sources.length) workbench.webSources = webSources.sources;
           await options.onUpdate();
         }
         if (result.toolCalls.length > 12) throw new Error('Zu viele Werkzeugaufrufe');

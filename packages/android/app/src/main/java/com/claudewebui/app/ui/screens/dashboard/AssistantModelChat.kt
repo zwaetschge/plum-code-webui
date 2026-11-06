@@ -157,6 +157,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var notice by remember { mutableStateOf<String?>(null) }
     var openedCode by remember { mutableStateOf<Triple<String, String, List<AssistantChatSource>>?>(null) }
     var openedSource by remember { mutableStateOf<AssistantChatSource?>(null) }
+    var openedWebSources by remember { mutableStateOf<List<AssistantWebSource>>(emptyList()) }
     var sourceDownload by remember { mutableStateOf<ByteArray?>(null) }
     val sourceSave = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         val bytes = sourceDownload; sourceDownload = null
@@ -309,8 +310,9 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             }
         }
     }
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null && !busy && imageIds.size + documentIds.size < 4) scope.launch {
+    // One upload path for picked files and for a file taken from the clipboard.
+    fun attachUri(uri: android.net.Uri) {
+        if (!busy && imageIds.size + documentIds.size < 4) scope.launch {
             busy = true; error = null
             try {
                 var target = chat
@@ -353,6 +355,9 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             catch (failure: Exception) { checkOwner(); error = failure.message }
             finally { if (TokenStore.assistantOwnerKey() == owner) busy = false }
         }
+    }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) attachUri(uri)
     }
     val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
     val showHistory = historyOpen
@@ -474,6 +479,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             finally { if (TokenStore.assistantOwnerKey() == owner) busy = false }
         } }) { Text("Originaldatei") } }, dismissButton = { TextButton(onClick = { openedSource = null }) { Text("Schliessen") } })
     }
+    if (openedWebSources.isNotEmpty()) ChatWebSourceSheet(openedWebSources) { openedWebSources = emptyList() }
     if (realtimeVoice && chat != null) RealtimeVoiceSheet(owner, chat!!.id, { refresh++ }) { realtimeVoice = false; refresh++ }
     if (showAdvanced) ChatWorkbenchSheet(
         owner, api, chat, providers, newChatOptions.takeIf { it.isNotEmpty() } ?: (profiles.firstOrNull { it.id == profileId }?.body?.get("chatOptions") as? JsonObject ?: newChatOptions),
@@ -587,6 +593,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     AnswerHeader(turn.status, palette.muted, palette.accent)
+                                    ChatWebSearchActivity(turn.toolEvents, turn.webSources)
                                     if (turn.status == "queued") {
                                         Text("Vorgemerkt", color = palette.muted, style = MaterialTheme.typography.labelMedium)
                                         TextButton(enabled = !busy && live, onClick = { command("/api/assistant/api-chats/$shownId/turns/${turn.id}/stop", buildJsonObject {}, "Wartende Nachricht entfernen", keepDraft = true) }) { Text("Wartende Nachricht entfernen") }
@@ -597,12 +604,13 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                         val thinkingLabel = stringResource(R.string.component_thinking)
                                         ThinkingDots(palette.accent, Modifier.padding(vertical = 8.dp).semantics { contentDescription = thinkingLabel })
                                     } else if (turn.response.isNotEmpty() || (turn.ui == null && !turn.uiPending)) {
-                                        MarkdownContent(turn.response, Modifier.fillMaxWidth(), isStreaming = streaming, onRunCode = { code, language -> openedCode = Triple(code, language, turn.sources) })
+                                        MarkdownContent(turn.response, Modifier.fillMaxWidth(), isStreaming = streaming, onRunCode = { code, language -> openedCode = Triple(code, language, turn.sources) }, webSources = turn.webSources, onCitation = { openedWebSources = it })
                                     }
                                     // Dynamic UI: an interactive view below the text, rendered natively.
                                     if (turn.uiPending && turn.ui == null) DynamicUiPending()
                                     turn.ui?.let { spec -> DynamicUi(spec, stateStore = dynamicUiState, stateKey = turn.id, busy = busy || running || !live, onSendMessage = if (live) ({ text: String -> send(text) }) else null) }
                                     turn.uiError?.let { note -> if (turn.status != "running") DynamicUiNote(note) }
+                                    ChatWebSourcesRow(turn.webSources, turn.response) { openedWebSources = it }
                                 }
                                 ChatCompactionReceipt(turn.compaction)
                                 ChatContextReceipt(turn.contextReceipt) { id ->
@@ -616,7 +624,9 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                 turn.toolEvents.flatMap { it.files }.forEach { file -> key(owner, shownId, file.id) { ChatToolFile(owner, api, shownId, file) } }
                                 if (turn.toolEvents.isNotEmpty()) {
                                     turn.toolEvents.filter { it.status == "waiting" }.forEach { event -> ChatToolDecision(owner, api, shownId, turn.id, event) }
-                                    Text(turn.toolEvents.joinToString(" · ") { event -> "${if (event.name == "web_search") "Websuche" else if (event.name == "web_fetch") "Seitenabruf" else event.name}: ${if (event.status == "running") "Läuft …" else if (event.status == "failed") "Fehlgeschlagen" else "Fertig"}" }, style = MaterialTheme.typography.labelSmall, color = palette.muted)
+                                    // Web search has its own line above the answer.
+                                    val otherTools = turn.toolEvents.filterNot { isWebTool(it.name) }
+                                    if (otherTools.isNotEmpty()) Text(otherTools.joinToString(" · ") { event -> "${event.name}: ${if (event.status == "running") "Läuft …" else if (event.status == "failed") "Fehlgeschlagen" else "Fertig"}" }, style = MaterialTheme.typography.labelSmall, color = palette.muted)
                                 }
                                 if (turn.sources.isNotEmpty()) Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     turn.sources.forEach { source -> AssistChip(onClick = { openedSource = source }, label = { Text(source.title + (source.page?.let { " · S. $it" } ?: "")) }) }
@@ -697,6 +707,12 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         androidx.compose.animation.AnimatedVisibility(showAttach && !researchChat) {
             Column(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(enabled = !busy && !cameraBusy && imageIds.size < 4, onClick = { imagePicker.launch(arrayOf("*/*")) }) { Text("Dateien anhängen") }
+                // Screenshots and copied images sit in the clipboard as a content URI.
+                OutlinedButton(enabled = !busy && !cameraBusy && imageIds.size < 4, onClick = {
+                    val clip = (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).primaryClip
+                    val uri = clip?.let { c -> (0 until c.itemCount).firstNotNullOfOrNull { c.getItemAt(it).uri } }
+                    if (uri == null) error = "Kein Bild in der Zwischenablage" else attachUri(uri)
+                }) { Text("Aus Zwischenablage") }
                 if (chatId != null) key(owner, chatId) { AssistantCamera(owner, chatId, api, !busy && !running && imageIds.size < 4, { id -> imageIds = (imageIds + id).distinct() }, { cameraBusy = it }) }
                 key(owner, chatId) { AssistantDictation(owner, api, voiceEnabled && !busy && !running, { text -> prompt = (prompt + (if (prompt.isBlank()) "" else "\n") + text).take(20000) }, { voiceBusy = it }) }
             }

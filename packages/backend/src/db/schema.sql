@@ -1080,7 +1080,8 @@ CREATE TABLE IF NOT EXISTS browser_tokens (
  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL,
  token_hash TEXT NOT NULL, token_prefix TEXT NOT NULL, revoked BIGINT NOT NULL DEFAULT 0,
  last_used_at TEXT,
- created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+ created_at TEXT DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+ scope TEXT NOT NULL DEFAULT 'browser'
 );
 CREATE INDEX IF NOT EXISTS idx_browser_tokens_user ON browser_tokens(user_id);
 

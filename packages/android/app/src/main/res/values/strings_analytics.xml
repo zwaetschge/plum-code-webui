@@ -94,10 +94,11 @@
     <string name="analytics_compare_month">vs same time last month</string>
     <string name="analytics_compare_90d">vs previous 90 days</string>
     <string name="analytics_mistral_month_summary">%1$s this month · %2$s tokens · %3$s requests</string>
+    <string name="analytics_mistral_exhausted">Mistral reports this allowance as used up. The amount above is what Plum tracked.</string>
     <string name="analytics_mistral_no_budget">No allowance set – Mistral publishes no quota API for Pro plans.</string>
     <string name="analytics_mistral_set_budget">Set allowance</string>
     <string name="analytics_mistral_budget_title">Mistral monthly allowance</string>
-    <string name="analytics_mistral_budget_hint">A regular API key (Pi, OpenCode) draws on API/Studio, a key from Code › Vibe CLI on Vibe Code. Plum counts its own Mistral turns at list prices (€ = $); Le Chat, Studio and the Vibe CLI are not included.</string>
+    <string name="analytics_mistral_budget_hint">A regular API key (Pi, Chat) draws on API/Studio, a key from Code › Vibe CLI on Vibe Code. Plum counts its own Mistral turns at list prices (€ = $); Le Chat, Studio and the Vibe CLI are not included.</string>
     <string name="analytics_mistral_budget_field">Monthly allowance</string>
     <string name="analytics_mistral_billing_day">Resets on day (1–28)</string>
     <string name="analytics_mistral_save">Save</string>

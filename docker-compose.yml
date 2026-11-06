@@ -76,20 +76,18 @@ services:
       - CLI_PROVIDER_CLAUDE_MODELS=${CLI_PROVIDER_CLAUDE_MODELS:-}
       - CLI_PROVIDER_CLAUDE_DEFAULT_MODEL=${CLI_PROVIDER_CLAUDE_DEFAULT_MODEL:-sonnet}
       - CLI_PROVIDER_CODEX_MODELS=${CLI_PROVIDER_CODEX_MODELS:-}
-      - CLI_PROVIDER_CODEX_DEFAULT_MODEL=${CLI_PROVIDER_CODEX_DEFAULT_MODEL:-gpt-5.5}
-      - CLI_PROVIDER_OPENCODE_MODELS=${CLI_PROVIDER_OPENCODE_MODELS:-}
-      - CLI_PROVIDER_OPENCODE_DEFAULT_MODEL=${CLI_PROVIDER_OPENCODE_DEFAULT_MODEL:-z-ai/glm-5.1}
-      - CLI_PROVIDER_OPENCODE_DEFAULT_AGENT=${CLI_PROVIDER_OPENCODE_DEFAULT_AGENT:-build}
-      - CLI_PROVIDER_OPENCODE_STYLE_PROMPT=${CLI_PROVIDER_OPENCODE_STYLE_PROMPT:-}
+      - CLI_PROVIDER_CODEX_DEFAULT_MODEL=${CLI_PROVIDER_CODEX_DEFAULT_MODEL:-gpt-6.1-sol}
       - CLI_PROVIDER_PI_MODELS=${CLI_PROVIDER_PI_MODELS:-}
       - CLI_PROVIDER_PI_DEFAULT_MODEL=${CLI_PROVIDER_PI_DEFAULT_MODEL:-z-ai/glm-5.1}
-      - OPENCODE_NO_PROGRESS_TIMEOUT_MS=${OPENCODE_NO_PROGRESS_TIMEOUT_MS:-600000}
-      - OPENCODE_ZAI_VISION_MCP=${OPENCODE_ZAI_VISION_MCP:-auto}
+      # Z.AI vision MCP for Pi: auto (with a Z.AI key), always, or off.
+      # OPENCODE_ZAI_VISION_MCP is the pre-2026-10-27 name and still honoured.
+      - PLUM_ZAI_VISION_MCP=${PLUM_ZAI_VISION_MCP:-${OPENCODE_ZAI_VISION_MCP:-auto}}
+      # Plum Chat web search: self-hosted SearXNG with its JSON format enabled; empty = Bing page fallback
+      - PLUM_SEARXNG_URL=${PLUM_SEARXNG_URL:-}
       - CLI_AUTO_UPDATE=${CLI_AUTO_UPDATE:-true}
       - CLI_AUTO_UPDATE_PROVIDERS=${CLI_AUTO_UPDATE_PROVIDERS:-codex}
       - CLI_AUTO_UPDATE_INTERVAL_HOURS=${CLI_AUTO_UPDATE_INTERVAL_HOURS:-24}
       - ADMIN_LLM_PROVIDER=${ADMIN_LLM_PROVIDER:-}
-      - OPENCODE_DEBUG_EVENTS=${OPENCODE_DEBUG_EVENTS:-0}
       - CODEX_USAGE_URL=${CODEX_USAGE_URL:-}
       - CODEX_USER_AGENT=${CODEX_USER_AGENT:-}
       - COMFYUI_URL=${COMFYUI_URL:-}
@@ -120,7 +118,6 @@ services:
       # Per-CLI auth + state — survive container rebuilds
       - ${CONFIG_DIR:-./config}/claude:/home/node/.claude
       - ${CONFIG_DIR:-./config}/codex:/home/node/.codex
-      - ${CONFIG_DIR:-./config}/opencode:/home/node/.opencode
       - ${CONFIG_DIR:-./config}/pi:/home/node/.pi
       - ${CONFIG_DIR:-./config}/vibe:/home/node/.vibe
       - ${CONFIG_DIR:-./config}/npm-global:/home/node/.npm-global

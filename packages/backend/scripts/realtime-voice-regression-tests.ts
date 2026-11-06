@@ -12,7 +12,7 @@ const { useTestSchema, createTestSchema, dropTestSchema } = await import('../src
 useTestSchema();
 const { run, get, all } = await import('../src/db/pg.js');
 const { safeEncrypt } = await import('../src/utils/encryption.js');
-const { writeOpenCodeProvidersForUser } = await import('../src/utils/opencodeProviderKeys.js');
+const { writeModelProvidersForUser } = await import('../src/utils/modelProviderKeys.js');
 const { generateUserToken } = await import('../src/utils/authTokens.js');
 const { createResource } = await import('../src/services/assistant/resources.js');
 const { setupRealtimeVoice } = await import('../src/services/assistant/realtimeVoice.js');
@@ -70,7 +70,7 @@ try {
       id
     );
   const now = new Date().toISOString();
-  await writeOpenCodeProvidersForUser('voice-alice', [
+  await writeModelProvidersForUser('voice-alice', [
     {
       id: 'openai',
       name: 'OpenAI',

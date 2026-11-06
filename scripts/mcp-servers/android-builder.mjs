@@ -1,20 +1,30 @@
 #!/usr/bin/env node
 // Minimal MCP stdio server for the Android App Creator backend.
-// Lets Claude/Codex/OpenCode build APKs, manage ADB devices, and drive
+// Lets Claude/Codex/Pi build APKs, manage ADB devices, and drive
 // real-device tests (logcat / shell / screencap) without re-explaining
 // the workflow every session.
+//
+// Several builder engines can be configured (ANDROID_BUILDER_ENGINES or the
+// android-build-engines.json file in the WebUI data dir). Builds go to an idle
+// engine (preferring the one with a warm Gradle cache for the project), with a
+// cross-session per-project lock; device tools go to the engine whose adb
+// server holds the device. See docs/plans/android-build-engines-2026-10-31.md.
 //
 // Speaks JSON-RPC 2.0 over stdin/stdout (line-delimited JSON). Zero deps.
 
 import { createInterface } from 'node:readline';
 import { Buffer } from 'node:buffer';
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm, rename, open, stat, readdir } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
-const API = (process.env.ANDROID_BUILDER_URL || 'http://host.docker.internal:4000').replace(
-  /\/$/,
-  ''
-);
+const normalizeUrl = (value) =>
+  String(value || '')
+    .trim()
+    .replace(/\/$/, '');
+
+const API = normalizeUrl(process.env.ANDROID_BUILDER_URL || 'http://host.docker.internal:4000');
 const REQUEST_TIMEOUT_MS = Number(process.env.ANDROID_BUILDER_TIMEOUT_MS || 60_000);
 const BUILDER_PROJECTS_ROOT = (
   process.env.ANDROID_BUILDER_PROJECTS_CONTAINER_PATH || '/app/projects'
@@ -30,10 +40,112 @@ const CLAIM_TTL_MS = Number(
   process.env.ANDROID_BUILDER_PROJECT_CLAIM_TTL_MS || 12 * 60 * 60 * 1000
 );
 const CLAIM_FILE = '.plum-session-claim.json';
+const DATA_DIR = (process.env.WEBUI_DATA_DIR || '/app/packages/backend/data').replace(/\/$/, '');
 const CLAIMS_DIR = (
-  process.env.ANDROID_BUILDER_PROJECT_CLAIMS_DIR ||
-  `${process.env.WEBUI_DATA_DIR || '/app/packages/backend/data'}/android-project-claims`
+  process.env.ANDROID_BUILDER_PROJECT_CLAIMS_DIR || `${DATA_DIR}/android-project-claims`
 ).replace(/\/$/, '');
+
+// ── Engine configuration ─────────────────────────────────────────────────
+const ENGINES_FILE =
+  process.env.ANDROID_BUILDER_ENGINES_FILE || `${DATA_DIR}/android-build-engines.json`;
+const ENGINE_STATE_DIR = (
+  process.env.ANDROID_BUILDER_ENGINE_STATE_DIR || `${DATA_DIR}/android-build-engines`
+).replace(/\/$/, '');
+// Builder data dir of the engine that works directly on HOST_PROJECTS_ROOT
+// (per-project Gradle homes live in <data>/gradle-homes/<projectId>).
+const BUILDER_DATA_HOST_ROOT = (
+  process.env.ANDROID_BUILDER_DATA_HOST_PATH || `${dirname(HOST_PROJECTS_ROOT)}/data`
+).replace(/\/$/, '');
+// A project marked "building" longer than this is treated as a stale marker.
+const BUILD_STALE_MS = Number(process.env.ANDROID_BUILDER_BUILD_STALE_MS || 90 * 60 * 1000);
+const LOCK_GRACE_MS = 60_000;
+const LOCK_MAX_MS = Number(process.env.ANDROID_BUILDER_LOCK_MAX_MS || 6 * 60 * 60 * 1000);
+const PROBE_TIMEOUT_MS = Number(process.env.ANDROID_BUILDER_PROBE_TIMEOUT_MS || 8_000);
+const DEVICE_CACHE_MS = 15_000;
+const EMULATOR_SERIAL = 'emulator-5554'; // every engine boots its emulator on 5554
+
+function engineNameFrom(raw, index) {
+  const cleaned = String(raw || '')
+    .trim()
+    .replace(/[^A-Za-z0-9_-]/g, '-')
+    .slice(0, 32);
+  return cleaned || (index === 0 ? 'primary' : `engine${index + 1}`);
+}
+
+function parseEngineList(spec) {
+  return String(spec || '')
+    .split(/[,\s]+/)
+    .filter(Boolean)
+    .map((item, index) => {
+      const eq = item.indexOf('=');
+      if (eq > 0 && !/^https?:/i.test(item)) {
+        return {
+          name: engineNameFrom(item.slice(0, eq), index),
+          url: normalizeUrl(item.slice(eq + 1)),
+        };
+      }
+      return { name: engineNameFrom('', index), url: normalizeUrl(item) };
+    })
+    .filter((engine) => engine.url);
+}
+
+function loadEngineConfig() {
+  let engines = null;
+  let source = 'ANDROID_BUILDER_URL';
+  let emulatorPreference = null;
+  const explicitUrl = normalizeUrl(process.env.ANDROID_BUILDER_URL || '');
+  const envSpec = (process.env.ANDROID_BUILDER_ENGINES || '').trim();
+  if (envSpec) {
+    engines = parseEngineList(envSpec);
+    source = 'ANDROID_BUILDER_ENGINES';
+  } else {
+    try {
+      const file = JSON.parse(readFileSync(ENGINES_FILE, 'utf8'));
+      const list = Array.isArray(file) ? file : file?.engines;
+      const parsed = (Array.isArray(list) ? list : [])
+        .map((entry, index) =>
+          typeof entry === 'string'
+            ? parseEngineList(entry)[0]
+            : entry && { name: engineNameFrom(entry.name, index), url: normalizeUrl(entry.url) }
+        )
+        .filter((engine) => engine?.url);
+      // The file only augments the configured builder: a session pointed at a
+      // different ANDROID_BUILDER_URL (tests, other sites) stays single-engine.
+      if (parsed.length && (!explicitUrl || parsed.some((engine) => engine.url === explicitUrl))) {
+        engines = parsed;
+        source = ENGINES_FILE;
+        if (Array.isArray(file?.emulatorPreference)) emulatorPreference = file.emulatorPreference;
+      }
+    } catch {
+      /* no engine file */
+    }
+  }
+  if (!engines?.length) {
+    engines = [
+      { name: engineNameFrom(process.env.ANDROID_BUILDER_ENGINE_NAME || 'primary', 0), url: API },
+    ];
+  }
+  // The engine behind ANDROID_BUILDER_URL is the primary (project registry).
+  const primaryIndex = explicitUrl ? engines.findIndex((engine) => engine.url === explicitUrl) : -1;
+  if (primaryIndex > 0) engines.unshift(...engines.splice(primaryIndex, 1));
+  const seen = new Set();
+  for (const engine of engines) {
+    let name = engine.name;
+    for (let n = 2; seen.has(name); n += 1) name = `${engine.name}${n}`;
+    engine.name = name;
+    engine.kind = 'unknown'; // 'gateway' (engine-local workspace) or 'plain'
+    seen.add(name);
+  }
+  const envPreference = (process.env.ANDROID_BUILDER_EMULATOR_PREFERENCE || '').trim();
+  if (envPreference) emulatorPreference = envPreference.split(/[,\s]+/).filter(Boolean);
+  return { engines, source, emulatorPreference: emulatorPreference || engines.map((e) => e.name) };
+}
+
+const ENGINE_CONFIG = loadEngineConfig();
+const ENGINES = ENGINE_CONFIG.engines;
+const PRIMARY = ENGINES[0];
+const MULTI = ENGINES.length > 1;
+const engineByName = (name) => ENGINES.find((engine) => engine.name === name) || null;
 
 const log = (...args) => console.error('[mcp-android]', ...args);
 
@@ -47,16 +159,26 @@ function fail(id, code, message, data) {
   send({ jsonrpc: '2.0', id, error: { code, message, ...(data ? { data } : {}) } });
 }
 
-async function http(method, path, body) {
+const engineTag = (engine, message) => (MULTI ? `[engine ${engine.name}] ${message}` : message);
+
+async function engineHttp(engine, method, path, body, { timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const resp = await fetch(`${API}${path}`, {
-      method,
-      headers: body ? { 'content-type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: ctrl.signal,
-    });
+    let resp;
+    try {
+      resp = await fetch(`${engine.url}${path}`, {
+        method,
+        headers: body ? { 'content-type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: ctrl.signal,
+      });
+    } catch (err) {
+      const wrapped = new Error(engineTag(engine, err?.cause?.message || err.message));
+      wrapped.engine = engine.name;
+      wrapped.unreachable = true;
+      throw wrapped;
+    }
     const text = await resp.text();
     let parsed;
     try {
@@ -66,9 +188,10 @@ async function http(method, path, body) {
     }
     if (!resp.ok) {
       const message = parsed?.error || parsed?.message || `HTTP ${resp.status}`;
-      const err = new Error(message);
+      const err = new Error(engineTag(engine, message));
       err.status = resp.status;
       err.body = parsed;
+      err.engine = engine.name;
       throw err;
     }
     return parsed;
@@ -77,15 +200,20 @@ async function http(method, path, body) {
   }
 }
 
+// Project registry calls always go to the primary engine (canonical tree).
+async function http(method, path, body) {
+  return engineHttp(PRIMARY, method, path, body);
+}
+
 // Fetch a binary blob (e.g. PNG screenshot) and return it as a Buffer.
-async function httpBinary(method, path) {
+async function httpBinary(method, path, engine = PRIMARY) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const resp = await fetch(`${API}${path}`, { method, signal: ctrl.signal });
+    const resp = await fetch(`${engine.url}${path}`, { method, signal: ctrl.signal });
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
-      throw new Error(`HTTP ${resp.status}: ${text.slice(0, 300)}`);
+      throw new Error(engineTag(engine, `HTTP ${resp.status}: ${text.slice(0, 300)}`));
     }
     const ab = await resp.arrayBuffer();
     return Buffer.from(ab);
@@ -169,6 +297,618 @@ async function withSelectedSerial(args = {}) {
   throw new Error(
     'multiple live Android devices; select one in Plum WebUI or pass serial explicitly'
   );
+}
+
+// ── Multi-engine routing ─────────────────────────────────────────────────
+
+function normalizeDeviceList(payload) {
+  return Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.items)
+      ? payload.items
+      : Array.isArray(payload?.devices)
+        ? payload.devices
+        : [];
+}
+const deviceSerialOf = (device) => String(device?.serial || device?.id || '').trim();
+const isLiveDevice = (device) => {
+  const state = String(device?.status || device?.state || 'device').toLowerCase();
+  return !!deviceSerialOf(device) && state !== 'offline' && state !== 'unauthorized';
+};
+
+// "serial@engine" pins a device to one engine (e.g. emulator-5554@geekom).
+function splitQualifiedSerial(raw) {
+  const value = String(raw || '').trim();
+  const at = value.lastIndexOf('@');
+  if (at > 0) {
+    const engine = engineByName(value.slice(at + 1));
+    if (engine) return { serial: value.slice(0, at), engine };
+  }
+  return { serial: value, engine: null };
+}
+
+function annotate(result, engine, extra = {}) {
+  if (result && typeof result === 'object' && !Array.isArray(result)) {
+    return { ...result, engine: engine.name, ...extra };
+  }
+  return result;
+}
+
+async function readJsonFile(path, fallback) {
+  try {
+    return JSON.parse(await readFile(path, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeJsonAtomic(path, data) {
+  await mkdir(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
+  await rename(tmp, path);
+}
+
+const isFreshBuilding = (meta) =>
+  meta?.status === 'building' &&
+  Date.now() - (Date.parse(meta.updatedAt || '') || 0) < BUILD_STALE_MS;
+
+async function readCanonicalMeta(projectId) {
+  const id = safeProjectId(projectId);
+  const fromFile = await readJsonFile(`${HOST_PROJECTS_ROOT}/${id}/.appcreator.json`, null);
+  if (fromFile) return fromFile;
+  try {
+    return await http('GET', `/api/projects/${encodeURIComponent(id)}`);
+  } catch {
+    return null;
+  }
+}
+
+// Engine probe: build load, emulator state and Gradle-cache warmth.
+const probeCache = new Map();
+async function probeEngine(engine, { projectId = null, fresh = false } = {}) {
+  const key = `${engine.name}|${projectId || ''}`;
+  const cached = probeCache.get(key);
+  if (!fresh && cached && Date.now() - cached.at < 4_000) return cached.value;
+  const started = Date.now();
+  const result = {
+    engine: engine.name,
+    url: engine.url,
+    ok: false,
+    kind: engine.kind,
+    busy: 0,
+    activeProjects: [],
+    emulator: null,
+    warm: false,
+  };
+  const opts = { timeoutMs: PROBE_TIMEOUT_MS };
+  try {
+    let gateway = null;
+    if (engine.kind !== 'plain') {
+      try {
+        const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+        gateway = await engineHttp(engine, 'GET', `/api/engine/status${qs}`, undefined, opts);
+        if (!gateway || !Array.isArray(gateway.activeBuilds)) gateway = null;
+      } catch (err) {
+        if (err.status !== 404) throw err;
+      }
+      engine.kind = gateway ? 'gateway' : 'plain';
+    }
+    if (gateway) {
+      result.ok = gateway.health?.status === 'ok';
+      if (!result.ok) result.error = gateway.health?.error || 'engine behind gateway unhealthy';
+      result.activeProjects = gateway.activeBuilds.map((build) => build.projectId);
+      result.activeBuilds = gateway.activeBuilds.map((build) => ({
+        projectId: build.projectId,
+        phase: build.phase,
+        requestedAt: build.requestedAt,
+      }));
+      result.emulator = gateway.emulator || null;
+      result.warm = !!gateway.project?.warm;
+      result.lastBuild = gateway.project?.lastBuild || null;
+    } else {
+      const [health, projects, emulator] = await Promise.all([
+        engineHttp(engine, 'GET', '/api/health', undefined, opts),
+        engineHttp(engine, 'GET', '/api/projects', undefined, {
+          timeoutMs: Math.max(PROBE_TIMEOUT_MS, 20_000),
+        }).catch(() => null),
+        engineHttp(engine, 'GET', '/api/emulator/status', undefined, opts).catch(() => null),
+      ]);
+      result.ok = health?.status === 'ok';
+      const list = Array.isArray(projects) ? projects : projects?.projects || [];
+      // Canonical builds owned by a gateway engine carry buildEngine=<name>.
+      result.activeProjects = list
+        .filter(
+          (project) =>
+            isFreshBuilding(project) &&
+            !(
+              project.buildEngine &&
+              project.buildEngine !== engine.name &&
+              engineByName(project.buildEngine)
+            )
+        )
+        .map((project) => project.id);
+      result.emulator = emulator;
+      result.warm =
+        !!projectId &&
+        engine === PRIMARY &&
+        existsSync(`${BUILDER_DATA_HOST_ROOT}/gradle-homes/${safeProjectId(projectId)}/caches`);
+    }
+  } catch (err) {
+    result.ok = false;
+    result.error = err.message;
+  }
+  result.kind = engine.kind;
+  result.busy = result.activeProjects.length;
+  result.latencyMs = Date.now() - started;
+  probeCache.set(key, { at: Date.now(), value: result });
+  return result;
+}
+
+function makeProber(projectId, { fresh = false } = {}) {
+  const pending = new Map();
+  return (engine) => {
+    if (!engine) return Promise.resolve(null);
+    if (!pending.has(engine.name))
+      pending.set(engine.name, probeEngine(engine, { projectId, fresh }));
+    return pending.get(engine.name);
+  };
+}
+
+const lockPath = (projectId) => `${ENGINE_STATE_DIR}/locks/${safeProjectId(projectId)}.json`;
+const LAST_ENGINE_FILE = `${ENGINE_STATE_DIR}/last-engine.json`;
+
+async function readLock(projectId) {
+  const path = lockPath(projectId);
+  try {
+    return JSON.parse(await readFile(path, 'utf8'));
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    // Created but not yet written by a concurrent session.
+    const info = await stat(path).catch(() => null);
+    return info
+      ? { engine: null, startedAt: new Date(info.mtimeMs).toISOString(), unreadable: true }
+      : null;
+  }
+}
+
+async function tryCreateLock(projectId, data) {
+  await mkdir(dirname(lockPath(projectId)), { recursive: true });
+  let handle;
+  try {
+    handle = await open(lockPath(projectId), 'wx');
+  } catch (err) {
+    if (err.code === 'EEXIST') return false;
+    throw err;
+  }
+  try {
+    await handle.writeFile(JSON.stringify(data, null, 2), 'utf8');
+  } finally {
+    await handle.close();
+  }
+  return true;
+}
+
+const removeLock = (projectId) => rm(lockPath(projectId), { force: true }).catch(() => {});
+
+// Is projectId currently building on any engine? Stale locks are cleaned up.
+async function findActiveBuild(projectId, probe = makeProber(projectId, { fresh: true })) {
+  const lock = await readLock(projectId);
+  if (lock) {
+    const startedMs = Date.parse(lock.startedAt || '') || 0;
+    const age = Date.now() - startedMs;
+    const engine = engineByName(lock.engine);
+    let active;
+    if (lock.unreadable) active = age < LOCK_GRACE_MS;
+    else if (age > LOCK_MAX_MS || !engine) active = false;
+    else {
+      // The grace window only covers the moment before the engine reports
+      // the build; a build that already finished releases the lock at once.
+      const state = await probe(engine);
+      if (!state?.ok) active = age < BUILD_STALE_MS;
+      else if (state.kind === 'gateway') {
+        const last = state.lastBuild;
+        const finished =
+          last && !last.active && (Date.parse(last.requestedAt || '') || 0) >= startedMs - 5_000;
+        active = state.activeProjects.includes(projectId) || (!finished && age < LOCK_GRACE_MS);
+      } else {
+        const meta = await readCanonicalMeta(projectId);
+        const finished =
+          !!meta && !isFreshBuilding(meta) && (Date.parse(meta.updatedAt || '') || 0) > startedMs;
+        active = isFreshBuilding(meta) || (!finished && age < LOCK_GRACE_MS);
+      }
+    }
+    if (active) {
+      return {
+        engine: lock.engine || 'unknown',
+        since: lock.startedAt,
+        source: 'lock',
+        sessionId: lock.sessionId || null,
+      };
+    }
+    await removeLock(projectId);
+  }
+  const meta = await readCanonicalMeta(projectId);
+  if (!isFreshBuilding(meta)) return null;
+  const owner = meta.buildEngine ? engineByName(meta.buildEngine) : null;
+  if (owner) {
+    const state = await probe(owner);
+    if (state?.ok && state.kind === 'gateway' && !state.activeProjects.includes(projectId))
+      return null;
+    return {
+      engine: owner.name,
+      since: meta.buildEngineStartedAt || meta.updatedAt,
+      source: 'metadata',
+    };
+  }
+  return { engine: PRIMARY.name, since: meta.updatedAt, source: 'metadata' };
+}
+
+async function lastEngineFor(projectId, meta) {
+  const state = await readJsonFile(LAST_ENGINE_FILE, {});
+  const fromState = state?.projects?.[projectId] || null;
+  const fromMeta = meta?.lastBuildEngine
+    ? { engine: meta.lastBuildEngine, at: meta.lastBuild?.requestedAt || meta.updatedAt }
+    : null;
+  const candidates = [fromState, fromMeta].filter((entry) => entry && engineByName(entry.engine));
+  candidates.sort((a, b) => (Date.parse(b.at || '') || 0) - (Date.parse(a.at || '') || 0));
+  return candidates[0] || null;
+}
+
+async function rememberLastEngine(projectId, engineName) {
+  try {
+    const state = await readJsonFile(LAST_ENGINE_FILE, {});
+    state.projects = state.projects || {};
+    state.projects[projectId] = { engine: engineName, at: new Date().toISOString() };
+    await writeJsonAtomic(LAST_ENGINE_FILE, state);
+  } catch (err) {
+    log('could not record last engine:', err.message);
+  }
+}
+
+// Per-session routing memory (MCP processes respawn per turn for some CLIs).
+const sessionStatePath = () =>
+  `${ENGINE_STATE_DIR}/sessions/${getSessionId().replace(/[^A-Za-z0-9._-]/g, '_')}.json`;
+
+async function readSessionState() {
+  const state = (await readJsonFile(sessionStatePath(), null)) || {};
+  return {
+    ...state,
+    emulatorEngine: state.emulatorEngine || null,
+    serials: { ...(state.serials || {}) },
+  };
+}
+
+async function updateSessionState(mutate) {
+  try {
+    const state = await readSessionState();
+    const before = JSON.stringify(state);
+    mutate(state);
+    if (JSON.stringify(state) === before) return;
+    state.updatedAt = new Date().toISOString();
+    await writeJsonAtomic(sessionStatePath(), state);
+  } catch (err) {
+    log('could not persist session routing state:', err.message);
+  }
+}
+
+const deviceCache = new Map();
+async function listEngineDevices(engine, { fresh = false } = {}) {
+  const cached = deviceCache.get(engine.name);
+  if (!fresh && cached && Date.now() - cached.at < DEVICE_CACHE_MS) return cached;
+  let entry;
+  try {
+    const payload = await engineHttp(engine, 'GET', '/api/devices', undefined, {
+      timeoutMs: Math.min(REQUEST_TIMEOUT_MS, 30_000),
+    });
+    entry = { at: Date.now(), devices: normalizeDeviceList(payload), error: null };
+  } catch (err) {
+    entry = { at: Date.now(), devices: [], error: err.message };
+  }
+  deviceCache.set(engine.name, entry);
+  return entry;
+}
+
+const listAllDevices = (opts) =>
+  Promise.all(
+    ENGINES.map(async (engine) => ({ engine, ...(await listEngineDevices(engine, opts)) }))
+  );
+
+async function findKnownDeviceEngine(serial) {
+  const lists = await Promise.all(
+    ENGINES.map((engine) =>
+      engineHttp(engine, 'GET', '/api/devices/known', undefined, { timeoutMs: PROBE_TIMEOUT_MS })
+        .then((payload) => ({ engine, devices: normalizeDeviceList(payload) }))
+        .catch(() => ({ engine, devices: [] }))
+    )
+  );
+  return (
+    lists.find((list) => list.devices.some((device) => deviceSerialOf(device) === serial))
+      ?.engine || null
+  );
+}
+
+function orderByPreference(engines) {
+  const rank = (engine) => {
+    const index = ENGINE_CONFIG.emulatorPreference.indexOf(engine.name);
+    return index === -1 ? 1000 + ENGINES.indexOf(engine) : index;
+  };
+  return [...engines].sort((a, b) => rank(a) - rank(b));
+}
+
+// Resolve which engine holds the target device. Returns args with the plain
+// serial plus the engine and how it was chosen.
+async function resolveDevice(input = {}, { projectId = null } = {}) {
+  const args = input && typeof input === 'object' ? { ...input } : {};
+  delete args.engine;
+  if (!MULTI) {
+    return { args: await withSelectedSerial(args), engine: PRIMARY, resolution: 'single-engine' };
+  }
+  const explicit = engineByName(input?.engine);
+  const raw = String(args.serial || WEBUI_ANDROID_DEVICE_SERIAL || '').trim();
+  const finish = async (serial, engine, resolution, candidates = []) => {
+    await updateSessionState((state) => {
+      state.serials[serial] = engine.name;
+    });
+    return {
+      args: { ...args, serial },
+      engine,
+      resolution,
+      candidates: candidates.map((candidate) => candidate.name),
+    };
+  };
+
+  if (!raw) {
+    const lists = await listAllDevices();
+    const live = lists.flatMap((list) =>
+      (explicit && list.engine !== explicit ? [] : list.devices)
+        .filter(isLiveDevice)
+        .map((device) => ({ engine: list.engine, serial: deviceSerialOf(device) }))
+    );
+    if (live.length === 1) return finish(live[0].serial, live[0].engine, 'sole-live-device');
+    if (live.length === 0) {
+      throw new Error('no live Android device; start the emulator or connect a device');
+    }
+    throw new Error(
+      `multiple live Android devices (${live.map((d) => `${d.serial}@${d.engine.name}`).join(', ')}); select one in Plum WebUI or pass serial explicitly (serial@engine pins the engine)`
+    );
+  }
+
+  const { serial, engine: qualified } = splitQualifiedSerial(raw);
+  if (qualified || explicit) return finish(serial, qualified || explicit, 'qualified');
+
+  const lists = await listAllDevices();
+  const holders = lists
+    .filter((list) =>
+      list.devices.some((device) => deviceSerialOf(device) === serial && isLiveDevice(device))
+    )
+    .map((list) => list.engine);
+  if (holders.length === 1) return finish(serial, holders[0], 'device-holder');
+
+  const session = await readSessionState();
+  if (holders.length > 1) {
+    const sticky = holders.find((engine) => engine.name === session.serials[serial]);
+    if (sticky) return finish(serial, sticky, 'session-sticky', holders);
+    if (serial.startsWith('emulator-')) {
+      const own = holders.find((engine) => engine.name === session.emulatorEngine);
+      if (own) return finish(serial, own, 'session-emulator', holders);
+    }
+    if (projectId) {
+      const last = await lastEngineFor(projectId, await readCanonicalMeta(projectId));
+      const builder = holders.find((engine) => engine.name === last?.engine);
+      if (builder) return finish(serial, builder, 'project-build-engine', holders);
+    }
+    const ordered = serial.startsWith('emulator-') ? orderByPreference(holders) : holders;
+    return finish(serial, ordered[0], 'ambiguous-first', holders);
+  }
+
+  // Nobody holds it live (offline Wi-Fi device, emulator still booting, ...).
+  const sticky = engineByName(session.serials[serial]);
+  if (sticky) return finish(serial, sticky, 'session-sticky-offline');
+  const known = await findKnownDeviceEngine(serial);
+  return finish(serial, known || PRIMARY, known ? 'known-registry' : 'primary-default');
+}
+
+async function deviceCall(input, fn, opts) {
+  const target = await resolveDevice(input, opts);
+  const result = await fn(target.args, target.engine);
+  if (!MULTI) return annotate(result, target.engine);
+  return annotate(result, target.engine, {
+    engineResolution: target.resolution,
+    ...(target.candidates.length > 1 ? { ambiguousEngines: target.candidates } : {}),
+  });
+}
+
+async function registryEngine(rawSerial) {
+  const { serial, engine } = splitQualifiedSerial(rawSerial);
+  if (engine || !MULTI) return { serial, engine: engine || PRIMARY };
+  return { serial, engine: (await findKnownDeviceEngine(serial)) || PRIMARY };
+}
+
+async function emulatorStatuses() {
+  return Promise.all(
+    ENGINES.map(async (engine) => {
+      try {
+        const status = await engineHttp(engine, 'GET', '/api/emulator/status', undefined, {
+          timeoutMs: PROBE_TIMEOUT_MS,
+        });
+        return {
+          engine,
+          ok: true,
+          status: status?.status || 'unknown',
+          vncUrl: status?.vncUrl ?? null,
+        };
+      } catch (err) {
+        return { engine, ok: false, status: 'unreachable', vncUrl: null, error: err.message };
+      }
+    })
+  );
+}
+
+const emulatorRunning = (entry) => entry.status === 'running' || entry.status === 'starting';
+
+function summarizeEmulators(statuses) {
+  return statuses.map((entry) => ({
+    engine: entry.engine.name,
+    status: entry.status,
+    vncUrl: entry.vncUrl,
+    serial: EMULATOR_SERIAL,
+    qualifiedSerial: `${EMULATOR_SERIAL}@${entry.engine.name}`,
+    ...(entry.error ? { error: entry.error } : {}),
+  }));
+}
+
+// Choose the engine for a build: the warm engine when idle, else an idle
+// engine (warm first), else the least busy one.
+async function chooseBuildEngine(projectId, probes, meta, explicitName) {
+  const usable = probes.filter((probe) => probe.ok);
+  if (explicitName) {
+    const explicit = usable.find((probe) => probe.engine === explicitName);
+    if (!explicit) throw new Error(`engine ${explicitName} is not configured or not reachable`);
+    return { probe: explicit, reason: 'explicit', last: null };
+  }
+  if (!usable.length) {
+    throw new Error(
+      `no reachable Android build engine (${probes.map((p) => `${p.engine}: ${p.error || 'unhealthy'}`).join('; ')})`
+    );
+  }
+  const last = await lastEngineFor(projectId, meta);
+  const lastProbe = usable.find((probe) => probe.engine === last?.engine);
+  if (lastProbe && lastProbe.busy === 0)
+    return { probe: lastProbe, reason: 'warm-cache-idle', last };
+  const order = (probe) => ENGINES.findIndex((engine) => engine.name === probe.engine);
+  const ranked = [...usable].sort(
+    (a, b) =>
+      a.busy - b.busy ||
+      Number(b.warm || b.engine === last?.engine) - Number(a.warm || a.engine === last?.engine) ||
+      order(a) - order(b)
+  );
+  const pick = ranked[0];
+  const reason =
+    pick.busy === 0
+      ? pick.warm || pick.engine === last?.engine
+        ? 'idle-warm'
+        : 'idle'
+      : 'least-busy';
+  return { probe: pick, reason, last };
+}
+
+// Builds another session started a moment ago may not show up in an engine's
+// status yet; count their fresh locks so simultaneous starts spread out.
+async function countJustStartedBuilds(probes, projectId) {
+  let names = [];
+  try {
+    names = await readdir(`${ENGINE_STATE_DIR}/locks`);
+  } catch {
+    return;
+  }
+  for (const name of names.filter((entry) => entry.endsWith('.json'))) {
+    const otherId = name.slice(0, -5);
+    if (otherId === projectId) continue;
+    const lock = await readJsonFile(`${ENGINE_STATE_DIR}/locks/${name}`, null);
+    const age = Date.now() - (Date.parse(lock?.startedAt || '') || 0);
+    const state = probes.find((entry) => entry.engine === lock?.engine);
+    if (!state || age > LOCK_GRACE_MS || state.activeProjects.includes(otherId)) continue;
+    state.activeProjects = [...state.activeProjects, otherId];
+    state.busy = state.activeProjects.length;
+  }
+}
+
+function buildRequestBody(args) {
+  const buildType = args.variant === 'release' ? 'release' : 'debug';
+  return { buildType, ...(args.variant ? { variant: args.variant } : {}) };
+}
+
+async function routedBuild(args) {
+  const projectId = safeProjectId(args.projectId);
+  const sessionId = getSessionId(args);
+  const probes = await Promise.all(
+    ENGINES.map((engine) => probeEngine(engine, { projectId, fresh: true }))
+  );
+  const probe = makeProber(projectId);
+  for (const state of probes)
+    probeCache.set(`${state.engine}|${projectId}`, { at: Date.now(), value: state });
+  await countJustStartedBuilds(probes, projectId);
+  const candidates = probes.map((state) => ({
+    engine: state.engine,
+    ok: state.ok,
+    busy: state.busy,
+    warm: state.warm,
+    kind: state.kind,
+    ...(state.error ? { error: state.error } : {}),
+  }));
+
+  const running = await findActiveBuild(projectId, probe);
+  if (running) {
+    return {
+      status: 'already_building',
+      projectId,
+      engine: running.engine,
+      since: running.since,
+      detectedBy: running.source,
+      message: `A build of this project is already running on engine ${running.engine}; wait for it to finish (android_get_project shows status) instead of starting a second one.`,
+      candidates,
+      ...projectPaths(projectId),
+    };
+  }
+
+  const meta = await readCanonicalMeta(projectId);
+  const choice = await chooseBuildEngine(projectId, probes, meta, args.engine || null);
+  const engine = engineByName(choice.probe.engine);
+  const locked = await tryCreateLock(projectId, {
+    projectId,
+    engine: engine.name,
+    sessionId,
+    startedAt: new Date().toISOString(),
+    pid: process.pid,
+  });
+  if (!locked) {
+    const other = (await readLock(projectId)) || {};
+    return {
+      status: 'already_building',
+      projectId,
+      engine: other.engine || 'unknown',
+      since: other.startedAt || null,
+      detectedBy: 'lock-race',
+      message: 'Another Plum session started a build of this project a moment ago.',
+      candidates,
+      ...projectPaths(projectId),
+    };
+  }
+  let response;
+  try {
+    response = await engineHttp(engine, 'POST', `/api/build/${encodeURIComponent(projectId)}`, {
+      ...buildRequestBody(args),
+      requestedBy: sessionId,
+    });
+  } catch (err) {
+    await removeLock(projectId);
+    if (err.status === 409 && err.body?.status === 'already_building') {
+      return { ...err.body, projectId, candidates, ...projectPaths(projectId) };
+    }
+    throw err;
+  }
+  await rememberLastEngine(projectId, engine.name);
+  probeCache.clear();
+  const gateway = engine.kind === 'gateway';
+  return {
+    ...(response && typeof response === 'object' ? response : { response }),
+    projectId,
+    engine: engine.name,
+    engineUrl: engine.url,
+    routing: {
+      reason: choice.reason,
+      lastEngine: choice.last?.engine || null,
+      candidates,
+    },
+    workspace: gateway
+      ? 'engine-local copy, outputs synced back to workspacePath'
+      : 'workspacePath',
+    progress: gateway
+      ? `GET ${engine.url}/api/engine/builds/${projectId} (log: ${engine.url}/api/engine/builds/${projectId}/log; after the build also ${HOST_PROJECTS_ROOT}/${projectId}/.plum-engine/last-build.log)`
+      : `Socket.IO room project:${projectId} on ${engine.url} (build:log / build:done); android_get_project shows status`,
+    ...projectPaths(projectId),
+  };
 }
 
 function claimPath(projectId) {
@@ -480,7 +1220,7 @@ const TOOLS = [
   {
     name: 'android_build',
     description:
-      'Build the APK for a project (Gradle assembleDebug). Streams progress via the backend socket; returns initial accept response.',
+      'Build the APK for a project (Gradle assembleDebug). Streams progress via the backend socket; returns initial accept response. With several build engines configured the build goes to an idle engine (preferring the one with a warm Gradle cache for this project) and the result names the engine.',
     inputSchema: {
       type: 'object',
       required: ['projectId'],
@@ -554,7 +1294,8 @@ const TOOLS = [
   // ── ADB device management ──────────────────────────────────────────
   {
     name: 'adb_devices',
-    description: 'List currently connected ADB devices (live).',
+    description:
+      'List currently connected ADB devices (live). With several build engines each device names its engine and a qualifiedSerial (serial@engine) that pins device tools to that engine.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -920,10 +1661,47 @@ const TOOLS = [
   },
 ];
 
+const enc = encodeURIComponent;
+
+// Device tools: resolve the engine that holds the device, then call it.
+const onDevice = (fn, opts) => (a) => deviceCall(a, fn, opts);
+
+async function aggregateArrays({ method, url }) {
+  const results = await Promise.all(
+    ENGINES.map(async (engine) => {
+      try {
+        const payload = await engineHttp(engine, method, url);
+        return normalizeDeviceList(payload).map((item) => ({ ...item, engine: engine.name }));
+      } catch (err) {
+        return [{ engine: engine.name, status: 'engine_unreachable', error: err.message }];
+      }
+    })
+  );
+  return results.flat();
+}
+
 const HANDLERS = {
   android_list_projects: async () => enrichProjectPayload(await http('GET', '/api/projects')),
-  android_get_project: async (a) =>
-    enrichProjectPayload(await http('GET', `/api/projects/${encodeURIComponent(a.projectId)}`)),
+  android_get_project: async (a) => {
+    const project = await enrichProjectPayload(
+      await http('GET', `/api/projects/${encodeURIComponent(a.projectId)}`)
+    );
+    if (!MULTI || !project || typeof project !== 'object' || !project.id) return project;
+    const activeBuild = await findActiveBuild(project.id);
+    const last = await lastEngineFor(project.id, project);
+    return {
+      ...project,
+      buildRouting: {
+        engines: ENGINES.map((engine) => engine.name),
+        lastEngine: last?.engine || null,
+        activeBuild,
+        // Gateway engines record sync/build timings of their latest build.
+        ...(project.lastBuild && project.lastBuild.engine === last?.engine
+          ? { lastBuildDetails: project.lastBuild }
+          : {}),
+      },
+    };
+  },
   android_create_project: async (a) => {
     const project = await enrichProjectPayload(await http('POST', '/api/projects', a));
     if (project?.id) {
@@ -945,133 +1723,306 @@ const HANDLERS = {
   android_generate: (a) => sessionAuthoredGeneration(a, 'generate'),
   android_iterate: (a) => sessionAuthoredGeneration(a, 'iterate'),
 
-  android_build: (a) =>
-    http(
-      'POST',
-      `/api/build/${encodeURIComponent(a.projectId)}`,
-      a.variant ? { variant: a.variant } : {}
-    ),
+  android_build: async (a) => {
+    if (MULTI) return routedBuild(a);
+    return annotate(
+      await http('POST', `/api/build/${encodeURIComponent(a.projectId)}`, buildRequestBody(a)),
+      PRIMARY
+    );
+  },
   android_build_artifacts: (a) =>
     http('GET', `/api/build/${encodeURIComponent(a.projectId)}/artifacts`),
   android_install: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http(
-      'POST',
-      `/api/devices/${encodeURIComponent(args.serial)}/install/${encodeURIComponent(args.projectId)}`,
-      args.apkPath ? { apkPath: args.apkPath } : {}
+    const projectId = safeProjectId(a.projectId);
+    if (MULTI) {
+      const running = await findActiveBuild(projectId);
+      if (running) {
+        throw new Error(
+          `the build of ${projectId} is still running on engine ${running.engine} (since ${running.since}); install after it has finished — android_get_project shows the status`
+        );
+      }
+    }
+    const last = MULTI ? await lastEngineFor(projectId, await readCanonicalMeta(projectId)) : null;
+    const result = await deviceCall(
+      a,
+      (args, engine) =>
+        engineHttp(
+          engine,
+          'POST',
+          `/api/devices/${enc(args.serial)}/install/${enc(projectId)}`,
+          args.apkPath ? { apkPath: args.apkPath } : {}
+        ),
+      { projectId }
     );
+    if (!MULTI || !result || typeof result !== 'object') return result;
+    return {
+      ...result,
+      builtOnEngine: last?.engine || null,
+      apkTransfer:
+        last?.engine && last.engine !== result.engine
+          ? 'APK built on another engine; installed from the canonical project copy'
+          : 'same engine',
+    };
   },
-  android_uninstall: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http('POST', `/api/devices/${encodeURIComponent(args.serial)}/uninstall`, {
+  android_uninstall: onDevice((args, engine) =>
+    engineHttp(engine, 'POST', `/api/devices/${enc(args.serial)}/uninstall`, {
       packageName: args.packageName,
-    });
-  },
-  android_launch: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http('POST', `/api/devices/${encodeURIComponent(args.serial)}/launch`, {
+    })
+  ),
+  android_launch: onDevice((args, engine) =>
+    engineHttp(engine, 'POST', `/api/devices/${enc(args.serial)}/launch`, {
       packageName: args.packageName,
       mainActivity: args.mainActivity,
-    });
+    })
+  ),
+
+  adb_devices: async () => {
+    if (!MULTI) return http('GET', '/api/devices');
+    const lists = await listAllDevices({ fresh: true });
+    return lists.flatMap((list) =>
+      list.error
+        ? [{ engine: list.engine.name, status: 'engine_unreachable', error: list.error }]
+        : list.devices.map((device) => ({
+            ...device,
+            engine: list.engine.name,
+            qualifiedSerial: `${deviceSerialOf(device)}@${list.engine.name}`,
+          }))
+    );
+  },
+  adb_known_devices: () =>
+    MULTI
+      ? aggregateArrays({ method: 'GET', url: '/api/devices/known' })
+      : http('GET', '/api/devices/known'),
+  adb_pair_wifi: async (a) => {
+    const engine = engineByName(a.engine) || PRIMARY;
+    const body = { ...a };
+    delete body.engine;
+    return annotate(await engineHttp(engine, 'POST', '/api/devices/pair', body), engine);
+  },
+  adb_connect_wifi: async (a) => {
+    const engine = engineByName(a.engine) || PRIMARY;
+    const body = { ...a };
+    delete body.engine;
+    const result = await engineHttp(engine, 'POST', '/api/devices/connect', body);
+    deviceCache.delete(engine.name);
+    if (MULTI && result?.serial) {
+      await updateSessionState((state) => {
+        state.serials[result.serial] = engine.name;
+      });
+    }
+    return annotate(result, engine);
+  },
+  adb_disconnect: async (a) => {
+    const target = await resolveDevice({ serial: a.serial, engine: a.engine });
+    deviceCache.delete(target.engine.name);
+    return annotate(
+      await engineHttp(target.engine, 'POST', '/api/devices/disconnect', {
+        serial: target.args.serial,
+      }),
+      target.engine
+    );
+  },
+  adb_forget_device: async (a) => {
+    const { serial, engine } = await registryEngine(a.serial);
+    return annotate(
+      await engineHttp(engine, 'DELETE', `/api/devices/known/${enc(serial)}`),
+      engine
+    );
+  },
+  adb_set_friendly_name: async (a) => {
+    const { serial, engine } = await registryEngine(a.serial);
+    return annotate(
+      await engineHttp(engine, 'POST', `/api/devices/${enc(serial)}/friendly-name`, {
+        friendlyName: a.friendlyName,
+      }),
+      engine
+    );
+  },
+  adb_set_auto_reconnect: async (a) => {
+    const { serial, engine } = await registryEngine(a.serial);
+    return annotate(
+      await engineHttp(engine, 'POST', `/api/devices/${enc(serial)}/auto-reconnect`, {
+        autoReconnect: a.autoReconnect,
+      }),
+      engine
+    );
+  },
+  adb_reconnect_all: async () => {
+    if (!MULTI) return http('POST', '/api/devices/reconnect-all');
+    deviceCache.clear();
+    return aggregateArrays({ method: 'POST', url: '/api/devices/reconnect-all' });
   },
 
-  adb_devices: () => http('GET', '/api/devices'),
-  adb_known_devices: () => http('GET', '/api/devices/known'),
-  adb_pair_wifi: (a) => http('POST', '/api/devices/pair', a),
-  adb_connect_wifi: (a) => http('POST', '/api/devices/connect', a),
-  adb_disconnect: (a) => http('POST', '/api/devices/disconnect', { serial: a.serial }),
-  adb_forget_device: (a) => http('DELETE', `/api/devices/known/${encodeURIComponent(a.serial)}`),
-  adb_set_friendly_name: (a) =>
-    http('POST', `/api/devices/${encodeURIComponent(a.serial)}/friendly-name`, {
-      friendlyName: a.friendlyName,
-    }),
-  adb_set_auto_reconnect: (a) =>
-    http('POST', `/api/devices/${encodeURIComponent(a.serial)}/auto-reconnect`, {
-      autoReconnect: a.autoReconnect,
-    }),
-  adb_reconnect_all: () => http('POST', '/api/devices/reconnect-all'),
+  emulator_status: async () => {
+    if (!MULTI) return http('GET', '/api/emulator/status');
+    const statuses = await emulatorStatuses();
+    const session = await readSessionState();
+    const pick =
+      statuses.find((entry) => entry.ok && entry.engine.name === session.emulatorEngine) ||
+      statuses.find(emulatorRunning) ||
+      statuses.find((entry) => entry.ok) ||
+      statuses[0];
+    return {
+      status: pick.status,
+      vncUrl: pick.vncUrl,
+      engine: pick.engine.name,
+      sessionEmulatorEngine: session.emulatorEngine || null,
+      engines: summarizeEmulators(statuses),
+    };
+  },
+  emulator_start: async (a) => {
+    if (!MULTI) return http('POST', '/api/emulator/start', { avdName: a.avd });
+    const statuses = await emulatorStatuses();
+    const session = await readSessionState();
+    let target = null;
+    let reason;
+    const explicit = engineByName(a.engine);
+    const own = statuses.find(
+      (entry) => entry.ok && entry.engine.name === session.emulatorEngine && emulatorRunning(entry)
+    );
+    if (explicit) {
+      target = explicit;
+      reason = 'explicit';
+    } else if (own) {
+      target = own.engine;
+      reason = 'session-emulator';
+    } else {
+      const reachable = statuses.filter((entry) => entry.ok);
+      const ordered = orderByPreference(reachable.map((entry) => entry.engine)).map((engine) =>
+        reachable.find((entry) => entry.engine === engine)
+      );
+      const free = ordered.find((entry) => !emulatorRunning(entry));
+      if (free) {
+        target = free.engine;
+        reason = 'free-emulator-slot';
+      } else if (ordered.length) {
+        target = ordered[0].engine;
+        reason = 'shared-running-emulator';
+      }
+    }
+    if (!target) throw new Error('no reachable Android build engine for the emulator');
+    const result = await engineHttp(target, 'POST', '/api/emulator/start', { avdName: a.avd });
+    await updateSessionState((state) => {
+      state.emulatorEngine = target.name;
+      state.serials[EMULATOR_SERIAL] = target.name;
+    });
+    deviceCache.delete(target.name);
+    return {
+      ...(result && typeof result === 'object' ? result : { result }),
+      engine: target.name,
+      reason,
+      serial: EMULATOR_SERIAL,
+      qualifiedSerial: `${EMULATOR_SERIAL}@${target.name}`,
+      note: `Boot takes 1-3 minutes; device tools route ${EMULATOR_SERIAL} of this session to engine ${target.name} (use ${EMULATOR_SERIAL}@<engine> for another engine's emulator).`,
+      engines: summarizeEmulators(statuses),
+    };
+  },
+  emulator_stop: async (a) => {
+    if (!MULTI) return http('POST', '/api/emulator/stop');
+    const statuses = await emulatorStatuses();
+    const session = await readSessionState();
+    const running = statuses.filter(emulatorRunning);
+    const target =
+      engineByName(a.engine) ||
+      engineByName(session.emulatorEngine) ||
+      (running.length === 1 ? running[0].engine : null);
+    if (!target) {
+      throw new Error(
+        running.length
+          ? `emulators are running on ${running.map((entry) => entry.engine.name).join(', ')} but none was started by this session; pass engine=<name> to stop one deliberately`
+          : 'no emulator is running on any engine'
+      );
+    }
+    const result = await engineHttp(target, 'POST', '/api/emulator/stop');
+    await updateSessionState((state) => {
+      if (state.emulatorEngine === target.name) state.emulatorEngine = null;
+    });
+    deviceCache.delete(target.name);
+    return annotate(result, target);
+  },
 
-  emulator_status: () => http('GET', '/api/emulator/status'),
-  emulator_start: (a) => http('POST', '/api/emulator/start', { avdName: a.avd }),
-  emulator_stop: () => http('POST', '/api/emulator/stop'),
-
-  adb_logcat: async (a) => {
-    const args = await withSelectedSerial(a);
+  adb_logcat: onDevice((args, engine) => {
     const params = new URLSearchParams();
     if (args.lines) params.set('lines', String(args.lines));
     if (args.sinceMs) params.set('sinceMs', String(args.sinceMs));
     if (args.filter) params.set('filter', args.filter);
     const qs = params.toString();
-    return http(
+    return engineHttp(
+      engine,
       'GET',
-      `/api/devices/${encodeURIComponent(args.serial)}/logcat${qs ? `?${qs}` : ''}`
+      `/api/devices/${enc(args.serial)}/logcat${qs ? `?${qs}` : ''}`
     );
-  },
-  adb_logcat_clear: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http('POST', `/api/devices/${encodeURIComponent(args.serial)}/logcat/clear`);
-  },
-  adb_shell: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http('POST', `/api/devices/${encodeURIComponent(args.serial)}/shell`, {
+  }),
+  adb_logcat_clear: onDevice((args, engine) =>
+    engineHttp(engine, 'POST', `/api/devices/${enc(args.serial)}/logcat/clear`)
+  ),
+  adb_shell: onDevice((args, engine) =>
+    engineHttp(engine, 'POST', `/api/devices/${enc(args.serial)}/shell`, {
       command: args.command,
       timeoutMs: args.timeoutMs,
-    });
-  },
-  adb_screenshot: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http('POST', `/api/devices/${encodeURIComponent(args.serial)}/screenshot`, {
+    })
+  ),
+  adb_screenshot: onDevice((args, engine) =>
+    engineHttp(engine, 'POST', `/api/devices/${enc(args.serial)}/screenshot`, {
       outputPath: args.outputPath,
-    });
-  },
-  adb_tap: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http('POST', `/api/devices/${encodeURIComponent(args.serial)}/tap`, {
-      x: args.x,
-      y: args.y,
-    });
-  },
-  adb_swipe: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http('POST', `/api/devices/${encodeURIComponent(args.serial)}/swipe`, {
+    })
+  ),
+  adb_tap: onDevice((args, engine) =>
+    engineHttp(engine, 'POST', `/api/devices/${enc(args.serial)}/tap`, { x: args.x, y: args.y })
+  ),
+  adb_swipe: onDevice((args, engine) =>
+    engineHttp(engine, 'POST', `/api/devices/${enc(args.serial)}/swipe`, {
       x1: args.x1,
       y1: args.y1,
       x2: args.x2,
       y2: args.y2,
       durationMs: args.durationMs,
-    });
-  },
-  adb_input_text: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http('POST', `/api/devices/${encodeURIComponent(args.serial)}/input-text`, {
-      text: args.text,
-    });
-  },
-  adb_keyevent: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http('POST', `/api/devices/${encodeURIComponent(args.serial)}/keyevent`, {
+    })
+  ),
+  adb_input_text: onDevice((args, engine) =>
+    engineHttp(engine, 'POST', `/api/devices/${enc(args.serial)}/input-text`, { text: args.text })
+  ),
+  adb_keyevent: onDevice((args, engine) =>
+    engineHttp(engine, 'POST', `/api/devices/${enc(args.serial)}/keyevent`, {
       keyCode: args.keyCode,
       ...(args.source ? { source: args.source } : {}),
-    });
-  },
-  adb_gamepad: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http('POST', `/api/devices/${encodeURIComponent(args.serial)}/gamepad-button`, {
+    })
+  ),
+  adb_gamepad: onDevice((args, engine) =>
+    engineHttp(engine, 'POST', `/api/devices/${enc(args.serial)}/gamepad-button`, {
       button: args.button,
       ...(args.longpress ? { longpress: true } : {}),
-    });
-  },
-  adb_ui_dump: async (a) => {
-    const args = await withSelectedSerial(a);
+    })
+  ),
+  adb_ui_dump: onDevice((args, engine) => {
     const qs = args.compressed === false ? '?compressed=false' : '';
-    return http('GET', `/api/devices/${encodeURIComponent(args.serial)}/ui-dump${qs}`);
-  },
-  adb_current_activity: async (a) => {
-    const args = await withSelectedSerial(a);
-    return http('GET', `/api/devices/${encodeURIComponent(args.serial)}/current-activity`);
-  },
+    return engineHttp(engine, 'GET', `/api/devices/${enc(args.serial)}/ui-dump${qs}`);
+  }),
+  adb_current_activity: onDevice((args, engine) =>
+    engineHttp(engine, 'GET', `/api/devices/${enc(args.serial)}/current-activity`)
+  ),
 
-  android_health: () => http('GET', '/api/health'),
+  android_health: async () => {
+    if (!MULTI) return http('GET', '/api/health');
+    const probes = await Promise.all(ENGINES.map((engine) => probeEngine(engine, { fresh: true })));
+    const primary = probes[0];
+    return {
+      status: primary.ok ? 'ok' : 'degraded',
+      timestamp: new Date().toISOString(),
+      engineConfig: ENGINE_CONFIG.source,
+      engines: probes.map((probe) => ({
+        engine: probe.engine,
+        url: probe.url,
+        ok: probe.ok,
+        kind: probe.kind,
+        busy: probe.busy,
+        activeProjects: probe.activeProjects,
+        emulator: probe.emulator?.status || null,
+        latencyMs: probe.latencyMs,
+        ...(probe.error ? { error: probe.error } : {}),
+      })),
+    };
+  },
 };
 
 // Pipe a buffer through `magick` (ImageMagick 7) to resize + recompress.
@@ -1101,8 +2052,14 @@ function magickPipe(input, args) {
 // we downscale + JPEG-recompress to stay well under the size cap. The
 // builder backend still serves the original PNG for adb_screenshot.
 async function callScreenshotView(args) {
-  const { serial } = await withSelectedSerial(args);
-  const png = await httpBinary('GET', `/api/devices/${encodeURIComponent(serial)}/screenshot.png`);
+  const target = await resolveDevice(args);
+  const { serial } = target.args;
+  const engine = target.engine;
+  const png = await httpBinary(
+    'GET',
+    `/api/devices/${encodeURIComponent(serial)}/screenshot.png`,
+    engine
+  );
 
   // Longest-edge 1024px, quality 78. Phone screens are pixel-dense; the agent
   // doesn't need 1:1 pixels to read UI labels. JPEG halves bytes vs PNG for
@@ -1130,11 +2087,12 @@ async function callScreenshotView(args) {
       { type: 'image', data: outBuf.toString('base64'), mimeType: mime },
       {
         type: 'text',
-        text: `Screenshot of ${serial}: ${png.length} B raw → ${outBuf.length} B ${mime}. Use adb_ui_dump for element coordinates.`,
+        text: `Screenshot of ${serial}${MULTI ? ` (engine ${engine.name})` : ''}: ${png.length} B raw → ${outBuf.length} B ${mime}. Use adb_ui_dump for element coordinates.`,
       },
     ],
     structuredContent: {
       serial,
+      engine: engine.name,
       size_bytes_raw: png.length,
       size_bytes_sent: outBuf.length,
       mime_type: mime,
@@ -1201,4 +2159,8 @@ rl.on('line', async (line) => {
   await handleRequest(msg);
 });
 rl.on('close', () => process.exit(0));
-log('ready (stdio) →', API);
+log(
+  'ready (stdio) →',
+  ENGINES.map((engine) => `${engine.name}=${engine.url}`).join(', '),
+  `(${ENGINE_CONFIG.source})`
+);

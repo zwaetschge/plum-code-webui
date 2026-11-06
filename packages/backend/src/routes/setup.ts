@@ -2,14 +2,9 @@ import { Router, type Request, type Response } from 'express';
 import { existsSync } from 'fs';
 import os from 'os';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
-import {
-  CLI_PROVIDERS,
-  getCliModels,
-  isProviderAvailable,
-  type CLIProvider,
-} from '../services/cli-providers.js';
+import { CLI_PROVIDERS, isProviderAvailable, type CLIProvider } from '../services/cli-providers.js';
 import { getEnabledCliProvidersForUser, getZaiApiConfigForUser } from './settings.js';
-import { readOpenCodeProvidersForUser } from '../utils/opencodeProviderKeys.js';
+import { readModelProvidersForUser } from '../utils/modelProviderKeys.js';
 import {
   getPiModelsForUser,
   hasPiAntigravityExtension,
@@ -30,7 +25,6 @@ const SETUP_KIND: Record<CLIProvider, SetupKind> = {
   codex: 'cli-login',
   claude: 'cli-login',
   vibe: 'cli-login',
-  opencode: 'provider-keys',
   pi: 'provider-keys',
   zai: 'endpoint',
 };
@@ -78,7 +72,7 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
   const userId = (req as AuthenticatedRequest).userId;
   const enabled = new Set(await getEnabledCliProvidersForUser(userId));
   const zaiConfig = await getZaiApiConfigForUser(userId);
-  const registryProviders = await readOpenCodeProvidersForUser(userId);
+  const registryProviders = await readModelProvidersForUser(userId);
   const configuredEndpoints = registryProviders.filter(
     (entry) => entry.enabled && entry.apiKey.trim().length > 0
   );
@@ -90,11 +84,7 @@ router.get('/status', requireAuth, async (req: Request, res: Response) => {
         provider.id === 'zai' ? zaiConfig !== null : await isProviderAvailable(provider.id, userId);
 
       const models =
-        provider.id === 'pi'
-          ? await getPiModelsForUser(userId)
-          : provider.id === 'opencode'
-            ? getCliModels('opencode')
-            : (provider.models ?? []);
+        provider.id === 'pi' ? await getPiModelsForUser(userId) : (provider.models ?? []);
 
       return {
         id: provider.id,

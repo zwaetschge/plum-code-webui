@@ -8,11 +8,11 @@ process.env.ENCRYPTION_KEY = 'memory-fixture-encryption-key-0000000000';
 const testing = await import('../src/db/testing.js');
 testing.useTestSchema();
 const { safeEncrypt } = await import('../src/utils/encryption.js');
-const { writeOpenCodeProvidersForUser } = await import('../src/utils/opencodeProviderKeys.js');
+const { writeModelProvidersForUser } = await import('../src/utils/modelProviderKeys.js');
 const { run, get, all } = await import('../src/db/pg.js');
 const { createResource, BODY_SCHEMAS, reviseResource, archiveResource } =
   await import('../src/services/assistant/resources.js');
-const { readPersonalization, updatePersonalization } =
+const { readPersonalization: _readPersonalization, updatePersonalization } =
   await import('../src/services/assistant/personalization.js');
 const {
   enqueueMemory,
@@ -124,7 +124,7 @@ try {
   count++;
   assert.equal((await relevantMemories('memory-bob', null, 'coffee')).length, 0);
   count++;
-  const b = await turn('Jetzt bevorzuge ich Kaffee statt Tee.');
+  const _b = await turn('Jetzt bevorzuge ich Kaffee statt Tee.');
   const correction = async () => ({
     extracted: {
       ...extracted,
@@ -396,7 +396,7 @@ try {
   count++;
   // Real transport serialization and owner API credential resolution with a local fake upstream.
   const stamp = new Date().toISOString();
-  await writeOpenCodeProvidersForUser(user, [
+  await writeModelProvidersForUser(user, [
     {
       id: 'openai',
       name: 'Memory fixture',

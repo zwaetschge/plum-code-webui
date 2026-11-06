@@ -344,7 +344,7 @@ if (!(await databaseReachable())) {
     await assert.rejects(()=>reviseResource('alice',treeRoot.id,1,treeRoot.title,{...treeRoot.body,parentId:treeChild.id}),/Kreis/);
     await assert.rejects(()=>reviseResource('alice',treeChild.id,1,treeChild.title,{...treeChild.body,parentId:treeChild.id}),/Kreis/);
     assert.equal((await findResource('alice',treeRoot.id)).revision,1);
-    const pageSource=await createResource('alice','source','Seiten',{text:'[Seite 1]\nkurz vor Marke\n[Seite 2]\nzweite',pageCount:2,projectId:knowledgeProject.id});
+    const _pageSource=await createResource('alice','source','Seiten',{text:'[Seite 1]\nkurz vor Marke\n[Seite 2]\nzweite',pageCount:2,projectId:knowledgeProject.id});
     assert.equal((await searchSourceChunks('alice',knowledgeProject.id,'vor Marke'))[0]!.page,1);
     assert.equal((await searchSourceChunks('alice',knowledgeProject.id,'zweite'))[0]!.page,2);
     console.log('PASS: owner-scoped reference metadata, acyclic task hierarchy and exact page-boundary citations');

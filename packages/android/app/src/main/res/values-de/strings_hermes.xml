@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="assistant_hermes">Hermes</string>
+    <string name="hermes_subtitle">Alle Agenten deines Schwarms: Zustand, Kanäle, Updates und Neustart.</string>
+    <string name="hermes_version_title">Version</string>
+    <string name="hermes_runs_on">Brian läuft auf %1$s</string>
+    <string name="hermes_available">%1$s ist verfügbar</string>
+    <string name="hermes_current">aktuell</string>
+    <string name="hermes_update_to">Aktualisieren auf %1$s</string>
+    <string name="hermes_update">Aktualisieren</string>
+    <string name="hermes_updating">Update läuft …</string>
+    <string name="hermes_auto_update">Brian täglich automatisch aktualisieren</string>
+    <string name="hermes_auto_update_on">Mit Sicherung, Kanalprüfung und Rückfall auf die alte Version.</string>
+    <string name="hermes_paused">Pausiert.</string>
+    <string name="hermes_not_managed">nicht von Plum verwaltet</string>
+    <string name="hermes_running_since">Läuft seit %1$s</string>
+    <string name="hermes_stopped">Gestoppt</string>
+    <string name="hermes_healthy">gesund</string>
+    <string name="hermes_connected">verbunden</string>
+    <string name="hermes_disconnected">getrennt</string>
+    <string name="hermes_swarm_background">Räume und Aufträge des Schwarms</string>
+    <string name="hermes_back">Zurück zu Hermes</string>
+    <string name="hermes_unreachable">Hermes nicht erreichbar</string>
+    <string name="hermes_latest">Hermes %1$s</string>
+    <string name="hermes_latest_hint">Neueste Version von Hermes Agent. Updates sichern vorher und fallen bei Fehlern auf die alte Version zurück.</string>
+    <string name="hermes_rebuild">Neu bauen</string>
+    <string name="hermes_rebuild_confirm">%1$s neu bauen und neu starten?</string>
+    <string name="hermes_up_to_date">Aktuell</string>
+    <string name="hermes_running_job">Läuft …</string>
+    <string name="hermes_log">Protokoll</string>
+    <string name="hermes_group_swarm">Schwarm</string>
+    <string name="hermes_group_watch">Melder und Wächter</string>
+    <string name="hermes_no_container">Kein eigener Container.</string>
+    <string name="hermes_on_phone">Läuft auf dem Handy.</string>
+    <string name="hermes_restart">Neu starten</string>
+    <string name="hermes_start">Starten</string>
+    <string name="hermes_cancel">Abbrechen</string>
+</resources>

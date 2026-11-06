@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import com.claudewebui.app.R
 import com.claudewebui.app.core.network.ApiClient
 import com.claudewebui.app.data.model.SwarmDirectory
+import com.claudewebui.app.data.model.SwarmContainerState
 import com.claudewebui.app.data.model.SwarmDirectoryAgent
 import com.claudewebui.app.data.model.SwarmHubState
 import com.claudewebui.app.ui.theme.PlumGlassCard
@@ -79,7 +80,7 @@ internal fun SwarmAgentDirectory(
     var reload by remember { mutableIntStateOf(0) }
     var filter by rememberSaveable { mutableStateOf("all") }
     var subagentsOpen by rememberSaveable { mutableStateOf(false) }
-    var confirm by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var confirm by remember { mutableStateOf<Pair<SwarmContainerState, String>?>(null) }
     var logs by remember { mutableStateOf<Pair<String, List<String>>?>(null) }
 
     LaunchedEffect(reload) {
@@ -92,31 +93,33 @@ internal fun SwarmAgentDirectory(
             delay(30_000)
         }
     }
-    fun containerAction(name: String, action: String) {
+    fun containerAction(container: SwarmContainerState, action: String) {
         scope.launch {
             try {
-                val response = api.swarmContainerAction(name, action)
+                val response = api.swarmContainerAction(container.name, action, container.host)
                 if (!response.success) error = response.error?.message
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = failure.message }
             reload++
         }
     }
-    fun showLogs(name: String) {
+    fun showLogs(container: SwarmContainerState) {
+        val name = listOfNotNull(container.hostLabel, container.name).joinToString(" · ")
         if (logs?.first == name) { logs = null; return }
         scope.launch {
             try {
-                logs = name to api.getSwarmContainerLogs(name).data?.lines.orEmpty()
+                logs = name to api.getSwarmContainerLogs(container.name, container.host).data?.lines.orEmpty()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = failure.message }
         }
     }
 
-    confirm?.let { (name, action) ->
+    confirm?.let { (container, action) ->
+        val name = listOfNotNull(container.hostLabel, container.name).joinToString(" · ")
         AlertDialog(
             onDismissRequest = { confirm = null },
             title = { Text(stringResource(if (action == "restart") R.string.swarm_restart_confirm else R.string.swarm_start_confirm, name)) },
-            confirmButton = { TextButton(onClick = { confirm = null; containerAction(name, action) }) { Text(stringResource(if (action == "restart") R.string.swarm_restart else R.string.swarm_start)) } },
+            confirmButton = { TextButton(onClick = { confirm = null; containerAction(container, action) }) { Text(stringResource(if (action == "restart") R.string.swarm_restart else R.string.swarm_start)) } },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text(stringResource(R.string.assistant_cancel)) } },
         )
     }
@@ -161,6 +164,7 @@ internal fun SwarmAgentDirectory(
                 )
                 if (!data.matrixConnected) Text(stringResource(R.string.swarm_needs_matrix), style = MaterialTheme.typography.bodySmall, color = palette.muted)
                 if (!data.containersVisible) Text(stringResource(R.string.swarm_needs_admin), style = MaterialTheme.typography.bodySmall, color = palette.muted)
+                data.containerErrors.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                 error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
         }
@@ -172,7 +176,7 @@ internal fun SwarmAgentDirectory(
                     agent, data.containersVisible,
                     onCommand = if (data.matrixConnected) onCommand else null,
                     onOpenRoom = if (data.matrixConnected) onOpenRoom else null,
-                    onContainer = { name, action -> confirm = name to action },
+                    onContainer = { container, action -> confirm = container to action },
                     onLogs = ::showLogs,
                 )
             }
@@ -257,8 +261,8 @@ private fun AgentCard(
     containersVisible: Boolean,
     onCommand: ((String) -> Unit)?,
     onOpenRoom: ((String) -> Unit)?,
-    onContainer: (name: String, action: String) -> Unit,
-    onLogs: (String) -> Unit,
+    onContainer: (container: SwarmContainerState, action: String) -> Unit,
+    onLogs: (SwarmContainerState) -> Unit,
 ) {
     val palette = PlumTheme.palette
     val native = if (agent.kind == "hub") agent.id.removePrefix("hub:") else null
@@ -307,10 +311,11 @@ private fun AgentCard(
                     Spacer(Modifier.width(6.dp))
                     Column(Modifier.weight(1f)) {
                         Text(container.name, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = palette.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(container.status, style = MaterialTheme.typography.labelSmall, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(listOfNotNull(container.hostLabel, container.status).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        container.ownerSessionName?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     }
-                    TextButton(onClick = { onLogs(container.name) }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(stringResource(R.string.swarm_logs)) }
-                    TextButton(onClick = { onContainer(container.name, if (container.running) "restart" else "start") }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    TextButton(onClick = { onLogs(container) }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(stringResource(R.string.swarm_logs)) }
+                    if ((container.actions ?: listOf("start", "restart")).contains(if (container.running) "restart" else "start")) TextButton(onClick = { onContainer(container, if (container.running) "restart" else "start") }, contentPadding = PaddingValues(horizontal = 8.dp)) {
                         Text(stringResource(if (container.running) R.string.swarm_restart else R.string.swarm_start))
                     }
                 }

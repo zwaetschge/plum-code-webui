@@ -120,7 +120,7 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
             history.replaceState(null,'',${JSONObject.quote(route)});
             document.addEventListener('click',async function(e){const a=e.target.closest&&e.target.closest('a[download]');if(!a)return;const u=new URL(a.href,location.href);if(!(u.origin===location.origin||a.href.startsWith('blob:'+location.origin+'/')))return;e.preventDefault();try{const r=await fetch(a.href,{headers:{Authorization:'Bearer '+window.__PLUM_ANDROID__.token}});if(!r.ok)throw new Error('Download failed');const b=await r.blob();if(b.size>32*1024*1024)throw new Error('Export exceeds 32 MB');const f=new FileReader();f.onload=()=>PlumDownloads.offer(String(f.result).split(',')[1],a.download||'plum-export');f.readAsDataURL(b);}catch(err){alert(err.message);}},true);
             const plumPush=history.pushState.bind(history);
-            history.pushState=function(state,title,url){const target=new URL(url,location.href);if(target.origin===location.origin&&['/code','/swarm'].includes(target.pathname)){location.assign('/__plum_native_area/'+target.pathname.slice(1));return;}const m=target.pathname.match(/^\/(?:chat\/session|session)\/([A-Za-z0-9_-]+)$/);if(m&&target.origin===location.origin){location.assign('/__plum_native_session/'+m[1]);return;}plumPush(state,title,url);};
+            history.pushState=function(state,title,url){const target=new URL(url,location.href);if(target.origin===location.origin&&['/code','/swarm','/hermes'].includes(target.pathname)){location.assign('/__plum_native_area/'+target.pathname.slice(1));return;}const m=target.pathname.match(/^\/(?:chat\/session|session)\/([A-Za-z0-9_-]+)$/);if(m&&target.origin===location.origin){location.assign('/__plum_native_session/'+m[1]);return;}plumPush(state,title,url);};
             </script>
         """.trimIndent()
         // The embedded viewport is resized by Compose (including IME insets).
@@ -200,12 +200,12 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
                             if (!current()) return true
                             if (!request.isForMainFrame) return target.scheme !in listOf("https", "http", "about", "blob", "data")
                             val same = "${target.scheme}://${target.encodedAuthority}" == origin
-                            if (same && target.path in listOf("/__plum_native_area/code", "/__plum_native_area/swarm")) { onAreaSelect(target.lastPathSegment!!); return true }
+                            if (same && target.path in listOf("/__plum_native_area/code", "/__plum_native_area/swarm", "/__plum_native_area/hermes")) { onAreaSelect(nativeArea(target.lastPathSegment!!)); return true }
                             val id = target.path?.removePrefix("/__plum_native_session/")
                             if (same && target.path?.startsWith("/__plum_native_session/") == true && id?.matches(Regex("[A-Za-z0-9_-]+")) == true) { onNavigateToChat(id); return true }
                             val route = target.encodedPath.orEmpty().removePrefix(prefix)
                             if (same && (route.startsWith("/api/") || route.startsWith("/generated/") || route.startsWith("/office/"))) return false
-                            if (same && route in listOf("/code", "/swarm")) { onAreaSelect(route.drop(1)); return true }
+                            if (same && route in listOf("/code", "/swarm", "/hermes")) { onAreaSelect(nativeArea(route.drop(1))); return true }
                             if (same && target.path?.startsWith("/api/") != true && target.path?.startsWith("/generated/") != true) {
                                 loading = true; loadDataWithBaseURL("$base/", bundledHtml(target.encodedPath + (target.encodedQuery?.let { "?$it" } ?: "")), "text/html", "UTF-8", null); return true
                             }
@@ -258,3 +258,6 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
         }
     }
 }
+
+/** The web Schwarm page lives inside the native Hermes area now. */
+private fun nativeArea(segment: String): String = if (segment == "swarm") "hermes" else segment

@@ -175,10 +175,12 @@ fun FirefoxBrowserPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                 fontSize = 12.sp,
             )
 
-            if (state.browserConnections.isEmpty()) {
+            // The watch has its own section (Settings → Uhr); it is never a browser.
+            val browserConnections = state.browserConnections.filter { it.client.kind != "watch" }
+            if (browserConnections.isEmpty()) {
                 Text(screenResources.getString(R.string.settings_firefox_browser_none_connected), color = PlumMuted, fontSize = 12.sp)
             } else {
-                state.browserConnections.forEach { connection ->
+                browserConnections.forEach { connection ->
                     Column {
                         Text(
                             "● ${connection.client.label}",
@@ -237,7 +239,7 @@ fun FirefoxBrowserPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                 }
             }
 
-            state.browserTokens.filterNot { it.revoked }.forEach { token ->
+            state.browserTokens.filterNot { it.revoked || it.scope == "watch" }.forEach { token ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(token.name, color = PlumText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -5,28 +5,28 @@ Auftrag: Die bestätigten Lücken aus `reports/Plum Chat Browserabschluss.md` um
 ## Umsetzung
 
 - [x] Antwortbelege: tatsächlich übergebene Erinnerungen, Recall und Projektchats sowie bestätigte Lernergebnisse anzeigen; Vergessen darf Fakten nicht über Belege zurückbringen.
-- [x] Lebende Themendokumente als fortlaufende Sicht auf Originalfacts mit Bearbeitung, Herkunft, Revisionsvergleich und Vergessen. Web geprüft; native Umsetzung vorhanden, Build läuft noch.
-- [x] Lange API-Chats: dauerhafte FIFO-Warteschlange und quellgeprüfte rollende Verdichtung in beiden Clients eingebaut. Backend-/Webprüfung bestanden; Android-Queue kompiliert, Build für Verdichtung läuft.
+- [x] Lebende Themendokumente als fortlaufende Sicht auf Originalfacts mit Bearbeitung, Herkunft, Revisionsvergleich und Vergessen. Web geprüft; native Umsetzung im endgültigen APK kompiliert.
+- [x] Lange API-Chats: dauerhafte FIFO-Warteschlange und quellgeprüfte rollende Verdichtung in beiden Clients eingebaut. Backend-/Webprüfung bestanden; Android-Queue und Verdichtung im endgültigen APK kompiliert.
 - [x] Fachliche Skills kombinieren und bedarfsgerecht laden; bestehenden Skilldateispeicher verwenden.
 - [x] Grosse MCP-Werkzeugbestände durchsuchen und gezielt laden.
 - [x] Optionale Funktionsrechte und Einzelgenehmigungen; Auto-Accept bleibt Standard.
 - [x] Globale Chat-Anweisungen pro Projekt/Profil auslassen können, unabhängig vom Gedächtnis.
 - [x] Profile als Fähigkeitsbündel; Revisionsdiffs für Wissen/Projekte/Profile sowie Mehrdatei-Skilleditor mit geschützten Textdateien, neuen Unterdateien und unveränderlichen Dateiversionen. Web und nativer Skilleditor vorhanden; Skill-Build abgeschlossen.
 - [x] Andere Chats explizit referenzieren; Mehrfachauswahl, Verschieben, Archivieren und Wiederherstellen in beiden Clients. Lese-/Projektgrenzen bleiben wirksam, laufende und wartende Chats sind geschützt.
-- [x] Chatplanung über Routine-Ressourcen und dauerhafte Occurrence-Outbox in die normale Chatqueue; Intervall/einmal/täglich/Wochentage/Zeitzone/Enddatum, Pause/Start/Bearbeiten. Wissensnotebooks auf vorhandenen Quellensammlungen; bewusste Quellenauswahl und GLM-Modellwahl. Eingebettete MCP-Dateien im Chat anzeigen/herunterladen und dauerhafte Ergebnisoriginale erhalten; temporäre Dateien werden bereinigt. Android: native Datei-/Medienbedienung, Wissen/Planung über eingebettete Arbeitsoberflächen erreichbar; endgültiges Webbundle im APK steht noch aus.
+- [x] Chatplanung über Routine-Ressourcen und dauerhafte Occurrence-Outbox in die normale Chatqueue; Intervall/einmal/täglich/Wochentage/Zeitzone/Enddatum, Pause/Start/Bearbeiten. Wissensnotebooks auf vorhandenen Quellensammlungen; bewusste Quellenauswahl und GLM-Modellwahl. Eingebettete MCP-Dateien im Chat anzeigen/herunterladen und dauerhafte Ergebnisoriginale erhalten; temporäre Dateien werden bereinigt. Android: native Datei-/Medienbedienung, Wissen/Planung über eingebettete Arbeitsoberflächen erreichbar; endgültiges Webbundle mit 296 Dateien im APK anhand des Index-SHA bestätigt.
 - [x] Quellen-/Sammlungsrollen owner/editor/viewer bis Quelle, Picker, revisionsgebundenem Retrieval und Originaldownload; Entziehen wird erneut geprüft. Gemeinsame Dokumente mit automatischer Speicherung, Remote-Aktualisierung und Zusammenführen unabhängiger Änderungen; Überschneidungen erhalten den lokalen Entwurf als Konflikt. Beide Clients erreichen den Editor.
-- [ ] Native Gedächtnis-Ladepfade und bestehende Integrationskorrektur im Zielsystem prüfen. Lokale Korrektur: ein authentifiziertes Matrix-`whoami` statt vollständiger Raumabfrage, begrenzte SQL-Lesezeit und parallele Hermes-Lesezugriffe; Client-Zeitlimit und erneutes Laden. Identitäts-/Widerrufs-/Epochenschutz separat geprüft; Produktivnachweis offen.
+- [x] Native Gedächtnis-Ladepfade und bestehende Integrationskorrektur im Zielsystem prüfen. Lokale Korrektur: ein authentifiziertes Matrix-`whoami` statt vollständiger Raumabfrage, begrenzte SQL-Lesezeit und parallele Hermes-Lesezugriffe; Client-Zeitlimit und erneutes Laden. Identitäts-/Widerrufs-/Epochenschutz separat geprüft. Produktiv antwortet der native Pfad sofort mit `403 NATIVE_MEMORY_IDENTITY`, weil diesem Plum-Konto das verbundene Schwarm-Betreiberkonto fehlt. Der authentifizierte Abruf nativer Inhalte bleibt deshalb ungeprüft; keine Berechtigungsabsenkung. Integrationen liefern produktiv Strings, die Einstellungen rendern fehlerfrei.
 
 ## Abnahme und Auslieferung
 
-- [ ] Aussagekräftige Backendregressionen und erforderliche Typ-/Lintprüfungen.
-- [ ] Reale gerenderte Webansichten auf Desktop und Mobil prüfen, früh nach dem ersten durchgängigen Schritt.
-- [ ] Android-Builder: Quellen synchronisieren, Build abschliessen, APK exportieren und SHA-256 prüfen.
-- [ ] Web-/Backendauslieferung mit bestehender Schwarmarbeit koordinieren; tatsächliches öffentliches Ziel prüfen.
+- [x] Aussagekräftige Backendregressionen und erforderliche Typ-/Lintprüfungen.
+- [x] Reale gerenderte Webansichten auf Desktop und Mobil prüfen, früh nach dem ersten durchgängigen Schritt.
+- [x] Android-Builder: Quellen synchronisieren, Build abschliessen, APK exportieren und SHA-256 prüfen.
+- [x] Web-/Backendauslieferung mit bestehender Schwarmarbeit koordinieren; tatsächliches öffentliches Ziel prüfen.
 - [ ] Native Laufzeit auf dem Fold8 prüfen, soweit Verbindung und bestehende Installationsautorisierung reichen.
-- [ ] Abschluss mit tatsächlich geliefertem Umfang und konkreten Restgrenzen dokumentieren.
+- [x] Abschluss mit tatsächlich geliefertem Umfang und konkreten Restgrenzen dokumentieren.
 
-Stand: Erste durchgängige Implementierungen lokal vorhanden und geprüft; noch kein Rollout bestätigt. Haken im Umsetzungsabschnitt bezeichnen lokale Implementierungen, keine Produktionsabnahme. Fremde Änderungen an Schwarm, Routen und gemeinsamen Modellen bleiben erhalten.
+Aktueller Stand am 26.10.2026, 21:10 UTC: Alle bestätigten Funktionslücken implementiert, Regressionen und Webprüfung bestanden. Web-/Backendstand produktiv auf dem Geekom; Android 1.9.6 / vc58 kompiliert, exportiert und im Updatekanal veröffentlicht. Fold8-Geräteprüfung ist blockiert: `192.168.1.106:40781` verweigert die Verbindung, aktueller Verbindungsport angefragt. Fremde Schwarmänderungen sind erhalten. Die folgenden Prüfstand-Abschnitte sind das chronologische Protokoll; der aktuelle Lieferstand steht am Ende.
 
 ## Prüfstand des ersten Schritts
 
@@ -58,3 +58,14 @@ Stand: Erste durchgängige Implementierungen lokal vorhanden und geprüft; noch 
 - Android-Skill-/Wissens-Quellstand kompiliert und exportiert: `/mnt/user/Zwischenspeicher/plum-1.9.6-knowledge-skills.apk`, 53’493’412 Bytes, SHA-256 `cf295e31ed6c675e72a10606de61e4864c5bc5a8a5d0cad7f6197c8238c409fb`. Das endgültige APK muss anschliessende native Medien-/Planungsänderungen und das aktuelle gebündelte Web-UI noch enthalten.
 - Bestehende grosse API-/Memoryrechte-/Workbench-/MCP-Fähigkeiten-/Sammlungs- und Integrationssuiten mit Migrationen 023/024 bestanden. Backend und Frontend kompilieren; ein abschliessender Bundle-/Geräte-/Produktivnachweis steht aus.
 - Öffentliche Traefik-Route erneut gelesen: Geekom `192.168.1.124:4545`, bereit. SSH als bestehender Geekom-Benutzer erreichbar, Repair Bot ist idle. Produktive Quellkopie `/srv/plum/appdata/plum-code-webui`, abweichender Git-/Arbeitsstand; Änderungen werden vor Übernahme einzeln abgeglichen. Keine parallele Übernahme und kein Rebuild ausgelöst. Firefox gegenwärtig nicht verbunden.
+
+## Auslieferung am 26.10.2026
+
+- Quellstand: `1f7d267`, `5b64e1c`, `33862e6`, `1250456`, `8e43c23`. Öffentlicher Router erneut geprüft: Geekom `192.168.1.124:4545`. 68 abgeglichene Quellpfade plus Produktions-Dockerfile mit Preimage-SHA und Sicherung übernommen, fremde Schwarm-Routen/-Typen erhalten. Repair Bot hat Image `sha256:3679ed06a7e1bea81f15dc2a8b4b654e8df3b317bcf0c6aade19e3faab72b6ac` am 26.10. um 04:08:44 UTC als bereit bestätigt. Laufender Container ist gesund. Sicherung: `/srv/plum/deploy/backups/chat-parity-20261026T040340Z`.
+- Echte Produktivrequests für Wissen/Freigaben, Planung, Verlaufsverwaltung, Gedächtnisthemen, Personalisierung und Integrationen: HTTP 200. GLM 5.3 Flash angeboten; persönliche Lernmodellwahl explizit `z-ai` / `glm-5.3-flash`, sämtliche übrigen Einstellungen beibehalten. Kein bezahlter Modellaufruf.
+- Echtes gerendertes Produktiv-UI bei 1440 und 390 px: Wissen, geplante Chats, Verlauf, Themen, Personalisierung und Einstellungen ohne JavaScriptfehler und ohne horizontalen Überlauf. Wissen und Geplant zusätzlich über die wirkliche Chat-Seitenleiste navigiert. Keine API-Mocks in dieser Produktivprüfung.
+- Endgültiges Android-APK vom Builder als `built` bestätigt, mtime 26.10. 04:08:22 UTC, 51’959’208 Bytes. Export `/mnt/user/Zwischenspeicher/plum-1.9.6.apk`, SHA-256 `dd082a279e8f202c29e748362b8ac12839e65c10141074536c0a17e4742d5dd7`. Alle 296 gebündelten Webdateien enthalten; Index-SHA `fc8b55c90de7b2099b971716f6e5ef8ddba2a65c527b9860259411087ff2e9f0`.
+- Updatekanal auf dem Geekom von 1.9.4/vc56 auf 1.9.6/vc58 veröffentlicht, Originale zuvor unter `/srv/plum/appdata/plum-code-webui/data/android/backup-chat-parity-20261026T210715Z` gesichert. APK über die echte Geekom-API heruntergeladen und bytegenau per SHA geprüft.
+- Öffentlicher Gatewaytest deckte einen bestehenden Updatefehler auf: fehlendes `/mobile` im signierten Link sowie JWT-Gate vor DownloadManager. Korrektur `152c9c1`: nur exakte GET-Downloadroute lässt die kurzlebige HMAC-Prüfung der App-Route entscheiden; Versionsmetadaten bleiben authentifiziert. Echter HTTP-Regressionstest mit isoliertem PostgreSQL prüft APK-Bytes, Prefix, abgelaufene/manipulierte/unsignierte Links und unveränderten Webpfad. Build und gezieltes ESLint bestanden. Korrektur wird ausschliesslich per Repair Bot ausgeliefert; öffentliche Downloadabnahme folgt.
+- Offene Laufzeitgrenzen: Fold8-Verbindung abgelehnt; kein neuer Stand auf dem Gerät installiert oder dort geprüft. Native Hermes-/Schwarm-Inhalte benötigen das verbundene Betreiberkonto; die sofortige produktive Berechtigungsantwort ist geprüft, Inhaltsabruf nicht. Die ältere echte bge-m3-Suite bleibt wegen `ENOTFOUND schwarm-plum-relay` unausführbar; separate Identitätsregression bestanden.
+- Belegdateien ohne Geheimniswerte: `.probe/chat-parity-rollout/production-api-verification.json`, `production-web-verification.json`, `production-sidebar-verification.json`, `android-publication.json`, `android-download-verification.json`; lokale Browserbilder `.screenshots/chat-parity-live-*.png`. Tokens und private Zwischenstände gehören nicht in Git.

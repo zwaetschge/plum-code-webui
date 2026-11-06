@@ -6,7 +6,7 @@ const testing = await import('../src/db/testing.js');
 testing.useTestSchema();
 const { run, get } = await import('../src/db/pg.js');
 const { safeEncrypt } = await import('../src/utils/encryption.js');
-const { writeOpenCodeProvidersForUser } = await import('../src/utils/opencodeProviderKeys.js');
+const { writeModelProvidersForUser } = await import('../src/utils/modelProviderKeys.js');
 const { createApiChat, startApiTurn, stopApiTurn, apiChatTurns } =
   await import('../src/services/assistant/apiChats.js');
 const { apiTurnHash, pumpApiChatQueue } = await import('../src/services/assistant/apiChatQueue.js');
@@ -58,7 +58,7 @@ try {
     user
   );
   const now = new Date().toISOString();
-  await writeOpenCodeProvidersForUser(user, [
+  await writeModelProvidersForUser(user, [
     {
       id: 'fixture',
       name: 'Fixture',

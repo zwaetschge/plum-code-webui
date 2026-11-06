@@ -19,7 +19,7 @@ import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Interactive prompts that block a turn: permission requests (both wire
- * formats) and OpenCode questions. Owned by [ChatViewModel] and scoped to
+ * formats) and agent questions. Owned by [ChatViewModel] and scoped to
  * its `viewModelScope`.
  */
 internal class ChatPermissionController(
@@ -55,7 +55,7 @@ internal class ChatPermissionController(
         return false to null
     }
 
-    /** OpenCode question prompts — without this the session stalls silently. */
+    /** Agent question prompts — without this the session stalls silently. */
     fun onQuestion(event: QuestionRequestEvent) {
         state.update { it.copy(pendingQuestion = event, isThinking = false) }
     }
@@ -92,7 +92,7 @@ internal class ChatPermissionController(
         }
     }
 
-    /** Answer an OpenCode question prompt; answers[i] holds question i's picks. */
+    /** Answer an agent question prompt; answers[i] holds question i's picks. */
     fun respondToQuestion(answers: List<List<String>>) {
         Breadcrumbs.add("chat.question", "respond")
         val question = state.value.pendingQuestion ?: return

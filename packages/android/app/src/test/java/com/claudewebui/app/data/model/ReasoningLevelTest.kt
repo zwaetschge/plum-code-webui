@@ -16,8 +16,8 @@ class ReasoningLevelTest {
         assertTrue(ReasoningLevel.ULTRA in ReasoningLevel.forProvider(CLIProvider.CODEX))
     }
 
-    @Test fun piOffersUltracodeButOpenCodeDoesNot() {
+    @Test fun piOffersUltracodeButNotUltra() {
         assertTrue(ReasoningLevel.ULTRACODE in ReasoningLevel.forProvider(CLIProvider.PI))
-        assertFalse(ReasoningLevel.ULTRACODE in ReasoningLevel.forProvider(CLIProvider.OPENCODE))
+        assertFalse(ReasoningLevel.ULTRA in ReasoningLevel.forProvider(CLIProvider.PI))
     }
 }

@@ -36,6 +36,7 @@ async function load() {
   $('allowJs').checked = settings.allowJs;
   $('protectedSites').value = settings.protectedSites;
   $('blockedSites').value = settings.blockedSites;
+  renderUsageProviders(settings.usageHidden);
   void renderShortcuts();
   renderStatus(await browser.runtime.sendMessage({ plumGetState: true }));
 }
@@ -99,6 +100,33 @@ browser.storage.onChanged.addListener((changes, area) => {
   }
 });
 
+// ---------------------------------------------------------------- usage providers
+
+/** One switch per provider; unchecked ones are hidden in the popup and the icon ring. */
+function renderUsageProviders(hidden) {
+  const off = new Set(Array.isArray(hidden) ? hidden : []);
+  $('usageProviders').replaceChildren(
+    ...PLUM_USAGE_PROVIDERS.map(([id, label]) => {
+      const row = document.createElement('label');
+      row.className = 'field toggle';
+      const name = document.createElement('span');
+      name.textContent = label;
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !off.has(id);
+      box.dataset.provider = id;
+      box.addEventListener('change', () => {
+        const usageHidden = [...$('usageProviders').querySelectorAll('input')]
+          .filter((input) => !input.checked)
+          .map((input) => input.dataset.provider);
+        void plumSaveSettings({ usageHidden });
+      });
+      row.append(name, box);
+      return row;
+    })
+  );
+}
+
 // ---------------------------------------------------------------- one-paste pairing
 
 /** Pasting Plum's pairing text into either field fills address and token at once. */
@@ -144,6 +172,7 @@ async function renderShortcuts() {
   const commands = browser.commands ? await browser.commands.getAll() : [];
   const names = {
     _execute_action: 'Panel öffnen',
+    _execute_browser_action: 'Übersicht öffnen',
     _execute_sidebar_action: 'Chat-Seitenleiste',
     'toggle-pause': 'Not-Aus',
   };

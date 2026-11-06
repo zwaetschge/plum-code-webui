@@ -37,7 +37,7 @@ data class AssistantSourceVersion(val id: String, val revision: Long)
 @Serializable
 data class AssistantApiUsage(val input: Long, val output: Long, val cached: Long, val cacheWrite: Long, val costUsd: Double? = null)
 @Serializable
-data class AssistantApiTurn(val id: String, val seq: Long, val prompt: String, val response: String, val status: String, val error: String? = null, val model: String, val providerId: String? = null, val profileId: String? = null, val profileRevision: Long? = null, val sourceVersions: List<AssistantSourceVersion> = emptyList(), val imageAssetIds: List<String> = emptyList(), val usage: AssistantApiUsage? = null, val createdAt: String, val ui: JsonObject? = null, val uiError: String? = null, val uiPending: Boolean = false, val versions: List<String> = emptyList(), val sources: List<AssistantChatSource> = emptyList(), val comparisons: List<AssistantChatComparison> = emptyList(), val toolEvents: List<AssistantChatToolEvent> = emptyList(), val contextReceipt: JsonObject? = null, val compaction: JsonObject? = null)
+data class AssistantApiTurn(val id: String, val seq: Long, val prompt: String, val response: String, val status: String, val error: String? = null, val model: String, val providerId: String? = null, val profileId: String? = null, val profileRevision: Long? = null, val sourceVersions: List<AssistantSourceVersion> = emptyList(), val imageAssetIds: List<String> = emptyList(), val usage: AssistantApiUsage? = null, val createdAt: String, val ui: JsonObject? = null, val uiError: String? = null, val uiPending: Boolean = false, val versions: List<String> = emptyList(), val sources: List<AssistantChatSource> = emptyList(), val comparisons: List<AssistantChatComparison> = emptyList(), val toolEvents: List<AssistantChatToolEvent> = emptyList(), val contextReceipt: JsonObject? = null, val compaction: JsonObject? = null, val webSources: List<AssistantWebSource> = emptyList())
 @Serializable
 data class AssistantApiHistory(val chat: AssistantResource, val turns: List<AssistantApiTurn> = emptyList())
 @Serializable
@@ -45,7 +45,7 @@ data class AssistantApiImage(val id: String, val filename: String, val mimeType:
 
 /** GET /api/assistant/swarm/directory: every agent the server can identify, with its real state. */
 @Serializable
-data class SwarmContainerState(val name: String, val state: String = "", val status: String = "", val running: Boolean = false, val health: String = "")
+data class SwarmContainerState(val name: String, val state: String = "", val status: String = "", val running: Boolean = false, val health: String = "", val host: String? = null, val hostLabel: String? = null, val ownerSessionId: String? = null, val ownerSessionName: String? = null, val actions: List<String>? = null)
 @Serializable
 data class SwarmAgentRoom(val alias: String, val id: String? = null)
 @Serializable
@@ -92,12 +92,15 @@ data class SwarmHubState(
     val error: String? = null,
 )
 @Serializable
-data class SwarmDirectory(val hub: SwarmHubState, val agents: List<SwarmDirectoryAgent>, val matrixConnected: Boolean = false, val containersVisible: Boolean = false, val checkedAt: String = "")
+data class SwarmDirectory(val hub: SwarmHubState, val agents: List<SwarmDirectoryAgent>, val matrixConnected: Boolean = false, val containersVisible: Boolean = false, val checkedAt: String = "", val containerErrors: List<String> = emptyList())
 @Serializable
 data class SwarmContainerLogs(val lines: List<String> = emptyList())
 
 @Serializable
 data class AssistantChatSource(val id: String, val revision: Long, val title: String, val text: String, val citation: String = "", val page: Long? = null, val excerptStart: Long = 0, val retrieval: String? = null)
+/** A web page found or read this turn; `ref` is stable across the turn and cited as `[ref](url)`. */
+@Serializable
+data class AssistantWebSource(val ref: Int, val url: String, val title: String = "", val domain: String = "", val excerpt: String = "", val publishedAt: String? = null, val read: Boolean = false)
 @Serializable
 data class AssistantChatComparison(val providerId: String, val model: String, val response: String = "", val status: String, val error: String? = null)
 @Serializable

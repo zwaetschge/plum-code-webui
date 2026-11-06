@@ -128,10 +128,16 @@ async function htmlText(bytes: Buffer) {
         if (
           typeof parsed.text !== 'string' ||
           !parsed.text.trim() ||
-          parsed.text.length > 50000 ||
+          parsed.text.length > 100000 ||
           typeof parsed.title !== 'string'
         )
           throw new Error();
+        // The extractor caps at 50000 code points; characters outside the BMP (emoji)
+        // count twice in UTF-16, which used to reject long pages with a single emoji.
+        if (parsed.text.length > 50000) {
+          parsed.text = parsed.text.slice(0, 50000).replace(/[\uD800-\uDBFF]$/, '');
+          parsed.truncated = true;
+        }
         resolve(parsed);
       } catch {
         reject(
@@ -149,7 +155,8 @@ async function htmlText(bytes: Buffer) {
 }
 export async function fetchPublicSource(
   value: string,
-  redirects = 0
+  redirects = 0,
+  options: { signal?: AbortSignal } = {}
 ): Promise<{
   bytes: Buffer;
   mimeType: string;
@@ -178,7 +185,9 @@ export async function fetchPublicSource(
             Accept: 'text/html,application/xhtml+xml,text/plain,application/json,text/csv',
             'Accept-Encoding': 'identity',
           },
-          signal: AbortSignal.timeout(12000),
+          signal: options.signal
+            ? AbortSignal.any([options.signal, AbortSignal.timeout(12000)])
+            : AbortSignal.timeout(12000),
         },
         (reply) => {
           if (
@@ -282,7 +291,8 @@ export async function fetchPublicSource(
       request.end();
     }
   );
-  if (response.redirect) return fetchPublicSource(response.redirect, Math.min(redirects, 3) - 1);
+  if (response.redirect)
+    return fetchPublicSource(response.redirect, Math.min(redirects, 3) - 1, options);
   let extracted;
   if (['text/html', 'application/xhtml+xml'].includes(response.mimeType))
     extracted = await htmlText(response.bytes);

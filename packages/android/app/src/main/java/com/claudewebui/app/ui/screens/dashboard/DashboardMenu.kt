@@ -107,7 +107,7 @@ internal fun AreaHeaderMenu(
                     ) { viewModel.toggleArchiveView() }()
                     item(stringResource(R.string.menu_select_sessions), Icons.Outlined.Checklist) { DashboardMenuBus.send(DashboardMenuCommand.SELECT_SESSIONS) }()
                 }
-                "swarm" -> item(stringResource(R.string.assistant_emergency), Icons.Outlined.Shield, action = onEmergency)()
+                "hermes" -> item(stringResource(R.string.assistant_emergency), Icons.Outlined.Shield, action = onEmergency)()
             }
             HorizontalDivider()
             item(

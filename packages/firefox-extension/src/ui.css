@@ -20,6 +20,7 @@
   --line-soft: rgba(58, 52, 78, 0.1);
   --ok-text: #045c31;
   --error-text: #9b0c24;
+  --warning-text: #a4501a;
   color-scheme: light;
   font-family:
     'Plus Jakarta Sans',
@@ -50,6 +51,7 @@
     --line-soft: rgba(255, 255, 255, 0.08);
     --ok-text: #6ee7a8;
     --error-text: #ff8a9b;
+    --warning-text: #f5b07c;
     color-scheme: dark;
   }
 }
@@ -651,4 +653,377 @@ input[type='password'] {
 .sessions .actions button {
   padding: 4px 8px;
   font-size: 0.75rem;
+}
+
+/* Account quotas (popup and panel). */
+.usage-list {
+  list-style: none;
+  margin: 0 -8px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.usage-provider {
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+}
+
+.usage-provider.active {
+  background: var(--surface-soft);
+  border-color: var(--line-soft);
+  padding: 8px;
+}
+
+.usage-provider.clickable {
+  cursor: pointer;
+}
+
+.usage-provider.clickable:hover {
+  background: var(--field);
+}
+
+.usage-provider:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.usage-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.usage-name {
+  font-weight: 600;
+  font-size: 0.86rem;
+}
+
+.usage-provider.active .usage-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.usage-tag {
+  font-size: 0.7rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.usage-tag.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.usage-when {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.usage-when.stale {
+  color: var(--warning-text);
+  font-weight: 600;
+}
+
+.usage-windows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+}
+
+.usage-window {
+  display: grid;
+  grid-template-columns: 6.8em minmax(0, 1fr) 3.2em 6.2em;
+  align-items: center;
+  column-gap: 8px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.usage-label,
+.usage-reset {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.usage-reset {
+  text-align: right;
+}
+
+.usage-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.usage-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  overflow: hidden;
+}
+
+.usage-provider.active .usage-bar {
+  height: 8px;
+}
+
+.usage-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 0.4s ease;
+}
+
+.usage-fill.warning {
+  background: var(--warning);
+}
+
+.usage-fill.danger {
+  background: var(--danger);
+}
+
+.usage-forecast {
+  grid-column: 2 / -1;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  margin-bottom: 2px;
+  color: var(--muted);
+}
+
+.usage-forecast.warning {
+  color: var(--warning-text);
+}
+
+.usage-forecast.danger {
+  color: var(--error-text);
+  font-weight: 600;
+}
+
+/* The other providers: two small cells per row, label and value over the bar. */
+.usage-provider.compact .usage-head {
+  margin-bottom: 2px;
+}
+
+.usage-provider.compact .usage-name {
+  font-size: 0.8rem;
+}
+
+.usage-provider.compact .usage-windows {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px 14px;
+}
+
+.usage-provider.compact .usage-window {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 6px;
+  row-gap: 2px;
+  font-size: 0.74rem;
+  line-height: 1.3;
+}
+
+.usage-provider.compact .usage-bar {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  height: 4px;
+}
+
+.usage-provider.compact .usage-forecast {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .usage-fill {
+    transition: none;
+  }
+}
+
+/* Open approvals and agent questions, answerable in place. */
+.approvals .count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--warning);
+  color: #fff;
+}
+
+.approvals .count:empty {
+  display: none;
+}
+
+.approval-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.approval {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  padding: 8px 9px;
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  border-left: 3px solid var(--warning);
+}
+
+.approval-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.approval-session {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 0.85rem;
+  font-weight: 700;
+  justify-content: flex-start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  text-align: left;
+}
+
+.approval-session:hover {
+  background: none;
+  text-decoration: underline;
+}
+
+.approval .when {
+  flex: none;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.approval-tool {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.approval-text {
+  font-size: 0.8rem;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.approval-more {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+.approval-actions button {
+  padding: 4px 9px;
+  font-size: 0.76rem;
+}
+
+/* Last sessions with their state and a quick message field. */
+.recent-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+}
+
+.recent-option {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 5px 8px;
+  font-weight: 400;
+  text-align: left;
+  border-color: transparent;
+  background: var(--surface-soft);
+}
+
+.recent-option:hover {
+  background: var(--field);
+}
+
+.recent-option[aria-selected='true'] {
+  border-color: var(--primary);
+  background: rgba(24, 86, 255, 0.1);
+}
+
+.recent-option .picker-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+}
+
+.recent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 0.84rem;
+}
+
+.chip {
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--line-soft);
+  color: var(--muted);
+}
+
+.chip.working {
+  background: rgba(24, 86, 255, 0.14);
+  color: var(--primary);
+}
+
+.chip.waiting {
+  background: rgba(232, 149, 88, 0.2);
+  color: var(--warning-text);
+}
+
+.quick-send input {
+  padding: 7px 10px;
+  font-size: 0.85rem;
+}
+
+.quick-send button {
+  padding: 7px 12px;
+  font-size: 0.82rem;
+}
+
+.recent .message {
+  margin-top: 8px;
+  padding: 6px 9px;
+  font-size: 0.8rem;
 }

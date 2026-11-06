@@ -656,7 +656,6 @@ private fun SectionLabel(text: String) {
 private fun CLIProvider.toCliProvider(): CliProvider = when (this) {
     CLIProvider.CLAUDE -> CliProvider.CLAUDE
     CLIProvider.CODEX  -> CliProvider.CODEX
-    CLIProvider.OPENCODE -> CliProvider.OPENCODE
     CLIProvider.PI -> CliProvider.PI
 
     CLIProvider.VIBE -> CliProvider.VIBE

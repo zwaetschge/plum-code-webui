@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pi_models_menu_title">Models in the menu</string>
+    <string name="pi_models_loading">Loading Pi models…</string>
+    <string name="pi_models_none">Pi has no runnable model yet. Enable a model provider first.</string>
+    <string name="pi_models_menu_custom">%1$d of %2$d models appear when creating or switching sessions. The star marks the default.</string>
+    <string name="pi_models_menu_all">All %1$d models appear, including new ones. Unticking hides a model.</string>
+    <string name="pi_models_show_all">Show all</string>
+    <string name="pi_models_search">Search models</string>
+    <string name="pi_models_no_match">No model matches the search.</string>
+    <string name="pi_models_group_all">All</string>
+    <string name="pi_models_group_none">None</string>
+    <string name="pi_models_is_default">Default model</string>
+    <string name="pi_models_make_default">Make default</string>
+</resources>

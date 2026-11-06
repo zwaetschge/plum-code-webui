@@ -23,7 +23,7 @@ Docker maps `4545:3001`. Backend DB migrations: `pnpm db:migrate` (from `package
 ## Architecture in short
 
 - **Backend** `packages/backend/src`: `routes/`, `services/`. `services/claude/ClaudeProcessManager.ts` runs provider lifecycles, streaming, interrupts, queued input and is the sole usage write path.
-- **Providers:** Codex per-turn respawn; OpenCode per-user HTTP/SSE; Pi JSONL RPC; Kimi Code / Mistral Vibe persistent ACP; Claude Code legacy stream-json.
+- **Providers:** Codex per-turn respawn; Pi JSONL RPC (model provider registry „Modellanbieter“, `/api/model-providers`); Kimi Code / Mistral Vibe persistent ACP; Claude Code legacy stream-json.
 - **Model chat** (`/chat`): `services/assistant/apiChats.ts`, `apiTransport.ts`; `reasoningEffort` per turn (low/medium/high/max/ultra).
 - **Frontend** `packages/frontend/src`: `pages/SessionPage.tsx` (chat), `components/assistant/ModelEffortPicker.tsx` (model + animated effort rail), Zustand stores, `services/socket.ts`.
 - **Android** `packages/android`: areas Chat/Task/Code/Schwarm are hoisted in `ui/screens/dashboard/DashboardScreen.kt`; effort rail in `ModelEffortSheet.kt`.
@@ -31,7 +31,7 @@ Docker maps `4545:3001`. Backend DB migrations: `pnpm db:migrate` (from `package
 
 ## Deployment
 
-`docker-compose.yml` is portable; `docker-compose.override.yml` (gitignored) holds site config (Traefik, Unraid paths, docker-socket-proxy, `repair-bot`). **Never** `docker compose down|up --force-recreate` inside the WebUI container; **never** mount raw `docker.sock` into it. Unraid persistence maps provider homes (`~/.codex`, `~/.opencode`, `~/.pi`, `~/.kimi-code`, `~/.vibe`, `~/.claude`) under `/mnt/cache/appdata/plum-code-webui/config/`.
+`docker-compose.yml` is portable; `docker-compose.override.yml` (gitignored) holds site config (Traefik, Unraid paths, docker-socket-proxy, `repair-bot`). **Never** `docker compose down|up --force-recreate` inside the WebUI container; **never** mount raw `docker.sock` into it. Unraid persistence maps provider homes (`~/.codex`, `~/.pi`, `~/.kimi-code`, `~/.vibe`, `~/.claude`) under `/mnt/cache/appdata/plum-code-webui/config/`.
 
 Basic Auth recovery: Postgres `app_config` keys `basic_auth_username`, `basic_auth_password` (bcrypt), `basic_auth_enabled` (set `false` to disable).
 

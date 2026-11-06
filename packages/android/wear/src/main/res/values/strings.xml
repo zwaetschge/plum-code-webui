@@ -2,5 +2,6 @@
 <resources>
     <string name="app_name">Plum Code</string>
     <string name="tile_label">Plum Code</string>
-    <string name="complication_label">Plum approvals</string>
+    <string name="complication_label">Plum Freigaben</string>
+    <string name="usage_complication_label">Plum Nutzung</string>
 </resources>

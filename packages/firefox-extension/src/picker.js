@@ -10,7 +10,6 @@
 
 const PICKER_PROVIDER_ICONS = {
   codex: '◎',
-  opencode: '◇',
   pi: 'π',
   kimi: 'K',
   vibe: 'M',

@@ -508,7 +508,7 @@ function PersonalizationAccount({ owner }: { owner?: string }) {
           {toggle(
             'webSearch',
             'Automatische Websuche',
-            'CLI-Assistenten dürfen bei Bedarf im Web recherchieren. API-Chats haben keine automatische Websuche.'
+            'Chats und CLI-Assistenten recherchieren bei Bedarf im Web und belegen Antworten mit Quellen.'
           )}
           {toggle(
             'voiceChat',

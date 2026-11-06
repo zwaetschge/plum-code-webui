@@ -24,6 +24,12 @@ marks only) and Pausiert; Plum can switch it remotely too. While Plum acts, a
 or Stopp pauses at once. Per-app rules from Plum block apps (no input, blacked
 out in screenshots) or ask before every input.
 
+A left click on the tray icon (or Meta+Alt+P, registered as a KWin global
+shortcut) opens the status window: mode, open approvals with answer buttons,
+account usage pushed by Plum (the tray icon's ring shows the binding quota),
+recent sessions with a quick message line, version and connection health. It
+can be pinned („Anheften“) as an always-on-top window.
+
 The tray also records demonstrations (clicks with the element under the
 pointer, keys, screenshots) and sends them to the session; saved as macros
 they replay by element name. Text recognition (tesseract) finds text in apps
@@ -51,6 +57,7 @@ import sys
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 import uuid
 
 # The overlay is an X11 window (via XWayland on Wayland): only there can a
@@ -60,7 +67,7 @@ import uuid
 CHILD_ENV = dict(os.environ)
 os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QPointF, QRect, QRectF, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QBuffer, QByteArray, QEasingCurve, QEvent, QIODevice, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtDBus import QDBusConnection, QDBusInterface
 from PySide6.QtGui import (
     QAction,
@@ -70,6 +77,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QGuiApplication,
     QCursor,
+    QDesktopServices,
     QIcon,
     QImage,
     QImageReader,
@@ -80,11 +88,11 @@ from PySide6.QtGui import (
     QPixmap,
     QPolygonF,
 )
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget, QPlainTextEdit, QComboBox, QScrollArea, QSpinBox
+from PySide6.QtWidgets import QApplication, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSystemTrayIcon, QVBoxLayout, QWidget, QPlainTextEdit, QComboBox, QScrollArea, QSpinBox, QProgressBar
 
 import websockets
 
-VERSION = "0.6.5"
+VERSION = "0.8.3"
 CONFIG_DIR = os.path.expanduser("~/.config/plum-desktop")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
@@ -238,8 +246,35 @@ class KWin(QObject):
 
     @Slot(str)
     def desktop(self, action):
-        if action in ("toggle_chat", "show_chat", "hide_chat", "pause", "resume", "stop", "context"):
+        if action in ("toggle_chat", "show_chat", "hide_chat", "toggle_status", "pause", "resume", "stop", "context"):
             self.desktop_action.emit(action)
+
+    SHORTCUT_SCRIPT = "plum-desktop-shortcuts"
+
+    def install_shortcuts(self):
+        """Meta+Alt+P toggles the status window: a KWin script that stays
+        loaded registers the global shortcut and calls back over DBus."""
+        if not self.ok:
+            return
+        service = json.dumps(DBUS_SERVICE)
+        path = os.path.join(CONFIG_DIR, "kwin-shortcuts.js")
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write('registerShortcut("PlumDesktopPopup", "Plum Desktop: Statusfenster", "Meta+Alt+P", function () '
+                             f"{{ callDBus({service}, '/', {service}, 'desktop', 'toggle_status'); }});\n")
+            scripting = QDBusInterface("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting")
+            scripting.call("unloadScript", self.SHORTCUT_SCRIPT)  # the copy of a previous run
+            for _attempt in range(20):  # KWin frees the old script on its next event loop turn
+                answer = scripting.call("loadScript", path, self.SHORTCUT_SCRIPT).arguments()
+                number = int(answer[0]) if answer and answer[0] is not None else -1
+                if number >= 0:
+                    QDBusInterface("org.kde.KWin", f"/Scripting/Script{number}", "org.kde.kwin.Script").call("run")
+                    return
+                pump_safe(0.1)
+            log("global shortcut unavailable: KWin did not load the script")
+        except (OSError, TypeError, ValueError) as error:
+            log("global shortcut unavailable:", error)
 
     def run(self, body, timeout=3.0):
         """`body` is JS that ends with `reply(value)`; returns the value."""
@@ -508,6 +543,7 @@ class Overlay(QWidget):
         self.marks = []  # dicts with kind, color, geometry, label, at
         self.cursor = None  # (QPointF, label)
         self.cursor_at = 0.0
+        self.note_listener = None
         self.hide_cursor = False
         # Edge glow: lit while Plum uses the computer, fades after GLOW_LINGER_S.
         self.glow_enabled = True
@@ -623,11 +659,13 @@ class Overlay(QWidget):
         self.glow_timer.stop()
         self.update()
 
-    def set_note(self, text, name=None):
-        text = " ".join(str(text or "").split())
+    def set_note(self, text, name=None, tail=False):
+        text = tail_text(text) if tail else " ".join(str(text or "").split())[:220]
         if not text:
             return
-        self.note = (text[:220], (name or "Plum")[:40], time.time())
+        self.note = (text, (name or "Plum")[:40], time.time())
+        if self.note_listener:
+            self.note_listener(*self.note[:2])
         self.update(self._note_rect.toAlignedRect().adjusted(-4, -4, 4, 4))
         self.update(self._note_box().toAlignedRect().adjusted(-4, -4, 4, 4))
 
@@ -697,6 +735,9 @@ class Overlay(QWidget):
             painter.drawRect(r.adjusted(1.5, 1.5, -1.5, -1.5))
             painter.setPen(Qt.NoPen)
 
+    def cursor_fresh(self):
+        return bool(self.cursor) and not self.hide_cursor and time.time() - self.cursor_at < 30
+
     def _note_box(self):
         """Where the status line goes: under the Plum cursor, else bottom right."""
         if not self.note:
@@ -707,17 +748,12 @@ class Overlay(QWidget):
         body = metrics.boundingRect(0, 0, 340, 400, Qt.TextWordWrap, text)
         width = max(body.width(), QFontMetrics(QFont("Sans", 9, QFont.DemiBold)).horizontalAdvance(name) + 40) + 28
         height = body.height() + 40
-        cursor_fresh = self.cursor and not self.hide_cursor and time.time() - self.cursor_at < 30
-        if cursor_fresh:
-            point = self.cursor[0] + QPointF(16, 58)
-            box = QRectF(point.x(), point.y(), width, height)
-        else:
-            active_screen = (QGuiApplication.screenAt(self.global_point(self.focus_screen).toPoint())
-                             if self.focus_screen is not None else None) or QGuiApplication.primaryScreen()
-            screen = QRectF(active_screen.geometry()).translated(
-                -self.geometry().x(), -self.geometry().y()
-            )
-            box = QRectF(screen.right() - width - 28, screen.bottom() - height - 28, width, height)
+        # Away from the Plum cursor the status opens out of the tray popup's
+        # place instead (StatusPeek), never as a box in a screen corner.
+        if not self.cursor_fresh():
+            return QRectF()
+        point = self.cursor[0] + QPointF(16, 58)
+        box = QRectF(point.x(), point.y(), width, height)
         # Keep it on the screen the box is mostly on.
         for r in self._screens_local():
             if r.contains(box.topLeft()):
@@ -738,6 +774,8 @@ class Overlay(QWidget):
             return
         box = self._note_box()
         self._note_rect = box
+        if box.isEmpty():
+            return
         fade = min(1.0, max(0.0, (NOTE_TTL_S - age) / 3.0))
         background = QColor(24, 22, 38)
         background.setAlphaF(0.92 * fade)
@@ -1141,6 +1179,1043 @@ class DesktopDock(Floating):
             self.history.setPlainText(history)
 
 
+# Status window palette: dark matches CARD_STYLE, light follows a light system scheme.
+POPUP_COLORS = {
+    True: {"@card": "rgba(24, 22, 38, 240)", "@border": "rgba(255,255,255,0.18)", "@text2": "rgba(255,255,255,0.86)",
+           "@text": "#ffffff", "@muted": "rgba(255,255,255,0.62)", "@soft2": "rgba(255,255,255,0.16)",
+           "@soft": "rgba(255,255,255,0.08)", "@rule": "rgba(255,255,255,0.12)", "@track": "rgba(255,255,255,0.1)",
+           "@tagline": "rgba(255,255,255,0.25)", "@danger": "#ff5a73", "@warn": "#f0a56a", "@accent": "#a98bff",
+           "@inputbg": "#211e33", "@inputtext": "#f6f4ff", "@inputline": "#4c455f", "@focus": "#9b7bff",
+           "@offbg": "#343044", "@offtext": "#8e899e"},
+    False: {"@card": "rgba(250, 249, 253, 248)", "@border": "rgba(27,24,48,0.16)", "@text2": "rgba(27,24,48,0.86)",
+            "@text": "#1b1830", "@muted": "rgba(27,24,48,0.6)", "@soft2": "rgba(27,24,48,0.12)",
+            "@soft": "rgba(27,24,48,0.06)", "@rule": "rgba(27,24,48,0.12)", "@track": "rgba(27,24,48,0.1)",
+            "@tagline": "rgba(27,24,48,0.25)", "@danger": "#c8102e", "@warn": "#b25a12", "@accent": "#6232e0",
+            "@inputbg": "#ffffff", "@inputtext": "#1b1830", "@inputline": "#cfcadb", "@focus": "#7a4cff",
+            "@offbg": "#e4e1ec", "@offtext": "#9a96a8"},
+}
+POPUP_TEMPLATE = """
+QWidget#card { background: @card; border: 1px solid @border; border-radius: 14px; }
+QLabel { color: @text; }
+QLabel#title { font-weight: 600; font-size: 13px; }
+QLabel#text { color: @text2; font-size: 12px; }
+QLabel#muted { color: @muted; font-size: 11px; }
+QLabel#small { color: @muted; font-size: 10px; }
+QLabel#section { color: @muted; font-size: 11px; font-weight: 600; }
+QLabel#provider { font-weight: 600; font-size: 12px; }
+QLabel#providerLarge { font-weight: 700; font-size: 14px; }
+QLabel#value { font-weight: 600; font-size: 11px; }
+QLabel#valueLarge { font-weight: 700; font-size: 13px; }
+QLabel#forecast { color: @muted; font-size: 10px; }
+QLabel#forecastWarn { color: @warn; font-size: 10px; font-weight: 600; }
+QLabel#error { color: @danger; font-size: 11px; }
+QLabel#smallDanger { color: @danger; font-size: 10px; }
+QLabel#tag { color: @muted; border: 1px solid @tagline; border-radius: 7px; padding: 0 6px; font-size: 10px; }
+QLabel#tagActive { color: @accent; border: 1px solid @accent; border-radius: 7px; padding: 0 6px; font-size: 10px; }
+QLabel#tagDanger { color: @danger; border: 1px solid @danger; border-radius: 7px; padding: 0 6px; font-size: 10px; }
+QPushButton { background: #1856ff; color: white; border: none; border-radius: 9px; padding: 6px 14px; font-weight: 600; }
+QPushButton:hover { background: #3a6dff; }
+QPushButton:disabled { background: @offbg; color: @offtext; }
+QPushButton#mode { background: @soft; color: @text2; padding: 6px 8px; }
+QPushButton#mode:checked { background: #1856ff; color: white; }
+QPushButton#secondary { background: @soft; color: @text; }
+QPushButton#secondary:hover { background: @soft2; }
+QPushButton#small { padding: 4px 10px; font-size: 11px; }
+QPushButton#smallSecondary { background: @soft; color: @text; padding: 4px 10px; font-size: 11px; }
+QPushButton#smallSecondary:hover { background: @soft2; }
+QPushButton#smallDanger { background: transparent; color: @danger; padding: 4px 8px; font-size: 11px; }
+QPushButton#smallDanger:hover { background: @soft; }
+QPushButton#pin { background: transparent; color: @muted; padding: 3px 8px; font-size: 11px; font-weight: 600; border: 1px solid @tagline; }
+QPushButton#pin:hover { background: @soft; }
+QPushButton#pin:checked { background: #1856ff; color: white; border: 1px solid #1856ff; }
+QWidget#rule { background: @rule; }
+QWidget#row { border-radius: 8px; }
+QWidget#row:hover, QWidget#rowSelected { background: @soft; border-radius: 8px; }
+QWidget#approval { background: @soft; border-radius: 10px; }
+QLineEdit { background: @inputbg; color: @inputtext; border: 1px solid @inputline; border-radius: 8px; padding: 6px 8px; }
+QLineEdit:focus { border: 1px solid @focus; }
+QScrollArea, QWidget#content { background: transparent; border: 0; }
+QProgressBar { background: @track; border: 0; border-radius: 3px; min-height: 6px; max-height: 6px; }
+QProgressBar[compact="true"] { border-radius: 2px; min-height: 4px; max-height: 4px; }
+QProgressBar::chunk { background: #4d7dff; border-radius: 3px; }
+QProgressBar#warning::chunk { background: #e89558; }
+QProgressBar#danger::chunk { background: #ea2143; }
+QToolTip { color: #ffffff; background: #211e33; border: 1px solid #4c455f; }
+"""
+
+
+def popup_style(dark):
+    style = POPUP_TEMPLATE
+    for key, value in sorted(POPUP_COLORS[bool(dark)].items(), key=lambda item: -len(item[0])):
+        style = style.replace(key, value)
+    return style
+
+
+POPUP_STYLE = popup_style(True)
+USAGE_PROVIDERS = [("codex", "Codex"), ("claude", "Claude"), ("zai", "Z.AI"), ("alibaba", "Token Plan"),
+                   ("mistral", "Mistral"), ("vibe", "Vibe")]
+USAGE_STALE_S = 5 * 60  # pushed frames keep usage fresh; poll only after this long without one
+
+
+def system_dark():
+    """The desktop's light/dark preference; dark when Qt cannot tell."""
+    try:
+        scheme = QGuiApplication.styleHints().colorScheme()
+        if scheme == Qt.ColorScheme.Dark:
+            return True
+        if scheme == Qt.ColorScheme.Light:
+            return False
+    except AttributeError:
+        pass
+    return QGuiApplication.palette().window().color().lightness() < 128
+
+
+def server_base(server_url):
+    """The WebUI address behind the bridge URL (same rules as the browser extension)."""
+    base = str(server_url or "").strip().rstrip("/")
+    if base and "://" not in base:
+        base = "https://" + base
+    return base[: -len("/mobile")] if base.endswith("/mobile") else base
+
+
+def open_url(url):
+    # Children get the original environment so the browser keeps native Wayland.
+    try:
+        subprocess.Popen(["xdg-open", url], env=CHILD_ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        QDesktopServices.openUrl(QUrl(url))
+
+
+def parse_time(iso):
+    try:
+        at = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
+def reset_text(iso):
+    """When a quota window resets: "in 2:09 Std." today, otherwise weekday or date."""
+    at = parse_time(iso) if iso else None
+    if not at:
+        return ""
+    minutes = round((at - datetime.now(timezone.utc)).total_seconds() / 60)
+    if minutes <= 0:
+        return "jetzt"
+    if minutes < 60:
+        return f"in {minutes} Min."
+    if minutes < 24 * 60:
+        return f"in {minutes // 60}:{minutes % 60:02d} Std."
+    local = at.astimezone()
+    if minutes < 7 * 24 * 60:
+        return f"{WEEKDAYS[local.weekday()]}. {local:%H:%M}"
+    return f"{local.day}. {['Jan', 'Feb', 'März', 'Apr', 'Mai', 'Juni', 'Juli', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'][local.month - 1]}"
+
+
+def forecast_text(forecast):
+    """("voll in ca. 40 Min.", True) at the recent pace, ("reicht bis Reset", False), or ("", False)."""
+    forecast = forecast if isinstance(forecast, dict) else {}
+    if forecast.get("state") == "lasts":
+        return "reicht bis Reset", False
+    at = parse_time(forecast.get("at")) if forecast.get("state") == "exhausts" and forecast.get("at") else None
+    if not at:
+        return "", False
+    minutes = round((at - datetime.now(timezone.utc)).total_seconds() / 60)
+    local = at.astimezone()
+    if minutes < 1:
+        return "jetzt voll", True
+    if minutes < 60:
+        return f"voll in ca. {minutes} Min.", True
+    if minutes < 24 * 60:
+        return f"voll ca. {local:%H:%M}", True
+    return f"voll ca. {WEEKDAYS[local.weekday()]}. {local:%H:%M}", True
+
+
+def ago_text(seconds):
+    seconds = max(0, seconds)
+    if seconds < 60:
+        return "gerade eben"
+    if seconds < 3600:
+        return f"vor {round(seconds / 60)} Min."
+    if seconds < 86400:
+        return f"vor {round(seconds / 3600)} Std."
+    days = round(seconds / 86400)
+    return "vor 1 Tag" if days == 1 else f"vor {days} Tagen"
+
+
+def clock_text(epoch):
+    at = datetime.fromtimestamp(epoch)
+    return f"{at:%H:%M}" if at.date() == datetime.now().date() else f"{at:%d.%m.} {at:%H:%M}"
+
+
+def utilization(window):
+    try:
+        return max(0, int(round(float(window.get("utilization") or 0))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def usage_visible(rows, state):
+    """Rows of the providers chosen under „Anbieter anzeigen“ (default all; new providers stay visible)."""
+    shown = state.get("usageProviders")
+    if not isinstance(shown, list):
+        return list(rows)
+    known = {provider for provider, _ in USAGE_PROVIDERS}
+    return [row for row in rows if row.get("provider") in shown or row.get("provider") not in known]
+
+
+def usage_level(rows):
+    """(percent, exhausted) for the tray ring: the active provider, else the highest of all rows."""
+    active = [row for row in rows if row.get("active") and row.get("windows")]
+    pick = active or rows
+    values = [utilization(w) for row in pick for w in (row.get("windows") or []) if isinstance(w, dict)]
+    if not values:
+        return None
+    return max(values), any(row.get("exhausted") for row in pick)
+
+
+def usage_color(percent, exhausted=False):
+    return "#ea2143" if exhausted or percent >= 90 else "#e89558" if percent >= 75 else "#07ca6b"
+
+
+def tail_text(text, limit=220):
+    """The end of a long stream, starting at a sentence or at least a word
+    boundary, so a status line never opens mid-word."""
+    text = " ".join(str(text or "").split())
+    if len(text) <= limit:
+        return text
+    tail = text[-limit:]
+    cuts = [tail.find(mark) for mark in (". ", "! ", "? ", ": ")]
+    cuts = [cut for cut in cuts if 0 <= cut < limit * 0.6]
+    if cuts:
+        return tail[min(cuts) + 2:]
+    space = tail.find(" ")
+    return "… " + (tail[space + 1:] if 0 <= space < 40 else tail)
+
+
+def elide(text, limit):
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+class Clickable(QWidget):
+    """A row that reacts to a click: provider usage, session."""
+
+    def __init__(self, on_click, tip="", parent=None):
+        super().__init__(parent)
+        self.on_click = on_click
+        self.setObjectName("row")
+        self.setAttribute(Qt.WA_StyledBackground)
+        self.setAttribute(Qt.WA_Hover)
+        self.setCursor(Qt.PointingHandCursor)
+        if tip:
+            self.setToolTip(tip)
+
+    def mousePressEvent(self, event):
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.on_click()
+
+
+class StatusPeek(Floating):
+    """What Plum is doing right now, opening out of the tray popup's place: a
+    collapsed status window instead of a note floating in a screen corner.
+    A click opens the full popup."""
+
+    WIDTH = 360
+
+    def __init__(self, app):
+        super().__init__()
+        self.s = app
+        self.setFixedWidth(self.WIDTH)
+        self.setCursor(Qt.PointingHandCursor)
+        body = QVBoxLayout(self.card)
+        body.setContentsMargins(14, 10, 10, 12)
+        body.setSpacing(4)
+        head = QHBoxLayout()
+        head.setSpacing(6)
+        self.dot = QLabel("●")
+        head.addWidget(self.dot)
+        self.title = QLabel()
+        self.title.setObjectName("muted")
+        head.addWidget(self.title, 1)
+        close = QPushButton("×")
+        close.setObjectName("ghost")
+        close.setAccessibleName("Statuszeile schliessen")
+        close.setFixedSize(24, 22)
+        close.clicked.connect(self.dismiss)
+        head.addWidget(close)
+        body.addLayout(head)
+        self.text = QLabel()
+        self.text.setWordWrap(True)
+        self.text.setTextFormat(Qt.PlainText)
+        self.text.setContentsMargins(0, 0, 4, 0)
+        body.addWidget(self.text)
+        self.expire = QTimer(self)
+        self.expire.setSingleShot(True)
+        self.expire.timeout.connect(self.dismiss)
+        self.fade = QPropertyAnimation(self, b"windowOpacity", self)
+        self.slide = QPropertyAnimation(self, b"pos", self)
+        for animation in (self.fade, self.slide):
+            animation.setDuration(180)
+            animation.setEasingCurve(QEasingCurve.OutCubic)
+        self.fade.finished.connect(lambda: self.windowOpacity() < 0.05 and self.hide())
+
+    def show_note(self, text, name, working=True):
+        self.setStyleSheet(popup_style(system_dark()))
+        self.dot.setStyleSheet(f"color: {'#07ca6b' if working else '#8a8a98'}; font-size: 10px;")
+        self.title.setText(f"{name} · macht gerade")
+        self.text.setText(text)
+        self.adjustSize()
+        target, below = self._place()
+        if self.isVisible() and self.windowOpacity() > 0.5:
+            self.slide.stop()
+            self.move(target)
+        else:
+            # Emerges from the tray, where the full popup opens.
+            self.move(target + QPoint(0, 14 if below else -14))
+            self.setWindowOpacity(0.0)
+            self.show()
+            self.raise_()
+            self.slide.setStartValue(self.pos())
+            self.slide.setEndValue(target)
+            self.fade.stop()
+            self.fade.setStartValue(0.0)
+            self.fade.setEndValue(1.0)
+            self.slide.start()
+            self.fade.start()
+        self.expire.start(NOTE_TTL_S * 1000)
+
+    def dismiss(self):
+        self.expire.stop()
+        if not self.isVisible():
+            return
+        self.fade.stop()
+        self.fade.setStartValue(self.windowOpacity())
+        self.fade.setEndValue(0.0)
+        self.fade.start()
+
+    def _place(self):
+        """Same spot and side as the status popup, so the two read as one window."""
+        point = self.s.tray_anchor()
+        screen = (QGuiApplication.screenAt(point) if point else None) or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry()
+        if point is None:
+            point = QPoint(area.right() - 24, area.bottom())
+        width, height = self.width(), self.height()
+        below = point.y() > area.center().y()
+        x = point.x() - width // 2
+        y = point.y() - height - 12 if below else point.y() + 12
+        x = min(max(x, area.left() + 8), area.right() - width - 8)
+        y = min(max(y, area.top() + 8), area.bottom() - height - 8)
+        return QPoint(x, y), below
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.expire.stop()
+            self.hide()
+            self.s.toggle_status(at_tray=True)
+
+
+class StatusPopup(Floating):
+    """What the tray click (or Meta+Alt+P) opens, like the browser extension's
+    popup: status, mode, open approvals, account usage, recent sessions and a
+    quick message. Closes on a click outside unless pinned („Anheften“)."""
+
+    WIDTH = 392
+    INSET_BOTTOM = 8
+
+    def __init__(self, app):
+        super().__init__()
+        self.s = app
+        self.pinned = False
+        self.pin_pos = None
+        self.drag = None
+        self.setWindowFlags(self._flags())
+        self.setAttribute(Qt.WA_ShowWithoutActivating, False)
+        self.setFixedWidth(self.WIDTH)
+        cache = self.s.state.get("usageCache") if isinstance(self.s.state.get("usageCache"), dict) else {}
+        self.usage = [row for row in cache.get("rows") or [] if isinstance(row, dict)]
+        try:
+            self.usage_at = float(cache.get("at") or 0)
+        except (TypeError, ValueError):
+            self.usage_at = 0.0
+        self.usage_error = ""
+        self.usage_tried = 0.0
+        self.approvals = []
+        self.approvals_error = ""
+        self.sessions = []
+        self.send_note = ""
+        self.loading = set()
+        self.closed_at = 0.0
+        self.anchor = None
+
+        frame = QVBoxLayout(self.card)
+        # Inset so scrolled content stays clear of the border and rounded corners.
+        frame.setContentsMargins(1, 1, 1, self.INSET_BOTTOM)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setFrameShape(QScrollArea.NoFrame)
+        frame.addWidget(self.scroll)
+        self.content = QWidget()
+        self.content.setObjectName("content")
+        self.scroll.setWidget(self.content)
+        body = self.body = QVBoxLayout(self.content)
+        body.setContentsMargins(15, 13, 15, 12 - self.INSET_BOTTOM)
+        body.setSpacing(8)
+
+        head = QHBoxLayout()
+        logo = QLabel()
+        logo.setPixmap(plum_pixmap(APP_COLOR, 36))
+        head.addWidget(logo)
+        names = QVBoxLayout()
+        names.setSpacing(0)
+        title = QLabel("Plum Desktop")
+        title.setObjectName("title")
+        names.addWidget(title)
+        self.status = QLabel()
+        self.status.setObjectName("muted")
+        names.addWidget(self.status)
+        head.addLayout(names, 1)
+        self.pin = QPushButton("Anheften")
+        self.pin.setObjectName("pin")
+        self.pin.setCheckable(True)
+        self.pin.setToolTip("Fenster offen halten, bis du es wieder löst")
+        self.pin.toggled.connect(self.set_pinned)
+        head.addWidget(self.pin, 0, Qt.AlignTop)
+        body.addLayout(head)
+
+        modes = QHBoxLayout()
+        modes.setSpacing(6)
+        self.mode_buttons = {}
+        for mode, label in MODE_LABELS.items():
+            button = QPushButton(label)
+            button.setObjectName("mode")
+            button.setCheckable(True)
+            button.clicked.connect(lambda _checked=False, m=mode: (self.s.set_mode(m), self.render()))
+            modes.addWidget(button)
+            self.mode_buttons[mode] = button
+        body.addLayout(modes)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(6)
+        chat = QPushButton("Chat öffnen")
+        chat.clicked.connect(lambda: (self._dismiss(), self.s.set_layout({"chatVisible": True})))
+        actions.addWidget(chat)
+        message = QPushButton("Nachricht …")
+        message.setObjectName("secondary")
+        message.clicked.connect(lambda: (self._dismiss(), self.s.message_prompt()))
+        actions.addWidget(message)
+        body.addLayout(actions)
+
+        self.approval_section = QWidget()
+        approvals = QVBoxLayout(self.approval_section)
+        approvals.setContentsMargins(0, 0, 0, 0)
+        approvals.setSpacing(8)
+        approvals.addWidget(self._rule())
+        self.approval_title = QLabel()
+        self.approval_title.setObjectName("section")
+        approvals.addWidget(self.approval_title)
+        self.approval_box = QVBoxLayout()
+        self.approval_box.setSpacing(6)
+        approvals.addLayout(self.approval_box)
+        body.addWidget(self.approval_section)
+
+        body.addWidget(self._rule())
+        usage_head = QHBoxLayout()
+        section = QLabel("NUTZUNG")
+        section.setObjectName("section")
+        usage_head.addWidget(section, 1)
+        self.usage_when = QLabel()
+        self.usage_when.setObjectName("muted")
+        usage_head.addWidget(self.usage_when)
+        body.addLayout(usage_head)
+        self.usage_box = QVBoxLayout()
+        self.usage_box.setSpacing(4)
+        body.addLayout(self.usage_box)
+
+        body.addWidget(self._rule())
+        session_title = QLabel("SITZUNGEN")
+        session_title.setObjectName("section")
+        body.addWidget(session_title)
+        self.live_title = QLabel()
+        self.live_title.setObjectName("muted")
+        body.addWidget(self.live_title)
+        self.live = QLabel()
+        self.live.setWordWrap(True)
+        self.live.setTextFormat(Qt.PlainText)
+        body.addWidget(self.live)
+        self.session_box = QVBoxLayout()
+        self.session_box.setSpacing(1)
+        body.addLayout(self.session_box)
+        self.recent = QLabel()
+        self.recent.setObjectName("muted")
+        self.recent.setWordWrap(True)
+        self.recent.setTextFormat(Qt.PlainText)
+        body.addWidget(self.recent)
+        self.quick = QLineEdit()
+        self.quick.setAccessibleName("Nachricht an die gewählte Sitzung")
+        self.quick.returnPressed.connect(self._quick_send)
+        body.addWidget(self.quick)
+        self.note = QLabel()
+        self.note.setObjectName("muted")
+        self.note.setWordWrap(True)
+        self.note.setTextFormat(Qt.PlainText)
+        body.addWidget(self.note)
+
+        body.addWidget(self._rule())
+        self.health = QLabel()
+        self.health.setObjectName("small")
+        self.health.setWordWrap(True)
+        self.health.setTextFormat(Qt.PlainText)
+        body.addWidget(self.health)
+
+        self._apply_theme()
+        try:
+            QGuiApplication.styleHints().colorSchemeChanged.connect(lambda _scheme: self._apply_theme())
+        except AttributeError:
+            pass
+        # While open: relative times and session states stay current; usage
+        # itself arrives as pushed frames (polled only when they stop).
+        self.timer = QTimer(self)
+        self.timer.setInterval(30_000)
+        self.timer.timeout.connect(self._tick)
+
+    @staticmethod
+    def _rule():
+        rule = QWidget()
+        rule.setObjectName("rule")
+        rule.setFixedHeight(1)
+        return rule
+
+    @staticmethod
+    def _add(layout, widget):
+        layout.addWidget(widget)
+        widget.show()
+        widget.ensurePolished()
+
+    @staticmethod
+    def _clear(layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().hide()
+                item.widget().deleteLater()
+            elif item.layout():
+                StatusPopup._clear(item.layout())
+
+    def _flags(self):
+        if self.pinned:
+            return Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        return Qt.Popup | Qt.FramelessWindowHint
+
+    def _apply_theme(self, dark=None):
+        self.dark = system_dark() if dark is None else dark
+        self.setStyleSheet(popup_style(self.dark))
+
+    # ------------------------------------------------------------ open, pin, place
+
+    def toggle(self, point):
+        # The outside click that closed the popup also reaches the tray icon.
+        if self.isVisible() or time.time() - self.closed_at < 0.35:
+            self.hide()
+            return
+        self.anchor = point
+        self.render()
+        self._fit()
+        self.show()
+        QTimer.singleShot(0, self._refit)
+        self.raise_()
+        self.activateWindow()
+        QTimer.singleShot(0, self._refresh_all)
+
+    def _dismiss(self):
+        if not self.pinned:
+            self.hide()
+
+    def set_pinned(self, pinned):
+        if pinned == self.pinned:
+            return
+        visible, pos = self.isVisible(), self.pos()
+        self.pinned = pinned
+        if visible:
+            self.pin_pos = pos
+        self.setWindowFlags(self._flags())  # hides the window; show it again with the new kind
+        if self.pin.isChecked() != pinned:
+            self.pin.setChecked(pinned)
+        if visible:
+            self.move(pos)
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+    def showEvent(self, event):
+        self.timer.start()
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        self.closed_at = time.time()
+        self.timer.stop()
+        if self.pinned:
+            self.pin_pos = self.pos()
+        super().hideEvent(event)
+
+    def mousePressEvent(self, event):
+        # Pinned it is a normal frameless window: drag it by any empty spot.
+        if self.pinned and event.button() == Qt.LeftButton:
+            self.drag = event.globalPosition().toPoint() - self.pos()
+
+    def mouseMoveEvent(self, event):
+        if self.drag is not None:
+            self.move(event.globalPosition().toPoint() - self.drag)
+
+    def mouseReleaseEvent(self, _event):
+        if self.drag is not None:
+            self.drag = None
+            self.pin_pos = self.pos()
+
+    def _fit(self):
+        """Size to the content (scrolling only beyond the screen) and place it."""
+        point = self.anchor or QCursor.pos()
+        if self.pinned and self.isVisible():
+            point = self.geometry().center()
+        screen = QGuiApplication.screenAt(point) or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry()
+        # Nested layouts settle on posted LayoutRequest events; flush them so the
+        # rows rendered just now are measured, not the previous ones.
+        QApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+        wanted = self.content.heightForWidth(self.WIDTH - 2)
+        if wanted < 0:
+            wanted = self.content.sizeHint().height()
+        chrome = 1 + self.INSET_BOTTOM
+        visible = max(120, min(wanted, area.height() - 24 - chrome))
+        self.scroll.setFixedHeight(visible)
+        QApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
+        width, height = self.WIDTH, visible + chrome
+        self.resize(width, height)
+        if self.pinned and (self.isVisible() or self.pin_pos is not None):
+            origin = self.pos() if self.isVisible() else self.pin_pos
+            x, y = origin.x(), origin.y()
+        else:
+            x = point.x() - width // 2
+            # Panels sit at the bottom or top: open away from the icon.
+            y = point.y() - height - 12 if point.y() > area.center().y() else point.y() + 12
+        x = min(max(x, area.left() + 8), area.right() - width - 8)
+        y = min(max(y, area.top() + 8), area.bottom() - height - 8)
+        self.move(x, y)
+
+    def rerender(self):
+        if self.isVisible():
+            self.render()
+            self._fit()
+            QTimer.singleShot(0, self._refit)
+
+    def _refit(self):
+        if self.isVisible() and self.drag is None:
+            self._fit()
+
+    def _tick(self):
+        self._refresh_all() if self.s.online else self.rerender()
+
+    # ------------------------------------------------------------ data
+
+    def _refresh_all(self):
+        if not self.isVisible() or not self.s.online:
+            return
+        self.refresh_approvals()
+        self.refresh_sessions()
+        if time.time() - self.usage_at >= USAGE_STALE_S:
+            self.refresh_usage()
+
+    def _call(self, key, method, params, timeout=30):
+        """One RPC per kind at a time: rpc() pumps events, so timers could stack calls."""
+        if key in self.loading or not self.s.online:
+            return None
+        self.loading.add(key)
+        try:
+            return self.s.bridge.rpc(method, params, timeout=timeout)
+        finally:
+            self.loading.discard(key)
+
+    def apply_usage(self, rows):
+        """Usage rows from a pushed `usage` frame or the fallback poll."""
+        self.usage = [row for row in rows if isinstance(row, dict)]
+        self.usage_at = time.time()
+        self.usage_error = ""
+        self.s.usage_loaded(self.usage)
+        self.rerender()
+
+    def refresh_usage(self):
+        if not self.s.online:
+            self.rerender()
+            return
+        self.usage_tried = time.time()
+        try:
+            rows = self._call("usage", "usage.limits", {}, timeout=35)
+            if rows is not None:
+                self.apply_usage(rows if isinstance(rows, list) else [])
+                return
+        except RuntimeError as error:
+            self.usage_error = str(error)[:120]
+        self.rerender()
+
+    def refresh_approvals(self):
+        try:
+            data = self._call("approvals", "approvals.list", {}, timeout=20)
+            if data is None:
+                return
+            self.approvals = [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+            self.approvals_error = ""
+        except RuntimeError as error:
+            # Servers without approvals.list: no section rather than an error.
+            self.approvals = []
+            self.approvals_error = "" if "Unknown method" in str(error) else str(error)[:160]
+        self.rerender()
+
+    def refresh_sessions(self):
+        try:
+            data = self._call("sessions", "sessions.list", {}, timeout=20)
+            if data is None:
+                return
+            self.sessions = [item for item in data if isinstance(item, dict) and item.get("id")] if isinstance(data, list) else []
+        except RuntimeError as error:
+            self.send_note = str(error)[:160]
+        self.rerender()
+
+    def _respond(self, item, method, params):
+        request = item.get("requestId")
+        self.approvals = [a for a in self.approvals if a.get("requestId") != request]
+        self.rerender()
+        failure = ""
+        try:
+            self.s.bridge.rpc(method, params, timeout=30)
+        except RuntimeError as error:
+            failure = f"Antwort fehlgeschlagen: {error}"[:160]
+        self.refresh_approvals()
+        if failure:
+            self.approvals_error = failure
+            self.rerender()
+
+    def _allow(self, item, action):
+        self._respond(item, "permission.respond",
+                      {"sessionId": item.get("sessionId"), "requestId": item.get("requestId"), "action": action})
+
+    def _answer(self, item, label=None):
+        params = {"requestId": item.get("requestId")}
+        if item.get("providerSessionId"):
+            params["providerSessionId"] = item["providerSessionId"]
+        if label is not None:
+            params["answers"] = [[label]]
+        self._respond(item, "question.respond", params)
+
+    def _choose(self, session):
+        self.s.attach_session({"id": session.get("id"), "name": session.get("name") or "Plum"})
+        self.send_note = ""
+        self.rerender()
+        self.quick.setFocus()
+
+    def _open_chat(self, item):
+        self._choose({"id": item.get("sessionId"), "name": item.get("sessionName")})
+        self._dismiss()
+        self.s.set_layout({"chatVisible": True})
+
+    def _quick_send(self):
+        text = self.quick.text().strip()
+        if not text:
+            return
+        if self.s.send_message(text):
+            self.quick.clear()
+            self.send_note = "Gesendet"
+            QTimer.singleShot(1500, self.refresh_sessions)
+        else:
+            self.send_note = self.s.activity_state.get("action") or "Senden fehlgeschlagen"
+        self.rerender()
+
+    def _open_analytics(self, row):
+        path = str(row.get("analyticsPath") or f"/analytics?provider={row.get('provider') or ''}")
+        base = server_base((getattr(self.s.bridge, "config", None) or {}).get("serverUrl"))
+        if base and path.startswith("/"):
+            open_url(base + path)
+            self._dismiss()
+
+    # ------------------------------------------------------------ render
+
+    def render(self):
+        a = self.s.activity_state
+        dot = "#07ca6b" if self.s.online and self.s.mode != "paused" else "#e89558" if self.s.online else "#8a8a98"
+        link = "Verbunden" if self.s.online else "Nicht verbunden"
+        self.status.setText(f'<span style="color:{dot}">●</span> {link} · {MODE_LABELS[self.s.mode]}')
+        for mode, button in self.mode_buttons.items():
+            button.setChecked(mode == self.s.mode)
+        self._render_approvals()
+        self._render_usage()
+        self._render_sessions(a)
+        self.render_live()
+        self.health.setText(self._health())
+
+    def render_live(self):
+        """The running status line, the same text the peek window shows."""
+        note = self.s.live_note
+        fresh = bool(note) and time.time() - note[2] < NOTE_TTL_S
+        before = self.live.sizeHint().height() if self.live.isVisible() else 0
+        self.live_title.setText(f"{note[1]} · macht gerade" if fresh else "")
+        self.live.setText(note[0] if fresh else "")
+        self.live_title.setVisible(fresh)
+        self.live.setVisible(fresh)
+        if self.isVisible() and (self.live.sizeHint().height() if fresh else 0) != before:
+            QTimer.singleShot(0, self._refit)
+
+    def _health(self):
+        update = getattr(self.s, "update_note", "") or "aktuell"
+        if self.s.online:
+            since = getattr(self.s, "connected_since", 0)
+            link = f"verbunden seit {clock_text(since)}" if since else "verbunden"
+        else:
+            last = self.s.state.get("lastOnline")
+            link = f"zuletzt verbunden {clock_text(float(last))}" if isinstance(last, (int, float)) and last else "noch nicht verbunden"
+        return f"Version {VERSION} · {update} · {link}"
+
+    def _render_approvals(self):
+        self._clear(self.approval_box)
+        items = self.approvals[:3]
+        self.approval_section.setVisible(bool(self.approvals or self.approvals_error))
+        self.approval_title.setText(f"ANFRAGEN · {len(self.approvals)}" if self.approvals else "ANFRAGEN")
+        for item in items:
+            self._add(self.approval_box, self._approval(item))
+        if len(self.approvals) > len(items):
+            more = QLabel(f"+ {len(self.approvals) - len(items)} weitere", self.content)
+            more.setObjectName("muted")
+            self._add(self.approval_box, more)
+        if self.approvals_error:
+            error = QLabel(self.approvals_error, self.content)
+            error.setObjectName("error")
+            error.setWordWrap(True)
+            self._add(self.approval_box, error)
+
+    def _approval(self, item):
+        # Built inside the content widget: a parentless row is a window of its
+        # own, and showing anything in it would close the Qt.Popup.
+        card = QWidget(self.content)
+        card.setObjectName("approval")
+        card.setAttribute(Qt.WA_StyledBackground)
+        column = QVBoxLayout(card)
+        column.setContentsMargins(10, 8, 10, 8)
+        column.setSpacing(5)
+        head = QHBoxLayout()
+        head.setSpacing(6)
+        question = item.get("kind") == "question"
+        questions = [q for q in item.get("questions") or [] if isinstance(q, dict)] if question else []
+        first = questions[0] if questions else {}
+        title = QLabel(elide(first.get("header") or "Frage", 40) if question else elide(item.get("toolName") or "Werkzeug", 40))
+        title.setObjectName("provider")
+        title.setTextFormat(Qt.PlainText)
+        head.addWidget(title)
+        session = QLabel(elide(item.get("sessionName") or "Sitzung", 34))
+        session.setObjectName("muted")
+        session.setTextFormat(Qt.PlainText)
+        head.addWidget(session, 1)
+        column.addLayout(head)
+        text = QLabel(elide(first.get("question") if question else item.get("description"), 150))
+        text.setObjectName("text")
+        text.setWordWrap(True)
+        text.setTextFormat(Qt.PlainText)
+        if text.text():
+            column.addWidget(text)
+        if question:
+            options = [o for o in first.get("options") or [] if isinstance(o, dict) and o.get("label")]
+            if len(questions) == 1 and options:
+                grid = QGridLayout()
+                grid.setSpacing(6)
+                for index, option in enumerate(options[:6]):
+                    button = QPushButton(elide(option["label"], 26))
+                    button.setObjectName("smallSecondary")
+                    if option.get("description"):
+                        button.setToolTip(str(option["description"])[:300])
+                    button.clicked.connect(lambda _c=False, i=item, l=str(option["label"]): self._answer(i, l))
+                    grid.addWidget(button, index // 2, index % 2)
+                column.addLayout(grid)
+            row = QHBoxLayout()
+            if len(questions) > 1 or not options:
+                chat = QPushButton(f"{len(questions)} Fragen im Chat" if len(questions) > 1 else "Im Chat antworten")
+                chat.setObjectName("smallSecondary")
+                chat.clicked.connect(lambda _c=False, i=item: self._open_chat(i))
+                row.addWidget(chat)
+            row.addStretch(1)
+            reject = QPushButton("Ablehnen")
+            reject.setObjectName("smallDanger")
+            reject.clicked.connect(lambda _c=False, i=item: self._answer(i))
+            row.addWidget(reject)
+            column.addLayout(row)
+        else:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            for label, action, name in (("Erlauben", "allow_once", "small"), ("Immer erlauben", "allow_project", "smallSecondary"),
+                                        ("Ablehnen", "deny", "smallDanger")):
+                button = QPushButton(label)
+                button.setObjectName(name)
+                button.clicked.connect(lambda _c=False, i=item, act=action: self._allow(i, act))
+                row.addWidget(button)
+                if action == "allow_project":
+                    row.addStretch(1)
+            column.addLayout(row)
+        return card
+
+    def _render_usage(self):
+        self._clear(self.usage_box)
+        rows = usage_visible(self.usage, self.s.state)
+        rows = sorted(rows, key=lambda row: not row.get("active"))  # stable: server order otherwise
+        for index, row in enumerate(rows):
+            self._add(self.usage_box, self._provider(row, large=index == 0 and bool(row.get("active"))))
+        if not rows:
+            text = ("Keine Anbieter ausgewählt" if self.usage else self.usage_error or
+                    ("Wird geladen …" if self.s.online else "Noch keine Nutzungsdaten"))
+            empty = QLabel(text, self.content)
+            empty.setObjectName("muted")
+            self._add(self.usage_box, empty)
+        if self.usage_at:
+            ago = ago_text(time.time() - self.usage_at)
+            self.usage_when.setText(ago if self.s.online else "Stand " + (ago if ago != "gerade eben" else "vor 1 Min."))
+        else:
+            self.usage_when.setText("")
+
+    def _provider(self, row, large):
+        """The active provider gets a header, larger bars and a forecast per
+        window; the others one aligned grid line per window."""
+        block = Clickable(lambda r=row: self._open_analytics(r), "Auswertung öffnen", self.content)
+        windows = [w for w in row.get("windows") or [] if isinstance(w, dict)]
+        name = QLabel(str(row.get("label") or row.get("provider") or ""))
+        name.setTextFormat(Qt.PlainText)
+        tag_text = "aufgebraucht" if row.get("exhausted") else "geschätzt" if row.get("estimate") else ""
+        if large:
+            layout = QVBoxLayout(block)
+            layout.setContentsMargins(6, 4, 6, 4)
+            layout.setSpacing(4)
+            head = QHBoxLayout()
+            head.setSpacing(6)
+            name.setObjectName("providerLarge")
+            head.addWidget(name)
+            for text, kind in (("aktiv", "tagActive"), (tag_text, "tagDanger" if row.get("exhausted") else "tag")):
+                if text:
+                    tag = QLabel(text)
+                    tag.setObjectName(kind)
+                    head.addWidget(tag)
+            head.addStretch(1)
+            layout.addLayout(head)
+            grid = QGridLayout()
+            grid.setHorizontalSpacing(8)
+            grid.setVerticalSpacing(3)
+            layout.addLayout(grid)
+        else:
+            grid = QGridLayout(block)
+            grid.setContentsMargins(6, 3, 6, 3)
+            grid.setHorizontalSpacing(6)
+            grid.setVerticalSpacing(1)
+            name.setObjectName("provider")
+            name.setFixedWidth(72)
+            grid.addWidget(name, 0, 0)
+            if tag_text:
+                tag = QLabel(tag_text)
+                tag.setObjectName("smallDanger" if row.get("exhausted") else "small")
+                grid.addWidget(tag, 1, 0)
+        first = 0 if large else 1
+        line = 0
+        for window in windows:
+            value = utilization(window)
+            label = QLabel(str(window.get("label") or ""))
+            label.setObjectName("muted" if large else "small")
+            label.setFixedWidth(76 if large else 70)
+            label.setToolTip(label.text())
+            grid.addWidget(label, line, first)
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setValue(min(100, value))
+            bar.setTextVisible(False)
+            bar.setMinimumWidth(30)
+            bar.setProperty("compact", not large)
+            bar.setObjectName("danger" if value >= 90 or row.get("exhausted") else "warning" if value >= 75 else "")
+            grid.addWidget(bar, line, first + 1)
+            percent = QLabel(f"{value} %")
+            percent.setObjectName("valueLarge" if large else "value")
+            percent.setFixedWidth(44 if large else 34)
+            percent.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            grid.addWidget(percent, line, first + 2)
+            reset = QLabel(reset_text(window.get("resetsAt")))
+            reset.setObjectName("muted" if large else "small")
+            reset.setFixedWidth(80 if large else 66)
+            reset.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            grid.addWidget(reset, line, first + 3)
+            line += 1
+            # Forecast at the recent pace: always for the active provider, for
+            # the compact ones only when the window runs out before its reset.
+            text, critical = forecast_text(window.get("forecast"))
+            if text and (large or critical):
+                forecast = QLabel(text)
+                forecast.setObjectName("forecastWarn" if critical else "forecast")
+                grid.addWidget(forecast, line, first + 1, 1, 3)
+                line += 1
+            elif text:
+                bar.setToolTip(text)
+        grid.setColumnStretch(first + 1, 1)
+        return block
+
+    def _session_rows(self, a):
+        rows = sorted(self.sessions, key=lambda s: str(s.get("lastActivity") or ""), reverse=True)[:5]
+        attached = a.get("sessionId")
+        if attached and not any(s.get("id") == attached for s in rows):
+            known = next((s for s in self.sessions if s.get("id") == attached), None)
+            rows = rows[:4] + [known or {"id": attached, "name": a.get("sessionName")}]
+        return rows
+
+    def _render_sessions(self, a):
+        self._clear(self.session_box)
+        attached = a.get("sessionId")
+        waiting = {item.get("sessionId") for item in self.approvals}
+        rows = self._session_rows(a)
+        for session in rows:
+            sid = session.get("id")
+            own = sid == attached
+            if sid in waiting or (own and a.get("status") == "Braucht deine Antwort"):
+                state, color = "wartet", "#e89558"
+            elif session.get("busy") or (own and a.get("status") == "Arbeitet"):
+                state, color = "arbeitet", "#4d7dff"
+            else:
+                state, color = "bereit", "#07ca6b"
+            row = Clickable(lambda s=session: self._choose(s), "Sitzung wählen", self.content)
+            if own:
+                row.setObjectName("rowSelected")
+            line = QHBoxLayout(row)
+            line.setContentsMargins(6, 3, 6, 3)
+            line.setSpacing(8)
+            dot = QLabel("●")
+            dot.setStyleSheet(f"color: {color}; font-size: 10px;")
+            line.addWidget(dot)
+            name = QLabel(elide(session.get("name") or sid, 40))
+            name.setTextFormat(Qt.PlainText)
+            name.setObjectName("provider" if own else "text")
+            line.addWidget(name, 1)
+            status = QLabel(state)
+            status.setObjectName("muted")
+            line.addWidget(status)
+            self._add(self.session_box, row)
+        if not rows:
+            empty = QLabel("Keine Sitzungen" if self.s.online else "Offline", self.content)
+            empty.setObjectName("muted")
+            self._add(self.session_box, empty)
+        self.recent.setText("\n".join(a.get("history", [])[-2:]) or (a.get("action") or ""))
+        self.recent.setVisible(bool(self.recent.text()))
+        target = a.get("sessionName") if attached else "Plum"
+        self.quick.setPlaceholderText(f"An {elide(target or 'Plum', 30)} senden …")
+        self.quick.setEnabled(self.s.online)
+        self.note.setText(self.send_note)
+        self.note.setVisible(bool(self.send_note))
+
+
 class Pill(Floating):
     """'Plum steuert · Stopp' at the top of the screen while Plum acts."""
 
@@ -1218,18 +2293,46 @@ class GuideCard(Floating):
         self.raise_()
 
 
-def plum_icon(color):
-    pixmap = QPixmap(64, 64)
+APP_ID = "ch.zwaetschge.plum-desktop"
+APP_COLOR = "#7a4cff"
+
+
+def plum_pixmap(color, size=64, ring=None):
+    """The Plum disc in the mode colour; `ring` = (percent, exhausted) adds a
+    thin usage gauge around it (green, orange from 75 %, red from 90 %)."""
+    pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing)
+    painter.scale(size / 64, size / 64)
+    if ring:
+        percent, exhausted = ring
+        bounds = QRectF(4, 4, 56, 56)
+        pen = QPen(QColor(128, 128, 140, 110), 6)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(pen)
+        painter.drawEllipse(bounds)
+        span = 360.0 if exhausted else max(0.0, min(100.0, float(percent))) * 3.6
+        if span > 0:
+            pen.setColor(QColor(usage_color(percent, exhausted)))
+            pen.setCapStyle(Qt.FlatCap if span >= 360 else Qt.RoundCap)
+            painter.setPen(pen)
+            painter.drawArc(bounds, 90 * 16, -round(span * 16))
+        # The disc shrinks inside the ring and keeps the mode colour.
+        painter.translate(32, 32)
+        painter.scale(22 / 26, 22 / 26)
+        painter.translate(-32, -32)
     painter.setBrush(QColor(color))
     painter.setPen(Qt.NoPen)
     painter.drawEllipse(6, 6, 52, 52)
     painter.setBrush(QColor("#ffffff"))
     painter.drawPolygon(QPolygonF([QPointF(24, 18), QPointF(24, 46), QPointF(31, 39), QPointF(36, 49), QPointF(41, 47), QPointF(36, 37), QPointF(45, 37)]))
     painter.end()
-    return QIcon(pixmap)
+    return pixmap
+
+
+def plum_icon(color, ring=None):
+    return QIcon(plum_pixmap(color, 64, ring))
 
 
 # --------------------------------------------------------------------------- accessibility
@@ -2536,6 +3639,10 @@ class Bridge(threading.Thread):
                     raise RuntimeError(frame.get("message") or "rejected")
                 elif frame.get("type") == "update":
                     self.s.update.emit(frame)
+                elif frame.get("type") == "usage":
+                    self.s.usage_pushed.emit(frame)
+                elif frame.get("type") in ("usage-alert", "notification"):
+                    self.s.notice.emit(frame)
                 elif frame.get("type") == "rules":
                     self.s.rules_changed.emit(frame.get("rules") or [])
                 elif frame.get("type") == "event":
@@ -2963,6 +4070,8 @@ def save_macros(macros):
 
 
 class App(QObject):
+    # Human input pauses a turn only this long after its last desktop action.
+    TAKEOVER_WINDOW_S = 30
     connected = Signal(bool)
     update = Signal(object)
     rules_changed = Signal(object)
@@ -2970,6 +4079,8 @@ class App(QObject):
     remote_record = Signal(str)
     chat_event = Signal(object)
     remote_action = Signal(object)
+    usage_pushed = Signal(object)
+    notice = Signal(object)
 
     def __init__(self, config):
         super().__init__()
@@ -2980,13 +4091,19 @@ class App(QObject):
         self.input = Input(self.overlay.geometry())
         self.kwin = KWin()
         refresh_display_mapping(self.kwin)
+        self.kwin.install_shortcuts()
         self.pill = Pill(lambda: self.set_mode("paused"))
         self.card = GuideCard(self.guide_done)
         self.bridge = Bridge(config, self)
         self.tools = Tools(self)
         self.online = False
+        self.connected_since = 0.0
+        self.update_note = ""
+        self.usage_ring = None
         self.connected.connect(self._on_connected)
         self.update.connect(self._self_update)
+        self.usage_pushed.connect(self._usage_pushed)
+        self.notice.connect(self._notice)
         self.config = config
         self.rules = self.state.get("rules") if isinstance(self.state.get("rules"), list) else []
         self.allowed_until = {}
@@ -3024,8 +4141,22 @@ class App(QObject):
         self.activity_dirty = False
         self.render_timer.timeout.connect(self._flush_activity)
         self.render_timer.start(250)
-        QGuiApplication.instance().screenAdded.connect(lambda _screen: self._screens_changed())
-        QGuiApplication.instance().screenRemoved.connect(lambda _screen: QTimer.singleShot(100, self._screens_changed))
+        # Rearranging monitors or switching the primary one adds no screen, but
+        # every position mapping depends on it; settle bursts into one refresh.
+        self.screens_timer = QTimer(self)
+        self.screens_timer.setSingleShot(True)
+        self.screens_timer.setInterval(300)
+        self.screens_timer.timeout.connect(self._screens_changed)
+        gui = QGuiApplication.instance()
+        gui.screenAdded.connect(self._watch_screen)
+        gui.screenAdded.connect(lambda _screen: self.screens_timer.start())
+        gui.screenRemoved.connect(lambda _screen: self.screens_timer.start())
+        gui.primaryScreenChanged.connect(lambda _screen: self.screens_timer.start())
+        for screen in QGuiApplication.screens():
+            self._watch_screen(screen)
+
+    def _watch_screen(self, screen):
+        screen.geometryChanged.connect(lambda _rect: self.screens_timer.start())
 
     def publish_activity(self):
         self.dock.render()
@@ -3044,15 +4175,12 @@ class App(QObject):
 
     @staticmethod
     def _install_chat_launcher():
-        directory = os.path.expanduser("~/.local/share/applications")
+        icons = os.path.expanduser("~/.local/share/icons/hicolor/256x256/apps")
         try:
-            os.makedirs(directory, exist_ok=True)
-            with open(os.path.join(directory, "ch.zwaetschge.plum-chat.desktop"), "w", encoding="utf-8") as handle:
-                handle.write("[Desktop Entry]\nType=Application\nName=Plum Chat\nComment=Desktop-Chat ein- oder ausblenden\n"
-                             "Icon=system-users\nExec=gdbus call --session --dest ch.zwaetschge.PlumDesktop --object-path / "
-                             "--method ch.zwaetschge.PlumDesktop.desktop toggle_chat\nCategories=Utility;\n")
+            os.makedirs(icons, exist_ok=True)
+            plum_pixmap(APP_COLOR, 256).save(os.path.join(icons, f"{APP_ID}.png"), "PNG")
         except OSError as error:
-            log("chat launcher not saved:", error)
+            log("app icon not saved:", error)
 
     def _screens_changed(self):
         refresh_display_mapping(self.kwin)
@@ -3155,7 +4283,7 @@ class App(QObject):
         if event == "session:output" and isinstance(data.get("content"), str):
             self.stream = (self.stream + data["content"])[-12000:]
             if self.mode != "paused":
-                self.overlay.set_note(self.stream[-220:], self.activity_state["sessionName"])
+                self.overlay.set_note(self.stream[-600:], self.activity_state["sessionName"], tail=True)
             self.turn_active = True
             if self.mode != "paused":
                 self.activity_state["status"] = "Arbeitet"
@@ -3165,7 +4293,7 @@ class App(QObject):
                 self.chat_lines = (self.chat_lines + [f"{'Du' if role == 'user' else 'Plum'}: {content[-6000:]}"])[-16:]
                 if role == "assistant":
                     self.stream = ""
-                    self.overlay.set_note(content[-220:], self.activity_state["sessionName"])
+                    self.overlay.set_note(content[-600:], self.activity_state["sessionName"], tail=True)
         elif event == "session:tool_use":
             summary = str(data.get("actionSummary") or data.get("toolName") or "Arbeitet")[:240]
             if data.get("status") in ("completed", "error"):
@@ -3247,7 +4375,10 @@ class App(QObject):
         if any(w.isVisible() and w.geometry().contains(point) for w in
                (self.dock, self.dock.chat_window, self.confirm, self.text_card)):
             return
-        if self.tools.busy or self.turn_active:
+        # Only a turn that is steering this desktop counts as Plum acting: a busy
+        # session that codes or browses must not pause on every mouse move.
+        steering = self.turn_active and time.time() - self.last_action < self.TAKEOVER_WINDOW_S
+        if self.tools.busy or steering:
             self.set_mode("paused")
             self.activity_state.update(status="Du übernimmst gerade", action="Mit Weiter die Desktop-Steuerung zurückgeben")
             self.publish_activity()
@@ -3314,8 +4445,50 @@ class App(QObject):
             self.set_layout(frame.get("layout") or {})
         elif action in ("toggle_chat", "show_chat", "hide_chat"):
             self.set_layout({"chatVisible": not self.layout.get("chatVisible", True) if action == "toggle_chat" else action == "show_chat"})
+        elif action == "toggle_status":
+            self.toggle_status()
         elif action in ("pause", "resume"):
             self.set_mode("paused" if action == "pause" else "control")
+
+    def toggle_status(self, from_tray=False, at_tray=False):
+        """Tray click and Meta+Alt+P: the status window next to the real pointer.
+        KWin knows it also over native Wayland surfaces such as the panel, where
+        XWayland's QCursor.pos() still holds the last spot over an X11 window.
+        A tray click also remembers the icon's spot, where the peek opens."""
+        point = None
+        if not self.status_popup.isVisible():
+            if at_tray:
+                point = self.tray_anchor()
+            if point is None:
+                refresh_display_mapping(self.kwin)
+                try:
+                    point = self.kwin.cursor().toPoint()
+                except RuntimeError:
+                    point = None
+            if from_tray and point is not None:
+                self.state["trayAnchor"] = [point.x(), point.y()]
+                save_state(self.state)
+            self.peek.dismiss()
+        self.status_popup.toggle(point or QCursor.pos())
+
+    def tray_anchor(self):
+        saved = self.state.get("trayAnchor")
+        if isinstance(saved, list) and len(saved) == 2:
+            try:
+                return QPoint(int(saved[0]), int(saved[1]))
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _note_changed(self, text, name):
+        self.live_note = (text, name, time.time())
+        if self.status_popup.isVisible():
+            self.status_popup.render_live()
+        elif self.overlay.cursor_fresh():
+            # Plum is steering: the note sits under its cursor instead.
+            self.peek.dismiss()
+        else:
+            self.peek.show_note(text, name, self.mode != "paused")
 
     def _tray(self):
         self.tray = QSystemTrayIcon(plum_icon("#7a4cff"))
@@ -3341,6 +4514,15 @@ class App(QObject):
         message.triggered.connect(self.message_prompt)
         menu.addAction(message)
         menu.addSeparator()
+        providers = menu.addMenu("Anbieter anzeigen")
+        shown = self.state.get("usageProviders")
+        self.provider_actions = {}
+        for provider, label in USAGE_PROVIDERS:
+            action = QAction(label, providers, checkable=True)
+            action.setChecked(not isinstance(shown, list) or provider in shown)
+            action.triggered.connect(lambda checked, p=provider: self._toggle_provider(p, checked))
+            providers.addAction(action)
+            self.provider_actions[provider] = action
         self.glow_action = QAction("Bildschirmrand leuchten, wenn Plum steuert", menu, checkable=True)
         self.glow_action.setChecked(self.overlay.glow_enabled)
         self.glow_action.triggered.connect(self._toggle_glow)
@@ -3353,8 +4535,77 @@ class App(QObject):
         menu.addAction(quit_action)
         self.tray.setContextMenu(menu)
         self.menu = menu
-        self._refresh_tray()
+        # A left click opens the status window, like the browser extension's
+        # toolbar popup; the right click keeps the menu.
+        self.status_popup = StatusPopup(self)
+        self.peek = StatusPeek(self)
+        self.live_note = None
+        self.overlay.note_listener = self._note_changed
+        self.tray.activated.connect(self._tray_activated)
+        self.tray.messageClicked.connect(lambda: self.status_popup.isVisible() or self.toggle_status())
+        self.usage_summary = ""
+        # Plum pushes `usage` frames after turns and every 5 min; poll only when
+        # they stop (older servers, a missed frame).
+        self.usage_timer = QTimer(self)
+        self.usage_timer.setInterval(60_000)
+        self.usage_timer.timeout.connect(self._usage_fallback)
+        self.usage_timer.start()
+        self._usage_changed()  # last known rows from state.json: ring and tooltip right away
         self.tray.show()
+
+    def _tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            self.toggle_status(from_tray=True)
+
+    def usage_loaded(self, rows):
+        # Kept for offline starts: the popup shows them with „Stand vor …“.
+        self.state["usageCache"] = {"rows": rows, "at": self.status_popup.usage_at}
+        save_state(self.state)
+        self._usage_changed()
+
+    def _usage_changed(self):
+        # The tooltip carries each shown provider's most binding window and the
+        # ring the active (else highest) one, so the tray already answers
+        # "how close am I?".
+        rows = usage_visible(self.status_popup.usage, self.state)
+        parts = []
+        for row in rows:
+            windows = [w for w in row.get("windows") or [] if isinstance(w, dict)]
+            if windows:
+                parts.append(f"{row.get('label') or row.get('provider')} {max(utilization(w) for w in windows)} %")
+        self.usage_summary = " · ".join(parts)
+        self.usage_ring = usage_level(rows)
+        self._refresh_tray()
+
+    def _usage_pushed(self, frame):
+        if isinstance(frame.get("rows"), list):
+            self.status_popup.apply_usage(frame["rows"])
+
+    def _usage_fallback(self):
+        popup = self.status_popup
+        if self.online and time.time() - max(popup.usage_at, popup.usage_tried) >= USAGE_STALE_S:
+            self.status_popup.refresh_usage()
+
+    def _toggle_provider(self, provider, checked):
+        shown = self.state.get("usageProviders")
+        chosen = set(shown) if isinstance(shown, list) else {p for p, _ in USAGE_PROVIDERS}
+        if checked:
+            chosen.add(provider)
+        else:
+            chosen.discard(provider)
+        self.state["usageProviders"] = [p for p, _ in USAGE_PROVIDERS if p in chosen]
+        save_state(self.state)
+        self._usage_changed()
+
+    def _notice(self, frame):
+        """`usage-alert` (threshold crossed, reset) and `notification` (new approval or question)."""
+        title = str(frame.get("title") or "Plum")[:120]
+        body = str(frame.get("body") or "")[:400]
+        warn = frame.get("type") == "usage-alert" and frame.get("level") in ("warning", "exhausted")
+        icon = QSystemTrayIcon.MessageIcon.Warning if warn else QSystemTrayIcon.MessageIcon.Information
+        self.tray.showMessage(title, body, icon, 10_000)
+        if frame.get("type") == "notification" and self.status_popup.isVisible():
+            QTimer.singleShot(0, self.status_popup.refresh_approvals)
 
     def _toggle_glow(self, checked):
         self.overlay.glow_enabled = bool(checked)
@@ -3364,17 +4615,29 @@ class App(QObject):
 
     def _refresh_tray(self):
         color = {"control": "#7a4cff", "guide": "#1856ff", "paused": "#8a8a98"}[self.mode]
-        self.tray.setIcon(plum_icon(color))
+        self.tray.setIcon(plum_icon(color, getattr(self, "usage_ring", None)))
         link = "verbunden" if self.online else "nicht verbunden"
         self.status_action.setText(f"Plum Desktop {VERSION} · {link}")
-        self.tray.setToolTip(f"Plum Desktop · {MODE_LABELS[self.mode]} · {link}")
+        tip = f"Plum Desktop · {MODE_LABELS[self.mode]} · {link}"
+        if getattr(self, "usage_summary", ""):
+            tip += f"\n{self.usage_summary}"
+        self.tray.setToolTip(tip)
+        if getattr(self, "status_popup", None):
+            self.status_popup.rerender()
         for mode, action in self.mode_actions.items():
             action.setChecked(mode == self.mode)
 
     def _on_connected(self, online):
+        was = self.online
         self.online = online
+        if online and not was:
+            self.connected_since = time.time()
+        if online != was:
+            self.state["lastOnline"] = time.time()
+            save_state(self.state)
         self._refresh_tray()
         if online:
+            QTimer.singleShot(3000, self.status_popup.refresh_usage)
             self.dock.present()
             self.dock.place_chat()
             if self.activity_state["sessionId"]:
@@ -3505,17 +4768,22 @@ class App(QObject):
 
     def _self_update(self, frame):
         """Plum pushes its shipped companion to older ones; replace and restart."""
+        version = str(frame.get("version") or "")[:20]
         if self.config.get("autoUpdate") is False:
             log("update to", frame.get("version"), "available; autoUpdate is off")
+            self._update_note(f"Update {version} verfügbar".replace("  ", " "))
             return
+        self._update_note(f"Update {version} wird installiert".replace("  ", " "))
         source = str(frame.get("source") or "")
         if hashlib.sha256(source.encode()).hexdigest() != frame.get("sha256"):
             log("update rejected: digest mismatch")
+            self._update_note("")
             return
         try:
             compile(source, "plum_desktop.py", "exec")
         except SyntaxError as error:
             log("update rejected:", error)
+            self._update_note("")
             return
         if self.tools.busy:
             QTimer.singleShot(5000, lambda: self._self_update(frame))
@@ -3528,10 +4796,15 @@ class App(QObject):
             os.replace(path + ".new", path)
         except OSError as error:
             log("update failed:", error)
+            self._update_note("")
             return
         log(f"updated {VERSION} -> {frame.get('version')}, restarting")
         self.tray.hide()
         os.execv(sys.executable, [sys.executable, path])
+
+    def _update_note(self, text):
+        self.update_note = text
+        self.status_popup.rerender()
 
     def guide_done(self, step):
         if not step or not step.get("session"):
@@ -3552,11 +4825,34 @@ class App(QObject):
         )
 
 
+def install_desktop_entries():
+    # Written before Qt starts: the desktop portal looks the app ID up while
+    # the application object is created, and the entry gives the chat window
+    # the Plum icon and name in taskbar and Alt+Tab instead of a bare python3.
+    directory = os.path.expanduser("~/.local/share/applications")
+    try:
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, f"{APP_ID}.desktop"), "w", encoding="utf-8") as handle:
+            handle.write(f"[Desktop Entry]\nType=Application\nName=Plum Desktop\nComment=Plum Desktop-Steuerung und Chat\n"
+                         f"Icon={APP_ID}\nExec=/usr/bin/python3 {os.path.abspath(__file__)}\n"
+                         "StartupWMClass=plum-desktop\nNoDisplay=true\n")
+        with open(os.path.join(directory, "ch.zwaetschge.plum-chat.desktop"), "w", encoding="utf-8") as handle:
+            handle.write("[Desktop Entry]\nType=Application\nName=Plum Chat\nComment=Desktop-Chat ein- oder ausblenden\n"
+                         f"Icon={APP_ID}\nExec=gdbus call --session --dest ch.zwaetschge.PlumDesktop --object-path / "
+                         "--method ch.zwaetschge.PlumDesktop.desktop toggle_chat\nCategories=Utility;\n")
+    except OSError as error:
+        log("desktop entries not saved:", error)
+
+
 def main():
     with open(CONFIG, encoding="utf-8") as handle:
         config = json.load(handle)
+    install_desktop_entries()
     QImageReader.setAllocationLimit(0)  # multi-monitor screenshots exceed Qt's 256 MB default
+    QGuiApplication.setDesktopFileName(APP_ID)
     app = QApplication(sys.argv)
+    app.setApplicationName("plum-desktop")
+    app.setWindowIcon(plum_icon(APP_COLOR))
     app.setQuitOnLastWindowClosed(False)
     plum = App(config)
     plum.bridge.start()

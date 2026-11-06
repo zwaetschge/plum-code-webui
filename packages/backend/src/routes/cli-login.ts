@@ -10,10 +10,6 @@ import fs from 'fs';
 import path from 'path';
 import { getCliEnv } from '../utils/cliPaths.js';
 import {
-  ensureOpenCodeTenantDirectories,
-  resolveOpenCodeTenantPaths,
-} from '../services/opencode/tenantPaths.js';
-import {
   extractCliDeviceCode,
   extractCliLoginUrl,
   CLI_LOGIN_TUI_INPUT,
@@ -381,7 +377,7 @@ router.post('/:provider/start', requireAuth, async (req, res) => {
     }
   }
 
-  // Claude and OpenCode expose dedicated auth commands. Codex uses its
+  // Claude exposes a dedicated auth command. Codex uses its
   // headless device-code flow so the browser interaction can stay in Plum.
   const invocationArgs = resolveCliLoginInvocation(provider);
   if (!invocationArgs) {
@@ -451,13 +447,6 @@ router.post('/:provider/start', requireAuth, async (req, res) => {
       }
     } else if (provider === 'codex') {
       env.CODEX_HOME = CLI_PROVIDERS.codex.credentialsPath.replace('~', os.homedir());
-    } else if (provider === 'opencode') {
-      // Keep OpenCode OAuth/account state in the same per-user tenant used by
-      // that user's server. A login can never replace another user's auth.json.
-      const tenantPaths = resolveOpenCodeTenantPaths(userId);
-      ensureOpenCodeTenantDirectories(tenantPaths);
-      env.OPENCODE_CONFIG_DIR = tenantPaths.configDir;
-      env.OPENCODE_DATA_DIR = tenantPaths.dataDir;
     } else if (provider === 'pi') {
       // Same per-user agent dir the WebUI hands to Pi sessions, so the token
       // lands where syncPiConfig and the model resolution look for it.

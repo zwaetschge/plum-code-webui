@@ -9,6 +9,7 @@ import com.claudewebui.app.data.model.BrowserToken
 import com.claudewebui.app.data.model.GatewayToken
 import com.claudewebui.app.data.model.CLIProvider
 import com.claudewebui.app.data.model.CLIProviderConfig
+import com.claudewebui.app.data.model.CliProviderDiagnostic
 import com.claudewebui.app.data.model.CliLoginSession
 import com.claudewebui.app.data.model.VibeApiKeyInput
 import com.claudewebui.app.data.model.VibeAuthStatus
@@ -28,8 +29,8 @@ import com.claudewebui.app.data.model.SaveSubagentUpstreamInput
 import com.claudewebui.app.data.model.SubagentModelGroup
 import com.claudewebui.app.data.model.SubagentUpstream
 import com.claudewebui.app.data.model.McpTestResult
-import com.claudewebui.app.data.model.OpenCodeProvider
-import com.claudewebui.app.data.model.OpenCodeProviderTest
+import com.claudewebui.app.data.model.ModelProvider
+import com.claudewebui.app.data.model.ModelProviderTest
 import com.claudewebui.app.data.model.InstallPluginInput
 import com.claudewebui.app.data.model.SaveConfigAgentInput
 import com.claudewebui.app.data.model.SaveConfigPluginInput
@@ -45,7 +46,7 @@ import com.claudewebui.app.data.model.UpdateMcpServerInput
 import com.claudewebui.app.data.model.UpdateSettingsInput
 import com.claudewebui.app.data.model.UserSettings
 import com.claudewebui.app.data.model.UpdateZaiApiInput
-import com.claudewebui.app.data.model.SaveOpenCodeProviderInput
+import com.claudewebui.app.data.model.SaveModelProviderInput
 import com.claudewebui.app.data.model.ZaiApiStatus
 import kotlinx.serialization.json.JsonElement
 
@@ -193,6 +194,7 @@ class SettingsRepository(
         uiProvider: UiProvider? = null,
         defaultCliProvider: CLIProvider? = null,
         cliProviderModels: Map<String, String>? = null,
+        cliProviderModelLists: Map<String, List<String>>? = null,
         cliProviderReasoning: Map<String, String>? = null,
         cliProviderServiceTiers: Map<String, String>? = null,
         codexWebSearch: String? = null,
@@ -208,6 +210,7 @@ class SettingsRepository(
             uiProvider = uiProvider,
             defaultCliProvider = defaultCliProvider,
             cliProviderModels = cliProviderModels,
+            cliProviderModelLists = cliProviderModelLists,
             cliProviderReasoning = cliProviderReasoning,
             cliProviderServiceTiers = cliProviderServiceTiers,
             codexWebSearch = codexWebSearch,
@@ -241,32 +244,32 @@ class SettingsRepository(
         if (!response.success) error(response.error?.message ?: "Failed to reset Z.AI configuration")
     }
 
-    suspend fun getOpenCodeProviders(): Result<List<OpenCodeProvider>> = apiCall {
-        val response = api.getOpenCodeProviders()
+    suspend fun getModelProviders(): Result<List<ModelProvider>> = apiCall {
+        val response = api.getModelProviders()
         if (!response.success || response.data == null) {
-            error(response.error?.message ?: "Failed to fetch OpenCode providers")
+            error(response.error?.message ?: "Failed to fetch model providers")
         }
         response.data
     }
 
-    suspend fun saveOpenCodeProvider(input: SaveOpenCodeProviderInput): Result<OpenCodeProvider> =
+    suspend fun saveModelProvider(input: SaveModelProviderInput): Result<ModelProvider> =
         apiCall {
-            val response = api.saveOpenCodeProvider(input)
+            val response = api.saveModelProvider(input)
             if (!response.success || response.data == null) {
-                error(response.error?.message ?: "Failed to save OpenCode provider")
+                error(response.error?.message ?: "Failed to save model provider")
             }
             response.data
         }
 
-    suspend fun deleteOpenCodeProvider(id: String): Result<Unit> = apiCall {
-        val response = api.deleteOpenCodeProvider(id)
-        if (!response.success) error(response.error?.message ?: "Failed to delete OpenCode provider")
+    suspend fun deleteModelProvider(id: String): Result<Unit> = apiCall {
+        val response = api.deleteModelProvider(id)
+        if (!response.success) error(response.error?.message ?: "Failed to delete model provider")
     }
 
-    suspend fun testOpenCodeProvider(id: String): Result<OpenCodeProviderTest> = apiCall {
-        val response = api.testOpenCodeProvider(id)
+    suspend fun testModelProvider(id: String): Result<ModelProviderTest> = apiCall {
+        val response = api.testModelProvider(id)
         if (!response.success || response.data == null) {
-            error(response.error?.message ?: "Failed to test OpenCode provider")
+            error(response.error?.message ?: "Failed to test model provider")
         }
         response.data
     }
@@ -278,6 +281,15 @@ class SettingsRepository(
         val response = api.getCLIProviders()
         if (!response.success || response.data == null) {
             error(response.error?.message ?: "Failed to fetch CLI providers")
+        }
+        response.data
+    }
+
+    /** Every harness with its full model list (Pi: all runnable models). */
+    suspend fun getCliProviderDiagnostics(): Result<List<CliProviderDiagnostic>> = apiCall {
+        val response = api.getCliProviderDiagnostics()
+        if (!response.success || response.data == null) {
+            error(response.error?.message ?: "Failed to fetch provider diagnostics")
         }
         response.data
     }

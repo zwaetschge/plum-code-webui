@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Plum Browser",
-  "version": "0.9.3",
+  "version": "0.9.5",
   "description": "Lässt Plum-Code-Agents Chrome steuern – jede Session in ihrem eigenen Fenster mit Tab-Gruppe.",
   "author": "Plum Code",
   "minimum_chrome_version": "116",

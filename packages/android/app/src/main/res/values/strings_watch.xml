@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Wear OS pairing: Settings section and dashboard hint (wear/WatchPairing.kt). -->
+<resources>
+    <string name="settings_hub_watch">Watch</string>
+    <string name="watch_description">Plum on your Wear OS watch: usage, approvals and sessions live, straight from the server. The watch gets its own key that can only read and answer these.</string>
+    <string name="watch_none_connected">No watch connected. Pair it with this phone in the Wear OS app first.</string>
+    <string name="watch_app_installed">Plum app installed</string>
+    <string name="watch_app_missing">Plum app not installed</string>
+    <string name="watch_pair">Pair watch</string>
+    <string name="watch_pair_again">Pair again</string>
+    <string name="watch_unpair">Unpair</string>
+    <string name="watch_paired">Paired</string>
+    <string name="watch_paired_with">Paired: %1$s</string>
+    <string name="watch_paired_since">Paired since %1$s</string>
+    <string name="watch_not_connected_now">Watch not connected right now</string>
+    <string name="watch_revoked_on_server">The key was revoked on the server. Pair again.</string>
+    <string name="watch_pairing_busy">Pairing …</string>
+    <string name="watch_pair_failed">Pairing failed: %1$s</string>
+    <string name="watch_unpair_failed">Unpairing failed: %1$s</string>
+    <string name="watch_hint_title">Plum on your watch</string>
+    <string name="watch_hint_detail">%1$s has the Plum app. Pair it for live usage, approvals and sessions.</string>
+    <string name="watch_hint_pair">Pair</string>
+    <string name="watch_hint_later">Not now</string>
+</resources>

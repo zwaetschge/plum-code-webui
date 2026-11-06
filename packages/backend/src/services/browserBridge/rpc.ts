@@ -1,6 +1,10 @@
 import { MAX_CHAT_UPLOAD_FILES } from '../chatUploads.js';
 import { config } from '../../config.js';
 import { generateUserToken } from '../../utils/authTokens.js';
+import { all as pgAll, get as pgGet } from '../../db/pg.js';
+import { listPendingPermissionsForUser } from '../../routes/permissions.js';
+import { listPendingQuestionsForUser } from '../pendingQuestions.js';
+import type { BridgeClientKind } from './bridge.js';
 import type { ChatRelay } from './chatRelay.js';
 
 /**
@@ -16,6 +20,8 @@ import type { ChatRelay } from './chatRelay.js';
 export interface BridgeRpcContext {
   userId: string;
   connectionId: string;
+  /** The connection's kind; a watch is limited to WATCH_RPC_METHODS. */
+  kind: BridgeClientKind;
   pinSession: (sessionId: string) => void;
   unpinSession: (sessionId: string) => void;
   sessionsOnThisBrowser: () => Set<string>;
@@ -84,6 +90,211 @@ function images(list: unknown[]) {
   });
 }
 
+// Account quotas for the companion and extension popups, in the order and with
+// the window names the WebUI tracker uses.
+const USAGE_PROVIDERS = [
+  ['codex', 'Codex', ['5 Std.', 'Woche']],
+  ['claude', 'Claude', ['5 Std.', 'Woche', 'Woche Sonnet']],
+  ['zai', 'Z.AI', ['5 Std.', 'Woche']],
+  ['alibaba', 'Token Plan', ['Plan', 'Planperiode']],
+  ['mistral', 'Mistral', ['Heute', 'Monat']],
+  ['vibe', 'Vibe', ['Heute', 'Monat']],
+] as const;
+const WINDOW_KEYS = ['five_hour', 'seven_day', 'seven_day_sonnet'] as const;
+// Providers whose windows Plum snapshots (usage_limit_snapshots), so a pace exists.
+const FORECAST_PROVIDERS = new Set(['codex', 'claude', 'zai']);
+// The pace is measured over the recent past of the current window only: three
+// hours for the 5-hour window, a day for weekly ones so one busy hour does not
+// project onto the whole week.
+const FORECAST_LOOKBACK_MS: Record<string, number> = {
+  five_hour: 3 * 60 * 60 * 1000,
+  seven_day: 24 * 60 * 60 * 1000,
+  seven_day_sonnet: 24 * 60 * 60 * 1000,
+};
+const FORECAST_MIN_SPAN_MS = 20 * 60 * 1000;
+
+interface LimitWindow {
+  utilization?: number;
+  resetsAt?: string | null;
+}
+
+export interface UsageForecast {
+  state: 'exhausts' | 'lasts' | 'unknown';
+  at: string | null;
+}
+
+/**
+ * When a window hits 100 % at its recent pace: the oldest snapshot of the same
+ * window (same reset time) within the lookback against the current value. No pace, or a pace that outlasts the reset, says nothing alarming.
+ */
+async function forecastWindow(
+  userId: string,
+  provider: string,
+  metricKey: string,
+  utilization: number,
+  resetsAt: string | null,
+  now = Date.now()
+): Promise<UsageForecast> {
+  const unknown: UsageForecast = { state: 'unknown', at: null };
+  if (!FORECAST_PROVIDERS.has(provider) || utilization >= 100) return unknown;
+  const resetMs = resetsAt ? Date.parse(resetsAt) : NaN;
+  const lookback = FORECAST_LOOKBACK_MS[metricKey] ?? FORECAST_LOOKBACK_MS.five_hour!;
+  const since = new Date(now - lookback).toISOString().slice(0, 19).replace('T', ' ');
+  const rows = (await pgAll(
+    `SELECT utilization, resets_at, recorded_at FROM usage_limit_snapshots
+      WHERE user_id = ? AND provider = ? AND metric_key = ? AND recorded_at >= ?
+      ORDER BY recorded_at ASC LIMIT 200`,
+    userId,
+    provider,
+    metricKey,
+    since
+  )) as unknown as Array<{ utilization: number; resets_at: string | null; recorded_at: string }>;
+  const sameWindow = rows.filter((row) => {
+    if (!Number.isFinite(resetMs)) return true;
+    const rowReset = row.resets_at ? Date.parse(row.resets_at) : NaN;
+    return Number.isFinite(rowReset) && Math.abs(rowReset - resetMs) < 5 * 60 * 1000;
+  });
+  const first = sameWindow[0];
+  if (!first) return unknown;
+  const firstMs = Date.parse(`${first.recorded_at.replace(' ', 'T')}Z`);
+  const span = now - firstMs;
+  const rise = utilization - Number(first.utilization);
+  if (!Number.isFinite(span) || span < FORECAST_MIN_SPAN_MS) return unknown;
+  if (rise <= 0) return Number.isFinite(resetMs) ? { state: 'lasts', at: null } : unknown;
+  const fullAt = now + ((100 - utilization) / rise) * span;
+  if (Number.isFinite(resetMs) && fullAt >= resetMs) return { state: 'lasts', at: null };
+  return { state: 'exhausts', at: new Date(fullAt).toISOString() };
+}
+
+const CLI_TO_USAGE: Record<string, string> = {
+  codex: 'codex',
+  claude: 'claude',
+  zai: 'zai',
+  vibe: 'vibe',
+};
+
+/** The usage provider of the given session, else of the user's most recent one. */
+async function activeUsageProvider(userId: string, sessionId?: string): Promise<string | null> {
+  const row = (sessionId
+    ? await pgGet(
+        'SELECT cli_provider FROM sessions WHERE user_id = ? AND id = ?',
+        userId,
+        sessionId
+      )
+    : await pgGet(
+        `SELECT cli_provider FROM sessions WHERE user_id = ?
+          ORDER BY updated_at DESC NULLS LAST LIMIT 1`,
+        userId
+      )) as { cli_provider?: string } | undefined;
+  return (row?.cli_provider && CLI_TO_USAGE[row.cli_provider]) || null;
+}
+
+export async function usageLimits(userId: string, sessionId?: string) {
+  const token = generateUserToken(userId, { expiresIn: '2m' });
+  const active = await activeUsageProvider(userId, sessionId).catch(() => null);
+  const results = await Promise.allSettled(
+    USAGE_PROVIDERS.map(async ([provider, label, names]) => {
+      const response = await fetch(
+        `http://127.0.0.1:${config.port}/api/usage/limits?provider=${provider}`,
+        {
+          headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(30_000),
+        }
+      );
+      const body = (await response.json().catch(() => null)) as {
+        supported?: boolean;
+        data?: {
+          fiveHour?: LimitWindow | null;
+          sevenDay?: LimitWindow | null;
+          sevenDaySonnet?: LimitWindow | null;
+          additional?: Array<LimitWindow & { name?: string }>;
+          source?: string;
+          planUsage?: { upstream?: { state?: string } | null } | null;
+        } | null;
+      } | null;
+      const data = body?.supported ? body.data : null;
+      if (!data) return null;
+      const entries: Array<readonly [string, string | null, LimitWindow | null | undefined]> = [
+        [names[0], WINDOW_KEYS[0], data.fiveHour],
+        [names[1], WINDOW_KEYS[1], data.sevenDay],
+        [names[2] ?? 'Sonnet', WINDOW_KEYS[2], data.sevenDaySonnet],
+        ...(data.additional ?? []).map((item) => [item.name || 'Weiteres', null, item] as const),
+      ];
+      const windows = await Promise.all(
+        entries
+          .filter((entry): entry is readonly [string, string | null, LimitWindow] => !!entry[2])
+          .map(async ([name, metricKey, window]) => {
+            const utilization = Math.max(0, Math.round(Number(window.utilization) || 0));
+            const resetsAt = window.resetsAt ?? null;
+            const forecast = metricKey
+              ? await forecastWindow(userId, provider, metricKey, utilization, resetsAt).catch(
+                  (): UsageForecast => ({ state: 'unknown', at: null })
+                )
+              : ({ state: 'unknown', at: null } as UsageForecast);
+            return { label: name, utilization, resetsAt, forecast };
+          })
+      );
+      if (!windows.length) return null;
+      return {
+        provider,
+        label,
+        estimate: data.source === 'local-estimate' || data.source === 'local-budget',
+        exhausted: data.planUsage?.upstream?.state === 'exhausted',
+        active: provider === active,
+        analyticsPath: `/analytics?provider=${provider}`,
+        windows,
+      };
+    })
+  );
+  return results.flatMap((result) =>
+    result.status === 'fulfilled' && result.value ? [result.value] : []
+  );
+}
+
+export type UsageRow = Awaited<ReturnType<typeof usageLimits>>[number];
+
+/** Open tool approvals and questions across the user's sessions, oldest first. */
+async function approvals(userId: string) {
+  const permissions = listPendingPermissionsForUser(userId).map((request) => ({
+    kind: 'permission' as const,
+    sessionId: request.sessionId,
+    requestId: request.requestId,
+    toolName: request.toolName,
+    description: request.description,
+    createdAt: request.createdAt,
+  }));
+  const questions = listPendingQuestionsForUser(userId).map((record) => ({
+    kind: 'question' as const,
+    sessionId: record.sessionId,
+    requestId: record.requestId,
+    providerSessionId: record.providerSessionId ?? null,
+    questions: record.questions.map((item) => ({
+      header: item.header,
+      question: item.question,
+      multiple: !!item.multiple,
+      options: item.options.map((option) => ({
+        label: option.label,
+        ...(option.description ? { description: option.description } : {}),
+      })),
+    })),
+    createdAt: record.createdAt,
+  }));
+  const items = [...permissions, ...questions]
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .slice(0, 10);
+  const ids = [...new Set(items.map((item) => item.sessionId))];
+  const names = new Map<string, string>();
+  if (ids.length) {
+    const rows = (await pgAll(
+      `SELECT id, name FROM sessions WHERE user_id = ? AND id IN (${ids.map(() => '?').join(', ')})`,
+      userId,
+      ...ids
+    )) as unknown as Array<{ id: string; name: string }>;
+    for (const row of rows) names.set(row.id, row.name);
+  }
+  return items.map((item) => ({ ...item, sessionName: names.get(item.sessionId) ?? null }));
+}
+
 /** Message rows the panel renders; tool payloads and media stay out. */
 function pickMessage(row: Record<string, unknown>) {
   return {
@@ -109,11 +320,32 @@ function pickSession(row: Record<string, unknown>, onThisBrowser: Set<string>) {
   };
 }
 
+/**
+ * Everything a Wear OS watch may ask for: usage, open approvals and sessions,
+ * a short chat (quick and voice replies, stop) and answering approvals and
+ * questions. No session creation, provider/model changes, pinning or
+ * transcription.
+ */
+export const WATCH_RPC_METHODS: ReadonlySet<string> = new Set([
+  'usage.limits',
+  'approvals.list',
+  'sessions.list',
+  'chat.open',
+  'chat.close',
+  'chat.send',
+  'chat.interrupt',
+  'permission.respond',
+  'question.respond',
+]);
+
 export async function handleBridgeRpc(
   ctx: BridgeRpcContext,
   method: string,
   params: Record<string, unknown>
 ): Promise<unknown> {
+  if (ctx.kind === 'watch' && !WATCH_RPC_METHODS.has(method)) {
+    throw new Error('Not allowed for watch');
+  }
   switch (method) {
     case 'sessions.list': {
       const rows = (await api(ctx.userId, 'GET', '/api/sessions')) as Array<
@@ -122,6 +354,15 @@ export async function handleBridgeRpc(
       const here = ctx.sessionsOnThisBrowser();
       return rows.slice(0, 80).map((row) => pickSession(row, here));
     }
+    case 'usage.limits':
+      return usageLimits(
+        ctx.userId,
+        typeof params.sessionId === 'string' && /^[\w-]{1,64}$/.test(params.sessionId)
+          ? params.sessionId
+          : undefined
+      );
+    case 'approvals.list':
+      return approvals(ctx.userId);
     case 'providers.list': {
       const rows = (await api(ctx.userId, 'GET', '/api/cli-providers')) as Array<
         Record<string, unknown>
@@ -283,12 +524,12 @@ export async function handleBridgeRpc(
       const providerSessionId =
         typeof params.providerSessionId === 'string' ? params.providerSessionId : undefined;
       return answers
-        ? api(ctx.userId, 'POST', '/api/opencode/questions/respond', {
+        ? api(ctx.userId, 'POST', '/api/permissions/questions/respond', {
             requestId,
             providerSessionId,
             answers,
           })
-        : api(ctx.userId, 'POST', '/api/opencode/questions/reject', {
+        : api(ctx.userId, 'POST', '/api/permissions/questions/reject', {
             requestId,
             providerSessionId,
           });

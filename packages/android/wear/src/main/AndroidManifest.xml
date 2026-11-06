@@ -4,31 +4,45 @@
     <uses-feature android:name="android.hardware.type.watch" />
 
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Own bridge connection to Plum (Wi-Fi, LTE or the phone's Bluetooth proxy) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Voice reply: lets resolveActivity/launch see the speech recognizer -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
+    </queries>
+
+    <!-- allowBackup off: the pairing token must not travel to another device. -->
     <application
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@android:style/Theme.DeviceDefault">
 
         <uses-library
             android:name="com.google.android.wearable"
             android:required="false" />
 
-        <!-- Companion app: the phone side owns the server connection. -->
+        <!-- Companion app: pairing (the watch-scoped token) comes from the phone. -->
         <meta-data
             android:name="com.google.android.wearable.standalone"
             android:value="false" />
 
         <activity
             android:name=".WearMainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- Quick-glance tile: running sessions, approvals, tokens, cost -->
+        <!-- Quick-glance tile: usage ring and open approvals (paired), else the phone snapshot -->
         <service
             android:name=".PlumTileService"
             android:exported="true"
@@ -59,7 +73,24 @@
                 android:value="600" />
         </service>
 
-        <!-- Refresh tile/complication/activity when the phone pushes new data -->
+        <!-- Watch-face complication: usage of the active (else fullest) provider -->
+        <service
+            android:name=".UsageComplicationService"
+            android:exported="true"
+            android:label="@string/usage_complication_label"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="RANGED_VALUE,SHORT_TEXT" />
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="900" />
+        </service>
+
+        <!-- Phone snapshot pushes and the watch pairing (/plum/watch-pairing) -->
         <service
             android:name=".WearDataListenerService"
             android:exported="true">

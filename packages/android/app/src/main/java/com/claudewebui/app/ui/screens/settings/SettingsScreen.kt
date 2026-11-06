@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Notifications
@@ -48,6 +49,7 @@ import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.Token
 import androidx.compose.material.icons.outlined.ViewColumn
+import androidx.compose.material.icons.outlined.Watch
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -101,6 +103,7 @@ import com.claudewebui.app.ui.theme.AppBackgroundStyle
 import com.claudewebui.app.ui.theme.AppThemeOption
 import com.claudewebui.app.ui.theme.LayoutPrefs
 import com.claudewebui.app.ui.theme.TwoPaneOption
+import com.claudewebui.app.wear.WatchPairing
 import com.claudewebui.app.widget.UsageAlerts
 import org.koin.compose.koinInject
 
@@ -111,6 +114,7 @@ private object SettingsPages {
     const val SUBAGENTS = "subagents"
     const val CODEX_PLUGINS = "codex-plugins"
     const val BROWSER = "browser"
+    const val WATCH = "watch"
     const val GATEWAY = "gateway"
     const val APPEARANCE = "appearance"
     const val THEME = "theme"
@@ -259,6 +263,8 @@ private fun SettingsRoot(
         state.cliProviders.firstOrNull { it.id.equals(provider.name, ignoreCase = true) }?.let { it.enabled && it.available } ?: false
     }
     val entries = settingsSearchEntries(state, push = { open(it) }, routes = routes)
+    val rootContext = LocalContext.current
+    val watchPairing by remember { WatchPairing.state(rootContext) }.collectAsStateWithLifecycle()
     SettingsPageScaffold(
         title = stringResource(R.string.settings_settings_c7f73),
         onBack = null,
@@ -300,7 +306,8 @@ private fun SettingsRoot(
             SettingsGroup(header = stringResource(R.string.settings_hub_connections)) {
                 item { SettingsRow(stringResource(R.string.settings_hub_ssh), Icons.Outlined.Dns, TileTone.Gray, onClick = routes.connections) }
                 item { SettingsRow(stringResource(R.string.settings_hub_integrations), Icons.Outlined.Hub, TileTone.Orange, subtitle = stringResource(R.string.settings_comfyui_discord_home_assistant_b5f60), onClick = routes.integrations) }
-                item { SettingsRow(stringResource(R.string.settings_hub_browser), Icons.Outlined.Language, TileTone.Orange, value = state.browserConnections.size.takeIf { it > 0 }?.toString(), onClick = { push(SettingsPages.BROWSER) }) }
+                item { SettingsRow(stringResource(R.string.settings_hub_browser), Icons.Outlined.Language, TileTone.Orange, value = state.browserConnections.count { it.client.kind != "watch" }.takeIf { it > 0 }?.toString(), onClick = { push(SettingsPages.BROWSER) }) }
+                item { SettingsRow(stringResource(R.string.settings_hub_watch), Icons.Outlined.Watch, TileTone.Teal, value = if (watchPairing != null) stringResource(R.string.watch_paired) else null, onClick = { push(SettingsPages.WATCH) }) }
                 item { SettingsRow(stringResource(R.string.settings_hub_gateway), Icons.Outlined.Token, TileTone.Violet, value = state.gatewayTokens.size.takeIf { it > 0 }?.toString(), onClick = { push(SettingsPages.GATEWAY) }) }
             }
         }
@@ -391,7 +398,8 @@ private fun settingsSearchEntries(state: SettingsUiState, push: (List<String>) -
         add(SettingsSearchEntry(stringResource(R.string.assistant_custom_instructions), "$assistant › $personal", "anweisungen instructions prompt", Icons.Outlined.AutoAwesome, TileTone.Teal, path(AssistantPages.PERSONAL, AssistantPages.INSTRUCTIONS)))
         add(SettingsSearchEntry(stringResource(R.string.preset_default_design), "$assistant › $personal", "design vorgabe preset", Icons.Outlined.Palette, TileTone.Pink, path(AssistantPages.PERSONAL)))
         add(SettingsSearchEntry(stringResource(R.string.settings_hub_memory), assistant, "gedächtnis memory erinnerungen verlauf history", Icons.Outlined.Psychology, TileTone.Indigo, path(AssistantPages.MEMORY)))
-        add(SettingsSearchEntry(providers, models, "anbieter provider codex opencode claude pi vibe login api modell model", Icons.Outlined.Hub, TileTone.Accent, path(SettingsPages.PROVIDERS)))
+        add(SettingsSearchEntry(providers, models, "anbieter provider codex claude pi vibe login api modell model", Icons.Outlined.Hub, TileTone.Accent, path(SettingsPages.PROVIDERS)))
+        add(SettingsSearchEntry(stringResource(R.string.settings_model_providers), "$models › $providers", "modellanbieter model providers api key schlüssel base url endpunkt endpoint z-ai mistral deepseek anthropic", Icons.Outlined.Key, TileTone.Accent, path(SettingsPages.PROVIDERS)))
         CLIProvider.active.forEach { provider ->
             add(SettingsSearchEntry(provider.displayName, "$models › $providers", "provider anbieter ${provider.name.lowercase()}", Icons.Outlined.Terminal, TileTone.Accent) { routes.cliProvider(provider.name.lowercase()) })
         }
@@ -404,6 +412,7 @@ private fun settingsSearchEntries(state: SettingsUiState, push: (List<String>) -
         add(SettingsSearchEntry(stringResource(R.string.settings_hub_ssh), connections, "ssh host server verbindungen connections jump schlüssel key", Icons.Outlined.Dns, TileTone.Gray, routes.connections))
         add(SettingsSearchEntry(stringResource(R.string.settings_hub_integrations), connections, "discord home assistant comfyui integrationen", Icons.Outlined.Hub, TileTone.Orange, routes.integrations))
         add(SettingsSearchEntry(stringResource(R.string.settings_hub_browser), connections, "browser firefox chrome edge erweiterung extension koppeln pair steuerung", Icons.Outlined.Language, TileTone.Orange, path(SettingsPages.BROWSER)))
+        add(SettingsSearchEntry(stringResource(R.string.settings_hub_watch), connections, "uhr watch wear os smartwatch koppeln pair entkoppeln unpair", Icons.Outlined.Watch, TileTone.Teal, path(SettingsPages.WATCH)))
         add(SettingsSearchEntry(stringResource(R.string.settings_hub_gateway), connections, "gateway token supervisor hermes api", Icons.Outlined.Token, TileTone.Violet, path(SettingsPages.GATEWAY)))
         add(SettingsSearchEntry(appearance, app, "darstellung appearance design theme modus dunkel hell eink", Icons.Outlined.Palette, TileTone.Blue, path(SettingsPages.APPEARANCE)))
         add(SettingsSearchEntry(stringResource(R.string.settings_hub_theme), "$app › $appearance", "theme modus dark light dunkel hell e-ink", Icons.Outlined.Brightness4, TileTone.Blue, path(SettingsPages.APPEARANCE, SettingsPages.THEME)))
@@ -436,6 +445,7 @@ private fun AppSettingsPage(
         SettingsPages.SUBAGENTS -> stringResource(R.string.settings_hub_subagents)
         SettingsPages.CODEX_PLUGINS -> stringResource(R.string.settings_hub_codex_plugins)
         SettingsPages.BROWSER -> stringResource(R.string.settings_hub_browser)
+        SettingsPages.WATCH -> stringResource(R.string.settings_hub_watch)
         SettingsPages.GATEWAY -> stringResource(R.string.settings_hub_gateway)
         SettingsPages.APPEARANCE -> stringResource(R.string.settings_hub_appearance)
         SettingsPages.THEME -> stringResource(R.string.settings_hub_theme)
@@ -461,7 +471,7 @@ private fun AppSettingsPage(
                         CLIProvider.active.forEach { provider ->
                             item {
                                 val config = state.cliProviders.firstOrNull { it.id.equals(provider.name, ignoreCase = true) }
-                                val connected = config?.available ?: (provider == CLIProvider.CODEX || provider == CLIProvider.OPENCODE)
+                                val connected = config?.available ?: (provider == CLIProvider.CODEX)
                                 val enabled = config?.enabled ?: true
                                 SettingsRow(
                                     title = provider.displayName,
@@ -478,6 +488,18 @@ private fun AppSettingsPage(
                         }
                     }
                 }
+                item(key = "model-providers") {
+                    ModelProvidersPanel(
+                        providers = state.modelProviders,
+                        saving = state.modelProvidersSaving,
+                        tests = state.modelProviderTestResults,
+                        testMessages = state.modelProviderTestMessages,
+                        error = state.error,
+                        onSave = viewModel::saveModelProvider,
+                        onDelete = viewModel::deleteModelProvider,
+                        onTest = viewModel::testModelProvider,
+                    )
+                }
                 item(key = "upstreams") { SubagentUpstreamsPanel(state = state, viewModel = viewModel) }
             }
             SettingsPages.SUBAGENTS -> item(key = "subagents") { CliSubagentsPanel(state = state, viewModel = viewModel) }
@@ -487,6 +509,7 @@ private fun AppSettingsPage(
                 item(key = "desktop") { DesktopCompanionPanel() }
                 item(key = "device-control") { DeviceControlPanel() }
             }
+            SettingsPages.WATCH -> item(key = "watch") { WatchPairingPanel() }
             SettingsPages.GATEWAY -> item(key = "gateway") { GatewayTokensPanel(state = state, viewModel = viewModel) }
             SettingsPages.APPEARANCE -> {
                 item(key = "look") {

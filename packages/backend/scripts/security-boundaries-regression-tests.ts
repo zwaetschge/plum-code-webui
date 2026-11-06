@@ -13,7 +13,6 @@ import { buildRestrictedChildEnv } from '../src/utils/childProcessEnv.js';
 import { applyUntrustedFileHeaders, isActiveDocument } from '../src/utils/untrustedFile.js';
 import { detectImageMime, isPathWithin } from '../src/services/comfyui/index.js';
 import { permissionIdentityMatches } from '../src/routes/permissions.js';
-import { permissionRequestBelongsToSession } from '../src/services/opencode/OpencodeServer.js';
 import { MobileAuthCodeStore, createPkceChallenge } from '../src/services/mobileAuthCodes.js';
 import { isMobileGatewayPublicRequest } from '../src/middleware/mobileGateway.js';
 import { createTestSchema, dropTestSchema, useTestSchema } from '../src/db/testing.js';
@@ -91,7 +90,7 @@ function testAdminMutationBoundaries(): void {
 
 async function testCliProviderLoginNeedsIdentity(): Promise<void> {
   const stack = (authRouter as unknown as { stack: RouterLayer[] }).stack;
-  for (const provider of ['claude', 'codex', 'opencode', 'pi']) {
+  for (const provider of ['claude', 'codex', 'pi']) {
     const layer = stack.find(
       (candidate) => candidate.route?.path === `/${provider}` && candidate.route.methods.get
     );
@@ -148,9 +147,6 @@ function testPermissionIdentityBinding(): void {
     permissionIdentityMatches({ userId: 'user-a', sessionId: 'session-a' }, 'user-a', 'session-b'),
     false
   );
-  assert.equal(permissionRequestBelongsToSession('remote-a', 'remote-a'), true);
-  assert.equal(permissionRequestBelongsToSession('remote-a', 'remote-b'), false);
-  assert.equal(permissionRequestBelongsToSession(undefined, 'remote-a'), false);
 }
 
 function testUntrustedActiveDocuments(): void {

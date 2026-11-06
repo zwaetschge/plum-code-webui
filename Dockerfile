@@ -51,13 +51,13 @@ RUN pnpm --filter @plum-code-webui/shared build && \
 FROM node:22.22.3-alpine AS runtime
 
 LABEL org.opencontainers.image.title="Plum Code WebUI"
-LABEL org.opencontainers.image.description="Web-based interface for Codex, OpenCode, and Claude Code CLIs"
+LABEL org.opencontainers.image.description="Web-based interface for Codex, Pi, Mistral Vibe, and Claude Code CLIs"
 LABEL org.opencontainers.image.source="https://github.com/zwaetschge/plum-code-webui"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.vendor="Plum Code WebUI"
 
 # Runtime OS tooling. gcompat + libstdc++ + libgcc let glibc-linked binaries
-# (codex's Rust binary, opencode's Go binary) run on Alpine's musl libc —
+# (codex's Rust binary) run on Alpine's musl libc —
 # without these, the npm postinstall hits SIGILL when verifying the binary.
 # blender-headless powers the built-in Blender MCP for background asset generation.
 # py3-numpy is not optional: Blender's io_scene_gltf2 addon imports numpy at
@@ -113,11 +113,10 @@ ENV XDG_RUNTIME_DIR=/tmp/runtime-node
 # Bake pinned fallback CLIs outside the persistent npm-global mount. Runtime
 # updates still land in /home/node/.npm-global and win through PATH ordering,
 # while a fresh installation is usable before any network update completes.
-# The release build is native linux/amd64, so all four shipped harnesses are
+# The release build is native linux/amd64, so the shipped npm harnesses are
 # mandatory and version-smoke-tested instead of relying on an online bootstrap.
 ARG CLAUDE_CODE_VERSION=2.1.220
 ARG CODEX_VERSION=0.153.3
-ARG OPENCODE_VERSION=1.17.17
 ARG PI_CODING_AGENT_VERSION=0.83.0
 ARG PI_MCP_ADAPTER_VERSION=2.11.0
 # Pi dropped built-in Google Antigravity in 0.71.0; this community extension is
@@ -143,11 +142,8 @@ RUN mkdir -p /home/node/.npm-global /opt/plum-cli && \
       pi-mcp-adapter@${PI_MCP_ADAPTER_VERSION} \
       pi-antigravity@${PI_ANTIGRAVITY_VERSION} && \
     npm install -g --prefix /opt/plum-cli @openai/codex@${CODEX_VERSION} && \
-    npm install -g --prefix /opt/plum-cli opencode-ai@${OPENCODE_VERSION} && \
-    rm -f /opt/plum-cli/lib/node_modules/opencode-ai/bin/.opencode && \
     /opt/plum-cli/bin/claude --version && \
     /opt/plum-cli/bin/codex --version && \
-    /opt/plum-cli/bin/opencode --version && \
     test -x /opt/plum-cli/bin/pi && \
     test -x /opt/plum-cli/bin/pi-mcp-adapter && \
     test -f /opt/plum-cli/lib/node_modules/pi-antigravity/src/index.ts && \
@@ -260,9 +256,6 @@ RUN install -m 0755 ./scripts/chromium-webui.sh /usr/local/bin/plum-chromium && 
     ln -sfn /usr/local/bin/plum-chromium /usr/local/bin/google-chrome-stable
 
 # Volume-friendly runtime dirs, owned by node:node (uid 1000).
-# OpenCode uses XDG paths (~/.config/opencode for config, ~/.local/share/opencode
-# for auth). Symlink both into the single /home/node/.opencode mount so one
-# volume persists config + credentials across rebuilds.
 #
 # Codex CLI's skills system looks under ~/.agents/skills/<name>/SKILL.md (not
 # ~/.claude/skills/). Symlink so the same skill packs work for both providers
@@ -272,11 +265,8 @@ RUN install -m 0755 ./scripts/chromium-webui.sh /usr/local/bin/plum-chromium && 
 # logs, so it gets the same pre-created, node-owned directory as the others.
 RUN mkdir -p /home/node/.claude /home/node/.codex /home/node/.pi \
              /home/node/.vibe \
-             /home/node/.opencode/config /home/node/.opencode/share \
              /home/node/.config /home/node/.local/share /home/node/.agents \
              /tmp/runtime-node && \
-    ln -sfn /home/node/.opencode/config /home/node/.config/opencode && \
-    ln -sfn /home/node/.opencode/share /home/node/.local/share/opencode && \
     ln -sfn /home/node/.claude/skills /home/node/.agents/skills && \
     chown -R node:node /home/node /tmp/runtime-node
 

@@ -231,7 +231,7 @@ const MISTRAL_ALLOWANCES = {
 
 /**
  * Mistral has no quota API for Pro plans, so the month is measured against the
- * allowance picked here. A regular API key (what Pi and OpenCode use) draws on
+ * allowance picked here. A regular API key (what Pi uses) draws on
  * API/Studio; a key created under Code › Vibe CLI draws on Vibe Code.
  *
  * The Vibe card is the Vibe allowance by definition, so it locks the choice and
@@ -445,6 +445,11 @@ function LimitDetail({ entry }: { entry: ProviderLimitEntry }) {
             </p>
           </div>
         </div>
+      )}
+      {data.planUsage?.upstream?.state === 'exhausted' && (
+        <p className="text-xs text-red-500">
+          Mistral reports this allowance as used up. The amount above is what Plum tracked.
+        </p>
       )}
       {(provider === 'mistral' || provider === 'vibe') && data.planUsage && (
         <MistralBudgetEditor

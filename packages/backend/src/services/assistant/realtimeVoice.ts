@@ -12,13 +12,13 @@ async function isActiveUser(id: string) {
 import { all, get, run, transaction } from '../../db/pg.js';
 import { findResource } from './resources.js';
 import { systemContext } from './apiChats.js';
-import { readOpenCodeProvidersForUser } from '../../utils/opencodeProviderKeys.js';
+import { readModelProvidersForUser } from '../../utils/modelProviderKeys.js';
 import { safeDecrypt } from '../../utils/encryption.js';
 
 const MODEL = 'gpt-realtime-2.1';
 /** Keys and raw audio never enter chat history or client configuration. */
 export async function realtimeConnection(userId: string) {
-  const provider = (await readOpenCodeProvidersForUser(userId)).find(
+  const provider = (await readModelProvidersForUser(userId)).find(
     (p) => p.id === 'openai' && p.enabled && p.apiKey
   );
   const key = provider ? safeDecrypt(provider.apiKey) : '';

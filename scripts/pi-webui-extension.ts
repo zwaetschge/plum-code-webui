@@ -44,9 +44,12 @@ async function requestApproval(toolName: string, input: unknown): Promise<boolea
   if (!secret || !sessionId) return false;
 
   const requestId = randomUUID();
+  // The permissions routes check that the caller is the session it asks for;
+  // without this header every request got 403 and ask mode denied every tool.
   const headers = {
     'content-type': 'application/json',
     'x-webui-hook-secret': secret,
+    'x-webui-session-id': sessionId,
   };
   const created = await fetch(`${backend}/api/permissions/request`, {
     method: 'POST',

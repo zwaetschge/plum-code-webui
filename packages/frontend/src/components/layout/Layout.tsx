@@ -218,6 +218,7 @@ export function Layout() {
     location.pathname === '/' ||
     location.pathname.startsWith('/assistant/') ||
     location.pathname === '/swarm' ||
+    location.pathname === '/hermes' ||
     location.pathname.startsWith('/collaborate');
   const headerTitle =
     activeSession?.name ??

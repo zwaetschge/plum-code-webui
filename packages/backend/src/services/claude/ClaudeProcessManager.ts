@@ -1,4 +1,7 @@
-import { buildContinuationHandoff, CONTEXT_CONTINUATION_PROMPT } from '../../utils/contextHandoff.js';
+import {
+  buildContinuationHandoff,
+  CONTEXT_CONTINUATION_PROMPT,
+} from '../../utils/contextHandoff.js';
 import { assertTaskTurnAllowed } from '../assistant/taskLimits.js';
 import { persistSubagentRun } from '../subagentHistory.js';
 import { subagentWaitOutcomes } from '../../utils/subagentStatus.js';
@@ -11,7 +14,11 @@ import {
   run as pgRun,
   transaction as pgTransaction,
 } from '../../db/pg.js';
-import { modelRouter, userHasSubagentRouting } from '../modelRouterInstance.js';
+import {
+  modelRouter,
+  userHasCustomUpstreams,
+  userHasSubagentRouting,
+} from '../modelRouterInstance.js';
 import type { Server } from 'socket.io';
 import type {
   ServerToClientEvents,
@@ -23,7 +30,6 @@ import type {
   ActiveFollowupMode,
   SubagentRun,
   SubagentRunStatus,
-  TodoItem,
   ToolActionSummary,
   SessionSendDisposition,
   DiscordAlertEventType,
@@ -80,12 +86,6 @@ import {
   type CLIProvider,
 } from '../cli-providers.js';
 import type { CodexWebSearchMode } from '@plum-code-webui/shared';
-import {
-  opencodeServer,
-  subtractOpenCodeUsage,
-  type OpencodeEvent,
-  type OpenCodeUsageCounters,
-} from '../opencode/OpencodeServer.js';
 import { resolveConfigHome } from '../../utils/configPaths.js';
 import { rebasePath } from '../../utils/projectRelocation.js';
 import { relocateSessionDirectories } from './sessionRelocation.js';
@@ -104,14 +104,24 @@ import {
   getZaiApiConfigForUser,
 } from '../../routes/settings.js';
 import { buildIntegrationEnv } from '../../utils/integrationEnv.js';
-import { syncProviderLinks } from '../../utils/providerLinks.js';
-import { getPiModelsForUser, syncPiConfig } from '../../utils/piConfig.js';
+import { getPiModelsForUser, selectVisiblePiModels, syncPiConfig } from '../../utils/piConfig.js';
+import {
+  clearPiRun,
+  getPiRun,
+  patchPiRun,
+  piResumePrompt,
+  PI_MAX_AUTO_RESUMES,
+  PI_RESUME_MAX_AGE_MS,
+  putPiRun,
+  readPiRuns,
+  recentPiResumes,
+} from './piRunJournal.js';
 import {
   CLAUDE_PROVIDER_OVERRIDE_ENV_KEYS,
   sanitizeClaudeSettingsProviderEnv,
 } from '../../utils/mcpDefaults.js';
 import { sanitizeClaudeResumeTranscript } from '../../utils/claudeResumeTranscript.js';
-import { buildOpenCodeProviderCredentialEnv } from '../../utils/opencodeProviderKeys.js';
+import { buildModelProviderCredentialEnv } from '../../utils/modelProviderKeys.js';
 import { assertRunnerAccess } from '../../utils/runnerAccess.js';
 import {
   buildSshEnvForSession,
@@ -234,6 +244,22 @@ async function buildClaudeTransportEnv(
     const token = modelRouter.registerSession(sessionId, userId);
     env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${config.port}/model-router/${token}`;
   }
+
+  // Z.AI Code with user-defined endpoints: models listed there (e.g. Strata's
+  // qwen) go to that endpoint, everything else falls back to Z.AI with the
+  // session's own token, so the GLM path behaves as before.
+  if (
+    provider === 'zai' &&
+    sessionId &&
+    env.ANTHROPIC_BASE_URL &&
+    process.env.MODEL_ROUTER_DISABLED !== '1' &&
+    (await userHasCustomUpstreams(userId))
+  ) {
+    const token = modelRouter.registerSession(sessionId, userId, {
+      baseUrl: env.ANTHROPIC_BASE_URL,
+    });
+    env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${config.port}/model-router/${token}`;
+  }
   return env;
 }
 
@@ -299,6 +325,13 @@ const PI_TURN_PROGRESS_EVENTS = new Set([
 const PI_COMPACT_RESUME_DELAY_MS = 6_000;
 // Bound the nudge so a compaction loop cannot spin forever on its own output.
 const PI_MAX_COMPACT_CONTINUATIONS = 3;
+// A prompt Pi refused during compaction is re-sent at `compaction_end`; this is
+// the fallback should that event never come.
+const PI_REJECTED_PROMPT_RETRY_MS = 30_000;
+// After a Pi crash the run is resumed this much later, on a fresh process.
+const PI_CRASH_RESUME_DELAY_MS = 4_000;
+// The running tool is journalled at most this often per session.
+const PI_JOURNAL_TOOL_THROTTLE_MS = 2_000;
 /** One subagent's share of a turn, pending a turn id. */
 interface PendingSubagentUsage {
   agentId: string;
@@ -334,24 +367,6 @@ interface SharedAgent {
   prompt: string;
   tools?: string[];
   model?: string;
-}
-
-// Streaming filter for Gemma's thought-channel markers. Gemma 4 emits
-// `<|channel>thought ... <channel|>` around its internal reasoning when
-// llama-server runs with `--reasoning-format none`. The markers appear inline
-// in the content stream and must be stripped before the UI sees them.
-interface ThoughtStripState {
-  inside: boolean;
-  pending: string;
-}
-
-interface OpenCodePartStreamEntry {
-  type: 'text' | 'reasoning';
-  messageId: string;
-  text: string;
-  cleaned?: string;
-  thoughtState?: ThoughtStripState;
-  savedCleanedLength?: number;
 }
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {
@@ -498,68 +513,6 @@ function appendPendingChatMedia(proc: ClaudeProcess, pending: PendingChatMedia):
   if (!duplicate) proc.pendingChatMedia.push(pending);
 }
 
-const THOUGHT_OPEN = '<|channel>thought';
-const THOUGHT_CLOSE = '<channel|>';
-
-function longestBoundarySuffix(haystack: string, marker: string): number {
-  const max = Math.min(haystack.length, marker.length - 1);
-  for (let len = max; len > 0; len--) {
-    if (marker.startsWith(haystack.slice(haystack.length - len))) return len;
-  }
-  return 0;
-}
-
-function stripThoughtChunk(
-  state: ThoughtStripState,
-  chunk: string
-): { state: ThoughtStripState; emit: string } {
-  let buf = state.pending + chunk;
-  let out = '';
-  let inside = state.inside;
-
-  while (buf.length > 0) {
-    if (inside) {
-      const idx = buf.indexOf(THOUGHT_CLOSE);
-      if (idx >= 0) {
-        buf = buf.slice(idx + THOUGHT_CLOSE.length);
-        inside = false;
-        continue;
-      }
-      const keep = longestBoundarySuffix(buf, THOUGHT_CLOSE);
-      buf = buf.slice(buf.length - keep);
-      break;
-    }
-
-    const openIdx = buf.indexOf(THOUGHT_OPEN);
-    const closeIdx = buf.indexOf(THOUGHT_CLOSE);
-
-    // Orphan close marker (no preceding open): Gemma retries emit the closing
-    // `thought\n<channel|>` without the matching `<|channel>thought` in some
-    // continuation parts. Treat the text before the orphan as discarded
-    // thought content and drop it along with the marker itself.
-    if (closeIdx >= 0 && (openIdx < 0 || closeIdx < openIdx)) {
-      buf = buf.slice(closeIdx + THOUGHT_CLOSE.length);
-      continue;
-    }
-
-    if (openIdx >= 0) {
-      out += buf.slice(0, openIdx);
-      buf = buf.slice(openIdx + THOUGHT_OPEN.length);
-      inside = true;
-      continue;
-    }
-
-    const keepOpen = longestBoundarySuffix(buf, THOUGHT_OPEN);
-    const keepClose = longestBoundarySuffix(buf, THOUGHT_CLOSE);
-    const keep = Math.max(keepOpen, keepClose);
-    out += buf.slice(0, buf.length - keep);
-    buf = buf.slice(buf.length - keep);
-    break;
-  }
-
-  return { state: { inside, pending: buf }, emit: out };
-}
-
 interface SharedSkill {
   name: string;
   content: string;
@@ -605,15 +558,20 @@ async function getCliModelForSession(
     settingsJson.cliProviderModelLists && typeof settingsJson.cliProviderModelLists === 'object'
       ? (settingsJson.cliProviderModelLists as Record<string, unknown>)
       : {};
-  const configuredModelList =
-    provider === 'pi' ? modelLists.pi : provider === 'opencode' ? modelLists.opencode : undefined;
+  const configuredModelList = provider === 'pi' ? modelLists.pi : undefined;
   let configuredModels = Array.isArray(configuredModelList)
     ? configuredModelList
         .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
         .filter((entry) => entry.length > 0)
     : [];
-  if (provider === 'pi' && configuredModels.length === 0) {
-    configuredModels = await getPiModelsForUser(userId);
+  if (provider === 'pi') {
+    // The picked list only shapes the pickers and the default (its first
+    // entry). A session keeps its model while it is still available, even if
+    // it was hidden from the menu afterwards.
+    const available = await getPiModelsForUser(userId);
+    configuredModels = [
+      ...new Set([...selectVisiblePiModels(available, configuredModels), ...available]),
+    ];
   }
 
   return resolveCliProviderSelectedModel(provider, null, configuredModels, sessionSelectedModel);
@@ -1606,9 +1564,17 @@ async function buildAndroidDeviceContext(
 ): Promise<string | null> {
   const serial = await getAndroidDeviceSerialForSession(sessionId, userId);
   if (!serial) return null;
+  // android-builder is deliberately not loaded as a permanent MCP tool (it is
+  // large); without the on-demand command a session was told to use tools it
+  // did not have and refused to build.
   return `<system-reminder>
 Android test device selected for this Plum session: ${serial}
-Use the android-builder MCP tools for Android app build/install/launch/testing. Do not run raw adb or gradle from Bash. When an MCP tool accepts a serial, pass this selected serial unless the user explicitly chooses another device.
+Build, install, launch and test Android apps through Plum's android-builder. If its android_* / adb_* tools are not in your tool list, call it on demand from the shell:
+  node /app/scripts/mcp-call.mjs tools android-builder
+  node /app/scripts/mcp-call.mjs schema android-builder <tool>
+  node /app/scripts/mcp-call.mjs call android-builder <tool> '<json args>'
+Start with android_health and adb_devices. If the device is not listed, reconnect it with adb_connect_wifi {"host","port"}; the wireless-debugging port changes, so ask the user for the current one when the connect fails.
+Do not run raw adb or gradle. Pass this serial wherever a tool accepts one unless the user chooses another device.
 </system-reminder>`;
 }
 
@@ -2184,64 +2150,6 @@ export async function ensureProjectInstructions(
   await removeOldSharedConfigBlock(claudeMdPath);
 }
 
-function extractCodexText(output: string): string {
-  const deltas: string[] = [];
-  const completed: string[] = [];
-  const fallback: string[] = [];
-
-  for (const line of output.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const event = JSON.parse(trimmed) as {
-        type?: string;
-        delta?: string;
-        text?: string;
-        item?: { type?: string; text?: string; content?: string; delta?: string };
-      };
-      const eventType = (event.type || '').replace(/\//g, '.').replace(/_/g, '').toLowerCase();
-      const delta =
-        (typeof event.delta === 'string' && event.delta) ||
-        (typeof event.text === 'string' && event.text) ||
-        (typeof event.item?.delta === 'string' && event.item.delta) ||
-        '';
-      if (
-        delta &&
-        (eventType.includes('delta') || eventType === 'agentmessage' || eventType === 'text')
-      ) {
-        deltas.push(delta);
-      }
-      const itemType = (event.item?.type || '').replace(/_/g, '').toLowerCase();
-      if (eventType === 'item.completed' && itemType === 'agentmessage') {
-        const text = event.item?.text || event.item?.content || '';
-        if (text) completed.push(text);
-      }
-    } catch {
-      if (!trimmed.startsWith('WARNING:')) fallback.push(trimmed);
-    }
-  }
-
-  const deltaText = deltas.join('').trim();
-  const completedText = completed.join('\n').trim();
-  if (completedText.length >= deltaText.length * 0.5) return completedText;
-  if (deltaText) return deltaText;
-  return fallback.join('\n').trim();
-}
-
-async function maybeCodexChatGptAuthArg(codexHome: string): Promise<string[]> {
-  try {
-    const authPath = path.join(codexHome, 'auth.json');
-    const auth = safeJsonParse<Record<string, unknown>>(await fs.readFile(authPath, 'utf-8'), {});
-    const hasTokens =
-      typeof auth.tokens === 'object' && !!(auth.tokens as { access_token?: string }).access_token;
-    const hasApiKey = typeof auth.OPENAI_API_KEY === 'string' && auth.OPENAI_API_KEY.length > 0;
-    if (hasTokens && !hasApiKey) return ['--config', 'auth_mode="chatgpt"'];
-  } catch {
-    // No auth hint needed.
-  }
-  return [];
-}
-
 type CodexSessionIdentityEvent = {
   type?: string;
   id?: string;
@@ -2319,93 +2227,6 @@ export function shouldInjectSessionStyleContext(
   return previousContext !== nextContext;
 }
 
-async function describeImagesWithCodex(opts: {
-  imagePaths: string[];
-  userPrompt: string;
-  cwd: string;
-  sessionId: string;
-}): Promise<string | null> {
-  if (opts.imagePaths.length === 0) return null;
-  const providerConfig = CLI_PROVIDERS.codex;
-  const codexHome = providerConfig.credentialsPath.replace('~', os.homedir());
-  const prompt = [
-    'Describe the attached image(s) for a downstream coding agent that cannot see images.',
-    'Focus on concrete visual facts: UI text, errors, diagrams, layout, code snippets, filenames, charts, and relevant details.',
-    'Do not solve the user task. Return concise structured notes that can be prepended to the downstream prompt.',
-    '',
-    `Original user prompt:\n${opts.userPrompt || '(no text prompt)'}`,
-  ].join('\n');
-  const args = [
-    'exec',
-    '--json',
-    '--skip-git-repo-check',
-    '--ephemeral',
-    '--sandbox',
-    'read-only',
-    '-c',
-    'approval_policy="never"',
-    ...(await maybeCodexChatGptAuthArg(codexHome)),
-    '--image',
-    opts.imagePaths.join(','),
-    prompt,
-  ];
-
-  const integrationEnv = await buildIntegrationEnv();
-
-  return await new Promise<string | null>((resolve) => {
-    const child = spawnManagedProcess(providerConfig.command, args, {
-      cwd: opts.cwd,
-      env: {
-        ...process.env,
-        ...integrationEnv,
-        CODEX_HOME: codexHome,
-        WEBUI_SESSION_ID: opts.sessionId,
-        WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
-        WEBUI_PROJECT_PATH: opts.cwd,
-        WEBUI_HOOK_SECRET: config.hookSecret,
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      try {
-        terminateManagedProcess(child);
-      } catch {
-        // ignore
-      }
-      resolve(null);
-    }, 120_000);
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
-      if (stdout.length > 2_000_000) stdout = stdout.slice(-2_000_000);
-    });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
-      if (stderr.length > 200_000) stderr = stderr.slice(-200_000);
-    });
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      console.error(`[IMAGE-BRIDGE] Codex failed to spawn [${opts.sessionId}]:`, err);
-      resolve(null);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      const text = extractCodexText(stdout).trim();
-      if (code !== 0 && !text) {
-        console.warn(
-          `[IMAGE-BRIDGE] Codex failed [${opts.sessionId}] code=${code}: ${stderr.slice(0, 500)}`
-        );
-        resolve(null);
-        return;
-      }
-      resolve(text || null);
-    });
-  });
-}
-
 interface CodexReviewCommand {
   args: string[];
   prompt?: string;
@@ -2477,7 +2298,9 @@ export function appliesModeOnNextTurnWithoutRestart(provider: CLIProvider): bool
 }
 
 /** ACP is currently supplied by Mistral Vibe. */
-export function acpProviderLabel(_provider: CLIProvider | null | undefined): string { return 'Vibe'; }
+export function acpProviderLabel(_provider: CLIProvider | null | undefined): string {
+  return 'Vibe';
+}
 export function acpModeForSessionMode(_provider: CLIProvider, mode: SessionMode): string {
   if (mode === 'planning') return 'plan';
   if (mode === 'danger') return 'auto-approve';
@@ -2494,7 +2317,9 @@ export function resolveSessionStartMode(
 }
 
 export function isAcpSessionNotFoundError(text: string): boolean {
-  return /session[^\n]*(?:not found|does not exist)|(?:unknown|missing|no such) session/i.test(text);
+  return /session[^\n]*(?:not found|does not exist)|(?:unknown|missing|no such) session/i.test(
+    text
+  );
 }
 
 export function shouldRecoverInterruptedAcpTurn(
@@ -2518,6 +2343,38 @@ function acpConfigSupports(
   });
 }
 
+const ACP_THINKING_ORDER = ['off', 'low', 'medium', 'high', 'max'];
+
+/**
+ * The closest advertised value when the wanted one is gone. Vibe 3 dropped the
+ * `plan` mode and the `off`/`medium` thinking levels that 2.x offered; skipping
+ * them silently left a planning session on the harness default and `medium` on
+ * `high` without saying so. Thinking moves to the nearest level (ties go up),
+ * plan mode to `ask`, which still puts every tool call in front of the user.
+ */
+export function acpFallbackValue(
+  options: AcpSessionConfigOption[] | null | undefined,
+  configId: string,
+  value: string
+): string | null {
+  if (acpConfigSupports(options, configId, value)) return value;
+  if (configId === 'mode' && value === 'plan') {
+    return acpConfigSupports(options, configId, 'ask') ? 'ask' : null;
+  }
+  const wanted = ACP_THINKING_ORDER.indexOf(value);
+  if (configId !== 'thinking' || wanted < 0) return null;
+  let best: string | null = null;
+  let bestDistance = Infinity;
+  for (const [index, candidate] of ACP_THINKING_ORDER.entries()) {
+    const distance = Math.abs(index - wanted) - (index > wanted ? 0.5 : 0);
+    if (distance < bestDistance && acpConfigSupports(options, configId, candidate)) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 function acpToolResultText(
   update: Extract<AcpSessionUpdate, { sessionUpdate: 'tool_call_update' }>
 ): string {
@@ -2536,57 +2393,6 @@ function acpToolResultText(
     })
     .filter(Boolean)
     .join('\n');
-}
-
-type OpenCodeSlashCommand =
-  | { type: 'command'; command: 'init' | 'review' | 'security-review'; args: string }
-  | { type: 'plan'; args: string }
-  | { type: 'compact' };
-
-function parseOpenCodeSlashCommand(message: string): OpenCodeSlashCommand | null {
-  const trimmed = message.trim();
-  const match = trimmed.match(/^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/i);
-  if (!match) return null;
-
-  const name = match[1]?.toLowerCase();
-  const args = (match[2] ?? '').trim();
-  if (name === 'init' || name === 'review' || name === 'security-review') {
-    return { type: 'command', command: name, args };
-  }
-  if (name === 'plan') {
-    return { type: 'plan', args };
-  }
-  if (name === 'compact') {
-    return { type: 'compact' };
-  }
-  return null;
-}
-
-function normalizeOpenCodeTodoStatus(status: unknown): 'pending' | 'in_progress' | 'completed' {
-  if (status === 'in_progress') return 'in_progress';
-  if (status === 'completed' || status === 'cancelled' || status === 'canceled') return 'completed';
-  return 'pending';
-}
-
-function summarizeOpenCodeDiff(diff: unknown): string {
-  if (!Array.isArray(diff) || diff.length === 0) return 'No file changes reported.';
-  const files = diff
-    .map((item) => {
-      const entry = item as {
-        file?: unknown;
-        status?: unknown;
-        additions?: unknown;
-        deletions?: unknown;
-      };
-      const file = typeof entry.file === 'string' ? entry.file : 'unknown';
-      const status = typeof entry.status === 'string' ? entry.status : 'modified';
-      const additions = typeof entry.additions === 'number' ? entry.additions : 0;
-      const deletions = typeof entry.deletions === 'number' ? entry.deletions : 0;
-      return `${file} (${status}, +${additions}/-${deletions})`;
-    })
-    .slice(0, 12);
-  const suffix = diff.length > files.length ? `\n...and ${diff.length - files.length} more` : '';
-  return `OpenCode diff updated:\n${files.map((file) => `- ${file}`).join('\n')}${suffix}`;
 }
 
 interface UsageInfo {
@@ -2668,11 +2474,9 @@ interface StreamJsonMessage {
   permission_denials?: PermissionDenial[];
 }
 
-// Build a no-op ChildProcess stub for server-backed sessions (opencode HTTP/SSE).
-// The manager expects every ClaudeProcess to carry a ChildProcess, but when the
-// CLI is driven over HTTP there is no local child to own. stdin is null so the
-// existing `proc.process.stdin?.write/end` chains become no-ops; kill() is a
-// noop whose real equivalent runs via opencodeServer.abort()/shutdown().
+// Build a no-op ChildProcess stub for a process slot that has no local child
+// (yet). The manager expects every ClaudeProcess to carry a ChildProcess; stdin
+// is null so the existing `proc.process.stdin?.write/end` chains become no-ops.
 function createVirtualChildProcess(): ChildProcess {
   const em = new EventEmitter() as unknown as ChildProcess;
   Object.assign(em, {
@@ -2800,13 +2604,31 @@ interface ClaudeProcess {
   codexSteerDraining?: boolean;
   codexPreemptingForSteer?: boolean;
   codexPreemptKillTimer?: ReturnType<typeof setTimeout>;
-  // Pi runs a persistent JSONL RPC, so a turn is "in flight" from the moment we
-  // write a prompt until `turn_end`. Compaction can land in that window.
+  // Pi runs a persistent JSONL RPC, so a run is "in flight" from the moment we
+  // write a prompt until `agent_settled`. `turn_end` closes one model round
+  // only; retries, compaction and queued work still follow `agent_end`.
   piTurnInFlight?: boolean;
   piCompactContinuations?: number;
   /** `stopReason` of the last assistant round (`stop`, `length`, `error`, ...). */
   piLastStopReason?: string;
   piCompactResumeTimer?: ReturnType<typeof setTimeout>;
+  /** Messages sent while a run is in flight, dispatched when it settles. */
+  piQueuedTurns?: ClaudePreparedTurn[];
+  piQueueDraining?: boolean;
+  /** The turn last written to Pi, re-queued if Pi rejects the prompt. */
+  piDispatchedTurn?: ClaudePreparedTurn;
+  /** Pi is compacting; a prompt sent now would be rejected. */
+  piCompacting?: boolean;
+  /** Provider error of the run (final retry failure or an `error` stop). */
+  piRunError?: string;
+  /** Token use of every round of the run, booked once when it settles. */
+  piRunUsage?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cost: number;
+  };
   // Per-subagent-thread cumulative snapshot, so a resumed exec books only the
   // delta each spawned agent added during the current turn.
   codexSubagentBaseline?: Map<string, CodexUsageCounters>;
@@ -2814,7 +2636,7 @@ interface ClaudeProcess {
   // final in saveUsageToDatabase.
   pendingSubagentUsage?: PendingSubagentUsage[];
   // Track tool callIDs we've already emitted 'started' for during a codex turn, mirroring
-  // the opencode emittedTools pattern. Reset at the start of each turn.
+  // the emittedTools pattern. Reset at the start of each turn.
   codexEmittedTools?: Set<string>;
   // Last cumulative-token snapshot Codex reported for this session. We use it to
   // compute per-turn deltas because `turn.completed.usage` in resume mode reports
@@ -2873,12 +2695,6 @@ interface ClaudeProcess {
   /** Vibe Ultracode: the running `ultracode_workflow` call and its agents' usage. */
   vibeWorkflowToolId?: string | null;
   vibeWorkflowUsage?: { input: number; output: number; cached: number };
-  // Server-backed providers (opencode in HTTP/SSE mode) have no child process.
-  // `process` is a no-op stub; all lifecycle goes through HTTP + SSE subscription.
-  serverBacked?: boolean;
-  opencodeIdle?: boolean;
-  opencodeQueuedTurns?: OpenCodePreparedTurn[];
-  opencodeQueueDraining?: boolean;
   claudeIdle?: boolean;
   claudeQueuedTurns?: ClaudePreparedTurn[];
   /** Settings reload parked until the running turn (and its queue) finishes. */
@@ -2893,15 +2709,6 @@ interface ClaudeProcess {
     previousMode: SessionMode;
   };
   claudeQueueDraining?: boolean;
-  // Accumulates content per opencode part.id so we can emit streaming deltas
-  // and flush each opencode assistant message as a separate WebUI message.
-  partStreams?: Map<string, OpenCodePartStreamEntry>;
-  opencodeActiveMessageId?: string | null;
-  opencodeMessageOrder?: string[];
-  opencodeLastManualCompactAt?: number;
-  opencodeCompactionText?: string;
-  opencodeUsageBaseline?: OpenCodeUsageCounters | null;
-  opencodeUsageFinalizing?: boolean;
   claudeCurrentResponseId?: string;
   claudeCurrentResponseOutputTokens?: number;
   // Track tool callIDs we've already emitted 'started' for, so we don't
@@ -3009,17 +2816,6 @@ interface CodexPreparedTurn {
   codexNativeSlashCommand: boolean;
 }
 
-interface OpenCodePreparedTurn {
-  queueId: string;
-  chatId: string | null;
-  queuedAt: string;
-  originalMessage: string;
-  messageForClaude: string;
-  attachments?: FileAttachmentData[];
-  updateLastMessage: boolean;
-  opencodeSlashCommand: OpenCodeSlashCommand | null;
-}
-
 interface ClaudePreparedTurn {
   queueId: string;
   chatId: string | null;
@@ -3083,7 +2879,10 @@ function withUltrathink(proc: { claudeUltrathink?: boolean }, message: string): 
 export class ClaudeProcessManager {
   private processes: Map<string, ClaudeProcess> = new Map();
   private pendingModes: Map<string, SessionMode> = new Map(); // Store modes for sessions not yet started
-  private contextContinuations = new Map<string, { userId: string; chatId: string | null; attempts: number }>();
+  private contextContinuations = new Map<
+    string,
+    { userId: string; chatId: string | null; attempts: number }
+  >();
 
   private pendingContextReminders: Map<
     string,
@@ -4813,15 +4612,7 @@ Discord Main Gateway:
   getStreamingSnapshot(sessionId: string): StreamingMessage | null {
     const proc = this.processes.get(sessionId);
     if (!proc?.isStreaming) return null;
-    const content =
-      proc.cliProvider === 'opencode'
-        ? [...(proc.partStreams?.values() ?? [])]
-            .filter(
-              (part) => part.type === 'text' && part.messageId === proc.opencodeActiveMessageId
-            )
-            .map((part) => (part.cleaned ?? part.text).slice(part.savedCleanedLength ?? 0))
-            .join('')
-        : proc.streamingText;
+    const content = proc.streamingText;
     if (!content || content.trim() === proc.lastSavedAssistantContent) return null;
     return {
       sessionId,
@@ -4923,6 +4714,14 @@ Discord Main Gateway:
    * processes.set() let a concurrent send start a second CLI whose loser is
    * never registered, never killed, and keeps running unmanaged. */
   private readonly startingSessions = new Map<string, Promise<void>>();
+  /** Set by `shutdownAll`: process exits from then on are not crashes. */
+  private shuttingDown = false;
+  /** Trailing write of the running tool into the Pi run journal. */
+  private readonly piJournalToolTimers = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; tool: { name: string; input: string } }
+  >();
+  private readonly piJournalToolWrittenAt = new Map<string, number>();
 
   async startSession(sessionId: string, userId: string, mode?: SessionMode): Promise<void> {
     const inflight = this.startingSessions.get(sessionId);
@@ -5042,10 +4841,19 @@ Discord Main Gateway:
     if (isClaudeTransportProvider(cliProvider) && session.context_handoff_json) {
       try {
         const checkpoint = JSON.parse(session.context_handoff_json);
-        if (checkpoint.provider === cliProvider && typeof checkpoint.summary === 'string' && checkpoint.chatId === session.active_chat_id) {
-          this.pendingContextReminders.set(sessionId, { summary: checkpoint.summary, reason: 'context-limit' });
+        if (
+          checkpoint.provider === cliProvider &&
+          typeof checkpoint.summary === 'string' &&
+          checkpoint.chatId === session.active_chat_id
+        ) {
+          this.pendingContextReminders.set(sessionId, {
+            summary: checkpoint.summary,
+            reason: 'context-limit',
+          });
         }
-      } catch { /* A malformed legacy checkpoint cannot override the current prompt. */ }
+      } catch {
+        /* A malformed legacy checkpoint cannot override the current prompt. */
+      }
     }
     const configHome = resolveConfigHome(cliProvider);
     if (isClaudeTransportProvider(cliProvider)) {
@@ -5083,14 +4891,11 @@ Discord Main Gateway:
     // Write skills/agents to global ~/.claude/CLAUDE.md + lightweight project AGENTS.md context
     await ensureGlobalInstructions(configHome);
     await ensureProjectInstructions(session.working_directory, configHome, cliProvider);
-    // Shared links are provider-neutral. OpenCode's user-specific provider
-    // blocks are written later into that user's isolated tenant config.
-    await syncProviderLinks({ quiet: true });
     if (cliProvider === 'pi') {
       const piSync = await syncPiConfig(userId);
       if (piSync.providerCount === 0 || piSync.modelCount === 0) {
         throw new Error(
-          'Pi requires at least one enabled OpenCode API connection with available models. Configure it under Settings → General → OpenCode.'
+          'Pi braucht mindestens einen aktiven Modellanbieter mit verfügbaren Modellen. Richte ihn unter Einstellungen → Modellanbieter ein.'
         );
       }
       if (piSync.extensions.length < 3) {
@@ -5101,111 +4906,6 @@ Discord Main Gateway:
         `[PI] Synced ${piSync.providerCount} providers, ${piSync.modelCount} models, ` +
           `${piSync.mcpCount} MCP servers, ${piSync.agentCount} agents`
       );
-    }
-
-    if (cliProvider === 'opencode') {
-      // Server-backed path: OpenCode HTTP/SSE via one isolated server per WebUI user.
-      // Unlike claude/codex, there is no per-session child process to own; events
-      // arrive over the shared SSE subscription and are demultiplexed by sessionID.
-      await opencodeServer.ensureStarted(userId);
-
-      let remoteId = isResuming && session.claude_session_id ? session.claude_session_id : null;
-      if (remoteId && !(await opencodeServer.sessionExists(remoteId, userId))) {
-        console.log(`[OPENCODE-SERVER] Prior session ${remoteId} not found on server; recreating`);
-        remoteId = null;
-      }
-      if (!remoteId) {
-        remoteId = await opencodeServer.createSession(session.working_directory, {
-          model: selectedModel,
-          mode: effectiveMode,
-          variant: selectedReasoning,
-          allowedDirectories: allowedDirs,
-          userId,
-        });
-        await pgRun('UPDATE sessions SET claude_session_id = ? WHERE id = ?', remoteId, sessionId);
-      }
-
-      console.log(`[SESSION] ========== Starting Session (opencode server) ==========`);
-      console.log(`[SESSION] Session ID: ${sessionId}`);
-      console.log(`[SESSION] OpenCode sessionID: ${remoteId}`);
-      console.log(`[SESSION] Working directory: ${session.working_directory}`);
-      console.log(`[SESSION] Mode: ${effectiveMode}`);
-      console.log(`[SESSION] Model: ${selectedModel ?? '(default)'}`);
-      console.log(`[SESSION] Resuming: ${isResuming}`);
-      console.log(`[SESSION] ==============================================`);
-
-      const virtualProc = createVirtualChildProcess();
-      const claudeProcess: ClaudeProcess = {
-        process: virtualProc,
-        sessionId,
-        providerChatId: session.active_chat_id,
-        currentChatId: session.active_chat_id,
-        cliProvider,
-        userId,
-        workingDirectory: session.working_directory,
-        claudeSessionId: remoteId,
-        buffer: '',
-        streamingText: '',
-        isStreaming: false,
-        mode: effectiveMode,
-        currentToolName: null,
-        currentToolId: null,
-        currentToolInput: '',
-        currentActivitySummary: null,
-        pendingToolResults: new Map(),
-        currentAgentType: null,
-        currentAgentDescription: null,
-        subagentRuns: new Map(),
-        model: selectedModel || CLI_PROVIDERS[cliProvider]?.defaultModel || 'unknown',
-        contextWindow: contextWindowFor(selectedModel || CLI_PROVIDERS[cliProvider]?.defaultModel),
-        turnInputTokens: 0,
-        turnCacheReadTokens: 0,
-        turnCacheCreationTokens: 0,
-        turnOutputTokens: 0,
-        totalInputTokens: 0,
-        totalOutputTokens: 0,
-        cacheReadTokens: 0,
-        cacheCreationTokens: 0,
-        totalCostUsd: 0,
-        previousTotalCostUsd: 0,
-        needsWorkingDirReminder: isResuming,
-        contextReminder: this.pendingContextReminders.get(sessionId) || null,
-        outputBuffer: new CircularBuffer<BufferedMessage>(BUFFER_SIZE),
-        lastActivityAt: Date.now(),
-        disconnectedAt: null,
-        lastUserMessage: null,
-        lastAttachments: null,
-        pendingPermissionDenials: null,
-        pendingChatMedia: [],
-        sharedContextInjected: false,
-        modePromptInjected: null,
-        lastContextLimitAt: undefined,
-        serverBacked: true,
-        opencodeIdle: true,
-        partStreams: new Map(),
-        opencodeActiveMessageId: null,
-        opencodeMessageOrder: [],
-        emittedTools: new Set(),
-      };
-
-      this.pendingContextReminders.delete(sessionId);
-      this.processes.set(sessionId, claudeProcess);
-
-      opencodeServer.subscribe(
-        remoteId,
-        async (evt) => {
-          await this.translateOpencodeServerEvent(sessionId, evt);
-        },
-        userId
-      );
-
-      await pgRun(
-        'UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        'running',
-        sessionId
-      );
-      this.emitStatus(sessionId, { sessionId, status: 'running' });
-      return;
     }
 
     if (isAcpProvider(cliProvider)) {
@@ -5660,7 +5360,7 @@ Discord Main Gateway:
       // The ultracode effort keeps the workflow tool on for every turn; without
       // it the extension still enables it for a prompt that says "ultracode".
       extraEnv.PI_ULTRACODE = selectedReasoning === 'ultracode' ? '1' : '0';
-      Object.assign(extraEnv, await buildOpenCodeProviderCredentialEnv(userId));
+      Object.assign(extraEnv, await buildModelProviderCredentialEnv(userId, { pi: true }));
     }
     extraEnv.WEBUI_SESSION_MODE = effectiveMode;
     extraEnv.WEBUI_CONFIG_HOME = configHome;
@@ -5807,9 +5507,10 @@ Discord Main Gateway:
       console.error(`${providerConfig.name} stderr [${sessionId}]:`, data.toString());
     });
 
-    proc.on('exit', async (exitCode) => {
+    proc.on('exit', async (exitCode, exitSignal) => {
       console.log(
-        `${providerConfig.name} process for session ${sessionId} exited with code ${exitCode}`
+        `${providerConfig.name} process for session ${sessionId} exited with code ${exitCode}` +
+          (exitSignal ? ` (${exitSignal})` : '')
       );
       const managedProc = this.processes.get(sessionId);
       // A detached child's late exit must not act on its replacement: it would
@@ -5825,6 +5526,44 @@ Discord Main Gateway:
           await this.saveAssistantMessage(sessionId, managedProc.streamingText.trim());
           managedProc.streamingText = '';
           managedProc.isStreaming = false;
+        }
+        // Pi died while a run was going (a stop clears the flag first). A
+        // backend shutdown leaves the journal for the next boot; otherwise say
+        // so in the chat and resume on a fresh process, within the bound.
+        if (managedProc.cliProvider === 'pi' && managedProc.piTurnInFlight && !this.shuttingDown) {
+          managedProc.piTurnInFlight = false;
+          // Tools the dead Pi started (a build, a sleep) are still running in
+          // its process group; the resumed run would start them a second time.
+          terminateManagedProcess(proc, 2_000);
+          const ending = exitSignal
+            ? `Signal ${exitSignal}`
+            : `Exit-Code ${exitCode ?? 'unbekannt'}`;
+          await this.bookPiRunUsage(sessionId, managedProc);
+          const record = getPiRun(sessionId);
+          const resume = !!record && recentPiResumes(record).length < PI_MAX_AUTO_RESUMES;
+          const waiting = managedProc.piQueuedTurns?.length ?? 0;
+          const notice =
+            `**Pi wurde mitten im Lauf beendet** (${ending}).` +
+            (resume
+              ? ' Plum setzt die Aufgabe in wenigen Sekunden automatisch fort' +
+                (waiting > 0 ? ', danach folgen die wartenden Nachrichten.' : '.')
+              : (waiting > 0
+                  ? ` ${waiting} wartende Nachricht${waiting === 1 ? ' wurde' : 'en wurden'} nicht gesendet.`
+                  : '') + ' Schreib „weiter“, um an der Stelle fortzusetzen.');
+          console.warn(`[PI] Process exited mid-run [${sessionId}] ${ending}`);
+          await this.saveAssistantMessage(sessionId, notice);
+          this.io.to(`session:${sessionId}`).emit('session:error', {
+            sessionId,
+            error: `Pi wurde mitten im Lauf beendet (${ending}).`,
+          });
+          if (resume) {
+            setTimeout(() => {
+              void this.resumeInterruptedPiRun(sessionId, 'crash');
+            }, PI_CRASH_RESUME_DELAY_MS).unref();
+          } else {
+            // Bound reached (or never journalled): the notice above asks for "weiter".
+            this.journalPiRunEnd(sessionId);
+          }
         }
         this.io.to(`session:${sessionId}`).emit('session:thinking', {
           sessionId,
@@ -5910,11 +5649,10 @@ Discord Main Gateway:
       try {
         raw = JSON.parse(line) as unknown;
       } catch {
-        // Not valid JSON, emit as raw output for debugging (skip noisy Codex/OpenCode output)
+        // Not valid JSON, emit as raw output for debugging (skip noisy Codex/Pi output)
         console.log(`Non-JSON output [${sessionId}]:`, line);
         if (
           proc.cliProvider !== 'codex' &&
-          proc.cliProvider !== 'opencode' &&
           proc.cliProvider !== 'pi' &&
           !isAcpProvider(proc.cliProvider)
         ) {
@@ -5990,6 +5728,29 @@ Discord Main Gateway:
             : isRecordValue(event.error) && typeof event.error.message === 'string'
               ? event.error.message
               : `Pi RPC command ${command || 'unknown'} failed`;
+        if (command === 'prompt' && proc.piDispatchedTurn) {
+          const rejected = proc.piDispatchedTurn;
+          proc.piDispatchedTurn = undefined;
+          proc.piTurnInFlight = false;
+          // Pi refuses prompts while it compacts. The message is already in the
+          // chat, so keep it at the head of the queue and send it once the
+          // compaction is over instead of leaving it marked as delivered.
+          if (/compact/i.test(error)) {
+            proc.piCompacting = true;
+            proc.piQueuedTurns = [rejected, ...(proc.piQueuedTurns ?? [])];
+            this.emitQueueState(sessionId, proc);
+            setTimeout(() => {
+              if (this.processes.get(sessionId) !== proc || !proc.piCompacting) return;
+              proc.piCompacting = false;
+              void this.drainPiQueuedTurns(sessionId, proc);
+            }, PI_REJECTED_PROMPT_RETRY_MS).unref();
+            return null;
+          }
+          this.io.to(`session:${sessionId}`).emit('session:thinking', {
+            sessionId,
+            isThinking: false,
+          });
+        }
         this.io.to(`session:${sessionId}`).emit('session:error', { sessionId, error });
         return null;
       }
@@ -6025,6 +5786,8 @@ Discord Main Gateway:
     if (type === 'agent_start') {
       proc.isStreaming = true;
       proc.piTurnInFlight = true;
+      proc.piDispatchedTurn = undefined;
+      proc.piRunUsage ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
       proc.currentActivitySummary = 'Agent working';
       this.io.to(`session:${sessionId}`).emit('session:thinking', {
         sessionId,
@@ -6052,6 +5815,17 @@ Discord Main Gateway:
 
     if (type === 'message_end' && message?.role === 'assistant') {
       this.capturePiUsage(proc, message);
+      // A provider failure ends the round with `stopReason: 'error'`; Pi may
+      // still retry. Remember it so the run does not end silently, and forget
+      // it once a later round gets through.
+      if (message.stopReason === 'error') {
+        proc.piRunError =
+          typeof message.errorMessage === 'string' && message.errorMessage.trim()
+            ? message.errorMessage.trim()
+            : 'Der Anbieter hat mit einem Fehler geantwortet.';
+      } else if (message.stopReason !== 'aborted') {
+        proc.piRunError = undefined;
+      }
       if (proc.streamingText.trim()) return { type: 'content_block_stop' };
       const content = piMessageText(message.content);
       return content
@@ -6070,6 +5844,7 @@ Discord Main Gateway:
       proc.currentToolId = toolCallId;
       proc.currentToolName = toolName;
       proc.pendingToolResults.set(toolCallId, { toolName, input: args });
+      if (proc.piTurnInFlight) this.journalPiTool(sessionId, toolName, args);
 
       if (toolName === 'workflow' && isRecordValue(args)) {
         // Ultracode (scripts/pi-ultracode-extension.ts): the workflow is the
@@ -6155,6 +5930,19 @@ Discord Main Gateway:
       return null;
     }
 
+    if (type === 'turn_start') {
+      // A new model round of a running task: show it as working again until
+      // its text or tools arrive.
+      if (proc.piTurnInFlight) {
+        proc.currentActivitySummary = 'Agent working';
+        this.io.to(`session:${sessionId}`).emit('session:thinking', {
+          sessionId,
+          isThinking: true,
+        });
+      }
+      return null;
+    }
+
     if (type === 'turn_end') {
       if (message) this.capturePiUsage(proc, message);
       proc.totalInputTokens += proc.turnInputTokens;
@@ -6163,19 +5951,71 @@ Discord Main Gateway:
       proc.cacheCreationTokens += proc.turnCacheCreationTokens;
       const usage = message && isRecordValue(message.usage) ? message.usage : null;
       const cost = usage && isRecordValue(usage.cost) ? usage.cost : null;
-      if (cost && typeof cost.total === 'number' && Number.isFinite(cost.total)) {
-        proc.totalCostUsd += Math.max(0, cost.total);
-      }
+      const roundCost =
+        cost && typeof cost.total === 'number' && Number.isFinite(cost.total)
+          ? Math.max(0, cost.total)
+          : 0;
+      proc.totalCostUsd += roundCost;
+      const run = (proc.piRunUsage ??= {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: 0,
+      });
+      run.input += proc.turnInputTokens;
+      run.output += proc.turnOutputTokens;
+      run.cacheRead += proc.turnCacheReadTokens;
+      run.cacheWrite += proc.turnCacheCreationTokens;
+      run.cost += roundCost;
       proc.isStreaming = false;
       proc.piLastStopReason =
         message && typeof message.stopReason === 'string' ? message.stopReason : undefined;
-      // `turn_end` fires after every LLM round, tool rounds included — the
-      // prompt itself is only over at `agent_end`. Clearing the in-flight flag
-      // here made every later compaction look like a manual `/compact`.
-      return { type: 'result' };
+      // `turn_end` closes one model round (tool rounds included), not the task:
+      // Pi keeps working until `agent_settled`. Reporting each round as a
+      // finished turn made the spinner vanish mid-task, fired "done"
+      // notifications and applied parked settings restarts that killed the run.
+      if (proc.streamingText.trim()) {
+        await this.saveAssistantMessage(sessionId, proc.streamingText.trim());
+        proc.streamingText = '';
+      }
+      await this.emitUsage(sessionId, proc);
+      return null;
+    }
+
+    if (type === 'auto_retry_start') {
+      const attempt = typeof event.attempt === 'number' ? event.attempt : 1;
+      const maxAttempts = typeof event.maxAttempts === 'number' ? event.maxAttempts : attempt;
+      const delaySeconds =
+        typeof event.delayMs === 'number' ? Math.max(1, Math.round(event.delayMs / 1000)) : 0;
+      const reason =
+        typeof event.errorMessage === 'string' ? event.errorMessage.trim().slice(0, 160) : '';
+      proc.currentActivitySummary =
+        `Erneuter Versuch ${attempt}/${maxAttempts}` +
+        (delaySeconds ? ` in ${delaySeconds} s` : '') +
+        (reason ? `: ${reason}` : '');
+      console.warn(`[PI] ${proc.currentActivitySummary} [${sessionId}]`);
+      this.io.to(`session:${sessionId}`).emit('session:thinking', {
+        sessionId,
+        isThinking: true,
+      });
+      void this.emitLifecycle(sessionId, 'busy');
+      return null;
+    }
+
+    if (type === 'auto_retry_end') {
+      if (event.success === false) {
+        proc.piRunError =
+          typeof event.finalError === 'string' && event.finalError.trim()
+            ? event.finalError.trim()
+            : (proc.piRunError ?? 'Alle Wiederholungen sind fehlgeschlagen.');
+      }
+      proc.currentActivitySummary = 'Agent working';
+      return null;
     }
 
     if (type === 'compaction_start') {
+      proc.piCompacting = true;
       const reason = piCompactionReason(event.reason);
       await this.emitCompact(sessionId, {
         sessionId,
@@ -6189,21 +6029,332 @@ Discord Main Gateway:
     }
 
     if (type === 'compaction_end') {
-      return this.handlePiCompactionEnd(sessionId, proc, event);
+      proc.piCompacting = false;
+      const outcome = await this.handlePiCompactionEnd(sessionId, proc, event);
+      // A prompt refused during the compaction goes out now, unless a run is
+      // still going (it drains when that run settles).
+      if (!proc.piTurnInFlight && (proc.piQueuedTurns?.length ?? 0) > 0) {
+        queueMicrotask(() => void this.drainPiQueuedTurns(sessionId, proc));
+      }
+      return outcome;
     }
 
     if (type === 'agent_end') {
       proc.isStreaming = false;
-      proc.piTurnInFlight = false;
       // A run that ended because the model chose to stop is real progress. A
       // `length`/`error` end at the context limit is not: refilling the budget
       // there let a session at the hard limit loop forever — one tool call,
       // overflow, failed compaction, nudge, repeat.
       if (proc.piLastStopReason === 'stop') proc.piCompactContinuations = 0;
+      // Not the end of the task: retries, compaction and queued work can still
+      // follow. `agent_settled` is.
       return null;
     }
 
+    if (type === 'agent_settled') {
+      // A scheduled post-compaction continue starts the next run in a moment;
+      // the task is not over yet.
+      if (proc.piCompactResumeTimer && event.aborted !== true) return null;
+      return this.settlePiRun(sessionId, proc, event.aborted === true);
+    }
+
     return null;
+  }
+
+  /**
+   * Pi has no automatic work left for this run: book its usage once, surface a
+   * provider error that ended it, then hand over to the shared `result` path
+   * (thinking off, `turnComplete`, parked restarts) and send queued messages.
+   */
+  private async settlePiRun(
+    sessionId: string,
+    proc: ClaudeProcess,
+    aborted: boolean
+  ): Promise<StreamJsonMessage> {
+    proc.piTurnInFlight = false;
+    proc.piDispatchedTurn = undefined;
+    proc.isStreaming = false;
+    proc.currentToolName = null;
+    proc.currentToolId = null;
+
+    await this.bookPiRunUsage(sessionId, proc);
+    // Nothing left to resume: the run is over.
+    this.journalPiRunEnd(sessionId);
+
+    const error = proc.piRunError;
+    proc.piRunError = undefined;
+    if (error && !aborted) {
+      console.warn(`[PI] Run ended with a provider error [${sessionId}]: ${error}`);
+      if (proc.streamingText.trim()) {
+        await this.saveAssistantMessage(sessionId, proc.streamingText.trim());
+        proc.streamingText = '';
+      }
+      await this.saveAssistantMessage(
+        sessionId,
+        `**Pi-Fehler:** ${error}\n\nDer Lauf wurde nach allen Wiederholungen beendet. ` +
+          'Schreib „weiter“, um fortzusetzen, oder wechsle das Modell.'
+      );
+      this.io.to(`session:${sessionId}`).emit('session:error', {
+        sessionId,
+        error: `Pi: ${error}`,
+      });
+    }
+
+    // Queued messages go out from the `result` handler, after it has switched
+    // the indicator off and applied any parked restart.
+    return { type: 'result' };
+  }
+
+  /**
+   * Books every round of the run under the turn id of the prompt that started
+   * it. Booking per round kept only the first round: the usage table ignores a
+   * second row for the same turn id.
+   */
+  private async bookPiRunUsage(sessionId: string, proc: ClaudeProcess): Promise<void> {
+    const run = proc.piRunUsage;
+    proc.piRunUsage = undefined;
+    if (!run || run.input + run.output + run.cacheRead + run.cacheWrite <= 0) return;
+    const last = {
+      input: proc.turnInputTokens,
+      output: proc.turnOutputTokens,
+      cacheRead: proc.turnCacheReadTokens,
+      cacheWrite: proc.turnCacheCreationTokens,
+    };
+    proc.turnInputTokens = run.input;
+    proc.turnOutputTokens = run.output;
+    proc.turnCacheReadTokens = run.cacheRead;
+    proc.turnCacheCreationTokens = run.cacheWrite;
+    proc.turnCostUsd = run.cost > 0 ? run.cost : undefined;
+    await this.saveUsageToDatabase(sessionId, proc);
+    // The live context readout keeps describing the last request.
+    proc.turnInputTokens = last.input;
+    proc.turnOutputTokens = last.output;
+    proc.turnCacheReadTokens = last.cacheRead;
+    proc.turnCacheCreationTokens = last.cacheWrite;
+    proc.turnCostUsd = undefined;
+  }
+
+  /** A run starts: write it down so a crash or restart can pick it up. */
+  private journalPiRunStart(
+    sessionId: string,
+    proc: ClaudeProcess,
+    turn: ClaudePreparedTurn
+  ): void {
+    const now = new Date().toISOString();
+    putPiRun({
+      sessionId,
+      userId: proc.userId,
+      chatId: turn.chatId ?? null,
+      startedAt: now,
+      lastActivityAt: now,
+      tool: null,
+      queued: this.piQueueForJournal(proc),
+      // A resumed run keeps counting against the resume bound.
+      resumes: getPiRun(sessionId)?.resumes ?? [],
+    });
+  }
+
+  private journalPiRunEnd(sessionId: string): void {
+    const pending = this.piJournalToolTimers.get(sessionId);
+    if (pending) clearTimeout(pending.timer);
+    this.piJournalToolTimers.delete(sessionId);
+    this.piJournalToolWrittenAt.delete(sessionId);
+    clearPiRun(sessionId);
+  }
+
+  private piQueueForJournal(proc: ClaudeProcess): Array<{
+    message: string;
+    chatId: string | null;
+    attachments?: unknown[];
+  }> {
+    return (proc.piQueuedTurns ?? []).map((turn) => ({
+      message: turn.originalMessage,
+      chatId: turn.chatId ?? null,
+      ...(turn.attachments?.length ? { attachments: turn.attachments as unknown[] } : {}),
+    }));
+  }
+
+  /** The running tool, so a resume can tell the model what was cut off. */
+  private journalPiTool(sessionId: string, name: string, args: unknown): void {
+    const command =
+      isRecordValue(args) && typeof args.command === 'string'
+        ? args.command
+        : args === undefined
+          ? ''
+          : JSON.stringify(args);
+    const tool = { name, input: (command ?? '').replace(/\s+/g, ' ').trim().slice(0, 200) };
+    const write = () => {
+      this.piJournalToolTimers.delete(sessionId);
+      this.piJournalToolWrittenAt.set(sessionId, Date.now());
+      patchPiRun(sessionId, { tool });
+    };
+    const pending = this.piJournalToolTimers.get(sessionId);
+    if (pending) clearTimeout(pending.timer);
+    const since = Date.now() - (this.piJournalToolWrittenAt.get(sessionId) ?? 0);
+    if (since >= PI_JOURNAL_TOOL_THROTTLE_MS) {
+      write();
+      return;
+    }
+    const timer = setTimeout(write, PI_JOURNAL_TOOL_THROTTLE_MS - since);
+    timer.unref();
+    this.piJournalToolTimers.set(sessionId, { timer, tool });
+  }
+
+  /**
+   * Picks up a Pi run that a crash or a backend restart cut off: a fresh Pi
+   * process on the same Pi session (`--session`; Pi gives the interrupted
+   * tool call an empty result), a bounded "continue", then the messages that
+   * were waiting in the queue. At most {@link PI_MAX_AUTO_RESUMES} times per
+   * hour, so a run that keeps crashing stops instead of looping.
+   */
+  async resumeInterruptedPiRun(sessionId: string, reason: 'crash' | 'restart'): Promise<boolean> {
+    const record = getPiRun(sessionId);
+    if (!record) return false;
+    const now = Date.now();
+    if (now - Date.parse(record.lastActivityAt) > PI_RESUME_MAX_AGE_MS) {
+      clearPiRun(sessionId);
+      return false;
+    }
+    const session = (await pgGet(
+      'SELECT cli_provider, user_id FROM sessions WHERE id = ?',
+      sessionId
+    )) as unknown as { cli_provider: string | null; user_id: string } | undefined;
+    if (!session || session.cli_provider !== 'pi' || session.user_id !== record.userId) {
+      clearPiRun(sessionId);
+      return false;
+    }
+    // Someone already continued it (a message, an opened chat).
+    if (this.processes.get(sessionId)?.piTurnInFlight) return false;
+
+    const recent = recentPiResumes(record, now);
+    if (recent.length >= PI_MAX_AUTO_RESUMES) {
+      clearPiRun(sessionId);
+      console.warn(`[PI] Resume limit reached, not resuming [${sessionId}]`);
+      await this.saveAssistantMessage(
+        sessionId,
+        `**Pi wurde ${recent.length + 1}-mal hintereinander unterbrochen.** ` +
+          'Die automatische Fortsetzung ist gestoppt. Schreib „weiter“, wenn es weitergehen soll.'
+      );
+      return false;
+    }
+    putPiRun({ ...record, resumes: [...recent, new Date(now).toISOString()], queued: [] });
+    console.log(
+      `[PI] Resuming interrupted run after ${reason} [${sessionId}]` +
+        (record.tool ? ` (was in ${record.tool.name})` : '')
+    );
+    try {
+      if (reason === 'restart') {
+        await this.saveAssistantMessage(
+          sessionId,
+          '↻ **Plum wurde neu gestartet, während Pi arbeitete.** Pi setzt die Aufgabe automatisch fort' +
+            (record.tool ? ` (unterbrochen bei \`${record.tool.name}\`).` : '.')
+        );
+      }
+      await this.sendMessage(sessionId, record.userId, piResumePrompt(record, reason), undefined, {
+        chatId: record.chatId,
+        recordMessage: false,
+        updateLastMessage: false,
+      });
+      for (const queued of record.queued) {
+        await this.sendMessage(
+          sessionId,
+          record.userId,
+          queued.message,
+          queued.attachments as Parameters<ClaudeProcessManager['sendMessage']>[3],
+          { chatId: queued.chatId, recordMessage: false }
+        );
+      }
+      return true;
+    } catch (error) {
+      console.error(`[PI] Resume failed [${sessionId}]:`, error);
+      this.io.to(`session:${sessionId}`).emit('session:error', {
+        sessionId,
+        error: `Pi konnte nicht automatisch fortsetzen: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return false;
+    }
+  }
+
+  /** Boot: resume every Pi run the previous backend left unfinished. */
+  async resumeInterruptedPiRuns(): Promise<void> {
+    const runs = Object.values(readPiRuns());
+    if (runs.length === 0) return;
+    console.log(`[PI] ${runs.length} interrupted run(s) from before the restart`);
+    for (const record of runs) {
+      await this.resumeInterruptedPiRun(record.sessionId, 'restart').catch((error) =>
+        console.error(`[PI] Resume after restart failed [${record.sessionId}]:`, error)
+      );
+    }
+  }
+
+  /** Writes one prepared turn to Pi and marks the run as in flight. */
+  private dispatchPiTurn(sessionId: string, proc: ClaudeProcess, turn: ClaudePreparedTurn): void {
+    this.clearPiCompactResumeTimer(proc);
+    proc.currentChatId = turn.chatId;
+    if (turn.updateLastMessage) {
+      proc.lastUserMessage = turn.originalMessage;
+      proc.lastAttachments = turn.attachments || null;
+    }
+    proc.pendingPermissionDenials = null;
+    proc.currentUsageTurnId = turn.queueId;
+    proc.currentUsageTurnStartedAt = turn.queuedAt;
+    proc.piTurnInFlight = true;
+    proc.piCompactContinuations = 0;
+    proc.piRunError = undefined;
+    proc.piDispatchedTurn = turn;
+    this.io.to(`session:${sessionId}`).emit('session:thinking', {
+      sessionId,
+      isThinking: true,
+    });
+    if (proc.process.stdin?.writable) {
+      proc.process.stdin.write(
+        formatInputMessage('pi', withUltrathink(proc, turn.messageForClaude))
+      );
+      console.log(
+        `Sent message [${sessionId}] via pi: ${turn.messageForClaude.substring(0, 100)}...`
+      );
+      this.journalPiRunStart(sessionId, proc, turn);
+    } else {
+      proc.piTurnInFlight = false;
+      proc.piDispatchedTurn = undefined;
+      console.warn(`[SEND] stdin no longer writable for pi [${sessionId}]; dropping turn`);
+      this.io.to(`session:${sessionId}`).emit('session:thinking', {
+        sessionId,
+        isThinking: false,
+      });
+    }
+    this.emitQueueState(sessionId, proc);
+  }
+
+  /** Sends the next message typed while Pi was busy, once Pi is idle. */
+  private async drainPiQueuedTurns(sessionId: string, proc: ClaudeProcess): Promise<void> {
+    if (
+      this.processes.get(sessionId) !== proc ||
+      proc.piTurnInFlight ||
+      proc.piCompacting ||
+      proc.piQueueDraining
+    ) {
+      return;
+    }
+    const next = proc.piQueuedTurns?.shift();
+    if (!next) {
+      this.emitQueueState(sessionId, proc);
+      return;
+    }
+    proc.piQueueDraining = true;
+    try {
+      await assertTaskTurnAllowed(sessionId, proc.userId);
+      this.dispatchPiTurn(sessionId, proc, next);
+    } catch (error) {
+      proc.piQueuedTurns = [next, ...(proc.piQueuedTurns ?? [])];
+      this.io.to(`session:${sessionId}`).emit('session:error', {
+        sessionId,
+        error: error instanceof Error ? error.message : 'Task konnte nicht weiterarbeiten',
+      });
+      this.emitQueueState(sessionId, proc);
+    } finally {
+      proc.piQueueDraining = false;
+    }
   }
 
   private clearPiCompactResumeTimer(proc: ClaudeProcess): void {
@@ -6237,9 +6388,10 @@ Discord Main Gateway:
         isThinking: false,
       });
 
+    // The run state itself ends at `agent_settled`, which follows a compaction
+    // inside a run; here only the indicator and the continue nudge change.
     if (event.aborted === true) {
       this.clearPiCompactResumeTimer(proc);
-      proc.piTurnInFlight = false;
       proc.piCompactContinuations = 0;
       proc.isStreaming = false;
       await this.emitCompact(sessionId, {
@@ -6262,7 +6414,6 @@ Discord Main Gateway:
         : null;
     if (errorMessage || !isRecordValue(event.result)) {
       this.clearPiCompactResumeTimer(proc);
-      proc.piTurnInFlight = false;
       proc.isStreaming = false;
       console.warn(
         `[PI] Compaction failed (${reason}) [${sessionId}]: ${errorMessage ?? 'no result'}`
@@ -6294,12 +6445,16 @@ Discord Main Gateway:
       return null;
     }
 
+    // Pi compacts after the model ended its turn. If the model stopped on its
+    // own the task is done, and a "continue" would only start new work (or
+    // loop on a small window); only a cut-off round (`length`, `error`) needs it.
+    if (proc.piLastStopReason === 'stop') return null;
+
     const attempted = proc.piCompactContinuations ?? 0;
     if (attempted >= PI_MAX_COMPACT_CONTINUATIONS) {
       console.warn(
         `[PI] Compaction continue limit reached after ${attempted} attempts [${sessionId}]`
       );
-      proc.piTurnInFlight = false;
       proc.isStreaming = false;
       await this.emitCompact(sessionId, {
         sessionId,
@@ -6320,7 +6475,12 @@ Discord Main Gateway:
       console.log(
         `[PI] Resuming turn after ${reason} compaction (attempt ${current.piCompactContinuations}) [${sessionId}]`
       );
-      if (!current.process.stdin?.writable) return;
+      if (!current.process.stdin?.writable) {
+        // Nothing will settle this run any more; do not leave it busy forever.
+        current.piTurnInFlight = false;
+        void this.processStreamMessage(sessionId, { type: 'result' } as StreamJsonMessage);
+        return;
+      }
       current.process.stdin.write(formatInputMessage('pi', PI_COMPACT_CONTINUE_PROMPT));
       this.io.to(`session:${sessionId}`).emit('session:thinking', {
         sessionId,
@@ -7349,697 +7509,6 @@ Discord Main Gateway:
   }
 
   /**
-   * Translate a single opencode SSE event into our Socket.IO event stream.
-   *
-   * The OpenCode server emits `message.part.updated` many times per turn — once
-   * per delta for streaming text/reasoning, once per state transition for tools
-   * (pending → running → completed|error), and for step-start/step-finish
-   * boundaries. `session.idle` marks the turn's end, at which point we finalize
-   * the streaming buffer and persist the assistant message.
-   */
-  private rememberOpenCodeMessage(proc: ClaudeProcess, messageId: string): void {
-    const order = (proc.opencodeMessageOrder ??= []);
-    if (!order.includes(messageId)) order.push(messageId);
-  }
-
-  private async flushOpenCodeAssistantMessage(
-    sessionId: string,
-    proc: ClaudeProcess,
-    messageId: string
-  ): Promise<boolean> {
-    const streams = proc.partStreams;
-    if (!streams) return false;
-
-    const chunks: string[] = [];
-    const flushedEntries: OpenCodePartStreamEntry[] = [];
-    for (const entry of streams.values()) {
-      if (entry.type !== 'text' || entry.messageId !== messageId) continue;
-      const cleaned = entry.cleaned ?? entry.text;
-      const previousLength = entry.savedCleanedLength ?? 0;
-      if (cleaned.length <= previousLength) continue;
-      const unsaved = cleaned.slice(previousLength).trim();
-      if (unsaved) chunks.push(unsaved);
-      flushedEntries.push(entry);
-    }
-
-    for (const entry of flushedEntries) {
-      entry.savedCleanedLength = (entry.cleaned ?? entry.text).length;
-    }
-
-    const content = chunks.join('\n').trim();
-    if (!content) return false;
-
-    this.io.to(`session:${sessionId}`).emit('session:output', {
-      sessionId,
-      chatId: proc.currentChatId,
-      content: '',
-      isComplete: true,
-    });
-    await this.saveAssistantMessage(sessionId, content);
-    if (proc.opencodeActiveMessageId === messageId) {
-      proc.opencodeActiveMessageId = null;
-    }
-    return true;
-  }
-
-  private async flushAllOpenCodeAssistantMessages(
-    sessionId: string,
-    proc: ClaudeProcess
-  ): Promise<void> {
-    const streams = proc.partStreams;
-    if (!streams || streams.size === 0) return;
-
-    const ordered = proc.opencodeMessageOrder ?? [];
-    const seen = new Set<string>();
-    for (const messageId of ordered) {
-      seen.add(messageId);
-      await this.flushOpenCodeAssistantMessage(sessionId, proc, messageId);
-    }
-    for (const entry of streams.values()) {
-      if (seen.has(entry.messageId)) continue;
-      seen.add(entry.messageId);
-      await this.flushOpenCodeAssistantMessage(sessionId, proc, entry.messageId);
-    }
-  }
-
-  private async processOpencodeTextChunk(
-    sessionId: string,
-    proc: ClaudeProcess,
-    partId: string,
-    messageId: string,
-    rawChunk: string
-  ): Promise<void> {
-    if (!rawChunk) return;
-    this.rememberOpenCodeMessage(proc, messageId);
-    if (proc.opencodeActiveMessageId && proc.opencodeActiveMessageId !== messageId) {
-      await this.flushOpenCodeAssistantMessage(sessionId, proc, proc.opencodeActiveMessageId);
-    }
-    proc.opencodeActiveMessageId = messageId;
-
-    const streams = (proc.partStreams ??= new Map());
-    const existing = streams.get(partId);
-    const entry = existing ?? {
-      type: 'text' as const,
-      messageId,
-      text: '',
-      thoughtState: { inside: false, pending: '' },
-    };
-    entry.messageId = entry.messageId || messageId;
-    entry.thoughtState ??= { inside: false, pending: '' };
-
-    entry.text += rawChunk;
-    const { state: nextState, emit } = stripThoughtChunk(entry.thoughtState, rawChunk);
-    entry.thoughtState = nextState;
-    entry.cleaned = (entry.cleaned ?? '') + emit;
-    streams.set(partId, entry);
-
-    this.io.to(`session:${sessionId}`).emit('session:thinking', {
-      sessionId,
-      isThinking: nextState.inside,
-    });
-
-    if (emit) {
-      proc.isStreaming = true;
-      proc.currentActivitySummary = 'Writing response';
-      if (process.env.OPENCODE_DEBUG_EVENTS === '1') {
-        console.log(
-          `[OC-EMIT] session=${sessionId} partId=${partId} chunk=${JSON.stringify(emit).slice(0, 80)} totalCleaned=${entry.cleaned.length}`
-        );
-      }
-      this.io.to(`session:${sessionId}`).emit('session:output', {
-        sessionId,
-        chatId: proc.currentChatId,
-        content: emit,
-        isComplete: false,
-      });
-    }
-  }
-
-  private async translateOpencodeServerEvent(
-    sessionId: string,
-    event: OpencodeEvent
-  ): Promise<void> {
-    const proc = this.processes.get(sessionId);
-    if (!proc) {
-      if (process.env.OPENCODE_DEBUG_EVENTS === '1') {
-        console.log(`[OC-TRANSLATE] no proc for sessionId=${sessionId} type=${event.type}`);
-      }
-      return;
-    }
-
-    const type = event.type;
-    const props = (event.properties ?? {}) as Record<string, unknown>;
-
-    switch (type) {
-      case 'session.status': {
-        const status = props.status as { type?: string } | undefined;
-        if (status?.type === 'busy') {
-          proc.opencodeIdle = false;
-          proc.currentActivitySummary = proc.currentActivitySummary || 'OpenCode is starting';
-          this.io.to(`session:${sessionId}`).emit('session:thinking', {
-            sessionId,
-            isThinking: true,
-            message: proc.currentActivitySummary,
-          });
-        } else if (status?.type === 'idle') {
-          proc.opencodeIdle = true;
-          proc.currentToolName = null;
-          proc.currentToolId = null;
-          proc.currentActivitySummary = null;
-          this.io
-            .to(`session:${sessionId}`)
-            .emit('session:thinking', { sessionId, isThinking: false });
-          this.emitQueueState(sessionId, proc);
-        }
-        return;
-      }
-
-      case 'session.idle': {
-        void this.finalizeOpenCodeTurn(sessionId, proc);
-        return;
-      }
-
-      case 'permission.asked': {
-        const requestId = typeof props.id === 'string' ? props.id : undefined;
-        const providerSessionId =
-          typeof props.sessionID === 'string' ? (props.sessionID as string) : undefined;
-        const permission = typeof props.permission === 'string' ? props.permission : 'tool';
-        const patterns = Array.isArray(props.patterns)
-          ? props.patterns.filter((item): item is string => typeof item === 'string')
-          : [];
-        const metadata = props.metadata ?? {};
-        if (!requestId) return;
-        await recordAudit({
-          actorUserId: proc.userId,
-          action: 'permission.request',
-          resourceType: 'session',
-          resourceId: sessionId,
-          metadata: {
-            provider: 'opencode',
-            requestId,
-            toolName: permission,
-            pattern: patterns[0] || null,
-          },
-        });
-        const permissionEvent = {
-          sessionId,
-          requestId,
-          providerSessionId,
-          toolName: permission,
-          toolInput: metadata,
-          description: `OpenCode requests ${permission}${patterns[0] ? `: ${patterns[0]}` : ''}`,
-          suggestedPattern: patterns[0] || `${permission}:*`,
-        };
-        this.emitBufferedEvent(sessionId, 'permission_request', permissionEvent, (sequenced) => {
-          this.io.to(`session:${sessionId}`).emit('session:permission_request', sequenced);
-        });
-        await this.notifyDiscordSessionEvent(sessionId, {
-          eventType: 'session.permission_requested',
-          severity: 'warning',
-          title: 'Session needs permission',
-          summary: `OpenCode requests ${permission}${patterns[0] ? `: ${patterns[0]}` : ''}`,
-          fields: [{ name: 'Request', value: requestId, inline: true }],
-        });
-        this.io
-          .to(`session:${sessionId}`)
-          .emit('session:thinking', { sessionId, isThinking: false });
-        return;
-      }
-
-      case 'permission.v2.asked': {
-        const requestId = typeof props.id === 'string' ? props.id : undefined;
-        const providerSessionId =
-          typeof props.sessionID === 'string' ? (props.sessionID as string) : undefined;
-        const action = typeof props.action === 'string' ? props.action : 'permission';
-        const resources = Array.isArray(props.resources)
-          ? props.resources.filter((item): item is string => typeof item === 'string')
-          : [];
-        const metadata = props.metadata ?? {};
-        if (!requestId) return;
-        await recordAudit({
-          actorUserId: proc.userId,
-          action: 'permission.request',
-          resourceType: 'session',
-          resourceId: sessionId,
-          metadata: {
-            provider: 'opencode',
-            requestId,
-            toolName: action,
-            pattern: resources[0] || null,
-          },
-        });
-        const permissionEvent = {
-          sessionId,
-          requestId,
-          providerSessionId,
-          toolName: action,
-          toolInput: { action, resources, metadata, source: props.source ?? null },
-          description: `OpenCode requests ${action}${resources[0] ? `: ${resources[0]}` : ''}`,
-          suggestedPattern: resources[0] || `${action}:*`,
-        };
-        this.emitBufferedEvent(sessionId, 'permission_request', permissionEvent, (sequenced) => {
-          this.io.to(`session:${sessionId}`).emit('session:permission_request', sequenced);
-        });
-        await this.notifyDiscordSessionEvent(sessionId, {
-          eventType: 'session.permission_requested',
-          severity: 'warning',
-          title: 'Session needs permission',
-          summary: `OpenCode requests ${action}${resources[0] ? `: ${resources[0]}` : ''}`,
-          fields: [{ name: 'Request', value: requestId, inline: true }],
-        });
-        this.io
-          .to(`session:${sessionId}`)
-          .emit('session:thinking', { sessionId, isThinking: false });
-        return;
-      }
-
-      case 'question.asked':
-      case 'question.v2.asked': {
-        const requestId = typeof props.id === 'string' ? props.id : undefined;
-        const providerSessionId =
-          typeof props.sessionID === 'string' ? (props.sessionID as string) : undefined;
-        const rawQuestions = Array.isArray(props.questions) ? props.questions : [];
-        if (!requestId || rawQuestions.length === 0) return;
-        const questions = rawQuestions.map((item, index) => {
-          const question = item as Record<string, unknown>;
-          const options = Array.isArray(question.options)
-            ? question.options.map((option, optionIndex) => {
-                const opt = option as Record<string, unknown>;
-                return {
-                  label:
-                    typeof opt.label === 'string' && opt.label.trim()
-                      ? opt.label
-                      : `Option ${optionIndex + 1}`,
-                  description: typeof opt.description === 'string' ? opt.description : undefined,
-                };
-              })
-            : [];
-          return {
-            question:
-              typeof question.question === 'string' ? question.question : 'OpenCode needs input.',
-            header:
-              typeof question.header === 'string' && question.header.trim()
-                ? question.header
-                : `Question ${index + 1}`,
-            options,
-            multiple: question.multiple === true,
-            custom: question.custom === true,
-          };
-        });
-        const questionEvent = {
-          sessionId,
-          requestId,
-          providerSessionId,
-          questions,
-        };
-        this.emitBufferedEvent(sessionId, 'question', questionEvent, (sequenced) => {
-          this.io.to(`session:${sessionId}`).emit('session:question_request', sequenced);
-        });
-        // Remember it for the surfaces that are not holding a socket open. The
-        // frame above only reaches whoever is subscribed to this session right
-        // now; a widget or a watch learns about the block from the registry.
-        // Registered before the beat, so the beat already counts this question.
-        void this.registerQuestion(sessionId, questionEvent).then(() =>
-          this.emitLifecycle(sessionId, 'question')
-        );
-        await this.notifyDiscordSessionEvent(sessionId, {
-          eventType: 'session.needs_input',
-          severity: 'warning',
-          title: 'Session needs input',
-          summary: questions.map((question) => question.question).join('\n'),
-          fields: [{ name: 'Request', value: requestId, inline: true }],
-        });
-        this.io
-          .to(`session:${sessionId}`)
-          .emit('session:thinking', { sessionId, isThinking: false });
-        return;
-      }
-
-      case 'todo.updated': {
-        const todos = Array.isArray(props.todos)
-          ? props.todos.reduce<TodoItem[]>((acc, todo) => {
-              const item = todo as Record<string, unknown>;
-              const content = typeof item.content === 'string' ? item.content : '';
-              if (!content.trim()) return acc;
-              const next: TodoItem = {
-                content,
-                status: normalizeOpenCodeTodoStatus(item.status),
-              };
-              if (typeof item.activeForm === 'string') next.activeForm = item.activeForm;
-              acc.push(next);
-              return acc;
-            }, [])
-          : [];
-        const todosEvent = { sessionId, todos };
-        this.emitBufferedEvent(sessionId, 'todos', todosEvent, (sequenced) => {
-          this.io.to(`session:${sessionId}`).emit('session:todos', sequenced);
-        });
-        return;
-      }
-
-      case 'session.diff': {
-        this.emitToolUse(sessionId, {
-          sessionId,
-          toolName: 'OpenCodeDiff',
-          status: 'completed',
-          toolId: typeof event.id === 'string' ? event.id : `opencode-diff-${Date.now()}`,
-          input: { files: Array.isArray(props.diff) ? props.diff.length : 0 },
-          result: summarizeOpenCodeDiff(props.diff),
-        });
-        return;
-      }
-
-      case 'session.next.compaction.started': {
-        proc.opencodeCompactionText = '';
-        proc.currentActivitySummary = 'Compacting context';
-        this.io.to(`session:${sessionId}`).emit('session:thinking', {
-          sessionId,
-          isThinking: true,
-          message: proc.currentActivitySummary,
-        });
-        return;
-      }
-
-      case 'session.next.compaction.delta': {
-        const text = typeof props.text === 'string' ? props.text : '';
-        if (text) proc.opencodeCompactionText = `${proc.opencodeCompactionText ?? ''}${text}`;
-        return;
-      }
-
-      case 'session.next.compaction.ended':
-      case 'session.compacted': {
-        proc.totalInputTokens = 0;
-        proc.totalOutputTokens = 0;
-        proc.cacheReadTokens = 0;
-        proc.cacheCreationTokens = 0;
-        this.resetCurrentContextUsage(proc);
-        await this.emitUsage(sessionId, proc);
-        const compactText =
-          typeof props.text === 'string' && props.text.trim()
-            ? props.text
-            : proc.opencodeCompactionText;
-        proc.opencodeCompactionText = '';
-        const justEmittedManual =
-          proc.opencodeLastManualCompactAt &&
-          Date.now() - proc.opencodeLastManualCompactAt < 10_000;
-        if (!justEmittedManual) {
-          await this.emitCompact(sessionId, {
-            sessionId,
-            message: 'OpenCode compacted session context.',
-            summary: compactText || undefined,
-            reason: 'auto-compact',
-          });
-        }
-        this.io
-          .to(`session:${sessionId}`)
-          .emit('session:thinking', { sessionId, isThinking: false });
-        return;
-      }
-
-      case 'session.error': {
-        const err = props.error as { data?: { message?: string }; message?: string } | undefined;
-        const message = err?.data?.message || err?.message || 'OpenCode session error';
-        this.io.to(`session:${sessionId}`).emit('session:output', {
-          sessionId,
-          chatId: proc.currentChatId,
-          content: `${message}\n`,
-          isComplete: true,
-        });
-        await this.notifyDiscordSessionEvent(sessionId, {
-          eventType: 'session.error',
-          severity: 'error',
-          title: 'OpenCode session error',
-          summary: message,
-        });
-        this.io
-          .to(`session:${sessionId}`)
-          .emit('session:thinking', { sessionId, isThinking: false });
-        return;
-      }
-
-      case 'message.part.updated': {
-        const part = props.part as Record<string, unknown> | undefined;
-        const delta = typeof props.delta === 'string' ? (props.delta as string) : undefined;
-        if (!part) return;
-        const partType = part.type as string;
-        const partId = part.id as string;
-        const messageId =
-          (typeof part.messageID === 'string' ? (part.messageID as string) : undefined) ||
-          (typeof part.messageId === 'string' ? (part.messageId as string) : undefined) ||
-          partId;
-
-        if (partType === 'text') {
-          let rawChunk = delta ?? '';
-          if (!rawChunk) {
-            const fullText = (part.text as string) ?? '';
-            const existing = proc.partStreams?.get(partId);
-            if (fullText.length > (existing?.text?.length ?? 0)) {
-              rawChunk = fullText.slice(existing?.text?.length ?? 0);
-            }
-          }
-          await this.processOpencodeTextChunk(sessionId, proc, partId, messageId, rawChunk);
-          return;
-        }
-
-        if (partType === 'reasoning') {
-          const fullText = (part.text as string) ?? '';
-          if (!fullText.trim()) return;
-          const summary = this.formatCodexReasoning(fullText);
-          proc.currentActivitySummary = summary || 'Thinking through the turn';
-          this.io.to(`session:${sessionId}`).emit('session:thinking', {
-            sessionId,
-            isThinking: true,
-            message: proc.currentActivitySummary,
-          });
-          return;
-        }
-
-        if (partType === 'tool') {
-          const callId = (part.callID as string) || partId;
-          const toolName = part.tool as string;
-          const state = part.state as
-            | { status?: string; input?: unknown; output?: string; error?: string }
-            | undefined;
-          if (!toolName || !state) return;
-          if (toolName === 'task') {
-            const input = isRecordValue(state.input) ? state.input : {};
-            if (!this.findSubagentRun(proc, { toolId: callId }))
-              this.startSubagentRun(sessionId, proc, {
-                agentId: callId,
-                toolId: callId,
-                agentType:
-                  typeof input.subagent_type === 'string'
-                    ? input.subagent_type
-                    : 'OpenCode subagent',
-                description:
-                  typeof input.description === 'string'
-                    ? input.description
-                    : typeof input.prompt === 'string'
-                      ? input.prompt
-                      : undefined,
-              });
-            if (state.status === 'completed' || state.status === 'error')
-              this.completeSubagentRun(
-                sessionId,
-                proc,
-                { toolId: callId },
-                {
-                  status: state.status === 'error' ? 'error' : 'completed',
-                  result: state.output,
-                  error: state.error,
-                }
-              );
-          }
-          const emittedTools = (proc.emittedTools ??= new Set());
-
-          if (state.status === 'pending' || state.status === 'running') {
-            await this.flushOpenCodeAssistantMessage(
-              sessionId,
-              proc,
-              proc.opencodeActiveMessageId || messageId
-            );
-            if (!emittedTools.has(callId)) {
-              emittedTools.add(callId);
-              this.emitToolUse(sessionId, {
-                sessionId,
-                toolName,
-                status: 'started',
-                toolId: callId,
-                input: state.input,
-              });
-            }
-            return;
-          }
-
-          if (state.status === 'completed') {
-            const output =
-              typeof state.output === 'string' ? state.output : JSON.stringify(state.output ?? '');
-            this.emitToolUse(sessionId, {
-              sessionId,
-              toolName,
-              status: 'completed',
-              toolId: callId,
-              input: state.input,
-              result: output,
-            });
-            return;
-          }
-
-          if (state.status === 'error') {
-            this.emitToolUse(sessionId, {
-              sessionId,
-              toolName,
-              status: 'error',
-              toolId: callId,
-              input: state.input,
-              error: state.error || 'Tool error',
-            });
-            return;
-          }
-          return;
-        }
-
-        if (partType === 'step-start') {
-          this.rememberOpenCodeMessage(proc, messageId);
-          proc.currentActivitySummary = 'Working through the next step';
-          this.io.to(`session:${sessionId}`).emit('session:thinking', {
-            sessionId,
-            isThinking: true,
-            message: proc.currentActivitySummary,
-          });
-          return;
-        }
-
-        if (partType === 'step-finish') {
-          const tokens = part.tokens as
-            | {
-                input?: number;
-                output?: number;
-                reasoning?: number;
-                cache?: { read?: number; write?: number };
-              }
-            | undefined;
-          const cost = typeof part.cost === 'number' ? (part.cost as number) : 0;
-          if (tokens) {
-            proc.turnInputTokens += tokens.input ?? 0;
-            proc.turnOutputTokens += (tokens.output ?? 0) + (tokens.reasoning ?? 0);
-            proc.turnCacheReadTokens += tokens.cache?.read ?? 0;
-            proc.turnCacheCreationTokens += tokens.cache?.write ?? 0;
-            proc.totalInputTokens += tokens.input ?? 0;
-            proc.totalOutputTokens += (tokens.output ?? 0) + (tokens.reasoning ?? 0);
-            proc.cacheReadTokens += tokens.cache?.read ?? 0;
-            proc.cacheCreationTokens += tokens.cache?.write ?? 0;
-            // Context is the latest model request, while turn* is billed usage
-            // summed across every tool/subagent step.
-            proc.contextInputTokens = tokens.input ?? 0;
-            proc.contextOutputTokens = (tokens.output ?? 0) + (tokens.reasoning ?? 0);
-            proc.contextCacheReadTokens = tokens.cache?.read ?? 0;
-            proc.contextCacheCreationTokens = tokens.cache?.write ?? 0;
-          }
-          if (cost > 0) {
-            proc.previousTotalCostUsd = proc.totalCostUsd;
-            proc.totalCostUsd += cost;
-            proc.turnCostUsd = (proc.turnCostUsd ?? 0) + cost;
-          }
-          await this.emitUsage(sessionId, proc);
-          await this.flushOpenCodeAssistantMessage(
-            sessionId,
-            proc,
-            proc.opencodeActiveMessageId || messageId
-          );
-          return;
-        }
-        return;
-      }
-
-      case 'message.part.delta': {
-        // Streaming text chunk. Shape: { sessionID, messageID, partID, field, delta }.
-        // Only text deltas need to reach the UI; other fields are metadata updates.
-        const field = typeof props.field === 'string' ? (props.field as string) : undefined;
-        if (field !== 'text') return;
-        const partId = typeof props.partID === 'string' ? (props.partID as string) : undefined;
-        const messageId =
-          (typeof props.messageID === 'string' ? (props.messageID as string) : undefined) ||
-          (typeof props.messageId === 'string' ? (props.messageId as string) : undefined) ||
-          partId;
-        const delta = typeof props.delta === 'string' ? (props.delta as string) : undefined;
-        if (!partId || !messageId || !delta) return;
-        await this.processOpencodeTextChunk(sessionId, proc, partId, messageId, delta);
-        return;
-      }
-
-      case 'permission.updated': {
-        // Forwarded for future UI wiring; no action required for now.
-        return;
-      }
-
-      default:
-        return;
-    }
-  }
-
-  private async finalizeOpenCodeTurn(sessionId: string, proc: ClaudeProcess): Promise<void> {
-    if (proc.opencodeUsageFinalizing) return;
-    proc.opencodeUsageFinalizing = true;
-
-    try {
-      if (proc.claudeSessionId && proc.opencodeUsageBaseline) {
-        const finalSnapshot = await opencodeServer.getUsageSnapshot(
-          proc.claudeSessionId,
-          proc.userId
-        );
-        if (finalSnapshot) {
-          const delta = subtractOpenCodeUsage(finalSnapshot, proc.opencodeUsageBaseline);
-          if (delta) {
-            const prior = {
-              input: proc.turnInputTokens,
-              output: proc.turnOutputTokens,
-              cacheRead: proc.turnCacheReadTokens,
-              cacheWrite: proc.turnCacheCreationTokens,
-            };
-            proc.turnInputTokens = delta.input;
-            proc.turnOutputTokens = delta.output + delta.reasoning;
-            proc.turnCacheReadTokens = delta.cacheRead;
-            proc.turnCacheCreationTokens = delta.cacheWrite;
-            proc.totalInputTokens += proc.turnInputTokens - prior.input;
-            proc.totalOutputTokens += proc.turnOutputTokens - prior.output;
-            proc.cacheReadTokens += proc.turnCacheReadTokens - prior.cacheRead;
-            proc.cacheCreationTokens += proc.turnCacheCreationTokens - prior.cacheWrite;
-            // Streamed cost covers only the subscribed root. Recalculate from
-            // the complete root + child usage snapshot at save time.
-            proc.turnCostUsd = undefined;
-          }
-        }
-      }
-
-      // Turn complete: flush every unsaved OpenCode assistant message
-      // separately, then drop partial streams so the next turn starts clean.
-      const streams = proc.partStreams;
-      if (streams && streams.size > 0) {
-        await this.flushAllOpenCodeAssistantMessages(sessionId, proc);
-        streams.clear();
-      }
-      proc.opencodeActiveMessageId = null;
-      proc.opencodeMessageOrder = [];
-      await this.emitUsage(sessionId, proc);
-      await this.saveUsageToDatabase(sessionId, proc);
-    } finally {
-      proc.opencodeUsageBaseline = null;
-      proc.opencodeUsageFinalizing = false;
-      proc.streamingText = '';
-      proc.isStreaming = false;
-      proc.emittedTools?.clear();
-      proc.opencodeIdle = true;
-      proc.currentToolName = null;
-      proc.currentToolId = null;
-      proc.currentActivitySummary = null;
-      this.io.to(`session:${sessionId}`).emit('session:thinking', { sessionId, isThinking: false });
-      this.emitQueueState(sessionId, proc);
-      void this.drainOpenCodeQueuedTurns(sessionId, proc);
-    }
-  }
-
-  /**
    * Respawn a codex process for the next turn.
    * Codex CLI is single-shot (stdin EOF → response → exit), so we need a fresh
    * process for each user message.  This reuses the existing ClaudeProcess entry
@@ -8621,17 +8090,46 @@ Discord Main Gateway:
 
     if (proc.contextRecoveryPending) return;
     const recoveryVersion = proc.contextRecoveryVersion || 0;
-    const stillCurrent = () => this.processes.get(sessionId) === proc && (proc.contextRecoveryVersion || 0) === recoveryVersion;
-    const summary = await this.buildContextSummary(sessionId, HANDOFF_CONTEXT_MAX_MESSAGES, HANDOFF_CONTEXT_MAX_CHARS, proc.currentChatId);
-    const saved = await pgGet('SELECT context_handoff_json FROM sessions WHERE id=? AND user_id=?', sessionId, proc.userId);
+    const stillCurrent = () =>
+      this.processes.get(sessionId) === proc &&
+      (proc.contextRecoveryVersion || 0) === recoveryVersion;
+    const summary = await this.buildContextSummary(
+      sessionId,
+      HANDOFF_CONTEXT_MAX_MESSAGES,
+      HANDOFF_CONTEXT_MAX_CHARS,
+      proc.currentChatId
+    );
+    const saved = await pgGet(
+      'SELECT context_handoff_json FROM sessions WHERE id=? AND user_id=?',
+      sessionId,
+      proc.userId
+    );
     if (!stillCurrent()) return;
     let attempts = 1;
-    try { attempts += Number(JSON.parse(String(saved?.context_handoff_json)).attempts) || 0; } catch { /* first recovery */ }
+    try {
+      attempts += Number(JSON.parse(String(saved?.context_handoff_json)).attempts) || 0;
+    } catch {
+      /* first recovery */
+    }
     if (isClaudeTransportProvider(proc.cliProvider)) {
-      await pgRun('UPDATE sessions SET claude_session_id=NULL,context_handoff_json=? WHERE id=? AND user_id=?',
-        JSON.stringify({ summary, chatId: proc.currentChatId, provider: proc.cliProvider, attempts }), sessionId, proc.userId);
+      await pgRun(
+        'UPDATE sessions SET claude_session_id=NULL,context_handoff_json=? WHERE id=? AND user_id=?',
+        JSON.stringify({
+          summary,
+          chatId: proc.currentChatId,
+          provider: proc.cliProvider,
+          attempts,
+        }),
+        sessionId,
+        proc.userId
+      );
       if (!stillCurrent()) return;
-      if (summary && attempts <= 3) this.contextContinuations.set(sessionId, { userId: proc.userId, chatId: proc.currentChatId, attempts });
+      if (summary && attempts <= 3)
+        this.contextContinuations.set(sessionId, {
+          userId: proc.userId,
+          chatId: proc.currentChatId,
+          attempts,
+        });
     }
 
     if (summary) this.pendingContextReminders.set(sessionId, { summary, reason: 'context-limit' });
@@ -8688,13 +8186,22 @@ Discord Main Gateway:
       await this.startSession(sessionId, pending.userId);
       if (this.contextContinuations.get(sessionId) !== pending) return;
       await this.sendMessage(sessionId, pending.userId, CONTEXT_CONTINUATION_PROMPT, undefined, {
-        chatId: pending.chatId, recordMessage: false, updateLastMessage: false, contextContinuation: true,
+        chatId: pending.chatId,
+        recordMessage: false,
+        updateLastMessage: false,
+        contextContinuation: true,
       });
     } catch (error) {
-      if (this.contextContinuations.get(sessionId) === pending) this.io.to(`session:${sessionId}`).emit('session:error', { sessionId, error: 'Die automatische Fortsetzung ist fehlgeschlagen. Die Übergabe bleibt gespeichert.' });
+      if (this.contextContinuations.get(sessionId) === pending)
+        this.io.to(`session:${sessionId}`).emit('session:error', {
+          sessionId,
+          error:
+            'Die automatische Fortsetzung ist fehlgeschlagen. Die Übergabe bleibt gespeichert.',
+        });
       console.warn('[CONTEXT-LIMIT] Continuation failed', sessionId, error);
     } finally {
-      if (this.contextContinuations.get(sessionId) === pending) this.contextContinuations.delete(sessionId);
+      if (this.contextContinuations.get(sessionId) === pending)
+        this.contextContinuations.delete(sessionId);
     }
   }
 
@@ -9404,7 +8911,12 @@ The planning phase is complete. You are now in Auto-Accept mode.
         proc.isStreaming = false;
       }
       if (proc.contextRecoveryPending) return;
-      if (isClaudeTransportProvider(proc.cliProvider)) await pgRun('UPDATE sessions SET context_handoff_json=NULL WHERE id=? AND user_id=?', sessionId, proc.userId);
+      if (isClaudeTransportProvider(proc.cliProvider))
+        await pgRun(
+          'UPDATE sessions SET context_handoff_json=NULL WHERE id=? AND user_id=?',
+          sessionId,
+          proc.userId
+        );
       // Stop thinking indicator
       this.io.to(`session:${sessionId}`).emit('session:thinking', {
         sessionId,
@@ -9430,6 +8942,10 @@ The planning phase is complete. You are now in Auto-Accept mode.
         this.emitQueueState(sessionId, proc);
         queueMicrotask(() => this.drainClaudeQueuedTurns(sessionId, proc));
         queueMicrotask(async () => await this.applyDeferredModeRestart(sessionId, proc));
+      }
+      if (msg.type === 'result' && proc.cliProvider === 'pi') {
+        this.emitQueueState(sessionId, proc);
+        queueMicrotask(() => void this.drainPiQueuedTurns(sessionId, proc));
       }
     }
   }
@@ -9599,19 +9115,6 @@ The planning phase is complete. You are now in Auto-Accept mode.
     this.emitQueueState(sessionId, proc);
   }
 
-  private queueOpenCodeTurn(
-    sessionId: string,
-    proc: ClaudeProcess,
-    turn: OpenCodePreparedTurn
-  ): void {
-    proc.opencodeQueuedTurns ??= [];
-    proc.opencodeQueuedTurns.push(turn);
-    console.log(
-      `[OPENCODE] Queued user turn while current turn is running [${sessionId}], depth=${proc.opencodeQueuedTurns.length}`
-    );
-    this.emitQueueState(sessionId, proc);
-  }
-
   private queueClaudeTurn(sessionId: string, proc: ClaudeProcess, turn: ClaudePreparedTurn): void {
     proc.claudeQueuedTurns ??= [];
     proc.claudeQueuedTurns.push(turn);
@@ -9621,20 +9124,18 @@ The planning phase is complete. You are now in Auto-Accept mode.
     this.emitQueueState(sessionId, proc);
   }
 
-  private getQueuedTurnItems(
-    proc: ClaudeProcess
-  ): Array<CodexPreparedTurn | OpenCodePreparedTurn | ClaudePreparedTurn> {
+  private getQueuedTurnItems(proc: ClaudeProcess): Array<CodexPreparedTurn | ClaudePreparedTurn> {
     if (proc.cliProvider === 'codex') {
       return proc.codexQueuedTurns ?? [];
-    }
-    if (proc.cliProvider === 'opencode') {
-      return proc.opencodeQueuedTurns ?? [];
     }
     if (isAcpProvider(proc.cliProvider)) {
       return proc.acpQueuedTurns ?? [];
     }
     if (isClaudeTransportProvider(proc.cliProvider)) {
       return proc.claudeQueuedTurns ?? [];
+    }
+    if (proc.cliProvider === 'pi') {
+      return proc.piQueuedTurns ?? [];
     }
     return [];
   }
@@ -9652,21 +9153,20 @@ The planning phase is complete. You are now in Auto-Accept mode.
   private discardQueuedTurns(sessionId: string, proc: ClaudeProcess): void {
     const discarded =
       (proc.codexQueuedTurns?.length ?? 0) +
-      (proc.opencodeQueuedTurns?.length ?? 0) +
       (proc.claudeQueuedTurns?.length ?? 0) +
-      (proc.acpQueuedTurns?.length ?? 0);
+      (proc.acpQueuedTurns?.length ?? 0) +
+      (proc.piQueuedTurns?.length ?? 0);
     proc.codexQueuedTurns = [];
     proc.codexSteerDraining = false;
     proc.codexPreemptingForSteer = false;
-    proc.opencodeQueuedTurns = [];
-    proc.opencodeQueueDraining = false;
-    proc.opencodeIdle = true;
     proc.claudeQueuedTurns = [];
     proc.claudeQueueDraining = false;
     proc.claudeIdle = true;
     proc.acpQueuedTurns = [];
     proc.acpQueueDraining = false;
     proc.acpIdle = true;
+    proc.piQueuedTurns = [];
+    proc.piQueueDraining = false;
     this.emitQueueState(sessionId, proc);
     if (discarded > 0) {
       console.log(`[SESSION] Discarded ${discarded} queued turn(s) [${sessionId}]`);
@@ -9674,6 +9174,10 @@ The planning phase is complete. You are now in Auto-Accept mode.
   }
 
   private emitQueueState(sessionId: string, proc: ClaudeProcess): void {
+    // Queued Pi messages must survive a crash or restart with the run.
+    if (proc.cliProvider === 'pi' && proc.piTurnInFlight) {
+      patchPiRun(sessionId, { queued: this.piQueueForJournal(proc) });
+    }
     const items = this.getQueuedTurnItems(proc).map((turn) => ({
       id: turn.queueId,
       preview: turn.originalMessage.slice(0, 240),
@@ -9690,12 +9194,12 @@ The planning phase is complete. You are now in Auto-Accept mode.
       busy:
         proc.cliProvider === 'codex'
           ? !proc.codexIdle || hasPendingCodexFollowup
-          : proc.cliProvider === 'opencode'
-            ? !proc.opencodeIdle || items.length > 0
-            : isClaudeTransportProvider(proc.cliProvider)
-              ? proc.claudeIdle === false || items.length > 0
-              : isAcpProvider(proc.cliProvider)
-                ? proc.acpIdle === false || items.length > 0
+          : isClaudeTransportProvider(proc.cliProvider)
+            ? proc.claudeIdle === false || items.length > 0
+            : isAcpProvider(proc.cliProvider)
+              ? proc.acpIdle === false || items.length > 0
+              : proc.cliProvider === 'pi'
+                ? !!proc.piTurnInFlight || items.length > 0
                 : proc.isStreaming || !!proc.currentToolName,
       preempting: !!proc.codexPreemptingForSteer,
     });
@@ -9798,9 +9302,9 @@ The planning phase is complete. You are now in Auto-Accept mode.
     );
     if (hasActiveSubagents) return false;
     if (proc.cliProvider === 'codex') return proc.codexIdle !== false;
-    if (proc.cliProvider === 'opencode') return proc.opencodeIdle !== false;
     if (isAcpProvider(proc.cliProvider)) return proc.acpIdle !== false;
     if (isClaudeTransportProvider(proc.cliProvider)) return proc.claudeIdle !== false;
+    if (proc.cliProvider === 'pi') return !proc.piTurnInFlight;
     return !proc.isStreaming && !proc.currentToolName;
   }
 
@@ -9916,12 +9420,13 @@ The planning phase is complete. You are now in Auto-Accept mode.
       // without configOptions, so an unadvertised value is probed instead of
       // skipped; a rejection just leaves the harness default in place.
       const options = proc.acpConfigOptions;
-      if (options?.length && !acpConfigSupports(options, configId, value)) return;
+      const chosen = options?.length ? acpFallbackValue(options, configId, value) : value;
+      if (!chosen) return;
       try {
         const result = await connection.setSessionConfigOption({
           sessionId: nativeSessionId,
           configId,
-          value,
+          value: chosen,
         });
         proc.acpConfigOptions = result.configOptions;
       } catch (error) {
@@ -10699,183 +10204,6 @@ The planning phase is complete. You are now in Auto-Accept mode.
     }
   }
 
-  private async dispatchOpenCodeTurn(
-    sessionId: string,
-    proc: ClaudeProcess,
-    turn: OpenCodePreparedTurn
-  ): Promise<void> {
-    if (proc.cliProvider !== 'opencode' || !proc.serverBacked || !proc.claudeSessionId) {
-      throw new Error('OpenCode session is not ready');
-    }
-
-    proc.currentChatId = turn.chatId;
-    proc.currentUsageTurnId = turn.queueId;
-    proc.currentUsageTurnStartedAt = turn.queuedAt;
-
-    if (turn.updateLastMessage) {
-      proc.lastUserMessage = turn.originalMessage;
-      proc.lastAttachments = turn.attachments || null;
-    }
-    proc.pendingPermissionDenials = null;
-    proc.opencodeIdle = false;
-    this.emitQueueState(sessionId, proc);
-    this.io.to(`session:${sessionId}`).emit('session:thinking', {
-      sessionId,
-      isThinking: true,
-    });
-
-    try {
-      const selectedReasoning = await getCliReasoningForSession(proc.userId, 'opencode', sessionId);
-      this.resetCurrentContextUsage(proc);
-      proc.opencodeUsageBaseline = await opencodeServer.getUsageSnapshot(
-        proc.claudeSessionId,
-        proc.userId
-      );
-
-      if (turn.opencodeSlashCommand?.type === 'compact') {
-        const compacted = await opencodeServer.compactSession(proc.claudeSessionId, {
-          model: proc.model,
-          mode: proc.mode,
-          variant: selectedReasoning,
-          directory: proc.workingDirectory,
-          webuiSessionId: sessionId,
-          userId: proc.userId,
-        });
-        if (!compacted) throw new Error('OpenCode compact endpoint is not available');
-        proc.opencodeLastManualCompactAt = Date.now();
-        proc.totalInputTokens = 0;
-        proc.totalOutputTokens = 0;
-        proc.cacheReadTokens = 0;
-        proc.cacheCreationTokens = 0;
-        this.resetCurrentContextUsage(proc);
-        await this.emitUsage(sessionId, proc);
-        await this.emitCompact(sessionId, {
-          sessionId,
-          message: 'OpenCode compacted session context.',
-        });
-        proc.opencodeIdle = true;
-        this.emitQueueState(sessionId, proc);
-        this.io.to(`session:${sessionId}`).emit('session:thinking', {
-          sessionId,
-          isThinking: false,
-        });
-        console.log(`Compacted opencode session [${sessionId}] via HTTP`);
-        if (!proc.opencodeQueueDraining) {
-          void this.drainOpenCodeQueuedTurns(sessionId, proc);
-        }
-        return;
-      }
-
-      if (turn.opencodeSlashCommand?.type === 'command') {
-        await opencodeServer.sendCommand(proc.claudeSessionId, {
-          turnId: turn.queueId,
-          command: turn.opencodeSlashCommand.command,
-          arguments: turn.opencodeSlashCommand.args,
-          model: proc.model,
-          mode: proc.mode,
-          variant: selectedReasoning,
-          directory: proc.workingDirectory,
-          webuiSessionId: sessionId,
-          userId: proc.userId,
-        });
-        console.log(
-          `Sent command [${sessionId}] via opencode HTTP: /${turn.opencodeSlashCommand.command}`
-        );
-        return;
-      }
-
-      if (turn.opencodeSlashCommand?.type === 'plan') {
-        await opencodeServer.sendPrompt(proc.claudeSessionId, {
-          turnId: turn.queueId,
-          text:
-            turn.opencodeSlashCommand.args ||
-            'Create a plan for the next work in this session. Do not edit files until the plan is accepted.',
-          model: proc.model,
-          agent: 'plan',
-          mode: proc.mode,
-          variant: selectedReasoning,
-          directory: proc.workingDirectory,
-          webuiSessionId: sessionId,
-          userId: proc.userId,
-        });
-        console.log(`Sent plan request [${sessionId}] via opencode plan agent`);
-        return;
-      }
-
-      await opencodeServer.sendPrompt(proc.claudeSessionId, {
-        turnId: turn.queueId,
-        text: turn.messageForClaude,
-        model: proc.model,
-        mode: proc.mode,
-        variant: selectedReasoning,
-        directory: proc.workingDirectory,
-        webuiSessionId: sessionId,
-        userId: proc.userId,
-      });
-      console.log(
-        `Sent message [${sessionId}] via opencode HTTP: ${turn.messageForClaude.substring(0, 100)}...`
-      );
-    } catch (err) {
-      proc.opencodeIdle = true;
-      this.emitQueueState(sessionId, proc);
-      this.io.to(`session:${sessionId}`).emit('session:thinking', {
-        sessionId,
-        isThinking: false,
-      });
-      throw err;
-    }
-  }
-
-  private async drainOpenCodeQueuedTurns(sessionId: string, proc: ClaudeProcess): Promise<void> {
-    if (proc.cliProvider !== 'opencode' || proc.opencodeQueueDraining || !proc.opencodeIdle) {
-      return;
-    }
-
-    const nextTurn = proc.opencodeQueuedTurns?.shift();
-    if (!nextTurn) {
-      this.emitQueueState(sessionId, proc);
-      return;
-    }
-
-    proc.opencodeQueueDraining = true;
-    let dispatchedSuccessfully = false;
-    this.emitQueueState(sessionId, proc);
-    try {
-      await assertTaskTurnAllowed(sessionId, proc.userId);
-      await this.dispatchOpenCodeTurn(sessionId, proc, nextTurn);
-      dispatchedSuccessfully = true;
-    } catch (err) {
-      proc.opencodeQueuedTurns?.unshift(nextTurn);
-      proc.opencodeIdle = true;
-      this.emitQueueState(sessionId, proc);
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[OPENCODE] Failed to dispatch queued turn [${sessionId}]:`, err);
-      this.io.to(`session:${sessionId}`).emit('session:error', {
-        sessionId,
-        error: `Failed to start queued OpenCode message: ${message}`,
-      });
-      await this.notifyDiscordSessionEvent(sessionId, {
-        eventType: 'session.error',
-        severity: 'error',
-        title: 'OpenCode queued turn failed',
-        summary: `Failed to start queued OpenCode message: ${message}`,
-      });
-      this.io.to(`session:${sessionId}`).emit('session:thinking', {
-        sessionId,
-        isThinking: false,
-      });
-    } finally {
-      proc.opencodeQueueDraining = false;
-      if (
-        dispatchedSuccessfully &&
-        proc.opencodeIdle &&
-        (proc.opencodeQueuedTurns?.length ?? 0) > 0
-      ) {
-        void this.drainOpenCodeQueuedTurns(sessionId, proc);
-      }
-    }
-  }
-
   async sendMessage(
     sessionId: string,
     userId: string,
@@ -10927,7 +10255,8 @@ The planning phase is complete. You are now in Auto-Accept mode.
       throw new Error('Provider context belongs to a different chat; retry after switching');
     }
     proc.currentChatId = targetChatId;
-    if (!options?.contextContinuation) proc.contextRecoveryVersion = (proc.contextRecoveryVersion || 0) + 1;
+    if (!options?.contextContinuation)
+      proc.contextRecoveryVersion = (proc.contextRecoveryVersion || 0) + 1;
 
     const materializedAttachments = await materializeAttachments(
       attachments,
@@ -10936,14 +10265,26 @@ The planning phase is complete. You are now in Auto-Accept mode.
     const filePaths = materializedAttachments.files;
     const inlineTextContents = materializedAttachments.inlineText;
 
-    if (options?.contextContinuation && !this.contextContinuations.has(sessionId)) throw new Error('Fortsetzung wurde abgebrochen');
+    if (options?.contextContinuation && !this.contextContinuations.has(sessionId))
+      throw new Error('Fortsetzung wurde abgebrochen');
     if (!options?.contextContinuation && isClaudeTransportProvider(proc.cliProvider)) {
-      const saved = await pgGet('SELECT context_handoff_json FROM sessions WHERE id=? AND user_id=?', sessionId, userId);
+      const saved = await pgGet(
+        'SELECT context_handoff_json FROM sessions WHERE id=? AND user_id=?',
+        sessionId,
+        userId
+      );
       if (saved?.context_handoff_json && !proc.contextReminder) {
         try {
           const checkpoint = JSON.parse(String(saved.context_handoff_json));
-          if (checkpoint.provider === proc.cliProvider && checkpoint.chatId === targetChatId && typeof checkpoint.summary === 'string') proc.contextReminder = { summary: checkpoint.summary, reason: 'context-limit' };
-        } catch { /* no usable checkpoint */ }
+          if (
+            checkpoint.provider === proc.cliProvider &&
+            checkpoint.chatId === targetChatId &&
+            typeof checkpoint.summary === 'string'
+          )
+            proc.contextReminder = { summary: checkpoint.summary, reason: 'context-limit' };
+        } catch {
+          /* no usable checkpoint */
+        }
       }
     }
     // Build message for Claude (with attachment instructions and/or working dir reminder if needed)
@@ -10952,8 +10293,6 @@ The planning phase is complete. You are now in Auto-Accept mode.
       proc.cliProvider === 'codex' ? parseCodexReviewCommand(message) : null;
     const codexNativeSlashCommand =
       proc.cliProvider === 'codex' && !codexReviewCommand && isCodexNativeSlashCommand(message);
-    const opencodeSlashCommand =
-      proc.cliProvider === 'opencode' ? parseOpenCodeSlashCommand(message) : null;
     const piNativeSlashCommand = proc.cliProvider === 'pi' && message.trimStart().startsWith('/');
     const piCompactCommand =
       proc.cliProvider === 'pi' && /^\/compact(?:\s|$)/i.test(message.trim());
@@ -10962,10 +10301,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     const vibeNativeSlashCommand =
       proc.cliProvider === 'vibe' && /^\/[a-z][\w-]*(?:\s|$)/i.test(message.trimStart());
     const providerNativeSlashCommand =
-      codexNativeSlashCommand ||
-      Boolean(opencodeSlashCommand) ||
-      piNativeSlashCommand ||
-      vibeNativeSlashCommand;
+      codexNativeSlashCommand || piNativeSlashCommand || vibeNativeSlashCommand;
     let codexExecCommandForTurn: CodexPreparedTurn['codexExecCommand'];
     const codexImagePathsForTurn: string[] = [];
     if (codexReviewCommand) {
@@ -11040,7 +10376,6 @@ ${proc.contextReminder.summary}
     if (
       !codexReviewCommand &&
       !providerNativeSlashCommand &&
-      proc.cliProvider !== 'opencode' &&
       proc.modePromptInjected !== proc.mode
     ) {
       const modePrompt = this.getModePrompt(proc.mode);
@@ -11124,29 +10459,7 @@ ${proc.contextReminder.summary}
 
       if (imageFiles.length > 0) {
         const refs = imageFiles.map((f) => `- ${f.path}`).join('\n');
-        if (proc.cliProvider === 'opencode') {
-          const names = imageFiles.map((f) => f.filename).join(', ');
-          const bridgeDescription = await describeImagesWithCodex({
-            imagePaths: imageFiles.map((f) => f.path),
-            userPrompt: message,
-            cwd: proc.workingDirectory,
-            sessionId,
-          });
-          if (bridgeDescription) {
-            instructions.push(
-              `The user attached ${imageFiles.length} image file(s) (${names}), saved at:\n${refs}\n\n` +
-                `OpenCode is receiving these image attachments through Plum Code WebUI's Codex vision bridge, so Codex pre-read the image(s) and produced these visual notes:\n` +
-                `<image-vision-notes provider="codex">\n${bridgeDescription}\n</image-vision-notes>\n\n` +
-                `Use these notes as the image content. If you need exact pixels or OCR beyond these notes, say what is missing.`
-            );
-          } else {
-            instructions.push(
-              `The user attached ${imageFiles.length} image file(s) (${names}), saved at:\n${refs}\n` +
-                `OpenCode did not receive native vision content and the Codex vision bridge failed. Do not pretend to see the image; ` +
-                `ask the user for a text description or switch to Codex/Claude for this image-specific turn.`
-            );
-          }
-        } else if (proc.cliProvider === 'codex' || proc.cliProvider === 'vibe') {
+        if (proc.cliProvider === 'codex' || proc.cliProvider === 'vibe') {
           // Codex (--image) and Vibe (ACP image blocks) see images natively.
           // Codex supports native multimodal input via --image. Stage the paths for
           // this turn's respawn instead of asking the model to Read them — that wastes
@@ -11211,7 +10524,7 @@ ${proc.contextReminder.summary}
     let recordedEventSequence: number | undefined;
 
     if (recordMessage) {
-    // Save user message and emit to frontend (show original message, images as metadata)
+      // Save user message and emit to frontend (show original message, images as metadata)
       recordedEventSequence = await this.allocateEventSequence(sessionId);
       try {
         await pgRun(
@@ -11372,39 +10685,6 @@ ${proc.contextReminder.summary}
       };
     }
 
-    if (proc.cliProvider === 'opencode' && proc.serverBacked && proc.claudeSessionId) {
-      const opencodeTurn: OpenCodePreparedTurn = {
-        queueId: recordedMessageId,
-        chatId: recordedChatId,
-        queuedAt: recordedCreatedAt,
-        originalMessage: message,
-        messageForClaude,
-        attachments,
-        updateLastMessage,
-        opencodeSlashCommand,
-      };
-
-      if (proc.opencodeIdle === false || proc.opencodeQueueDraining) {
-        this.queueOpenCodeTurn(sessionId, proc, opencodeTurn);
-        return {
-          ...(recordMessage ? { messageId: recordedMessageId } : {}),
-          chatId: recordedChatId,
-          disposition: 'queued',
-          highWatermark:
-            recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
-        };
-      }
-
-      await this.dispatchOpenCodeTurn(sessionId, proc, opencodeTurn);
-      return {
-        ...(recordMessage ? { messageId: recordedMessageId } : {}),
-        chatId: recordedChatId,
-        disposition: 'dispatched',
-        highWatermark:
-          recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
-      };
-    }
-
     if (isClaudeTransportProvider(proc.cliProvider)) {
       const claudeTurn: ClaudePreparedTurn = {
         queueId: recordedMessageId,
@@ -11475,7 +10755,8 @@ ${proc.contextReminder.summary}
     // Never write into the stale child — its stdin is dead or belongs to a
     // replaced turn. Re-dispatch once through the current transport instead;
     // the user message is already recorded, so the retry must not re-record.
-    if (options?.contextContinuation && !this.contextContinuations.has(sessionId)) throw new Error('Fortsetzung wurde abgebrochen');
+    if (options?.contextContinuation && !this.contextContinuations.has(sessionId))
+      throw new Error('Fortsetzung wurde abgebrochen');
     if (this.processes.get(sessionId) !== proc) {
       if (options?.staleProcRedispatch) {
         throw new Error('Session restarted repeatedly while sending; message not delivered');
@@ -11520,9 +10801,56 @@ ${proc.contextReminder.summary}
     }
 
     if (proc.cliProvider === 'pi') {
-      this.clearPiCompactResumeTimer(proc);
-      proc.piTurnInFlight = true;
-      proc.piCompactContinuations = 0;
+      const piTurn: ClaudePreparedTurn = {
+        queueId: recordedMessageId,
+        chatId: recordedChatId,
+        queuedAt: recordedCreatedAt,
+        originalMessage: message,
+        messageForClaude,
+        attachments,
+        updateLastMessage,
+      };
+      const response = async (disposition: 'queued' | 'dispatched') => ({
+        ...(recordMessage ? { messageId: recordedMessageId } : {}),
+        chatId: recordedChatId,
+        disposition,
+        highWatermark:
+          recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
+      });
+      const piBusy =
+        proc.piTurnInFlight ||
+        proc.piCompacting ||
+        proc.piQueueDraining ||
+        (proc.piQueuedTurns?.length ?? 0) > 0;
+      if (piBusy) {
+        // Steering goes straight to Pi, which takes it after the current tool
+        // round. Everything else waits in Plum's queue — visible, removable,
+        // cleared by Stop — instead of Pi's in-memory follow-up queue, which
+        // delivered only after the whole run and died with the process.
+        if (
+          options?.activeFollowupMode === 'steer' &&
+          proc.piTurnInFlight &&
+          proc.process.stdin?.writable
+        ) {
+          proc.process.stdin.write(
+            `${JSON.stringify({
+              type: 'prompt',
+              message: withUltrathink(proc, messageForClaude),
+              streamingBehavior: 'steer',
+            })}\n`
+          );
+          console.log(`[PI] Steering message into the running task [${sessionId}]`);
+          return response('dispatched');
+        }
+        proc.piQueuedTurns = [...(proc.piQueuedTurns ?? []), piTurn];
+        console.log(
+          `[PI] Queued user turn while a run is in flight [${sessionId}], depth=${proc.piQueuedTurns.length}`
+        );
+        this.emitQueueState(sessionId, proc);
+        return response('queued');
+      }
+      this.dispatchPiTurn(sessionId, proc, piTurn);
+      return response('dispatched');
     }
 
     proc.currentUsageTurnId = recordedMessageId;
@@ -11595,14 +10923,14 @@ ${proc.contextReminder.summary}
       isThinking: false,
     });
 
-    // Server-backed opencode: abort the in-flight prompt via HTTP.
-    if (proc.serverBacked && proc.cliProvider === 'opencode' && proc.claudeSessionId) {
-      void opencodeServer.abort(proc.claudeSessionId, proc.userId);
-      return;
-    }
-
     if (proc.cliProvider === 'pi' && proc.process.stdin?.writable) {
+      // Steering messages wait inside Pi; Stop drops them like Plum's queue.
+      proc.process.stdin.write(`${JSON.stringify({ type: 'clear_queue' })}\n`);
       proc.process.stdin.write(`${JSON.stringify({ type: 'abort' })}\n`);
+      proc.piDispatchedTurn = undefined;
+      // Stopped on purpose: nothing to resume after a crash or restart.
+      this.journalPiRunEnd(sessionId);
+      proc.piRunError = undefined;
       proc.isStreaming = false;
       proc.currentToolName = null;
       proc.currentToolId = null;
@@ -11656,11 +10984,9 @@ ${proc.contextReminder.summary}
       clearPendingQuestionsForSession(sessionId)
     );
 
-    if (proc.serverBacked && proc.cliProvider === 'opencode') {
-      this.detachProcessForRestart(proc);
-      await this.cleanupProcess(sessionId, proc);
-      return;
-    }
+    // A stopped Pi run is over by request, not a crash (see the exit handler).
+    proc.piTurnInFlight = false;
+    if (proc.cliProvider === 'pi') this.journalPiRunEnd(sessionId);
 
     // Close stdin to signal end
     proc.process.stdin?.end();
@@ -11678,12 +11004,6 @@ ${proc.contextReminder.summary}
   }
 
   private detachProcessForRestart(proc: ClaudeProcess): void {
-    if (proc.serverBacked && proc.cliProvider === 'opencode' && proc.claudeSessionId) {
-      void opencodeServer.abort(proc.claudeSessionId, proc.userId);
-      opencodeServer.unsubscribe(proc.claudeSessionId, proc.userId);
-      return;
-    }
-
     terminateManagedProcess(proc.process);
   }
 
@@ -11747,10 +11067,10 @@ ${proc.contextReminder.summary}
         throw new Error('Unauthorized');
       }
 
-      if (!options.preserveNativeContext) proc.contextRecoveryVersion = (proc.contextRecoveryVersion || 0) + 1;
+      if (!options.preserveNativeContext)
+        proc.contextRecoveryVersion = (proc.contextRecoveryVersion || 0) + 1;
       this.discardQueuedTurns(sessionId, proc);
-      // Stop the provider transport immediately. Server-backed OpenCode sessions
-      // need an HTTP abort plus handler cleanup; their virtual child kill is a no-op.
+      // Stop the provider transport immediately.
       this.detachProcessForRestart(proc);
       this.completeActiveSubagents(sessionId, proc, { includeBackground: true });
       this.processes.delete(sessionId);
@@ -11799,12 +11119,24 @@ ${proc.contextReminder.summary}
       return null;
     }
 
-    const requests = await pgAll('SELECT content FROM messages WHERE session_id=? AND chat_id IS ? AND role=\'user\' ORDER BY created_at DESC,seq DESC LIMIT 12', sessionId, chatId);
-    const original = await pgGet('SELECT content FROM messages WHERE session_id=? AND chat_id IS ? AND role=\'user\' ORDER BY created_at ASC,seq ASC LIMIT 1', sessionId, chatId);
+    const requests = await pgAll(
+      "SELECT content FROM messages WHERE session_id=? AND chat_id IS ? AND role='user' ORDER BY created_at DESC,seq DESC LIMIT 12",
+      sessionId,
+      chatId
+    );
+    const original = await pgGet(
+      "SELECT content FROM messages WHERE session_id=? AND chat_id IS ? AND role='user' ORDER BY created_at ASC,seq ASC LIMIT 1",
+      sessionId,
+      chatId
+    );
     return buildContinuationHandoff({
       original: original?.content ? String(original.content) : null,
-      users: requests.reverse().map(row => String(row.content)),
-      recent: rows.reverse().filter(row => !(row.role === 'assistant' && isClaudeContextLimitAssistantReply(row.content))),
+      users: requests.reverse().map((row) => String(row.content)),
+      recent: rows
+        .reverse()
+        .filter(
+          (row) => !(row.role === 'assistant' && isClaudeContextLimitAssistantReply(row.content))
+        ),
       maxChars,
     });
   }
@@ -12016,13 +11348,6 @@ ${proc.contextReminder.summary}
       proc.codexPreemptKillTimer = undefined;
     }
 
-    // Server-backed opencode: drop the SSE handler so events for this session
-    // stop routing anywhere. The opencode session itself stays alive on the
-    // server (it can be resumed on next startSession).
-    if (proc.serverBacked && proc.cliProvider === 'opencode' && proc.claudeSessionId) {
-      opencodeServer.unsubscribe(proc.claudeSessionId, proc.userId);
-    }
-
     this.completeActiveSubagents(sessionId, proc, { includeBackground: true });
     this.processes.delete(sessionId);
 
@@ -12043,9 +11368,10 @@ ${proc.contextReminder.summary}
       status: 'stopped',
     });
     if (proc.contextRecoveryPending && this.contextContinuations.has(sessionId)) {
-      setImmediate(() => { void this.resumeAfterContextLimit(sessionId); });
+      setImmediate(() => {
+        void this.resumeAfterContextLimit(sessionId);
+      });
     }
-
   }
 
   getRunningSessionIds(): string[] {
@@ -12091,12 +11417,18 @@ ${proc.contextReminder.summary}
     const busy =
       proc.cliProvider === 'codex'
         ? !proc.codexIdle || hasPendingCodexFollowup || hasActiveSubagents
-        : proc.cliProvider === 'opencode'
-          ? !proc.opencodeIdle || queueItems.length > 0 || hasActiveSubagents
-          : isClaudeTransportProvider(proc.cliProvider)
-            ? proc.claudeIdle === false || queueItems.length > 0 || hasActiveSubagents
-            : isAcpProvider(proc.cliProvider)
-              ? proc.acpIdle === false || queueItems.length > 0 || hasActiveSubagents
+        : isClaudeTransportProvider(proc.cliProvider)
+          ? proc.claudeIdle === false || queueItems.length > 0 || hasActiveSubagents
+          : isAcpProvider(proc.cliProvider)
+            ? proc.acpIdle === false || queueItems.length > 0 || hasActiveSubagents
+            : proc.cliProvider === 'pi'
+              ? // A Pi run is busy between rounds too: waiting for the model,
+                // retrying, compacting.
+                !!proc.piTurnInFlight ||
+                proc.isStreaming ||
+                !!proc.currentToolName ||
+                queueItems.length > 0 ||
+                hasActiveSubagents
               : proc.isStreaming || !!proc.currentToolName || hasActiveSubagents;
     const activitySummary = this.getActivitySummary(proc, busy, queueItems.length);
 
@@ -12129,11 +11461,9 @@ ${proc.contextReminder.summary}
    * then SIGKILLs anything still alive.
    */
   async shutdownAll(timeoutMs = 3000): Promise<void> {
+    this.shuttingDown = true;
     const sessionIds = Array.from(this.processes.keys());
-    if (sessionIds.length === 0) {
-      await opencodeServer.shutdownAll();
-      return;
-    }
+    if (sessionIds.length === 0) return;
 
     console.log(`[SHUTDOWN] Terminating ${sessionIds.length} Claude process(es)`);
 
@@ -12148,6 +11478,9 @@ ${proc.contextReminder.summary}
         const proc = this.processes.get(sessionId);
         if (!proc) return;
         try {
+          // A Pi run keeps its rounds apart until it settles; book them now.
+          // Its journal entry stays, so the next boot resumes the run.
+          if (proc.cliProvider === 'pi') await this.bookPiRunUsage(sessionId, proc);
           await this.saveUsageToDatabase(sessionId, proc);
         } catch (err) {
           console.warn(`[SHUTDOWN] Usage flush failed for ${sessionId}:`, err);
@@ -12159,12 +11492,8 @@ ${proc.contextReminder.summary}
       const proc = this.processes.get(sessionId);
       if (!proc) continue;
       try {
-        if (proc.serverBacked && proc.cliProvider === 'opencode') {
-          this.detachProcessForRestart(proc);
-        } else {
-          proc.process.stdin?.end();
-          signalManagedProcess(proc.process, 'SIGTERM');
-        }
+        proc.process.stdin?.end();
+        signalManagedProcess(proc.process, 'SIGTERM');
       } catch (err) {
         console.error(`[SHUTDOWN] SIGTERM failed for ${sessionId}:`, err);
       }
@@ -12192,7 +11521,6 @@ ${proc.contextReminder.summary}
       this.completeActiveSubagents(sessionId, proc, { includeBackground: true });
       this.processes.delete(sessionId);
     }
-    await opencodeServer.shutdownAll();
   }
 
   // Handle permission approval - restart session with allowed tools and resend message
@@ -12304,14 +11632,12 @@ ${proc.contextReminder.summary}
     // Claude Code reports the bare model id, which would drop a `[1m]`
     // selection on restart; take the session's stored choice first.
     const requestedModel =
-      cliProvider === 'opencode'
-        ? await getCliModelForSession(userId, cliProvider, sessionId)
-        : cliProvider === 'claude'
-          ? ((await getCliModelForSession(userId, cliProvider, sessionId)) ??
-            (proc.model && proc.model !== 'unknown' ? proc.model : null))
-          : proc.model && proc.model !== 'unknown'
-            ? proc.model
-            : await getCliModelForSession(userId, cliProvider, sessionId);
+      cliProvider === 'claude'
+        ? ((await getCliModelForSession(userId, cliProvider, sessionId)) ??
+          (proc.model && proc.model !== 'unknown' ? proc.model : null))
+        : proc.model && proc.model !== 'unknown'
+          ? proc.model
+          : await getCliModelForSession(userId, cliProvider, sessionId);
     const requestedReasoning = await getCliReasoningForSession(userId, cliProvider, sessionId);
     const requestedServiceTier = await getCliServiceTierForSession(userId, cliProvider, sessionId);
     if (isClaudeTransportProvider(cliProvider)) {

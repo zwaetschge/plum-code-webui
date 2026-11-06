@@ -10,7 +10,7 @@ import org.junit.Test
 
 /**
  * One Mistral plan carries two monthly allowances and Plum tracks them apart:
- * `mistral` for API/Studio traffic routed through Pi/OpenCode, `vibe` for the
+ * `mistral` for API/Studio traffic routed through Pi or model chat, `vibe` for the
  * turns the Vibe harness books. These cover the client side of that split —
  * the presets the budget editor offers and the shape
  * `GET /api/usage/limits?provider=vibe` answers with.

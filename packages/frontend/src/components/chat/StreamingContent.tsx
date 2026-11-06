@@ -282,7 +282,7 @@ function parseClaudeOutput(content: string): {
 type ParsedStreamingOutput = ReturnType<typeof parseClaudeOutput>;
 
 function parseProviderOutput(content: string, provider: UiProvider): ParsedStreamingOutput {
-  // Codex/OpenCode stream clean assistant deltas through the backend. The
+  // Codex, Pi and Vibe stream clean assistant deltas through the backend. The
   // heavy terminal-screen parser exists for legacy Claude CLI output only.
   if (provider !== 'claude' && provider !== 'zai') {
     const cleanContent = stripAnsi(content);

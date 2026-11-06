@@ -6,7 +6,7 @@ import path from 'path';
  *
  * The config writers this replaces used a plain `fs.writeFileSync`, which
  * truncates the target and then fills it. A provider CLI that reads
- * `opencode.json` or Pi's `models.json` during that window gets a truncated
+ * Pi's `models.json` or `mcp.json` during that window gets a truncated
  * file and fails to parse it — and because the sync runs on every session
  * spawn, the window is hit by exactly the process that needs the file. Writing
  * to a sibling temp file and renaming makes the swap atomic on the same

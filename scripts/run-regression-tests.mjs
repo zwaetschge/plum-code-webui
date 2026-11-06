@@ -104,11 +104,6 @@ export const REGRESSION_SUITES = [
     args: ['--filter', '@plum-code-webui/backend', 'run', 'test:session-icon-thumbnails'],
   },
   {
-    name: 'opencode isolation',
-    command: 'pnpm',
-    args: ['--filter', '@plum-code-webui/backend', 'run', 'test:opencode-isolation'],
-  },
-  {
     name: 'operations and rollback',
     command: 'node',
     args: ['scripts/ops-release-regression-tests.mjs'],

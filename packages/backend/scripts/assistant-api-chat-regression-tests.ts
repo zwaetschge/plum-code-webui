@@ -14,7 +14,7 @@ const { run, get, closePool } = await import('../src/db/pg.js');
 const { BODY_SCHEMAS, createResource, reviseResource, archiveResource } =
   await import('../src/services/assistant/resources.js');
 const { safeEncrypt } = await import('../src/utils/encryption.js');
-const { writeOpenCodeProvidersForUser } = await import('../src/utils/opencodeProviderKeys.js');
+const { writeModelProvidersForUser } = await import('../src/utils/modelProviderKeys.js');
 const { apiChatProviders } = await import('../src/services/assistant/apiTransport.js');
 const { apiUsage } = await import('../src/services/assistant/apiUsage.js');
 const {
@@ -157,7 +157,7 @@ try {
       id
     );
   const stamp = new Date().toISOString();
-  await writeOpenCodeProvidersForUser('api-alice', [
+  await writeModelProvidersForUser('api-alice', [
     {
       id: 'openai',
       name: 'Fixture API',

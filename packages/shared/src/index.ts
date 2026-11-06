@@ -21,6 +21,7 @@ export type * from './types/tasks.js';
 export type * from './types/operations.js';
 export type * from './types/discord.js';
 export type * from './types/home-assistant.js';
+export type * from './types/hermes.js';
 export * from './utils/contextWindow.js';
 
 export * from './utils/subagents.js';

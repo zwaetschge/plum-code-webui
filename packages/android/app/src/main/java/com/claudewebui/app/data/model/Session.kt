@@ -14,7 +14,6 @@ enum class SessionStatus {
 enum class CLIProvider(val displayName: String) {
     @SerialName("claude") CLAUDE("Claude"),
     @SerialName("codex") CODEX("Codex"),
-    @SerialName("opencode") OPENCODE("OpenCode"),
     @SerialName("pi") PI("Pi"),
 
     @SerialName("vibe") VIBE("Vibe"),
@@ -23,7 +22,7 @@ enum class CLIProvider(val displayName: String) {
     companion object {
         // Codex first, Claude last (legacy); Vibe uses persistent ACP sessions; all providers
         // keep their own reasoning choices.
-        val active: List<CLIProvider> = listOf(CODEX, OPENCODE, PI, VIBE, ZAI, CLAUDE)
+        val active: List<CLIProvider> = listOf(CODEX, PI, VIBE, ZAI, CLAUDE)
 
         fun fromId(id: String): CLIProvider? =
             entries.firstOrNull { it.name.equals(id, ignoreCase = true) }
@@ -173,7 +172,6 @@ enum class ReasoningLevel(val id: String, val label: String) {
          */
         fun forProvider(provider: CLIProvider): List<ReasoningLevel> = when (provider) {
             CLIProvider.CLAUDE, CLIProvider.ZAI -> listOf(LOW, MEDIUM, HIGH, XHIGH, MAX, ULTRATHINK, ULTRACODE)
-            CLIProvider.OPENCODE -> listOf(MINIMAL, LOW, MEDIUM, HIGH, MAX)
             // Vibe calls the setting "Thinking"; Ultracode runs Plum's workflow server.
             CLIProvider.VIBE -> listOf(OFF, LOW, MEDIUM, HIGH, MAX, ULTRACODE)
             // Pi runs Ultracode workflows through the Plum pi-ultracode extension.

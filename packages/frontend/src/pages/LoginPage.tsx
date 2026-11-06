@@ -35,10 +35,8 @@ const errorMessages: Record<string, string> = {
     'Claude CLI not logged in. Use the WebUI login below or run "claude /login".',
   codex: 'Codex authentication failed. Please try again.',
   codex_not_logged_in: 'Codex CLI not logged in. Run "codex login" first.',
-  opencode: 'OpenCode authentication failed. Please try again.',
-  opencode_not_logged_in: 'OpenCode CLI not logged in. Run "opencode auth login" first.',
   pi: 'Pi authentication failed. Please try again.',
-  pi_not_available: 'Pi is not available. Configure an OpenCode API connection first.',
+  pi_not_available: 'Pi is not available. Add an API key under Settings → Modellanbieter first.',
   vibe: 'Mistral Vibe authentication failed. Please try again.',
   vibe_not_logged_in:
     'Mistral Vibe is not signed in. Connect it under Settings → Providers → Provider logins.',
@@ -51,7 +49,6 @@ interface AuthProviders {
   google: boolean;
   claude: boolean;
   codex?: boolean;
-  opencode?: boolean;
   pi?: boolean;
   vibe?: boolean;
 }
@@ -70,7 +67,7 @@ interface CliLoginResponse {
 }
 
 // Provider brand configurations
-type ProviderStyleKey = 'claude' | 'codex' | 'opencode' | 'pi';
+type ProviderStyleKey = 'claude' | 'codex' | 'pi';
 const providerStyles: Record<
   ProviderStyleKey,
   {
@@ -89,13 +86,8 @@ const providerStyles: Record<
     hover: '',
     text: 'text-white',
   },
-  opencode: {
-    bg: 'provider-login-button provider-login-button-opencode',
-    hover: '',
-    text: 'text-white',
-  },
   pi: {
-    bg: 'provider-login-button provider-login-button-opencode',
+    bg: 'provider-login-button provider-login-button-pi',
     hover: '',
     text: 'text-white',
   },
@@ -188,7 +180,6 @@ export function LoginPage() {
   const handleProviderLogin = (provider: UiProvider) => {
     const routes: Record<string, string> = {
       codex: '/auth/codex',
-      opencode: '/auth/opencode',
       pi: '/auth/pi',
       claude: '/auth/claude',
     };
@@ -243,7 +234,6 @@ export function LoginPage() {
   // Count available CLI providers
   const availableProviders = [
     providers?.codex && 'codex',
-    providers?.opencode && 'opencode',
     providers?.pi && 'pi',
     providers?.claude && 'claude',
   ].filter(Boolean);
@@ -302,7 +292,7 @@ export function LoginPage() {
               Supported Providers
             </p>
             <div className="flex items-center gap-6">
-              {['codex', 'opencode', 'pi', 'claude'].map((p, i) => (
+              {['codex', 'pi', 'claude'].map((p, i) => (
                 <div
                   key={p}
                   className="opacity-40 hover:opacity-100 transition-opacity duration-300"
@@ -369,30 +359,6 @@ export function LoginPage() {
                 </button>
               )}
 
-              {providers?.opencode && (
-                <div className="space-y-2">
-                  <button
-                    onClick={() => handleProviderLogin('opencode')}
-                    onMouseEnter={() => setHoveredProvider('opencode')}
-                    onMouseLeave={() => setHoveredProvider(null)}
-                    className={cn(
-                      'group relative w-full h-14 rounded-lg font-medium text-base transition-all duration-300',
-                      'flex items-center justify-between px-5',
-                      providerStyles.opencode.bg,
-                      providerStyles.opencode.hover,
-                      providerStyles.opencode.text,
-                      'hover:scale-[1.02] active:scale-[0.98]'
-                    )}
-                  >
-                    <span className="flex items-center gap-3">
-                      <ProviderLogo provider="opencode" className="h-6 w-6" alt="" />
-                      <span>Sign in with OpenCode</span>
-                    </span>
-                    <ArrowRight className="h-5 w-5 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300" />
-                  </button>
-                </div>
-              )}
-
               {providers?.pi && (
                 <div className="space-y-2">
                   <button
@@ -414,9 +380,6 @@ export function LoginPage() {
                     </span>
                     <ArrowRight className="h-5 w-5 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300" />
                   </button>
-                  <p className="px-1 text-xs text-muted-foreground/60">
-                    Uses the API connections configured for OpenCode.
-                  </p>
                 </div>
               )}
 
@@ -642,7 +605,6 @@ export function LoginPage() {
 
             {/* No providers message */}
             {!providers?.codex &&
-              !providers?.opencode &&
               !providers?.pi &&
               !providers?.claude &&
               !providers?.github &&

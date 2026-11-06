@@ -18,7 +18,7 @@ const { createApiChat, apiChatTurns } = await import('../src/services/assistant/
 const { findResource, createResource, BODY_SCHEMAS } =
   await import('../src/services/assistant/resources.js');
 const { safeEncrypt } = await import('../src/utils/encryption.js');
-const { writeOpenCodeProvidersForUser } = await import('../src/utils/opencodeProviderKeys.js');
+const { writeModelProvidersForUser } = await import('../src/utils/modelProviderKeys.js');
 const { default: officeRoutes } = await import('../src/routes/office.js');
 const { default: assistantRoutes } = await import('../src/routes/assistant.js');
 const { requireAuth } = await import('../src/middleware/auth.js');
@@ -103,7 +103,7 @@ try {
       user
     );
   const stamp = new Date().toISOString();
-  await writeOpenCodeProvidersForUser('office-alice', [
+  await writeModelProvidersForUser('office-alice', [
     {
       id: 'openai',
       name: 'Office fixture',

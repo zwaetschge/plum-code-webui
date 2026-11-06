@@ -10,6 +10,8 @@ interface BrowserToken {
   id: string;
   name: string;
   tokenPrefix: string;
+  /** `watch`: handed to the Wear OS app by the phone; it never drives a browser. */
+  scope?: 'browser' | 'watch';
   revoked: boolean;
   lastUsedAt: string | null;
   createdAt: string;
@@ -18,7 +20,14 @@ interface BrowserToken {
 interface BrowserConnection {
   id: string;
   tokenName: string;
-  client: { name: string; version: string; extensionVersion: string; label: string };
+  client: {
+    kind?: 'browser' | 'desktop' | 'watch';
+    name: string;
+    version: string;
+    extensionVersion: string;
+    platform?: string;
+    label: string;
+  };
   paused: boolean;
   tabGroups: boolean;
   connectedAt: string;
@@ -228,11 +237,18 @@ export function FirefoxBrowserPanel() {
                   />
                   <span className="min-w-0">
                     <span className="block truncate text-sm">{connection.client.label}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {connection.client.name} {connection.client.version} · extension{' '}
-                      {connection.client.extensionVersion}
-                      {connection.tabGroups ? ' · tab groups' : ' · no tab-group API'}
-                    </span>
+                    {connection.client.kind === 'watch' ? (
+                      // A watch only shows usage and approvals; agents never drive it.
+                      <span className="block text-xs text-muted-foreground">
+                        Uhr · {connection.client.platform || 'Wear OS'} {connection.client.version}
+                      </span>
+                    ) : (
+                      <span className="block text-xs text-muted-foreground">
+                        {connection.client.name} {connection.client.version} · extension{' '}
+                        {connection.client.extensionVersion}
+                        {connection.tabGroups ? ' · tab groups' : ' · no tab-group API'}
+                      </span>
+                    )}
                   </span>
                 </span>
                 {connection.paused && (
@@ -312,6 +328,7 @@ export function FirefoxBrowserPanel() {
               <span className="min-w-0">
                 <span className="block truncate text-sm">{token.name}</span>
                 <span className="block text-xs text-muted-foreground">
+                  {token.scope === 'watch' ? 'Uhr · ' : ''}
                   {token.tokenPrefix}… ·{' '}
                   {token.lastUsedAt ? `last connected ${token.lastUsedAt}` : 'never connected'}
                 </span>

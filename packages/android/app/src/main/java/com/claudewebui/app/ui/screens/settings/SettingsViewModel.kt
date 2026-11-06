@@ -32,7 +32,7 @@ import com.claudewebui.app.data.model.SaveSubagentUpstreamInput
 import com.claudewebui.app.data.model.SubagentModelGroup
 import com.claudewebui.app.data.model.SubagentUpstream
 import com.claudewebui.app.data.model.McpServerType
-import com.claudewebui.app.data.model.OpenCodeProvider
+import com.claudewebui.app.data.model.ModelProvider
 import com.claudewebui.app.data.model.SlashCommand
 import com.claudewebui.app.data.model.Theme
 import com.claudewebui.app.data.model.BackgroundAnimation
@@ -41,7 +41,7 @@ import com.claudewebui.app.data.model.UpdateMcpServerInput
 import com.claudewebui.app.data.model.UserSettings
 import com.claudewebui.app.data.model.UpdateZaiApiInput
 import com.claudewebui.app.data.model.VibeAuthStatus
-import com.claudewebui.app.data.model.SaveOpenCodeProviderInput
+import com.claudewebui.app.data.model.SaveModelProviderInput
 import com.claudewebui.app.data.model.ZaiApiStatus
 import com.claudewebui.app.data.repository.AuthRepository
 import com.claudewebui.app.data.repository.SettingsRepository
@@ -117,16 +117,23 @@ data class SettingsUiState(
 
     // Providers
     val cliProviders: List<CLIProviderConfig> = emptyList(),
+    // Pi: every runnable model (diagnostics) and the provider's own default,
+    // for choosing which models the session menus offer.
+    val piModelCatalog: List<String>? = null,
+    val piProviderDefault: String? = null,
+    val piModelMenuSaving: Boolean = false,
     val zaiApi: ZaiApiStatus? = null,
     val zaiApiSaving: Boolean = false,
     // Mistral Vibe: sign-in state plus the write-only key field. Never holds a
     // key — the status endpoint only reports whether one exists and where.
     val vibeAuth: VibeAuthStatus? = null,
     val vibeAuthSaving: Boolean = false,
-    val openCodeProviders: List<OpenCodeProvider> = emptyList(),
-    val openCodeSaving: Boolean = false,
-    val openCodeTestResults: Map<String, TestResult> = emptyMap(),
-    val openCodeTestMessages: Map<String, String> = emptyMap(),
+    // Model provider registry: keys, base URLs and model lists for Pi, model
+    // chat and voice. Keys are write-only (`hasKey`).
+    val modelProviders: List<ModelProvider> = emptyList(),
+    val modelProvidersSaving: Boolean = false,
+    val modelProviderTestResults: Map<String, TestResult> = emptyMap(),
+    val modelProviderTestMessages: Map<String, String> = emptyMap(),
 
     // Control gateway tokens and the Codex plugin catalogue — both were
     // reachable only from the WebUI before.
@@ -317,8 +324,8 @@ class SettingsViewModel(
                         .onSuccess { status -> _uiState.update { it.copy(zaiApi = status) } }
                 }
                 launch {
-                    settingsRepository.getOpenCodeProviders()
-                        .onSuccess { providers -> _uiState.update { it.copy(openCodeProviders = providers) } }
+                    settingsRepository.getModelProviders()
+                        .onSuccess { providers -> _uiState.update { it.copy(modelProviders = providers) } }
                 }
                 launch {
                     settingsRepository.getMcpServers()
@@ -1135,6 +1142,53 @@ class SettingsViewModel(
      * server, so it runs when the Vibe detail screen opens rather than with the
      * rest of the settings load.
      */
+    /** Pi's full model list, loaded when its detail page opens. */
+    fun loadPiModelCatalog() {
+        viewModelScope.launch {
+            settingsRepository.getCliProviderDiagnostics()
+                .onSuccess { diagnostics ->
+                    val pi = diagnostics.firstOrNull { it.id == "pi" }
+                    _uiState.update {
+                        it.copy(
+                            piModelCatalog = pi?.models ?: emptyList(),
+                            piProviderDefault = pi?.defaultModel,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(error = error.screenErrorMessage("settings", "loadPiModelCatalog", context))
+                    }
+                }
+        }
+    }
+
+    /**
+     * Stores which Pi models the session menus offer, default first; an empty
+     * list offers all of them again. Refreshes the provider list afterwards,
+     * which the server narrows to the same pick.
+     */
+    fun setPiModelMenu(models: List<String>) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(piModelMenuSaving = true) }
+            val current = _uiState.value.userSettings?.cliProviderModelLists ?: emptyMap()
+            settingsRepository.updateSettings(cliProviderModelLists = current + ("pi" to models))
+                .onSuccess { settings ->
+                    _uiState.update { it.copy(userSettings = settings, piModelMenuSaving = false) }
+                    settingsRepository.getCLIProviders()
+                        .onSuccess { providers -> _uiState.update { it.copy(cliProviders = providers) } }
+                }
+                .onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            piModelMenuSaving = false,
+                            error = error.screenErrorMessage("settings", "setPiModelMenu", context),
+                        )
+                    }
+                }
+        }
+    }
+
     fun loadVibeAuth() {
         viewModelScope.launch {
             settingsRepository.getVibeAuthStatus()
@@ -1206,79 +1260,83 @@ class SettingsViewModel(
         }
     }
 
-    fun saveOpenCodeProvider(
+    fun saveModelProvider(
         id: String,
         name: String,
         apiKey: String,
         baseUrl: String,
         enabled: Boolean,
+        models: List<String>,
+        pi: Boolean = true,
     ) {
-        _uiState.update { it.copy(openCodeSaving = true, error = null) }
+        _uiState.update { it.copy(modelProvidersSaving = true, error = null) }
         viewModelScope.launch {
-            settingsRepository.saveOpenCodeProvider(
-                SaveOpenCodeProviderInput(
+            settingsRepository.saveModelProvider(
+                SaveModelProviderInput(
                     id = id.trim(),
                     name = name.trim(),
                     apiKey = apiKey.trim().takeIf { it.isNotBlank() },
                     baseUrl = baseUrl.trim().takeIf { it.isNotBlank() },
                     enabled = enabled,
+                    models = models.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+                    pi = pi,
                 ),
             ).onSuccess { provider ->
                 _uiState.update { state ->
                     state.copy(
-                        openCodeProviders = state.openCodeProviders
+                        modelProviders = state.modelProviders
                             .filterNot { it.id == provider.id } + provider,
-                        openCodeSaving = false,
-                        toastMessage = "${provider.name} saved",
+                        modelProvidersSaving = false,
+                        toastMessage = context.getString(R.string.settings_model_provider_saved, provider.name),
                     )
                 }
             }.onFailure { error ->
-                _uiState.update { it.copy(openCodeSaving = false, error = error.screenErrorMessage("settings", "saveOpenCodeProvider", context)) }
+                _uiState.update { it.copy(modelProvidersSaving = false, error = error.screenErrorMessage("settings", "saveModelProvider", context)) }
             }
         }
     }
 
-    fun deleteOpenCodeProvider(id: String) {
-        _uiState.update { it.copy(openCodeSaving = true, error = null) }
+    fun deleteModelProvider(id: String) {
+        _uiState.update { it.copy(modelProvidersSaving = true, error = null) }
         viewModelScope.launch {
-            settingsRepository.deleteOpenCodeProvider(id)
+            settingsRepository.deleteModelProvider(id)
                 .onSuccess {
                     _uiState.update {
                         it.copy(
-                            openCodeProviders = it.openCodeProviders.filterNot { provider -> provider.id == id },
-                            openCodeSaving = false,
-                            toastMessage = "OpenCode provider removed",
+                            modelProviders = it.modelProviders.filterNot { provider -> provider.id == id },
+                            modelProvidersSaving = false,
+                            toastMessage = context.getString(R.string.settings_model_provider_removed),
                         )
                     }
                 }
                 .onFailure { error ->
-                    _uiState.update { it.copy(openCodeSaving = false, error = error.screenErrorMessage("settings", "deleteOpenCodeProvider", context)) }
+                    _uiState.update { it.copy(modelProvidersSaving = false, error = error.screenErrorMessage("settings", "deleteModelProvider", context)) }
                 }
         }
     }
 
-    fun testOpenCodeProvider(id: String) {
+    fun testModelProvider(id: String) {
         _uiState.update {
-            it.copy(openCodeTestResults = it.openCodeTestResults + (id to TestResult.Testing))
+            it.copy(modelProviderTestResults = it.modelProviderTestResults + (id to TestResult.Testing))
         }
         viewModelScope.launch {
-            settingsRepository.testOpenCodeProvider(id)
+            settingsRepository.testModelProvider(id)
                 .onSuccess { test ->
                     _uiState.update {
                         it.copy(
-                            openCodeTestResults = it.openCodeTestResults + (
+                            modelProviderTestResults = it.modelProviderTestResults + (
                                 id to if (test.connected) TestResult.Success else TestResult.Failure(test.message)
                             ),
-                            openCodeTestMessages = it.openCodeTestMessages + (id to test.message),
+                            modelProviderTestMessages = it.modelProviderTestMessages + (id to test.message),
                         )
                     }
                 }
                 .onFailure { error ->
-                    val message = error.screenErrorMessage("settings", "testOpenCodeProvider", context)
+                    val message = error.screenErrorMessage("settings", "testModelProvider", context)
                     _uiState.update {
                         it.copy(
-                            openCodeTestResults = it.openCodeTestResults + (id to TestResult.Failure(message)),
-                            openCodeTestMessages = it.openCodeTestMessages + (id to message),
+                            modelProviderTestResults = it.modelProviderTestResults + (id to TestResult.Failure(message)),
+                            modelProviderTestMessages = it.modelProviderTestMessages + (id to message),
                         )
                     }
                 }

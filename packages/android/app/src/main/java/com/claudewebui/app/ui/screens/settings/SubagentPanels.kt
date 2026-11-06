@@ -43,7 +43,7 @@ import com.claudewebui.app.ui.components.common.PlumText
  */
 
 /** Providers the `subagents` MCP bridge knows how to spawn. */
-private val CLI_SUBAGENT_PROVIDERS = listOf("codex", "claude", "zai", "opencode", "pi")
+private val CLI_SUBAGENT_PROVIDERS = listOf("codex", "claude", "zai", "pi")
 
 @Composable
 fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
@@ -73,7 +73,7 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
             )
             Text(
                 screenResources.getString(R.string.settings_z_ai_is_the_exception_it_runs_the_claude_cli_against_your_z_ai_en_3e163) +
-                    screenResources.getString(R.string.settings_the_same_second_claude_transport_a_z_ai_session_uses_not_opencode_c25b9) +
+                    screenResources.getString(R.string.settings_the_same_second_claude_transport_a_z_ai_session_uses_6e1d4) +
                     screenResources.getString(R.string.settings_disappears_server_side_while_no_z_ai_endpoint_is_configured_f649f),
                 color = PlumMuted,
                 fontSize = 12.sp,

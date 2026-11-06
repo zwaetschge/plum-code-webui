@@ -9,7 +9,7 @@
  */
 import { createHash } from 'node:crypto'
 import { sql, type Db } from './db/index.js'
-import { enqueue, type NewOutbox } from './outbox.js'
+import { type NewOutbox } from './outbox.js'
 import { redact } from './redact.js'
 import type { Ctx } from './context.js'
 

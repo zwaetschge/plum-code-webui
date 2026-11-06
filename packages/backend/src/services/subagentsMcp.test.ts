@@ -4,8 +4,8 @@
  * backend. The properties that matter:
  *
  * - the spawned CLI gets exactly the headless invocation we promise
- *   (codex exec --json --full-auto, claude -p --output-format json, opencode run)
- * - a codex/opencode child must NOT inherit ANTHROPIC_* router overrides,
+ *   (codex exec --json --full-auto, claude -p --output-format json, pi -p)
+ * - a codex/pi child must NOT inherit ANTHROPIC_* router overrides,
  *   while a claude child keeps them (that's how nested GLM routing works)
  * - a `zai` child runs the claude binary but on the Z.AI endpoint the backend
  *   injects, never on the inherited Anthropic/router upstream, and books its
@@ -91,7 +91,7 @@ function writeFakeCli(dir: string, name: string, stdout: string): string {
     '    ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL ?? null,',
     '    ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN ?? null,',
     '    PLUM_SUBAGENT_DEPTH: process.env.PLUM_SUBAGENT_DEPTH ?? null,',
-    '    OPENCODE_CONFIG_DIR: process.env.OPENCODE_CONFIG_DIR ?? null,',
+    '    PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR ?? null,',
     '    ANTHROPIC_DEFAULT_SONNET_MODEL: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL ?? null,',
     '  },',
     '}));',
@@ -139,7 +139,7 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
   });
   const codexRecord = writeFakeCli(bin, 'codex', codexStdout);
   const claudeRecord = writeFakeCli(bin, 'claude', claudeStdout);
-  const opencodeRecord = writeFakeCli(bin, 'opencode', 'opencode says hi\n');
+  const piRecord = writeFakeCli(bin, 'pi', 'pi says hi\n');
 
   // Stub backend: serves the configured entries and records usage postings.
   const usagePosts: any[] = [];
@@ -162,18 +162,18 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
                 {
                   id: '2',
                   label: 'GLM',
-                  provider: 'opencode',
+                  provider: 'pi',
                   model: 'z-ai/glm-5.3',
                   enabled: true,
                 },
                 { id: '3', label: 'Claude', provider: 'claude', model: '', enabled: true },
                 { id: '4', label: 'Z.AI', provider: 'zai', model: '', enabled: true },
               ],
-              // OpenCode auth lives in per-user tenant dirs; the bridge must
-              // forward these to opencode children only. The zai block is the
-              // user's Z.AI endpoint, which replaces the inherited upstream.
+              // Pi runs from a per-user agent dir; the bridge must forward it
+              // to pi children only. The zai block is the user's Z.AI
+              // endpoint, which replaces the inherited upstream.
               env: {
-                opencode: { OPENCODE_CONFIG_DIR: '/tenant/config' },
+                pi: { PI_CODING_AGENT_DIR: '/tenant/pi-agent' },
                 zai: {
                   ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
                   ANTHROPIC_AUTH_TOKEN: 'zai-token',
@@ -247,19 +247,25 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
     assert.equal(codexSeen.env.ANTHROPIC_AUTH_TOKEN, null);
     assert.equal(codexSeen.env.PLUM_SUBAGENT_DEPTH, '1');
 
-    // OpenCode: entry model applies, tool-arg model would override it.
+    // Pi: entry model applies, tool-arg model would override it.
     const glmRun = await mcp.call('tools/call', {
       name: 'run_subagent',
       arguments: { subagent: 'GLM', prompt: 'answer briefly', working_directory: work },
     });
-    assert.match(toolText(glmRun), /opencode says hi/);
-    const opencodeSeen = JSON.parse(readFileSync(opencodeRecord, 'utf8'));
-    assert.deepEqual(opencodeSeen.argv, ['run', '-m', 'z-ai/glm-5.3', 'answer briefly']);
-    assert.equal(opencodeSeen.env.ANTHROPIC_BASE_URL, null);
+    assert.match(toolText(glmRun), /pi says hi/);
+    const piSeen = JSON.parse(readFileSync(piRecord, 'utf8'));
+    assert.deepEqual(piSeen.argv, [
+      '-p',
+      '--no-session',
+      '--model',
+      'z-ai/glm-5.3',
+      'answer briefly',
+    ]);
+    assert.equal(piSeen.env.ANTHROPIC_BASE_URL, null);
     assert.equal(
-      opencodeSeen.env.OPENCODE_CONFIG_DIR,
-      '/tenant/config',
-      'opencode must run in the calling user tenant'
+      piSeen.env.PI_CODING_AGENT_DIR,
+      '/tenant/pi-agent',
+      'pi must run in the calling user agent dir'
     );
 
     // Claude: keeps the router env — nested GLM routing depends on it.
@@ -300,7 +306,7 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
     assert.equal(zaiSeen.env.ANTHROPIC_AUTH_TOKEN, 'zai-token');
     assert.equal(zaiSeen.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.3');
 
-    // Usage: codex, claude and zai book (opencode has no usage output in v1).
+    // Usage: codex, claude and zai book (pi's print mode reports no usage).
     // bookUsage is fire-and-forget, so give the posts a beat to land.
     for (let i = 0; i < 50 && usagePosts.length < 3; i++) {
       await new Promise((r) => setTimeout(r, 100));

@@ -36,17 +36,6 @@ export function ProviderLogo({ provider, className, alt }: ProviderLogoProps) {
     );
   }
 
-  if (provider === 'opencode') {
-    const resolvedAlt = alt === undefined ? 'OpenCode' : alt;
-    return (
-      <img
-        src="/logos/opencode.png"
-        alt={resolvedAlt}
-        className={cn('object-contain', className)}
-      />
-    );
-  }
-
   if (provider === 'pi') {
     const resolvedAlt = alt === undefined ? 'Pi' : alt;
     return (

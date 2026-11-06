@@ -4,7 +4,7 @@ export const DEFAULT_CONTEXT_WINDOW = 200_000;
 
 const CLAUDE_1M_SUFFIX = /\[1m\]$/;
 
-/** `provider/model` → `model`. Pi and OpenCode ids carry the provider prefix. */
+/** `provider/model` → `model`. Pi ids carry the provider prefix. */
 function stripProviderPrefix(model: string): string {
   const slash = model.lastIndexOf('/');
   return slash >= 0 ? model.slice(slash + 1) : model;
@@ -26,9 +26,10 @@ export function lookupContextWindow(model: string | null | undefined): number | 
   if (CLAUDE_1M_SUFFIX.test(id)) return 1_000_000;
 
   // Anthropic's current Fable, Opus, and Sonnet families use the 1M-token
-  // window. Haiku 4.5 remains at 200k.
+  // window, as does Haiku 5.5. Haiku 4.5 remains at 200k.
   if (id === 'fable' || id === 'opus' || id === 'sonnet') return 1_000_000;
   if (/(fable|opus|sonnet)-?(4|5)/.test(id)) return 1_000_000;
+  if (/haiku-?5/.test(id)) return 1_000_000;
   if (id === 'haiku' || /haiku-?4[.-]?5/.test(id)) return 200_000;
 
   // Codex / GPT windows observed in live session logs; GPT-6 Astra from the
@@ -50,7 +51,9 @@ export function lookupContextWindow(model: string | null | undefined): number | 
 
   // Moonshot Kimi K2 family (also behind the Kimi-for-coding endpoint).
   if (/^(?:kimi-)?k2/.test(id) || id.startsWith('kimi')) return 256_000;
-  // DeepSeek V3.x / R1
+  // DeepSeek's own API: V4 Pro and V4.1 Flash (and the retired names it maps
+  // onto Flash) have 1M. Other deepseek ids (V3.x/R1 elsewhere) keep 128k.
+  if (/^deepseek-(?:flash|v4|chat$|reasoner$)/.test(id)) return 1_000_000;
   if (id.startsWith('deepseek')) return 128_000;
   // Google Gemini 2.5 and later
   if (/^gemini-(?:2\.5|3)/.test(id)) return 1_000_000;

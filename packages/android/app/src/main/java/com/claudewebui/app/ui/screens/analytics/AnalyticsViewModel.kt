@@ -13,9 +13,14 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -225,7 +230,13 @@ class AnalyticsViewModel(
 
     init {
         loadAnalytics(AnalyticsTimeRange.WEEK)
-        loadProviderLimits()
+        // Quota is polled every minute while the screen collects its state
+        // (collectAsStateWithLifecycle stops collecting in the background).
+        viewModelScope.launch {
+            _uiState.subscriptionCount.map { it > 0 }.distinctUntilChanged().collectLatest { visible ->
+                if (visible) while (isActive) { loadProviderLimits(); delay(60_000) }
+            }
+        }
     }
 
     /**
@@ -328,6 +339,9 @@ class AnalyticsViewModel(
             windows = windows,
             color = color,
             planUsage = data.planUsage,
+            // A real remark about the card (e.g. the Mistral key belongs to Vibe);
+            // the missing budget already has its own hint.
+            note = response.error?.takeIf { it.code != "NO_BUDGET" }?.message,
         )
     }
 
@@ -585,6 +599,7 @@ internal object AnalyticsParser {
     private fun providerColor(provider: String): Long = when (provider.lowercase()) {
         "codex" -> 0xFF22C55EL
         "kimi" -> 0xFF2582EDL
+        // Historical usage rows only; OpenCode is no longer a provider.
         "opencode" -> 0xFFF472B6L
         "pi" -> 0xFFA855F7L
         "z.ai", "zai", "z.ai code" -> 0xFF14B8A6L

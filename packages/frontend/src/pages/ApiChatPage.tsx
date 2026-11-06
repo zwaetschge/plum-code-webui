@@ -2,6 +2,8 @@ import { ChatMemoryControls } from '@/components/assistant/ChatMemoryControls';
 import { RealtimeVoice } from '@/components/assistant/RealtimeVoice';
 import { ChatWorkbench, ChatTurnDetails } from '@/components/assistant/ChatWorkbench';
 import { ChatRichText } from '@/components/assistant/ChatRichText';
+import { ChatWebActivity } from '@/components/assistant/ChatWebSources';
+import { webToolRunning } from '@/components/assistant/webSources';
 import { DynamicUiStateStore } from '@/components/assistant/dynamic-ui/state';
 import { orderChatApiProviders } from '@/lib/chatApiProviders';
 import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
@@ -803,6 +805,7 @@ export function ApiChatPage() {
                     </span>
                     {item.status !== 'completed' ? ` · ${statuses[item.status]}` : ''}
                   </p>
+                  <ChatWebActivity turn={item} />
                   {chat.body.workflow === 'research' && item.status === 'completed' ? (
                     <ResearchPreview
                       response={item.response}
@@ -810,11 +813,14 @@ export function ApiChatPage() {
                       onSave={() => saveAnswer(item, 'research')}
                     />
                   ) : item.status === 'running' && !item.response && !item.uiPending ? (
-                    <ThinkingDots />
+                    webToolRunning(item) ? null : (
+                      <ThinkingDots />
+                    )
                   ) : item.response || (!item.ui && !item.uiPending) ? (
                     <ChatRichText
                       text={item.response || 'Keine Antwort'}
                       sourceVersions={item.sourceVersions}
+                      webSources={item.webSources}
                     />
                   ) : null}
                   {item.uiPending && !item.ui && (
@@ -1073,6 +1079,41 @@ export function ApiChatPage() {
                 }
               }}
               onChange={(event) => setDraft(event.target.value)}
+              onPaste={(event) => {
+                // Screenshots and copied images arrive as clipboard files; a text
+                // paste carries none and stays native.
+                const pasted = Array.from(event.clipboardData.items)
+                  .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+                  .map((item) => item.getAsFile())
+                  .filter((file): file is File => file !== null);
+                if (!pasted.length) return;
+                event.preventDefault();
+                if (chat.body.workflow === 'research' || chat.body.artifactEdit) {
+                  setError('In diesem Modus sind keine Anhänge möglich.');
+                  return;
+                }
+                if (images.length + existingImages.length + pasted.length > 4) {
+                  setError('Höchstens vier Dateien pro Nachricht.');
+                  return;
+                }
+                if (pasted.some((file) => file.size > 5 * 1024 * 1024)) {
+                  setError('Bilder: höchstens 5 MB.');
+                  return;
+                }
+                // Clipboard images are all called "image.png"; give each its own name.
+                const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
+                const named = pasted.map(
+                  (file, index) =>
+                    new File(
+                      [file],
+                      `Eingefügt-${stamp}${pasted.length > 1 ? `-${index + 1}` : ''}.${file.type.split('/')[1] || 'png'}`,
+                      { type: file.type }
+                    )
+                );
+                setError('');
+                setImages((current) => [...current, ...named]);
+                setTools(true);
+              }}
             />
           </label>
           {!!existingImages.length && (

@@ -22,7 +22,6 @@ const expectedSuites = [
   'runner access',
   'managed process lifecycle',
   'session icon thumbnails',
-  'opencode isolation',
   'operations and rollback',
   'readiness',
   'migration dry-run',
