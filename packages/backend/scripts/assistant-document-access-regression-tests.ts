@@ -226,13 +226,48 @@ try {
   await assert.rejects(documentAccess('doc-reader', doc.id), /nicht verfügbar/);
   assert.equal(Number((await get('SELECT COUNT(*) AS n FROM assistant_document_members')).n), 1);
   await run("UPDATE users SET status='active' WHERE id=?", 'doc-owner');
-  const live = await createResource('doc-owner', 'artifact', 'Live document', BODY_SCHEMAS.artifact.parse({ type: 'document', format: 'text', content: 'Alpha\nBeta\nGamma' }));
-  await changeDocumentMember('doc-owner', live.id, { commandId: randomUUID(), expectedRevision: 1, email: 'doc-editor@fixture.invalid', role: 'editor' });
-  await writeSharedDocument('doc-owner', live.id, { commandId: randomUUID(), expectedRevision: 1, title: live.title, content: 'Alpha geändert\nBeta\nGamma', autoMerge: true });
-  const merged = await writeSharedDocument('doc-editor', live.id, { commandId: randomUUID(), expectedRevision: 1, title: live.title, content: 'Alpha\nBeta\nGamma geändert', autoMerge: true });
+  const live = await createResource(
+    'doc-owner',
+    'artifact',
+    'Live document',
+    BODY_SCHEMAS.artifact.parse({ type: 'document', format: 'text', content: 'Alpha\nBeta\nGamma' })
+  );
+  await changeDocumentMember('doc-owner', live.id, {
+    commandId: randomUUID(),
+    expectedRevision: 1,
+    email: 'doc-editor@fixture.invalid',
+    role: 'editor',
+  });
+  await writeSharedDocument('doc-owner', live.id, {
+    commandId: randomUUID(),
+    expectedRevision: 1,
+    title: live.title,
+    content: 'Alpha geändert\nBeta\nGamma',
+    autoMerge: true,
+  });
+  const merged = await writeSharedDocument('doc-editor', live.id, {
+    commandId: randomUUID(),
+    expectedRevision: 1,
+    title: live.title,
+    content: 'Alpha\nBeta\nGamma geändert',
+    autoMerge: true,
+  });
   assert.equal(merged.resource.body.content, 'Alpha geändert\nBeta\nGamma geändert');
-  await assert.rejects(writeSharedDocument('doc-editor', live.id, { commandId: randomUUID(), expectedRevision: 1, title: live.title, content: 'Alpha anderer Text\nBeta\nGamma', autoMerge: true }), /überschneiden/);
-  assert.equal((await documentAccess('doc-owner', live.id)).resource.revision, 3, 'conflicting live edits do not write');
+  await assert.rejects(
+    writeSharedDocument('doc-editor', live.id, {
+      commandId: randomUUID(),
+      expectedRevision: 1,
+      title: live.title,
+      content: 'Alpha anderer Text\nBeta\nGamma',
+      autoMerge: true,
+    }),
+    /überschneiden/
+  );
+  assert.equal(
+    (await documentAccess('doc-owner', live.id)).resource.revision,
+    3,
+    'conflicting live edits do not write'
+  );
   console.log(
     'PASS: real own PostgreSQL grants/editor/viewer/revocation, grant-bound history, sanitized references, same-UUID lost-ack receipts, concurrent CAS and revocation fencing, actual original pixels and private asset refusal, content-free audit, owner suspension; no live migration'
   );

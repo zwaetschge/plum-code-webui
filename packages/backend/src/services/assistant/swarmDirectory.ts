@@ -327,20 +327,32 @@ export async function swarmDirectory(userId: string): Promise<SwarmDirectory> {
     >,
     subagentFiles(),
   ]);
-  const sessionIds = [...new Set((containerRows?.rows ?? []).flatMap((row) => row.ownerSessionId ?? []))];
-  const ownedSessions: Array<{ id: string; name: string }> = sessionIds.length ? await all(
-    `SELECT id, name FROM sessions WHERE user_id = ? AND id IN (${sessionIds.map(() => '?').join(',')})`,
-    userId, ...sessionIds
-  ) : [];
+  const sessionIds = [
+    ...new Set((containerRows?.rows ?? []).flatMap((row) => row.ownerSessionId ?? [])),
+  ];
+  const ownedSessions: Array<{ id: string; name: string }> = sessionIds.length
+    ? await all(
+        `SELECT id, name FROM sessions WHERE user_id = ? AND id IN (${sessionIds.map(() => '?').join(',')})`,
+        userId,
+        ...sessionIds
+      )
+    : [];
   const sessionNames = new Map(ownedSessions.map((s) => [s.id, s.name]));
-  const byName = new Map((containerRows?.rows ?? []).map((row) => {
-    const state: SwarmContainerState = { ...containerState(row), host: row.host, hostLabel: row.hostLabel, actions: row.actions };
-    if (row.ownerSessionId && sessionNames.has(row.ownerSessionId)) {
-      state.ownerSessionId = row.ownerSessionId;
-      state.ownerSessionName = sessionNames.get(row.ownerSessionId);
-    }
-    return [row.name, state];
-  }));
+  const byName = new Map(
+    (containerRows?.rows ?? []).map((row) => {
+      const state: SwarmContainerState = {
+        ...containerState(row),
+        host: row.host,
+        hostLabel: row.hostLabel,
+        actions: row.actions,
+      };
+      if (row.ownerSessionId && sessionNames.has(row.ownerSessionId)) {
+        state.ownerSessionId = row.ownerSessionId;
+        state.ownerSessionName = sessionNames.get(row.ownerSessionId);
+      }
+      return [row.name, state];
+    })
+  );
   const docker = !!containerRows;
   const rooms = health?.rooms ?? {};
   const spent = new Map((health?.betrieb?.budget ?? []).map((b) => [b.agent, b.heute ?? 0]));
@@ -451,7 +463,9 @@ export async function swarmDirectory(userId: string): Promise<SwarmDirectory> {
       .filter((a) => a.worker === 'offline' && a.containers[0]?.running)
       .map(async (a) => {
         const target = a.containers[0]!;
-        const logs = await directoryLogs(directoryContainers(), target.name, target.host, 5).catch(() => null);
+        const logs = await directoryLogs(directoryContainers(), target.name, target.host, 5).catch(
+          () => null
+        );
         const line = logs?.lines
           .at(-1)
           ?.replace(/^(?:\S+Z\s+)+/, '')

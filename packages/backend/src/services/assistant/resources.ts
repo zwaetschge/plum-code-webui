@@ -165,7 +165,18 @@ export const BODY_SCHEMAS: Record<AssistantResourceKind, z.ZodTypeAny> = {
       ])
       .default('document'),
     content: z.string().max(50000).default(''),
-    toolFiles: z.array(z.object({ id: z.string().uuid(), filename: z.string().max(200), mimeType: z.string().max(100), byteLength: z.number().int().nonnegative(), sha256: z.string().regex(/^[a-f0-9]{64}$/) })).max(12).optional(),
+    toolFiles: z
+      .array(
+        z.object({
+          id: z.string().uuid(),
+          filename: z.string().max(200),
+          mimeType: z.string().max(100),
+          byteLength: z.number().int().nonnegative(),
+          sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+      )
+      .max(12)
+      .optional(),
     audioAssetId: z.string().uuid().optional(),
     format: z.enum(['markdown', 'json', 'csv', 'html', 'text']).default('markdown'),
     language: z
@@ -351,7 +362,9 @@ export async function listResources(
   } = {}
 ): Promise<AssistantResource[]> {
   const conditions = [
-    kind === 'source' ? `(user_id = ? OR EXISTS (SELECT 1 FROM assistant_library_members m WHERE m.resource_id=assistant_resources.id AND m.user_id=?) OR EXISTS (SELECT 1 FROM assistant_library_members m JOIN assistant_resources c ON c.id=m.resource_id WHERE m.user_id=? AND c.kind='collection' AND c.user_id=assistant_resources.user_id AND c.archived=0 AND c.body_json::jsonb->'resourceIds' @> jsonb_build_array(assistant_resources.id)))` : 'user_id = ?',
+    kind === 'source'
+      ? `(user_id = ? OR EXISTS (SELECT 1 FROM assistant_library_members m WHERE m.resource_id=assistant_resources.id AND m.user_id=?) OR EXISTS (SELECT 1 FROM assistant_library_members m JOIN assistant_resources c ON c.id=m.resource_id WHERE m.user_id=? AND c.kind='collection' AND c.user_id=assistant_resources.user_id AND c.archived=0 AND c.body_json::jsonb->'resourceIds' @> jsonb_build_array(assistant_resources.id)))`
+      : 'user_id = ?',
     'archived = 0',
     "(kind <> 'source' OR body_json::jsonb->>'temporaryChatId' IS NULL)",
   ];
@@ -389,7 +402,16 @@ export async function listResources(
     options.limit ?? 100,
     options.offset ?? 0
   )) as Row[];
-  if (kind === 'source') return (await Promise.all(rows.map((row) => readableSource(userId, String(row.id)).then((access) => access.resource).catch(() => null)))).filter((item): item is AssistantResource => !!item);
+  if (kind === 'source')
+    return (
+      await Promise.all(
+        rows.map((row) =>
+          readableSource(userId, String(row.id))
+            .then((access) => access.resource)
+            .catch(() => null)
+        )
+      )
+    ).filter((item): item is AssistantResource => !!item);
   return rows.map(resourceFromRow);
 }
 export async function resourceReferences(userId: string, ids: string[]) {
@@ -400,7 +422,21 @@ export async function resourceReferences(userId: string, ids: string[]) {
     ...ids
   );
   const existing = new Set(owned.map((item) => String(item.id)));
-  const shared = await Promise.all(ids.filter((id) => !existing.has(id)).map((id) => libraryAccess(userId, id).then(({ resource }) => ({ id: resource.id, kind: resource.kind, title: resource.title, revision: resource.revision, updatedAt: resource.updatedAt })).catch(() => null)));
+  const shared = await Promise.all(
+    ids
+      .filter((id) => !existing.has(id))
+      .map((id) =>
+        libraryAccess(userId, id)
+          .then(({ resource }) => ({
+            id: resource.id,
+            kind: resource.kind,
+            title: resource.title,
+            revision: resource.revision,
+            updatedAt: resource.updatedAt,
+          }))
+          .catch(() => null)
+      )
+  );
   return [...owned, ...shared.filter(Boolean)];
 }
 export async function checkReferences(
@@ -605,11 +641,22 @@ export async function checkReferences(
       throw new AppError('Audiooriginal nicht gefunden', 404, 'NOT_FOUND');
   }
   for (const file of (body.toolFiles as Array<{ id: string; sha256: string }> | undefined) ?? []) {
-    if (!(await (tx ?? { get }).get('SELECT id FROM assistant_assets WHERE id=? AND user_id=? AND sha256=?', file.id, userId, file.sha256))) throw new AppError('Eigenes Dateioriginal nicht gefunden', 404, 'NOT_FOUND');
+    if (
+      !(await (tx ?? { get }).get(
+        'SELECT id FROM assistant_assets WHERE id=? AND user_id=? AND sha256=?',
+        file.id,
+        userId,
+        file.sha256
+      ))
+    )
+      throw new AppError('Eigenes Dateioriginal nicht gefunden', 404, 'NOT_FOUND');
   }
   for (const key of ['projectId', 'parentId', 'profileId', 'sourceId', 'taskId']) {
     if (typeof body[key] !== 'string') continue;
-    const ref = key === 'sourceId' ? (await readableSource(userId, body[key] as string, tx)).resource : await findResource(userId, body[key] as string, tx);
+    const ref =
+      key === 'sourceId'
+        ? (await readableSource(userId, body[key] as string, tx)).resource
+        : await findResource(userId, body[key] as string, tx);
     const expected =
       key === 'projectId'
         ? 'project'
@@ -622,7 +669,12 @@ export async function checkReferences(
   }
   for (const key of ['sourceIds', 'resourceIds', 'taskIds']) {
     for (const id of (body[key] as string[] | undefined) ?? []) {
-      const ref = key === 'sourceIds' ? (await readableSource(userId, id, tx)).resource : await findResource(userId, id, tx).catch(() => readableSource(userId, id, tx).then((access) => access.resource));
+      const ref =
+        key === 'sourceIds'
+          ? (await readableSource(userId, id, tx)).resource
+          : await findResource(userId, id, tx).catch(() =>
+              readableSource(userId, id, tx).then((access) => access.resource)
+            );
       if (key === 'sourceIds' && ref.kind !== 'source')
         throw new AppError('Ungültige Quelle', 400, 'INVALID_REFERENCE');
       if (key === 'taskIds' && ref.kind !== 'task')
@@ -727,7 +779,8 @@ export async function reviseResource(
     // Status settlement may already hold a task row; only graph changes need the owner lock.
     if (current.kind === 'task' && current.body.parentId !== body.parentId)
       await checkTaskParentage(scope, userId, id, body.parentId);
-    if (current.kind === 'artifact' && current.body.toolFiles) body = { ...body, toolFiles: current.body.toolFiles, toolOrigin: current.body.toolOrigin };
+    if (current.kind === 'artifact' && current.body.toolFiles)
+      body = { ...body, toolFiles: current.body.toolFiles, toolOrigin: current.body.toolOrigin };
     if (current.kind === 'artifact' && current.body.importOrigin)
       body = { ...body, importOrigin: current.body.importOrigin };
     if (current.kind === 'artifact' && current.body.analysisTaskIds && !body.analysisTaskIds)

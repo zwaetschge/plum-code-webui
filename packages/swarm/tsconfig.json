@@ -1,9 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": [
-      "ES2023"
-    ],
+    "lib": ["ES2023"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
@@ -16,14 +14,10 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
-    "types": [
-      "node"
-    ],
+    "types": ["node"],
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true
   },
-  "include": [
-    "src/**/*.ts"
-  ]
+  "include": ["src/**/*.ts"]
 }

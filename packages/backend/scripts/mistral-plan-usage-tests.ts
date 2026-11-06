@@ -66,13 +66,21 @@ try {
   assert.equal(noBudget.error?.code, 'NO_BUDGET');
 
   // With a budget: a whole-percent month window (Android decodes it as Int).
-  await saveMistralPlanConfig('mistral-user', { monthlyBudget: 10, currency: 'EUR', billingDay: 1 });
+  await saveMistralPlanConfig('mistral-user', {
+    monthlyBudget: 10,
+    currency: 'EUR',
+    billingDay: 1,
+  });
   const budgeted = await buildMistralLimitResponse('mistral-user');
   assert.equal(budgeted.data?.sevenDay?.utilization, 21);
   assert.ok(Number.isInteger(budgeted.data?.sevenDay?.utilization));
   assert.equal(budgeted.data?.sevenDay?.limit, 10);
   assert.equal(budgeted.data?.sevenDay?.unit, 'eur');
-  assert.equal(budgeted.data?.planUsage.allowance, 'api', 'a regular key draws on the API allowance');
+  assert.equal(
+    budgeted.data?.planUsage.allowance,
+    'api',
+    'a regular key draws on the API allowance'
+  );
   assert.equal(budgeted.error, undefined);
 
   console.log('mistral plan usage tests passed');

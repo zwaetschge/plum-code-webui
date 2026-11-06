@@ -89,7 +89,18 @@ export function OutboxPanel() {
               >
                 Copy text
               </Button>
-              {entry.requiresReview === true && <Button size="sm" disabled={entry.sending} onClick={() => { socketService.reviewImportedOutboxEntry(entry.clientMessageId); void socketService.retryOutboxEntry(entry.clientMessageId); }}>Importierte Nachricht prüfen und senden</Button>}
+              {entry.requiresReview === true && (
+                <Button
+                  size="sm"
+                  disabled={entry.sending}
+                  onClick={() => {
+                    socketService.reviewImportedOutboxEntry(entry.clientMessageId);
+                    void socketService.retryOutboxEntry(entry.clientMessageId);
+                  }}
+                >
+                  Importierte Nachricht prüfen und senden
+                </Button>
+              )}
               {entry.retryable !== false && entry.requiresReview !== true && (
                 <Button
                   size="sm"

@@ -74,7 +74,9 @@ export async function taskSourceContext(
       : null;
   const selected = versions.slice(0, 20);
   for (const [index, item] of selected.entries()) {
-    const source = await readableSource(userId, item.id, undefined, item.revision).then((access) => access.resource).catch(() => null);
+    const source = await readableSource(userId, item.id, undefined, item.revision)
+      .then((access) => access.resource)
+      .catch(() => null);
     if (!source || source.kind !== 'source') continue;
     const version = await get(
       'SELECT title,body_json FROM assistant_resource_revisions WHERE resource_id=? AND revision=?',

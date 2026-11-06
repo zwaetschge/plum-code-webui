@@ -176,7 +176,6 @@ export function DesignPresetDialog({
             </p>
           )}
         </div>
-
       </DialogContent>
     </Dialog>
   );

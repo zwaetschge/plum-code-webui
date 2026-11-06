@@ -229,7 +229,15 @@ export function ChatWorkbench({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl max-h-[88dvh] overflow-y-auto">
           <DialogTitle>{profileMode ? 'Fähigkeiten' : 'Chat-Werkzeuge'}</DialogTitle>
-          {!profileMode && !chat.body.temporary && <Link to={`/assistant/schedules?chat=${encodeURIComponent(chat.id)}`} onClick={() => setOpen(false)} className="text-sm underline">Nachricht planen</Link>}
+          {!profileMode && !chat.body.temporary && (
+            <Link
+              to={`/assistant/schedules?chat=${encodeURIComponent(chat.id)}`}
+              onClick={() => setOpen(false)}
+              className="text-sm underline"
+            >
+              Nachricht planen
+            </Link>
+          )}
           <fieldset disabled={disabled || busy} className="space-y-4">
             <details>
               <summary className="cursor-pointer">
@@ -760,7 +768,9 @@ export function ChatTurnDetails({
           live={turn.status === 'running'}
         />
       )}
-      {!!turn.toolEvents?.some((event) => event.files?.length) && <ToolFiles chatId={chatId} files={turn.toolEvents.flatMap((event) => event.files ?? [])} />}
+      {!!turn.toolEvents?.some((event) => event.files?.length) && (
+        <ToolFiles chatId={chatId} files={turn.toolEvents.flatMap((event) => event.files ?? [])} />
+      )}
       <ChatContextReceipt receipt={turn.contextReceipt} />
       <ChatCompactionReceipt compaction={turn.compaction} />
       {!!toolEvents.length && (

@@ -19,7 +19,10 @@ test('402 budget errors read as exhausted, keeping Mistral’s error type', () =
 });
 
 test('a validation error means the budget check passed', () => {
-  assert.equal(classifyMistralBudgetResponse(400, { type: 'invalid_request_error' }).state, 'available');
+  assert.equal(
+    classifyMistralBudgetResponse(400, { type: 'invalid_request_error' }).state,
+    'available'
+  );
   assert.equal(classifyMistralBudgetResponse(422, { detail: [] }).state, 'available');
 });
 
@@ -28,7 +31,10 @@ test('an unknown probe model says nothing about the budget', () => {
 });
 
 test('auth failures and outages stay distinct from budget answers', () => {
-  assert.equal(classifyMistralBudgetResponse(401, { detail: 'Invalid API Key' }).state, 'unauthorized');
+  assert.equal(
+    classifyMistralBudgetResponse(401, { detail: 'Invalid API Key' }).state,
+    'unauthorized'
+  );
   assert.equal(classifyMistralBudgetResponse(429, null).state, 'unknown');
   assert.equal(classifyMistralBudgetResponse(503, null).state, 'unknown');
 });

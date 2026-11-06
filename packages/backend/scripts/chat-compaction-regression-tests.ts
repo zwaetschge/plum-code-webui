@@ -214,14 +214,49 @@ try {
       .excerpts.some((e) => e.id === seed[0]),
     'forgotten origin stays out even when the original message remains visible'
   );
-  const bounded = await createApiChat(user, { commandId: randomUUID(), title: 'Bounded coverage', providerId: 'fixture', model: 'fixture', sourceIds: [], chatOptions: { contextTurns: 1 } });
-  for (let seq = 1; seq <= 10; seq++) await run("INSERT INTO assistant_api_turns(id,chat_id,seq,payload_hash,prompt,response,status,model,profile_json,created_at,updated_at,expires_at) VALUES(?,?,?,'fixture',?,?,'completed','fixture','{}',?,?,?)", randomUUID(), bounded.id, seq, 'U'.repeat(20000), 'A'.repeat(40000), now, now, now);
+  const bounded = await createApiChat(user, {
+    commandId: randomUUID(),
+    title: 'Bounded coverage',
+    providerId: 'fixture',
+    model: 'fixture',
+    sourceIds: [],
+    chatOptions: { contextTurns: 1 },
+  });
+  for (let seq = 1; seq <= 10; seq++)
+    await run(
+      "INSERT INTO assistant_api_turns(id,chat_id,seq,payload_hash,prompt,response,status,model,profile_json,created_at,updated_at,expires_at) VALUES(?,?,?,'fixture',?,?,'completed','fixture','{}',?,?,?)",
+      randomUUID(),
+      bounded.id,
+      seq,
+      'U'.repeat(20000),
+      'A'.repeat(40000),
+      now,
+      now,
+      now
+    );
   const beforeBounded = requests.filter((r) => r.compact).length;
-  const boundedTurn = await settled(bounded.id, (await startApiTurn(user, bounded.id, { commandId: randomUUID(), expectedRevision: bounded.revision, prompt: 'Bounded answer' })).id);
-  assert.equal(requests.filter((r) => r.compact).length - beforeBounded, 4, 'at most four compaction calls per answer');
+  const boundedTurn = await settled(
+    bounded.id,
+    (
+      await startApiTurn(user, bounded.id, {
+        commandId: randomUUID(),
+        expectedRevision: bounded.revision,
+        prompt: 'Bounded answer',
+      })
+    ).id
+  );
+  assert.equal(
+    requests.filter((r) => r.compact).length - beforeBounded,
+    4,
+    'at most four compaction calls per answer'
+  );
   assert.equal(boundedTurn.compaction?.coveredTurns, 8);
   assert.equal(boundedTurn.compaction?.remainingTurns, 2, 'coverage gaps remain explicit');
-  assert.equal(boundedTurn.compaction?.truncatedTurnIds.length, 8, 'clipped source excerpts are declared');
+  assert.equal(
+    boundedTurn.compaction?.truncatedTurnIds.length,
+    8,
+    'clipped source excerpts are declared'
+  );
   assert.equal(boundedTurn.usage?.input, 39);
   blockCompaction = true;
   const beforeStop = requests.length;

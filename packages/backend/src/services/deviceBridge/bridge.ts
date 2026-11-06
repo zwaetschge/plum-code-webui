@@ -232,7 +232,10 @@ export class DeviceBridge {
       for (const pending of conn.pending.values()) {
         clearTimeout(pending.timer);
         pending.reject(
-          new DeviceBridgeError('The Android device disconnected during the call', 'DEVICE_DISCONNECTED')
+          new DeviceBridgeError(
+            'The Android device disconnected during the call',
+            'DEVICE_DISCONNECTED'
+          )
         );
       }
       conn.pending.clear();

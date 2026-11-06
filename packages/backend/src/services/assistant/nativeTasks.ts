@@ -260,7 +260,7 @@ export async function executeNativeTaskCommand(
         roles: roles.length ? roles : ['reference'],
       });
     }
-    const sharedMemory=await taskMemoryContext(userId,task.body);
+    const sharedMemory = await taskMemoryContext(userId, task.body);
     const sourceContext =
       sharedMemory +
       (analysis ? `\n${analysisTaskInstructions}\n${JSON.stringify(analysis)}` : '') +

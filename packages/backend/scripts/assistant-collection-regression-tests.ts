@@ -80,7 +80,15 @@ try {
     1,
     'concurrent edits cannot overwrite each other'
   );
-  assert.deepEqual(JSON.parse((await get('SELECT body_json FROM assistant_resource_revisions WHERE resource_id=? AND revision=1',collection.id))!.body_json).favoriteIds,[second.id]);
+  assert.deepEqual(
+    JSON.parse(
+      (await get(
+        'SELECT body_json FROM assistant_resource_revisions WHERE resource_id=? AND revision=1',
+        collection.id
+      ))!.body_json
+    ).favoriteIds,
+    [second.id]
+  );
   await archiveResource('collection-alice', second.id, second.revision);
   const refs = await resourceReferences('collection-alice', [first.id, second.id, foreign.id]);
   assert.deepEqual(

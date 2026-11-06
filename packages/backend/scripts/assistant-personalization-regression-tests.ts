@@ -332,7 +332,7 @@ try {
   }
   if (process.env.PLUM_PERSONALIZATION_FIXTURE_RECORD) {
     const app = express();
-    app.use(express.json({limit:'2mb'}));
+    app.use(express.json({ limit: '2mb' }));
     app.use('/api/assistant', assistantRouter);
     app.use(errorHandler);
     const server = app.listen(0, '127.0.0.1', () => {

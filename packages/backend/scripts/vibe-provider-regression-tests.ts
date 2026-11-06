@@ -136,8 +136,6 @@ function testAcpModeMapping() {
   assert.equal(acpModeForSessionMode('vibe', 'danger'), 'auto-approve');
   assert.equal(acpModeForSessionMode('vibe', 'manual'), 'ask');
   assert.equal(acpModeForSessionMode('vibe', 'auto-accept'), 'accept-edits');
-
-
 }
 
 function testVibeProviderConfig() {

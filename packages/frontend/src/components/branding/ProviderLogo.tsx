@@ -52,8 +52,6 @@ export function ProviderLogo({ provider, className, alt }: ProviderLogoProps) {
     );
   }
 
-
-
   if (provider === 'vibe') {
     // No shipped asset for Mistral Vibe, so the badge is drawn inline like the
     // Pi mark: an SVG keeps scaling with the h-*/w-* classes callers pass in.

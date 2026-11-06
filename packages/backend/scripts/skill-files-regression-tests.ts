@@ -2,30 +2,77 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { listSkillFiles, readSkillFile, writeSkillFile, skillFileHistory } from '../src/utils/skillFiles.js';
+import {
+  listSkillFiles,
+  readSkillFile,
+  writeSkillFile,
+  skillFileHistory,
+} from '../src/utils/skillFiles.js';
 const home = await fs.mkdtemp(path.join(os.tmpdir(), 'plum-skill-files-'));
 try {
   const skill = path.join(home, 'skills', 'fixture');
   await fs.mkdir(skill, { recursive: true });
   await fs.writeFile(path.join(skill, 'SKILL.md'), '# Original');
   const original = await readSkillFile(home, 'fixture', 'SKILL.md');
-  const updated = await writeSkillFile(home, 'fixture', { path: 'SKILL.md', expectedHash: original.hash, content: '# Updated' });
+  const updated = await writeSkillFile(home, 'fixture', {
+    path: 'SKILL.md',
+    expectedHash: original.hash,
+    content: '# Updated',
+  });
   assert.notEqual(updated.hash, original.hash);
-  assert.equal((await readSkillFile(home, 'fixture', 'SKILL.md', original.hash)).content, '# Original');
+  assert.equal(
+    (await readSkillFile(home, 'fixture', 'SKILL.md', original.hash)).content,
+    '# Original'
+  );
   assert.equal((await skillFileHistory(home, 'fixture', 'SKILL.md')).length, 2);
-  await assert.rejects(writeSkillFile(home, 'fixture', { path: 'SKILL.md', expectedHash: original.hash, content: 'stale' }), /inzwischen/);
-  await writeSkillFile(home, 'fixture', { path: 'references/example.md', expectedHash: null, content: 'Reference text' });
-  assert.deepEqual((await listSkillFiles(home, 'fixture')).files, ['SKILL.md', 'references/example.md']);
-  await assert.rejects(writeSkillFile(home, 'fixture', { path: '../outside', expectedHash: null, content: 'escape' }));
-  const outside = path.join(home, 'outside'); await fs.mkdir(outside); await fs.writeFile(path.join(outside, 'secret.txt'), 'private');
+  await assert.rejects(
+    writeSkillFile(home, 'fixture', {
+      path: 'SKILL.md',
+      expectedHash: original.hash,
+      content: 'stale',
+    }),
+    /inzwischen/
+  );
+  await writeSkillFile(home, 'fixture', {
+    path: 'references/example.md',
+    expectedHash: null,
+    content: 'Reference text',
+  });
+  assert.deepEqual((await listSkillFiles(home, 'fixture')).files, [
+    'SKILL.md',
+    'references/example.md',
+  ]);
+  await assert.rejects(
+    writeSkillFile(home, 'fixture', { path: '../outside', expectedHash: null, content: 'escape' })
+  );
+  const outside = path.join(home, 'outside');
+  await fs.mkdir(outside);
+  await fs.writeFile(path.join(outside, 'secret.txt'), 'private');
   await fs.symlink(outside, path.join(skill, 'linked'));
   await assert.rejects(readSkillFile(home, 'fixture', 'linked/secret.txt'));
-  await assert.rejects(writeSkillFile(home, 'fixture', { path: 'linked/secret.txt', expectedHash: null, content: 'escape' }));
+  await assert.rejects(
+    writeSkillFile(home, 'fixture', {
+      path: 'linked/secret.txt',
+      expectedHash: null,
+      content: 'escape',
+    })
+  );
   await fs.symlink(path.join(outside, 'secret.txt'), path.join(skill, 'shortcut.txt'));
   await assert.rejects(readSkillFile(home, 'fixture', 'shortcut.txt'));
   assert.equal(await fs.readFile(path.join(outside, 'secret.txt'), 'utf8'), 'private');
   await fs.writeFile(path.join(skill, '.plum-managed-skill.json'), '{}');
   assert.equal((await listSkillFiles(home, 'fixture')).readOnly, true);
-  await assert.rejects(writeSkillFile(home, 'fixture', { path: 'SKILL.md', expectedHash: updated.hash, content: 'overwrite' }), /verwaltet/);
-  console.log('PASS skill text files, nested creation, immutable versions, conflicts, symlinks and managed protection');
-} finally { await fs.rm(home, { recursive: true, force: true }); }
+  await assert.rejects(
+    writeSkillFile(home, 'fixture', {
+      path: 'SKILL.md',
+      expectedHash: updated.hash,
+      content: 'overwrite',
+    }),
+    /verwaltet/
+  );
+  console.log(
+    'PASS skill text files, nested creation, immutable versions, conflicts, symlinks and managed protection'
+  );
+} finally {
+  await fs.rm(home, { recursive: true, force: true });
+}

@@ -1,10 +1,12 @@
 import type { AssistantSlide, AssistantSlides } from '@plum-code-webui/shared';
 const escape = (value: string) =>
-  value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').replace(
-    /[&<>"']/g,
-    (character) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character]!
-  );
+  value
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '')
+    .replace(
+      /[&<>"']/g,
+      (character) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[character]!
+    );
 const lines = (text: string, bullets: boolean, size: number) =>
   text
     .split('\n')

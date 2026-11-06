@@ -1,15 +1,15 @@
 function req(name: string, fallback?: string): string {
-  const v = process.env[name] ?? fallback
-  if (v === undefined) throw new Error(`Umgebungsvariable ${name} fehlt`)
-  return v
+  const v = process.env[name] ?? fallback;
+  if (v === undefined) throw new Error(`Umgebungsvariable ${name} fehlt`);
+  return v;
 }
 
 function num(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  const v = Number(raw)
-  if (!Number.isFinite(v)) throw new Error(`${name} ist keine Zahl: ${raw}`)
-  return v
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const v = Number(raw);
+  if (!Number.isFinite(v)) throw new Error(`${name} ist keine Zahl: ${raw}`);
+  return v;
 }
 
 export const env = {
@@ -66,12 +66,12 @@ export const env = {
   inboxAlarmMinutes: num('INBOX_ALARM_MINUTES', 10),
 
   logLevel: req('LOG_LEVEL', 'info'),
-} as const
+} as const;
 
-export const HUB_MXID = `@${env.senderLocalpart}:${env.domain}`
-export const isDev = process.env.NODE_ENV !== 'production'
+export const HUB_MXID = `@${env.senderLocalpart}:${env.domain}`;
+export const isDev = process.env.NODE_ENV !== 'production';
 
 /** Puppets, die der Hub maskieren darf — nur der eigene Namensraum (§7.1). */
 export function puppetMxid(id: string): string {
-  return `@_sw_${id}:${env.domain}`
+  return `@_sw_${id}:${env.domain}`;
 }

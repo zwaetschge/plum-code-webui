@@ -5,22 +5,22 @@
  * `!audit` rechnet sie nach; ein Eingriff in die Tabelle fällt dabei auf, weil
  * ab der geänderten Zeile jeder Hash nicht mehr passt.
  */
-import { createHash } from 'node:crypto'
-import { jsonParam, sql, type Db, type Sql } from '../db/index.js'
+import { createHash } from 'node:crypto';
+import { jsonParam, sql, type Db, type Sql } from '../db/index.js';
 
 /**
  * Kanonisches JSON: jsonb sortiert Schlüssel beim Speichern um, also darf der
  * Hash nicht von der Reihenfolge abhängen, in der der Hub sie gerade schrieb.
  */
 export function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') {
     const eintrag = Object.entries(value as Record<string, unknown>)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`)
-    return `{${eintrag.join(',')}}`
+      .map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`);
+    return `{${eintrag.join(',')}}`;
   }
-  return JSON.stringify(value ?? null)
+  return JSON.stringify(value ?? null);
 }
 
 export function chainHash(
@@ -29,16 +29,22 @@ export function chainHash(
   actor: string,
   action: string,
   target: string | null,
-  detail: unknown,
+  detail: unknown
 ): string {
   return createHash('sha256')
     .update([prev ?? '', at, actor, action, target ?? '', canonical(detail ?? {})].join('|'))
-    .digest('hex')
+    .digest('hex');
 }
 
 /** Ein Beleg, der noch in die Kette muss. */
-interface Beleg { at: Date; actor: string; action: string; target: string | null; detail: Record<string, unknown> }
-const sammlung: Beleg[] = []
+interface Beleg {
+  at: Date;
+  actor: string;
+  action: string;
+  target: string | null;
+  detail: Record<string, unknown>;
+}
+const sammlung: Beleg[] = [];
 
 /**
  * Beleg **vormerken** statt sofort schreiben (ADR-002 §4.35).
@@ -58,21 +64,21 @@ export function auditMerken(
   actor: string,
   action: string,
   target: string | null,
-  detail: Record<string, unknown> = {},
+  detail: Record<string, unknown> = {}
 ): void {
-  sammlung.push({ at: new Date(), actor, action, target, detail })
+  sammlung.push({ at: new Date(), actor, action, target, detail });
 }
 
 /** Vorgemerkte Belege in Reihenfolge in die Kette schreiben. */
 export async function auditAbarbeiten(db: Sql = sql, hoechstens = 200): Promise<number> {
-  const charge = sammlung.splice(0, hoechstens)
-  for (const b of charge) await audit(b.actor, b.action, b.target, b.detail, db, b.at)
-  return charge.length
+  const charge = sammlung.splice(0, hoechstens);
+  for (const b of charge) await audit(b.actor, b.action, b.target, b.detail, db, b.at);
+  return charge.length;
 }
 
 /** Wie viele Belege noch warten — für /health und die Überwachung. */
 export function auditRueckstand(): number {
-  return sammlung.length
+  return sammlung.length;
 }
 
 /**
@@ -86,31 +92,40 @@ export async function audit(
   target: string | null,
   detail: Record<string, unknown> = {},
   db: Db = sql,
-  at: Date = new Date(),
+  at: Date = new Date()
 ): Promise<void> {
   const schreiben = async (tx: Db): Promise<void> => {
     // Vor dem Lesen serialisieren, auch bei leerer Tabelle. FOR UPDATE auf
     // dem letzten Eintrag reicht nicht: Ein wartender Leser behält sonst den
     // alten Snapshot und hängt einen zweiten Eintrag an denselben Vorgänger.
     // Das Transaktionsschloss gilt auch für Aufrufer mit bereits offenem tx.
-    await tx`SELECT pg_advisory_xact_lock(1398227282, 1096107081)`
+    await tx`SELECT pg_advisory_xact_lock(1398227282, 1096107081)`;
     // Die Zeit setzt der Hub, nicht now(): Beim Nachrechnen muss sie gleich sein.
-    const [prev] = await tx`SELECT hash FROM swarm.audit ORDER BY id DESC LIMIT 1 FOR UPDATE`
-    const hash = chainHash((prev?.hash as string | undefined) ?? null, at.toISOString(), actor, action, target, detail)
+    const [prev] = await tx`SELECT hash FROM swarm.audit ORDER BY id DESC LIMIT 1 FOR UPDATE`;
+    const hash = chainHash(
+      (prev?.hash as string | undefined) ?? null,
+      at.toISOString(),
+      actor,
+      action,
+      target,
+      detail
+    );
     await tx`
       INSERT INTO swarm.audit (at, actor, action, target, detail, prev_hash, hash)
       VALUES (${at}, ${actor}, ${action}, ${target}, ${jsonParam(tx, detail)},
-              ${prev?.hash ?? null}, ${hash})`
-  }
-  if (typeof (db as Sql).begin === 'function') await (db as Sql).begin(schreiben)
-  else await schreiben(db)
+              ${prev?.hash ?? null}, ${hash})`;
+  };
+  if (typeof (db as Sql).begin === 'function') await (db as Sql).begin(schreiben);
+  else await schreiben(db);
 }
 
-export async function verifyAudit(db: Db = sql): Promise<{ ok: boolean; rows: number; brokenAt: number | null }> {
+export async function verifyAudit(
+  db: Db = sql
+): Promise<{ ok: boolean; rows: number; brokenAt: number | null }> {
   const rows = await db`
     SELECT id, at, actor, action, target, detail, prev_hash, hash
-    FROM swarm.audit ORDER BY id`
-  let vorher: string | null = null
+    FROM swarm.audit ORDER BY id`;
+  let vorher: string | null = null;
   for (const r of rows as Record<string, unknown>[]) {
     const erwartet = chainHash(
       vorher,
@@ -118,42 +133,45 @@ export async function verifyAudit(db: Db = sql): Promise<{ ok: boolean; rows: nu
       r.actor as string,
       r.action as string,
       (r.target as string | null) ?? null,
-      r.detail,
-    )
+      r.detail
+    );
     if (r.prev_hash !== vorher || r.hash !== erwartet) {
-      return { ok: false, rows: rows.length, brokenAt: Number(r.id) }
+      return { ok: false, rows: rows.length, brokenAt: Number(r.id) };
     }
-    vorher = r.hash as string
+    vorher = r.hash as string;
   }
-  return { ok: true, rows: rows.length, brokenAt: null }
+  return { ok: true, rows: rows.length, brokenAt: null };
 }
 
 // ─── Flags: Kill-Switch und Einfrierungen ───────────────────────────────────
 
-export async function getFlag<T = Record<string, unknown>>(name: string, db: Db = sql): Promise<T | null> {
-  const [row] = await db`SELECT value FROM swarm.flags WHERE name = ${name}`
-  return row ? (row.value as T) : null
+export async function getFlag<T = Record<string, unknown>>(
+  name: string,
+  db: Db = sql
+): Promise<T | null> {
+  const [row] = await db`SELECT value FROM swarm.flags WHERE name = ${name}`;
+  return row ? (row.value as T) : null;
 }
 
 export async function setFlag(
   name: string,
   value: Record<string, unknown>,
   setBy: string,
-  db: Db = sql,
+  db: Db = sql
 ): Promise<void> {
   await db`
     INSERT INTO swarm.flags (name, value, set_by, set_at)
     VALUES (${name}, ${jsonParam(db, value)}, ${setBy}, now())
-    ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value, set_by = EXCLUDED.set_by, set_at = now()`
+    ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value, set_by = EXCLUDED.set_by, set_at = now()`;
 }
 
 export async function clearFlag(name: string, db: Db = sql): Promise<void> {
-  await db`DELETE FROM swarm.flags WHERE name = ${name}`
+  await db`DELETE FROM swarm.flags WHERE name = ${name}`;
 }
 
-export const FROZEN_FLAG = 'frozen'
+export const FROZEN_FLAG = 'frozen';
 
 /** Der Kill-Switch überlebt den Neustart, weil er in Postgres steht (§9.7). */
 export async function isSwarmFrozen(db: Db = sql): Promise<boolean> {
-  return (await getFlag(FROZEN_FLAG, db)) !== null
+  return (await getFlag(FROZEN_FLAG, db)) !== null;
 }

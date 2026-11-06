@@ -3,24 +3,24 @@
  * Appservice-Token, ohne SDK. Alles, was der Hub nach draussen schickt, läuft
  * hier durch — und nur hier steht, wie eine Transaktions-ID an der URL hängt.
  */
-import { env } from '../env.js'
+import { env } from '../env.js';
 
-export type SendOk = { ok: true; eventId: string }
+export type SendOk = { ok: true; eventId: string };
 export type SendErr = {
-  ok: false
-  status: number
-  errcode: string
-  message: string
+  ok: false;
+  status: number;
+  errcode: string;
+  message: string;
   /** 429/5xx/Netzfehler: später erneut versuchen. */
-  retryable: boolean
-  retryAfterMs?: number
-}
-export type SendResult = SendOk | SendErr
+  retryable: boolean;
+  retryAfterMs?: number;
+};
+export type SendResult = SendOk | SendErr;
 
 export interface AsUser {
   /** Puppet, in dessen Namen der Hub schreibt. Fehlt er, spricht `@schwarm`. */
-  user?: string
-  txnId: string
+  user?: string;
+  txnId: string;
 }
 
 function netzfehler(err: unknown): SendErr {
@@ -30,7 +30,7 @@ function netzfehler(err: unknown): SendErr {
     errcode: 'M_NETWORK',
     message: err instanceof Error ? err.message : String(err),
     retryable: true,
-  }
+  };
 }
 
 /**
@@ -39,36 +39,38 @@ function netzfehler(err: unknown): SendErr {
  * in den Dead Letter. Kommazahlen gehen deshalb als Text hinaus, ganze Zahlen bleiben.
  */
 export function kanonisch(wert: unknown): unknown {
-  if (typeof wert === 'number') return Number.isSafeInteger(wert) ? wert : String(wert)
-  if (Array.isArray(wert)) return wert.map(kanonisch)
+  if (typeof wert === 'number') return Number.isSafeInteger(wert) ? wert : String(wert);
+  if (Array.isArray(wert)) return wert.map(kanonisch);
   if (wert && typeof wert === 'object') {
-    return Object.fromEntries(Object.entries(wert as Record<string, unknown>).map(([k, v]) => [k, kanonisch(v)]))
+    return Object.fromEntries(
+      Object.entries(wert as Record<string, unknown>).map(([k, v]) => [k, kanonisch(v)])
+    );
   }
-  return wert
+  return wert;
 }
 
 export interface CreateRoomAntwort {
-  roomId: string | null
-  status: number
-  errcode: string | null
-  message: string | null
+  roomId: string | null;
+  status: number;
+  errcode: string | null;
+  message: string | null;
 }
 
 export class MatrixClient {
   constructor(
     private readonly baseUrl = env.homeserverUrl,
-    private readonly token = env.asToken,
+    private readonly token = env.asToken
   ) {}
 
   private async request(
     method: string,
     path: string,
     body?: unknown,
-    asUser?: string,
+    asUser?: string
   ): Promise<{ status: number; json: Record<string, unknown> }> {
-    const url = new URL(path, this.baseUrl)
-    if (asUser) url.searchParams.set('user_id', asUser)
-    let res: Response
+    const url = new URL(path, this.baseUrl);
+    if (asUser) url.searchParams.set('user_id', asUser);
+    let res: Response;
     try {
       res = await fetch(url, {
         method,
@@ -78,25 +80,25 @@ export class MatrixClient {
         },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(30_000),
-      })
+      });
     } catch (err) {
-      throw Object.assign(new Error((err as Error).message), { network: true })
+      throw Object.assign(new Error((err as Error).message), { network: true });
     }
-    let json: Record<string, unknown> = {}
+    let json: Record<string, unknown> = {};
     try {
-      json = (await res.json()) as Record<string, unknown>
+      json = (await res.json()) as Record<string, unknown>;
     } catch {
-      json = {}
+      json = {};
     }
-    return { status: res.status, json }
+    return { status: res.status, json };
   }
 
   private einordnen(res: { status: number; json: Record<string, unknown> }): SendErr {
-    const status = res.status
-    const errcode = String(res.json.errcode ?? 'M_UNKNOWN')
-    const message = String(res.json.error ?? '')
-    const retryable = status === 429 || status >= 500 || status === 0
-    const retryAfter = res.json.retry_after_ms
+    const status = res.status;
+    const errcode = String(res.json.errcode ?? 'M_UNKNOWN');
+    const message = String(res.json.error ?? '');
+    const retryable = status === 429 || status >= 500 || status === 0;
+    const retryAfter = res.json.retry_after_ms;
     return {
       ok: false,
       status,
@@ -104,7 +106,7 @@ export class MatrixClient {
       message,
       retryable,
       ...(typeof retryAfter === 'number' ? { retryAfterMs: retryAfter } : {}),
-    }
+    };
   }
 
   /** `PUT …/send/{type}/{txnId}` — idempotent über die Transaktions-ID (§10.2). */
@@ -112,17 +114,17 @@ export class MatrixClient {
     roomId: string,
     type: string,
     content: Record<string, unknown>,
-    as: AsUser,
+    as: AsUser
   ): Promise<SendResult> {
-    const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(type)}/${encodeURIComponent(as.txnId)}`
+    const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(type)}/${encodeURIComponent(as.txnId)}`;
     try {
-      const res = await this.request('PUT', path, kanonisch(content), as.user)
+      const res = await this.request('PUT', path, kanonisch(content), as.user);
       if (res.status === 200 && typeof res.json.event_id === 'string') {
-        return { ok: true, eventId: res.json.event_id }
+        return { ok: true, eventId: res.json.event_id };
       }
-      return this.einordnen(res)
+      return this.einordnen(res);
     } catch (err) {
-      return netzfehler(err)
+      return netzfehler(err);
     }
   }
 
@@ -131,30 +133,30 @@ export class MatrixClient {
     type: string,
     stateKey: string,
     content: Record<string, unknown>,
-    as: AsUser,
+    as: AsUser
   ): Promise<SendResult> {
-    const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(type)}/${encodeURIComponent(stateKey)}`
+    const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(type)}/${encodeURIComponent(stateKey)}`;
     try {
-      const res = await this.request('PUT', path, kanonisch(content), as.user)
+      const res = await this.request('PUT', path, kanonisch(content), as.user);
       if (res.status === 200 && typeof res.json.event_id === 'string') {
-        return { ok: true, eventId: res.json.event_id }
+        return { ok: true, eventId: res.json.event_id };
       }
-      return this.einordnen(res)
+      return this.einordnen(res);
     } catch (err) {
-      return netzfehler(err)
+      return netzfehler(err);
     }
   }
 
   async redact(roomId: string, eventId: string, reason: string, as: AsUser): Promise<SendResult> {
-    const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/redact/${encodeURIComponent(eventId)}/${encodeURIComponent(as.txnId)}`
+    const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/redact/${encodeURIComponent(eventId)}/${encodeURIComponent(as.txnId)}`;
     try {
-      const res = await this.request('PUT', path, { reason }, as.user)
+      const res = await this.request('PUT', path, { reason }, as.user);
       if (res.status === 200 && typeof res.json.event_id === 'string') {
-        return { ok: true, eventId: res.json.event_id }
+        return { ok: true, eventId: res.json.event_id };
       }
-      return this.einordnen(res)
+      return this.einordnen(res);
     } catch (err) {
-      return netzfehler(err)
+      return netzfehler(err);
     }
   }
 
@@ -164,11 +166,11 @@ export class MatrixClient {
         'POST',
         `/_matrix/client/v3/join/${encodeURIComponent(roomId)}`,
         {},
-        asUser,
-      )
-      return res.status === 200
+        asUser
+      );
+      return res.status === 200;
     } catch {
-      return false
+      return false;
     }
   }
 
@@ -177,20 +179,23 @@ export class MatrixClient {
       const res = await this.request(
         'POST',
         `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
-        { user_id: userId },
-      )
-      return res.status === 200
+        { user_id: userId }
+      );
+      return res.status === 200;
     } catch {
-      return false
+      return false;
     }
   }
 
   async resolveAlias(alias: string): Promise<string | null> {
     try {
-      const res = await this.request('GET', `/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`)
-      return res.status === 200 && typeof res.json.room_id === 'string' ? res.json.room_id : null
+      const res = await this.request(
+        'GET',
+        `/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`
+      );
+      return res.status === 200 && typeof res.json.room_id === 'string' ? res.json.room_id : null;
     } catch {
-      return null
+      return null;
     }
   }
 
@@ -201,28 +206,31 @@ export class MatrixClient {
    */
   async createRoom(spec: Record<string, unknown>): Promise<CreateRoomAntwort> {
     try {
-      const res = await this.request('POST', '/_matrix/client/v3/createRoom', spec)
+      const res = await this.request('POST', '/_matrix/client/v3/createRoom', spec);
       if (res.status === 200 && typeof res.json.room_id === 'string') {
-        return { roomId: res.json.room_id as string, status: 200, errcode: null, message: null }
+        return { roomId: res.json.room_id as string, status: 200, errcode: null, message: null };
       }
       return {
         roomId: null,
         status: res.status,
         errcode: typeof res.json?.errcode === 'string' ? (res.json.errcode as string) : null,
         message: typeof res.json?.error === 'string' ? (res.json.error as string) : null,
-      }
+      };
     } catch (err) {
-      return { roomId: null, status: 0, errcode: null, message: (err as Error).message }
+      return { roomId: null, status: 0, errcode: null, message: (err as Error).message };
     }
   }
 
   async members(roomId: string): Promise<string[]> {
     try {
-      const res = await this.request('GET', `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`)
-      if (res.status !== 200) return []
-      return Object.keys((res.json.joined as Record<string, unknown>) ?? {})
+      const res = await this.request(
+        'GET',
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`
+      );
+      if (res.status !== 200) return [];
+      return Object.keys((res.json.joined as Record<string, unknown>) ?? {});
     } catch {
-      return []
+      return [];
     }
   }
 
@@ -235,23 +243,23 @@ export class MatrixClient {
     filename: string,
     mime: string,
     daten: Uint8Array,
-    asUser?: string,
+    asUser?: string
   ): Promise<{ ok: true; mxc: string } | { ok: false; message: string }> {
-    const url = new URL('/_matrix/media/v3/upload', this.baseUrl)
-    url.searchParams.set('filename', filename)
-    if (asUser) url.searchParams.set('user_id', asUser)
+    const url = new URL('/_matrix/media/v3/upload', this.baseUrl);
+    url.searchParams.set('filename', filename);
+    if (asUser) url.searchParams.set('user_id', asUser);
     try {
       const res = await fetch(url, {
         method: 'POST',
         headers: { authorization: `Bearer ${this.token}`, 'content-type': mime },
         body: daten,
         signal: AbortSignal.timeout(60_000),
-      })
-      const body = (await res.json().catch(() => ({}))) as { content_uri?: string; error?: string }
-      if (res.status === 200 && body.content_uri) return { ok: true, mxc: body.content_uri }
-      return { ok: false, message: `${res.status} ${body.error ?? ''}`.trim() }
+      });
+      const body = (await res.json().catch(() => ({}))) as { content_uri?: string; error?: string };
+      if (res.status === 200 && body.content_uri) return { ok: true, mxc: body.content_uri };
+      return { ok: false, message: `${res.status} ${body.error ?? ''}`.trim() };
     } catch (err) {
-      return { ok: false, message: (err as Error).message }
+      return { ok: false, message: (err as Error).message };
     }
   }
 
@@ -262,44 +270,48 @@ export class MatrixClient {
   private async seit(
     roomId: string,
     cutoffMs: number,
-    maxEvents = 2000,
+    maxEvents = 2000
   ): Promise<Record<string, unknown>[]> {
-    const out: Record<string, unknown>[] = []
-    let from = ''
+    const out: Record<string, unknown>[] = [];
+    let from = '';
     for (let seite = 0; seite < 20; seite++) {
-      const qs = new URLSearchParams({ dir: 'b', limit: '200' })
-      if (from) qs.set('from', from)
-      let res: { status: number; json: Record<string, unknown> }
+      const qs = new URLSearchParams({ dir: 'b', limit: '200' });
+      if (from) qs.set('from', from);
+      let res: { status: number; json: Record<string, unknown> };
       try {
         res = await this.request(
           'GET',
-          `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?${qs.toString()}`,
-        )
+          `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?${qs.toString()}`
+        );
       } catch {
-        break
+        break;
       }
-      if (res.status !== 200) break
-      const chunk = (res.json.chunk as Record<string, unknown>[]) ?? []
-      let aelter = false
+      if (res.status !== 200) break;
+      const chunk = (res.json.chunk as Record<string, unknown>[]) ?? [];
+      let aelter = false;
       for (const e of chunk) {
-        const ts = Number(e.origin_server_ts ?? 0)
+        const ts = Number(e.origin_server_ts ?? 0);
         if (ts < cutoffMs) {
-          aelter = true
-          continue
+          aelter = true;
+          continue;
         }
-        out.push(e)
-        if (out.length >= maxEvents) return out
+        out.push(e);
+        if (out.length >= maxEvents) return out;
       }
-      const next = res.json.end
-      if (aelter || !next || typeof next !== 'string' || chunk.length === 0) break
-      from = next
+      const next = res.json.end;
+      if (aelter || !next || typeof next !== 'string' || chunk.length === 0) break;
+      from = next;
     }
-    return out
+    return out;
   }
 
   /** Öffentlicher Zugriff auf den Verlauf seit einem Zeitpunkt. */
-  async messagesSince(roomId: string, cutoffMs: number, maxEvents = 2000): Promise<Record<string, unknown>[]> {
-    return this.seit(roomId, cutoffMs, maxEvents)
+  async messagesSince(
+    roomId: string,
+    cutoffMs: number,
+    maxEvents = 2000
+  ): Promise<Record<string, unknown>[]> {
+    return this.seit(roomId, cutoffMs, maxEvents);
   }
 
   /**
@@ -308,30 +320,30 @@ export class MatrixClient {
    */
   async threadMessages(
     roomId: string,
-    rootEventId: string,
+    rootEventId: string
   ): Promise<{ eventId: string; sender: string; ts: number; body: string; msgtype: string }[]> {
     try {
       const res = await this.request(
         'GET',
-        `/_matrix/client/v1/rooms/${encodeURIComponent(roomId)}/relations/${encodeURIComponent(rootEventId)}/m.thread/m.room.message?limit=200&dir=f`,
-      )
-      if (res.status !== 200) return []
-      const chunk = (res.json.chunk as Record<string, unknown>[]) ?? []
+        `/_matrix/client/v1/rooms/${encodeURIComponent(roomId)}/relations/${encodeURIComponent(rootEventId)}/m.thread/m.room.message?limit=200&dir=f`
+      );
+      if (res.status !== 200) return [];
+      const chunk = (res.json.chunk as Record<string, unknown>[]) ?? [];
       return chunk
         .filter((e) => (e.content as Record<string, unknown> | undefined)?.msgtype)
         .map((e) => {
-          const content = (e.content ?? {}) as Record<string, unknown>
+          const content = (e.content ?? {}) as Record<string, unknown>;
           return {
             eventId: String(e.event_id ?? ''),
             sender: String(e.sender ?? ''),
             ts: Number(e.origin_server_ts ?? 0),
             body: String(content.body ?? ''),
             msgtype: String(content.msgtype ?? ''),
-          }
+          };
         })
-        .sort((a, b) => a.ts - b.ts)
+        .sort((a, b) => a.ts - b.ts);
     } catch {
-      return []
+      return [];
     }
   }
 
@@ -341,20 +353,21 @@ export class MatrixClient {
    * liegengebliebene Transaktionen sofort zu schicken.
    */
   async ping(): Promise<{ ok: boolean; ms: number; message?: string }> {
-    const start = Date.now()
+    const start = Date.now();
     try {
       const res = await this.request(
         'POST',
         `/_matrix/client/v1/appservice/${encodeURIComponent(env.appserviceId)}/ping`,
-        { appservice_id: env.appserviceId },
-      )
-      const ms = typeof res.json.duration_ms === 'number' ? res.json.duration_ms : Date.now() - start
-      if (res.status === 200) return { ok: true, ms }
-      return { ok: false, ms, message: `${res.status} ${String(res.json.errcode ?? '')}` }
+        { appservice_id: env.appserviceId }
+      );
+      const ms =
+        typeof res.json.duration_ms === 'number' ? res.json.duration_ms : Date.now() - start;
+      if (res.status === 200) return { ok: true, ms };
+      return { ok: false, ms, message: `${res.status} ${String(res.json.errcode ?? '')}` };
     } catch (err) {
-      return { ok: false, ms: Date.now() - start, message: (err as Error).message }
+      return { ok: false, ms: Date.now() - start, message: (err as Error).message };
     }
   }
 }
 
-export const matrix = new MatrixClient()
+export const matrix = new MatrixClient();

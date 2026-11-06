@@ -48,25 +48,23 @@ router.get('/:token', async (req, res, next) => {
 // Expected anonymous misses must not put a bearer publication URL into request-error logs.
 const publicError: ErrorRequestHandler = (error, _req, res, _next) => {
   const status = error instanceof AppError ? error.statusCode : 500;
-  res
-    .status(status)
-    .json({
-      success: false,
-      error: {
-        code:
-          status === 503
-            ? 'PUBLICATION_DISABLED'
-            : status === 404
-              ? 'NOT_FOUND'
-              : 'PUBLICATION_ERROR',
-        message:
-          status === 503
-            ? 'Öffentliche Veröffentlichungen sind nicht aktiviert'
-            : status === 404
-              ? 'Veröffentlichung nicht gefunden'
-              : 'Veröffentlichung konnte nicht geladen werden',
-      },
-    });
+  res.status(status).json({
+    success: false,
+    error: {
+      code:
+        status === 503
+          ? 'PUBLICATION_DISABLED'
+          : status === 404
+            ? 'NOT_FOUND'
+            : 'PUBLICATION_ERROR',
+      message:
+        status === 503
+          ? 'Öffentliche Veröffentlichungen sind nicht aktiviert'
+          : status === 404
+            ? 'Veröffentlichung nicht gefunden'
+            : 'Veröffentlichung konnte nicht geladen werden',
+    },
+  });
 };
 router.use(publicError);
 export default router;

@@ -2,19 +2,22 @@
  * ntfy direkt vom Hub (§10.5): Er meldet auch, wenn council-core aus ist.
  * Fire-and-forget — eine Benachrichtigung darf keinen Auftrag aufhalten.
  */
-import { env } from './env.js'
+import { env } from './env.js';
 
 export interface NotifyOptions {
-  title: string
-  text: string
+  title: string;
+  text: string;
   /** 1–5, ntfy-Priorität. 4 = hoch, 5 = max (Klingeln). */
-  priority?: number
-  tags?: string[]
+  priority?: number;
+  tags?: string[];
 }
 
-export async function notify(o: NotifyOptions, log?: { warn: (m: unknown) => void }): Promise<void> {
-  if (!env.ntfyUrl || !env.ntfyTopic) return
-  const url = `${env.ntfyUrl.replace(/\/$/, '')}/${env.ntfyTopic}`
+export async function notify(
+  o: NotifyOptions,
+  log?: { warn: (m: unknown) => void }
+): Promise<void> {
+  if (!env.ntfyUrl || !env.ntfyTopic) return;
+  const url = `${env.ntfyUrl.replace(/\/$/, '')}/${env.ntfyTopic}`;
   try {
     await fetch(url, {
       method: 'POST',
@@ -26,8 +29,8 @@ export async function notify(o: NotifyOptions, log?: { warn: (m: unknown) => voi
       },
       body: o.text,
       signal: AbortSignal.timeout(10_000),
-    })
+    });
   } catch (err) {
-    log?.warn(`ntfy nicht erreicht: ${(err as Error).message}`)
+    log?.warn(`ntfy nicht erreicht: ${(err as Error).message}`);
   }
 }

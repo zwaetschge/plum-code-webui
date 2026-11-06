@@ -10,31 +10,32 @@
  * Der Hub reicht nur durch und schwärzt die Ausgabe. Freigabe-Tokens gehen nie
  * über Matrix (§11.4, DoD P3).
  */
-import { env } from '../env.js'
-import { redact } from '../redact.js'
+import { env } from '../env.js';
+import { redact } from '../redact.js';
 
 export interface Aktion {
-  id: string
-  capability: string
-  target: string
-  risk: 'green' | 'yellow' | 'red'
-  status: string
-  exit_code: number | null
-  output: string | null
-  expires_at: string | null
+  id: string;
+  capability: string;
+  target: string;
+  risk: 'green' | 'yellow' | 'red';
+  status: string;
+  exit_code: number | null;
+  output: string | null;
+  expires_at: string | null;
 }
 
 export interface BrokerAntwort {
-  ok: boolean
-  ausgefuehrt: boolean
-  aktion?: Aktion
-  fehler?: string
-  status?: number
+  ok: boolean;
+  ausgefuehrt: boolean;
+  aktion?: Aktion;
+  fehler?: string;
+  status?: number;
 }
 
 function konfiguriert(): string | null {
-  if (!env.councilUrl || !env.councilToken) return 'Rat nicht konfiguriert (COUNCIL_URL/COUNCIL_TOKEN)'
-  return null
+  if (!env.councilUrl || !env.councilToken)
+    return 'Rat nicht konfiguriert (COUNCIL_URL/COUNCIL_TOKEN)';
+  return null;
 }
 
 function aktionAus(row: Record<string, unknown>): Aktion {
@@ -47,22 +48,25 @@ function aktionAus(row: Record<string, unknown>): Aktion {
     exit_code: row.exit_code === null || row.exit_code === undefined ? null : Number(row.exit_code),
     output: row.output === null || row.output === undefined ? null : redact(String(row.output)),
     expires_at: (row.expires_at as string | null) ?? null,
-  }
+  };
 }
 
-async function ruf(pfad: string, init: RequestInit): Promise<{ status: number; body: Record<string, unknown> }> {
+async function ruf(
+  pfad: string,
+  init: RequestInit
+): Promise<{ status: number; body: Record<string, unknown> }> {
   const res = await fetch(`${env.councilUrl.replace(/\/$/, '')}${pfad}`, {
     ...init,
     headers: { authorization: `Bearer ${env.councilToken}`, 'content-type': 'application/json' },
     signal: AbortSignal.timeout(30_000),
-  })
-  let body: Record<string, unknown> = {}
+  });
+  let body: Record<string, unknown> = {};
   try {
-    body = (await res.json()) as Record<string, unknown>
+    body = (await res.json()) as Record<string, unknown>;
   } catch {
-    body = {}
+    body = {};
   }
-  return { status: res.status, body }
+  return { status: res.status, body };
 }
 
 /**
@@ -70,14 +74,14 @@ async function ruf(pfad: string, init: RequestInit): Promise<{ status: number; b
  * `pending` (202) — die Freigabe macht Vale in der Rat-UI.
  */
 export async function capabilityAnfragen(o: {
-  capability: string
-  target: string
-  args?: Record<string, unknown>
-  reason: string
-  idempotencyKey?: string
+  capability: string;
+  target: string;
+  args?: Record<string, unknown>;
+  reason: string;
+  idempotencyKey?: string;
 }): Promise<BrokerAntwort> {
-  const fehlt = konfiguriert()
-  if (fehlt) return { ok: false, ausgefuehrt: false, fehler: fehlt }
+  const fehlt = konfiguriert();
+  if (fehlt) return { ok: false, ausgefuehrt: false, fehler: fehlt };
   try {
     const { status, body } = await ruf('/api/actions', {
       method: 'POST',
@@ -88,64 +92,78 @@ export async function capabilityAnfragen(o: {
         reason: o.reason,
         ...(o.idempotencyKey ? { idempotencyKey: o.idempotencyKey } : {}),
       }),
-    })
+    });
     if (status === 200 || status === 202) {
-      const action = body.action as Record<string, unknown> | undefined
+      const action = body.action as Record<string, unknown> | undefined;
       return {
         ok: true,
         ausgefuehrt: Boolean(body.executedNow),
         ...(action ? { aktion: aktionAus(action) } : {}),
         status,
-      }
+      };
     }
     return {
       ok: false,
       ausgefuehrt: false,
       fehler: redact(String(body.error ?? `Rat lehnte ab (${status})`)),
       status,
-    }
+    };
   } catch (err) {
     // §10.6: Der Rat ist eine eigene Ausfallstelle — der Hub bleibt brauchbar.
-    return { ok: false, ausgefuehrt: false, fehler: `Rat nicht erreichbar: ${(err as Error).message}` }
+    return {
+      ok: false,
+      ausgefuehrt: false,
+      fehler: `Rat nicht erreichbar: ${(err as Error).message}`,
+    };
   }
 }
 
 /** Stand einer Freigabe oder einer grünen Aktion nachschlagen. */
 export async function aktionHolen(id: string): Promise<BrokerAntwort> {
-  const fehlt = konfiguriert()
-  if (fehlt) return { ok: false, ausgefuehrt: false, fehler: fehlt }
+  const fehlt = konfiguriert();
+  if (fehlt) return { ok: false, ausgefuehrt: false, fehler: fehlt };
   try {
-    const { status, body } = await ruf(`/api/actions/${encodeURIComponent(id)}`, { method: 'GET' })
+    const { status, body } = await ruf(`/api/actions/${encodeURIComponent(id)}`, { method: 'GET' });
     if (status !== 200) {
-      return { ok: false, ausgefuehrt: false, fehler: redact(String(body.error ?? `HTTP ${status}`)), status }
+      return {
+        ok: false,
+        ausgefuehrt: false,
+        fehler: redact(String(body.error ?? `HTTP ${status}`)),
+        status,
+      };
     }
-    const action = body.action as Record<string, unknown> | undefined
+    const action = body.action as Record<string, unknown> | undefined;
     return {
       ok: true,
       ausgefuehrt: action?.status === 'executed' || action?.status === 'approved',
       ...(action ? { aktion: aktionAus(action) } : {}),
       status,
-    }
+    };
   } catch (err) {
-    return { ok: false, ausgefuehrt: false, fehler: `Rat nicht erreichbar: ${(err as Error).message}` }
+    return {
+      ok: false,
+      ausgefuehrt: false,
+      fehler: `Rat nicht erreichbar: ${(err as Error).message}`,
+    };
   }
 }
 
 /** Liste der Fähigkeiten — damit ein Agent nicht raten muss, was es gibt. */
-export async function capabilitiesHolen(): Promise<{ name: string; risk: string; description: string }[]> {
-  const fehlt = konfiguriert()
-  if (fehlt) return []
+export async function capabilitiesHolen(): Promise<
+  { name: string; risk: string; description: string }[]
+> {
+  const fehlt = konfiguriert();
+  if (fehlt) return [];
   try {
-    const { status, body } = await ruf('/api/capabilities', { method: 'GET' })
-    if (status !== 200) return []
-    const liste = (body.capabilities ?? []) as Record<string, unknown>[]
+    const { status, body } = await ruf('/api/capabilities', { method: 'GET' });
+    if (status !== 200) return [];
+    const liste = (body.capabilities ?? []) as Record<string, unknown>[];
     return liste.map((c) => ({
       name: String(c.name ?? ''),
       risk: String(c.risk ?? ''),
       description: String(c.description ?? ''),
-    }))
+    }));
   } catch {
-    return []
+    return [];
   }
 }
-

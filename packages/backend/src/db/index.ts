@@ -7,12 +7,7 @@ import { type CLIProvider } from '@plum-code-webui/shared';
 import { bootstrapAdmin, seedUserFromEnv } from './bootstrap.js';
 import { liveEvents } from '../services/liveEvents.js';
 import { runPendingMigrations } from './migrations.js';
-import {
-  get as pgGet,
-  getPool,
-  run as pgRun,
-  transaction as pgTransaction,
-} from './pg.js';
+import { get as pgGet, getPool, run as pgRun, transaction as pgTransaction } from './pg.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

@@ -26,9 +26,8 @@ export function DeviceBridgeStatus({ className }: { className?: string }) {
     staleTime: 15_000,
     refetchInterval: 20_000,
     queryFn: async () =>
-      (
-        await api.get<ApiResponse<DeviceBridgeStatusResponse>>('/api/device-bridge/status')
-      ).data.data ?? { devices: [] },
+      (await api.get<ApiResponse<DeviceBridgeStatusResponse>>('/api/device-bridge/status')).data
+        .data ?? { devices: [] },
   });
 
   const devices = data?.devices ?? [];

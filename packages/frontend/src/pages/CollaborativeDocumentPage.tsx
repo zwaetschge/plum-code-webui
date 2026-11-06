@@ -9,7 +9,13 @@ import { DocumentWorkspace } from '@/components/assistant/DocumentWorkspace';
 import { ArtifactImage } from '@/components/assistant/ArtifactImage';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-type Command = { commandId: string; expectedRevision: number; title: string; content: string; autoMerge?: boolean };
+type Command = {
+  commandId: string;
+  expectedRevision: number;
+  title: string;
+  content: string;
+  autoMerge?: boolean;
+};
 export function CollaborativeDocumentPage() {
   const { id } = useParams(),
     owner = useAuthStore((s) => s.user?.id);
@@ -130,7 +136,11 @@ function DocumentEditor({
     locked = !live && (busy || !!pending);
   const dirty = title !== resource.title || content !== resource.body.content;
   useEffect(() => {
-    if (!dirty && !busy && !pending && incoming.revision >= resource.revision) { setResource(incoming); setTitle(incoming.title); setContent(String(incoming.body.content)); }
+    if (!dirty && !busy && !pending && incoming.revision >= resource.revision) {
+      setResource(incoming);
+      setTitle(incoming.title);
+      setContent(String(incoming.body.content));
+    }
   }, [incoming, dirty, busy, pending, resource.revision]);
   async function save(command: Command) {
     setBusy(true);
@@ -145,8 +155,10 @@ function DocumentEditor({
       ).data.data;
       if (!current()) return;
       setResource(saved.resource);
-      setContent((draft) => draft === command.content ? String(saved.resource.body.content) : draft);
-      setTitle((draft) => draft === command.title ? saved.resource.title : draft);
+      setContent((draft) =>
+        draft === command.content ? String(saved.resource.body.content) : draft
+      );
+      setTitle((draft) => (draft === command.title ? saved.resource.title : draft));
       cache.setQueryData(['assistant', 'document-access', owner, resource.id], saved);
       setPending(null);
     } catch (failure) {
@@ -162,7 +174,17 @@ function DocumentEditor({
   saveRef.current = save;
   useEffect(() => {
     if (!live || !canEdit || !dirty || busy || pending || error || !title.trim()) return;
-    const timer = setTimeout(() => void saveRef.current({ commandId: crypto.randomUUID(), expectedRevision: resource.revision, title, content, autoMerge: true }), 800);
+    const timer = setTimeout(
+      () =>
+        void saveRef.current({
+          commandId: crypto.randomUUID(),
+          expectedRevision: resource.revision,
+          title,
+          content,
+          autoMerge: true,
+        }),
+      800
+    );
     return () => clearTimeout(timer);
   }, [live, canEdit, dirty, busy, pending, error, title, content, resource.revision]);
   const image = (src?: string, alt?: string) => (
@@ -175,7 +197,19 @@ function DocumentEditor({
         {access.role === 'owner' ? 'Besitzer' : canEdit ? 'Bearbeiten' : 'Lesen'} · Revision{' '}
         {resource.revision}
       </p>
-      {canEdit && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={live} onChange={(e) => { setLive(e.target.checked); setError(''); }} />Live gemeinsam bearbeiten</label>}
+      {canEdit && (
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={live}
+            onChange={(e) => {
+              setLive(e.target.checked);
+              setError('');
+            }}
+          />
+          Live gemeinsam bearbeiten
+        </label>
+      )}
       {canEdit ? (
         <label className="grid gap-1 text-sm">
           Dokumenttitel
@@ -232,7 +266,8 @@ function DocumentEditor({
         {canEdit && (
           <Button
             disabled={
-              busy || !!pending ||
+              busy ||
+              !!pending ||
               !title.trim() ||
               (title === resource.title && content === resource.body.content)
             }
@@ -285,7 +320,9 @@ function DocumentEditor({
           Aktuellen Stand laden und lokale Änderungen verwerfen
         </Button>
       </div>
-      <p role="status" className="text-xs text-muted-foreground">{busy ? 'Wird gespeichert …' : dirty ? 'Lokale Änderungen' : 'Gespeichert'}</p>
+      <p role="status" className="text-xs text-muted-foreground">
+        {busy ? 'Wird gespeichert …' : dirty ? 'Lokale Änderungen' : 'Gespeichert'}
+      </p>
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

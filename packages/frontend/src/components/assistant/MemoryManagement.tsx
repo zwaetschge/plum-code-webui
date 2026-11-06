@@ -170,7 +170,12 @@ export function MemoryManagement({
     );
   return (
     <section className="memory-management" aria-label="Langzeitgedächtnis verwalten">
-      <Link to="/assistant/memory-topics" className="inline-flex rounded-lg border px-3 py-2 font-medium">Themengedächtnis</Link>
+      <Link
+        to="/assistant/memory-topics"
+        className="inline-flex rounded-lg border px-3 py-2 font-medium"
+      >
+        Themengedächtnis
+      </Link>
       <label>
         Erinnerungen durchsuchen
         <Input

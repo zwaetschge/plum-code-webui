@@ -45,7 +45,9 @@ proxy.on('error', (err, _req, res) => {
 export function isPreviewHost(host: string | undefined): boolean {
   if (!config.previewHostname || !host) return false;
   const normalized = host.toLowerCase();
-  return normalized === config.previewHostname || config.previewHostnameAliases.includes(normalized);
+  return (
+    normalized === config.previewHostname || config.previewHostnameAliases.includes(normalized)
+  );
 }
 
 /**

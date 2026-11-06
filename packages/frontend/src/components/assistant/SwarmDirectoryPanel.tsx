@@ -151,7 +151,11 @@ export function SwarmDirectoryPanel({
           sind auch ohne sichtbar.
         </p>
       )}
-      {data.containerErrors?.map((message) => <p key={message} role="status" className="text-sm text-amber-700 dark:text-amber-400">{message}</p>)}
+      {data.containerErrors?.map((message) => (
+        <p key={message} role="status" className="text-sm text-amber-700 dark:text-amber-400">
+          {message}
+        </p>
+      ))}
       {!data.containersVisible && (
         <p className="text-sm text-muted-foreground">
           Container-Zustände sind nur mit Adminrechten sichtbar.
@@ -318,8 +322,15 @@ function AgentCard({
   const [logs, setLogs] = useState<{ name: string; lines: string[] } | null>(null);
   const native = agent.kind === 'hub' ? agent.id.slice(4) : null;
   const action = useMutation({
-    mutationFn: ({ name, host, verb }: { name: string; host?: string; verb: 'start' | 'restart' | 'stop' }) =>
-      api.post(`/api/assistant/swarm/containers/${encodeURIComponent(name)}/${verb}`, { host }),
+    mutationFn: ({
+      name,
+      host,
+      verb,
+    }: {
+      name: string;
+      host?: string;
+      verb: 'start' | 'restart' | 'stop';
+    }) => api.post(`/api/assistant/swarm/containers/${encodeURIComponent(name)}/${verb}`, { host }),
     onSettled: () => void cache.invalidateQueries({ queryKey: SWARM_DIRECTORY_KEY }),
   });
   const [logError, setLogError] = useState<string | null>(null);
@@ -329,13 +340,15 @@ function AgentCard({
     if (logs?.name === label) return setLogs(null);
     setLogError(null);
     try {
-    const result = (
-      await api.get<{ data: { lines: string[] } }>(
-        `/api/assistant/swarm/containers/${encodeURIComponent(name)}/logs${host ? `?host=${encodeURIComponent(host)}` : ''}`
-      )
-    ).data.data;
-    setLogs({ name: label, lines: result.lines });
-    } catch (error) { setLogError(error instanceof Error ? error.message : 'Logs nicht erreichbar'); }
+      const result = (
+        await api.get<{ data: { lines: string[] } }>(
+          `/api/assistant/swarm/containers/${encodeURIComponent(name)}/logs${host ? `?host=${encodeURIComponent(host)}` : ''}`
+        )
+      ).data.data;
+      setLogs({ name: label, lines: result.lines });
+    } catch (error) {
+      setLogError(error instanceof Error ? error.message : 'Logs nicht erreichbar');
+    }
   };
   const meta = [
     agent.mode,
@@ -398,7 +411,9 @@ function AgentCard({
               />
               <span className="font-mono">{container.name}</span>
               {container.hostLabel && <span className="font-medium">{container.hostLabel}</span>}
-              {container.ownerSessionName && <span className="text-muted-foreground">Projekt: {container.ownerSessionName}</span>}
+              {container.ownerSessionName && (
+                <span className="text-muted-foreground">Projekt: {container.ownerSessionName}</span>
+              )}
               <span className="text-muted-foreground">{container.status}</span>
               <span className="ml-auto flex gap-1">
                 <Button
@@ -410,27 +425,36 @@ function AgentCard({
                   <ScrollText className="mr-1 h-3 w-3" />
                   Logs
                 </Button>
-                {(container.actions ?? ['start', 'restart']).includes(container.running ? 'restart' : 'start') && <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 px-2 text-xs"
-                  disabled={action.isPending}
-                  onClick={() => {
-                    const verb = container.running ? 'restart' : 'start';
-                    const question = container.running
-                      ? `${container.name} auf ${container.hostLabel ?? 'diesem Host'} neu starten?`
-                      : `${container.name} auf ${container.hostLabel ?? 'diesem Host'} starten?`;
-                    if (window.confirm(question)) action.mutate({ name: container.name, host: container.host, verb });
-                  }}
-                >
-                  {container.running ? 'Neustart' : 'Starten'}
-                </Button>}
+                {(container.actions ?? ['start', 'restart']).includes(
+                  container.running ? 'restart' : 'start'
+                ) && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs"
+                    disabled={action.isPending}
+                    onClick={() => {
+                      const verb = container.running ? 'restart' : 'start';
+                      const question = container.running
+                        ? `${container.name} auf ${container.hostLabel ?? 'diesem Host'} neu starten?`
+                        : `${container.name} auf ${container.hostLabel ?? 'diesem Host'} starten?`;
+                      if (window.confirm(question))
+                        action.mutate({ name: container.name, host: container.host, verb });
+                    }}
+                  >
+                    {container.running ? 'Neustart' : 'Starten'}
+                  </Button>
+                )}
               </span>
             </li>
           ))}
         </ul>
       )}
-      {logError && <p role="alert" className="text-xs text-destructive">{logError}</p>}
+      {logError && (
+        <p role="alert" className="text-xs text-destructive">
+          {logError}
+        </p>
+      )}
       {action.error && (
         <p role="alert" className="text-xs text-destructive">
           {action.error.message}

@@ -428,7 +428,9 @@ export function setupWebSocket(httpServer: HttpServer): Server {
       } catch (err) {
         socket.emit('session:error', {
           sessionId,
-          error: logError('session:subscribe-recovery', sessionId, err) || 'Failed to recover ACP session',
+          error:
+            logError('session:subscribe-recovery', sessionId, err) ||
+            'Failed to recover ACP session',
         });
       }
     });
@@ -943,7 +945,9 @@ export function setupWebSocket(httpServer: HttpServer): Server {
       } catch (err) {
         socket.emit('session:error', {
           sessionId,
-          error: logError('session:reconnect-recovery', sessionId, err) || 'Failed to recover ACP session',
+          error:
+            logError('session:reconnect-recovery', sessionId, err) ||
+            'Failed to recover ACP session',
         });
       }
 

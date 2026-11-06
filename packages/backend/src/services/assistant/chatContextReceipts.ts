@@ -22,7 +22,9 @@ export async function contextReceipts(
     refs.filter((r) => r.kind === 'history' || r.kind === 'writing-style').map((r) => r.id)
   );
   const projectTurns = snapshots.flatMap(({ refs }) =>
-    refs.filter((r) => r.kind === 'project-chat' || r.kind === 'chat-reference').map((r) => r.turnId!)
+    refs
+      .filter((r) => r.kind === 'project-chat' || r.kind === 'chat-reference')
+      .map((r) => r.turnId!)
   );
   const [memories, history, project, jobs, learned, learnedHistory] = await Promise.all([
     all(

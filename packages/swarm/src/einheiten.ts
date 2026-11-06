@@ -10,33 +10,33 @@
  * letzte Stand nie fehlt. `at` zählt beim Vergleich nicht mit. Ohne Änderung frischt ein `status` den
  * Stand alle 10 min auf: Die App wertet `at` nach 25 min als veraltet, auch wenn der Hub selbst steht.
  */
-import { lobbyZustand } from './raumhinweis.js'
-import type { Ctx } from './context.js'
+import { lobbyZustand } from './raumhinweis.js';
+import type { Ctx } from './context.js';
 
-export const EINHEITEN_EVENT = 'ch.zwaetschge.swarm.einheiten'
-const PAUSE_MS = Number(process.env.EINHEITEN_PAUSE_MS || 20_000)
-const AUFFRISCHEN_MS = Number(process.env.EINHEITEN_AUFFRISCHEN_MS || 600_000)
+export const EINHEITEN_EVENT = 'ch.zwaetschge.swarm.einheiten';
+const PAUSE_MS = Number(process.env.EINHEITEN_PAUSE_MS || 20_000);
+const AUFFRISCHEN_MS = Number(process.env.EINHEITEN_AUFFRISCHEN_MS || 600_000);
 
 export interface EinheitEintrag {
-  name: string
-  zustand: string
-  text: string
-  link: string | null
-  id?: string | null
-  auftrag?: string | null
+  name: string;
+  zustand: string;
+  text: string;
+  link: string | null;
+  id?: string | null;
+  auftrag?: string | null;
 }
 
 interface Stand {
-  inhalt: string
-  gesendet: number
-  wartet: NodeJS.Timeout | null
-  offen: { eintraege: EinheitEintrag[]; verbunden: boolean } | null
+  inhalt: string;
+  gesendet: number;
+  wartet: NodeJS.Timeout | null;
+  offen: { eintraege: EinheitEintrag[]; verbunden: boolean } | null;
 }
 
-const staende = new Map<string, Stand>()
+const staende = new Map<string, Stand>();
 
 function vergleichbar(eintraege: EinheitEintrag[], verbunden: boolean): string {
-  return JSON.stringify({ verbunden, eintraege })
+  return JSON.stringify({ verbunden, eintraege });
 }
 
 export async function einheitenVeroeffentlichen(
@@ -44,29 +44,34 @@ export async function einheitenVeroeffentlichen(
   agent: string,
   eintraege: EinheitEintrag[],
   verbunden = true,
-  jetzt = Date.now(),
+  jetzt = Date.now()
 ): Promise<'gesendet' | 'gleich' | 'spaeter'> {
-  const s = staende.get(agent) ?? { inhalt: '', gesendet: 0, wartet: null, offen: null }
-  staende.set(agent, s)
-  const inhalt = vergleichbar(eintraege, verbunden)
-  const auffrischen = jetzt - s.gesendet >= AUFFRISCHEN_MS
-  if (inhalt === s.inhalt && !s.offen && !auffrischen) return 'gleich'
+  const s = staende.get(agent) ?? { inhalt: '', gesendet: 0, wartet: null, offen: null };
+  staende.set(agent, s);
+  const inhalt = vergleichbar(eintraege, verbunden);
+  const auffrischen = jetzt - s.gesendet >= AUFFRISCHEN_MS;
+  if (inhalt === s.inhalt && !s.offen && !auffrischen) return 'gleich';
   if (jetzt - s.gesendet < PAUSE_MS) {
-    s.offen = { eintraege, verbunden }
+    s.offen = { eintraege, verbunden };
     if (!s.wartet) {
-      s.wartet = setTimeout(() => {
-        s.wartet = null
-        const offen = s.offen
-        s.offen = null
-        if (offen) void einheitenVeroeffentlichen(ctx, agent, offen.eintraege, offen.verbunden).catch((err) =>
-          ctx.log.warn({ err, agent }, 'Einheiten-Stand nicht veröffentlicht'))
-      }, PAUSE_MS - (jetzt - s.gesendet) + 50)
-      s.wartet.unref?.()
+      s.wartet = setTimeout(
+        () => {
+          s.wartet = null;
+          const offen = s.offen;
+          s.offen = null;
+          if (offen)
+            void einheitenVeroeffentlichen(ctx, agent, offen.eintraege, offen.verbunden).catch(
+              (err) => ctx.log.warn({ err, agent }, 'Einheiten-Stand nicht veröffentlicht')
+            );
+        },
+        PAUSE_MS - (jetzt - s.gesendet) + 50
+      );
+      s.wartet.unref?.();
     }
-    return 'spaeter'
+    return 'spaeter';
   }
-  s.offen = null
-  if (inhalt === s.inhalt && !auffrischen) return 'gleich'
+  s.offen = null;
+  if (inhalt === s.inhalt && !auffrischen) return 'gleich';
   const ok = await lobbyZustand(ctx, EINHEITEN_EVENT, agent, {
     v: 1,
     agent,
@@ -80,10 +85,10 @@ export async function einheitenVeroeffentlichen(
       ...(e.id ? { id: e.id } : {}),
       ...(e.auftrag ? { auftrag: e.auftrag } : {}),
     })),
-  })
+  });
   if (ok) {
-    s.inhalt = inhalt
-    s.gesendet = jetzt
+    s.inhalt = inhalt;
+    s.gesendet = jetzt;
   }
-  return ok ? 'gesendet' : 'spaeter'
+  return ok ? 'gesendet' : 'spaeter';
 }

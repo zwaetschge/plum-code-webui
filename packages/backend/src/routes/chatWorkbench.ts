@@ -1,6 +1,11 @@
 import { apiChatImage } from '../services/assistant/apiFiles.js';
 import { artifactToolFile } from '../services/assistant/chatToolAssets.js';
-import { chatSchedules, saveChatSchedule, runChatSchedule, removeChatSchedule } from '../services/assistant/chatSchedules.js';
+import {
+  chatSchedules,
+  saveChatSchedule,
+  runChatSchedule,
+  removeChatSchedule,
+} from '../services/assistant/chatSchedules.js';
 import { libraryWorkbenchRouter } from './libraryWorkbench.js';
 import { Router, type Request, type RequestHandler } from 'express';
 import multer from 'multer';
@@ -43,19 +48,88 @@ const handle =
       )
     );
   };
-router.get('/api-chats/:id/tool-files/:assetId', handle(async (req, res) => {
-  const file = await apiChatImage(owner(req), String(req.params.id), String(req.params.assetId));
-  res.setHeader('Content-Type', file.mimeType); res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`); res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.send(file.bytes);
-}));
-router.get('/artifacts/:id/tool-files/:assetId', handle(async (req, res) => {
-  const file = await artifactToolFile(owner(req), String(req.params.id), String(req.params.assetId));
-  res.setHeader('Content-Type', String(file.mime_type)); res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(String(file.filename))}`); res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('X-Content-Type-Options', 'nosniff'); res.send(file.bytes);
-}));
-router.get('/chat-schedules', handle(async (req, res) => res.json({ success: true, data: await chatSchedules(owner(req), z.string().optional().parse(req.query.chatId)) })));
-router.post('/chat-schedules', handle(async (req, res) => res.json({ success: true, data: await saveChatSchedule(owner(req), req.body) })));
-router.put('/chat-schedules/:id', handle(async (req, res) => res.json({ success: true, data: await saveChatSchedule(owner(req), req.body, String(req.params.id)) })));
-router.post('/chat-schedules/:id/run', handle(async (req, res) => res.json({ success: true, data: await runChatSchedule(owner(req), String(req.params.id), z.string().uuid().parse(req.body.commandId)) })));
-router.delete('/chat-schedules/:id', handle(async (req, res) => res.json({ success: true, data: await removeChatSchedule(owner(req), String(req.params.id), z.number().int().positive().parse(req.body.expectedRevision)) })));
+router.get(
+  '/api-chats/:id/tool-files/:assetId',
+  handle(async (req, res) => {
+    const file = await apiChatImage(owner(req), String(req.params.id), String(req.params.assetId));
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(file.bytes);
+  })
+);
+router.get(
+  '/artifacts/:id/tool-files/:assetId',
+  handle(async (req, res) => {
+    const file = await artifactToolFile(
+      owner(req),
+      String(req.params.id),
+      String(req.params.assetId)
+    );
+    res.setHeader('Content-Type', String(file.mime_type));
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename*=UTF-8''${encodeURIComponent(String(file.filename))}`
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.send(file.bytes);
+  })
+);
+router.get(
+  '/chat-schedules',
+  handle(async (req, res) =>
+    res.json({
+      success: true,
+      data: await chatSchedules(owner(req), z.string().optional().parse(req.query.chatId)),
+    })
+  )
+);
+router.post(
+  '/chat-schedules',
+  handle(async (req, res) =>
+    res.json({ success: true, data: await saveChatSchedule(owner(req), req.body) })
+  )
+);
+router.put(
+  '/chat-schedules/:id',
+  handle(async (req, res) =>
+    res.json({
+      success: true,
+      data: await saveChatSchedule(owner(req), req.body, String(req.params.id)),
+    })
+  )
+);
+router.post(
+  '/chat-schedules/:id/run',
+  handle(async (req, res) =>
+    res.json({
+      success: true,
+      data: await runChatSchedule(
+        owner(req),
+        String(req.params.id),
+        z.string().uuid().parse(req.body.commandId)
+      ),
+    })
+  )
+);
+router.delete(
+  '/chat-schedules/:id',
+  handle(async (req, res) =>
+    res.json({
+      success: true,
+      data: await removeChatSchedule(
+        owner(req),
+        String(req.params.id),
+        z.number().int().positive().parse(req.body.expectedRevision)
+      ),
+    })
+  )
+);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 4 },

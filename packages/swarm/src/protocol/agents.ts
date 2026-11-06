@@ -1,7 +1,7 @@
-import { z } from 'zod'
+import { z } from 'zod';
 
-export const ADAPTER_KINDS = ['claude', 'codex', 'openai', 'echo'] as const
-export type AdapterKind = (typeof ADAPTER_KINDS)[number]
+export const ADAPTER_KINDS = ['claude', 'codex', 'openai', 'echo'] as const;
+export type AdapterKind = (typeof ADAPTER_KINDS)[number];
 
 /**
  * Konfiguration eines Ratsmitglieds.
@@ -37,15 +37,15 @@ export const agentConfigSchema = z.object({
   pricePerMTokenOut: z.number().min(0).max(1_000_000).default(0),
 
   timeoutSeconds: z.number().int().min(30).max(3600).default(600),
-})
+});
 
-export type AgentConfig = z.infer<typeof agentConfigSchema>
+export type AgentConfig = z.infer<typeof agentConfigSchema>;
 
 export const agentsConfigSchema = z.record(
   z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/),
-  agentConfigSchema,
-)
-export type AgentsConfig = z.infer<typeof agentsConfigSchema>
+  agentConfigSchema
+);
+export type AgentsConfig = z.infer<typeof agentsConfigSchema>;
 
 export const DEFAULT_AGENTS: AgentsConfig = {
   claude: {
@@ -77,18 +77,18 @@ export const DEFAULT_AGENTS: AgentsConfig = {
     adapter: 'echo',
     label: 'Moderator',
   },
-}
+};
 
 /** Was die Oberfläche über ein Mitglied wissen darf. */
 export interface AgentStatus {
-  id: string
-  config: AgentConfig
-  hasKey: boolean
-  connected: boolean
+  id: string;
+  config: AgentConfig;
+  hasKey: boolean;
+  connected: boolean;
   /** Von der CLI gemeldeter Anmeldezustand. */
-  auth: { ok: boolean; detail: string; checkedAt: string } | null
-  version: string | null
-  spentToday: number
+  auth: { ok: boolean; detail: string; checkedAt: string } | null;
+  version: string | null;
+  spentToday: number;
 }
 
 // ─── Steuerkanal zu den Runnern ──────────────────────────────────────────────
@@ -102,17 +102,17 @@ export const CONTROL_COMMANDS = [
   'logout',
   'update',
   'ping',
-] as const
-export type ControlCommand = (typeof CONTROL_COMMANDS)[number]
+] as const;
+export type ControlCommand = (typeof CONTROL_COMMANDS)[number];
 
 export interface ControlResult {
-  ok: boolean
-  detail: string
+  ok: boolean;
+  detail: string;
   /** Bei `login`: die URL, die der Mensch im Browser öffnen muss. */
-  url?: string
+  url?: string;
   /** Bei `login`: ob der Vorgang noch auf eine Eingabe wartet. */
-  awaitingInput?: boolean
+  awaitingInput?: boolean;
   /** Kennung, unter der die Eingabe nachgereicht wird. */
-  runId?: string
-  version?: string
+  runId?: string;
+  version?: string;
 }

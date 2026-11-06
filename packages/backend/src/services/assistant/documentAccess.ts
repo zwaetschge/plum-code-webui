@@ -267,12 +267,18 @@ export async function writeSharedDocument(
     const saved = await receipt(tx, userId, id, input.commandId, 'document-edit', input);
     if (saved.prior) return saved.prior as AssistantDocumentAccess;
     const current = await findResource(permitted.ownerId, id, tx);
-    let content = input.content, title = input.title;
+    let content = input.content,
+      title = input.title;
     if (input.autoMerge && current.revision !== input.expectedRevision) {
       const base = await access(userId, id, tx, input.expectedRevision);
-      content = mergeDocumentText(String(base.resource.body.content), String(current.body.content), input.content);
+      content = mergeDocumentText(
+        String(base.resource.body.content),
+        String(current.body.content),
+        input.content
+      );
       title = mergeDocumentText(base.resource.title, current.title, input.title);
-      if (content.length > 50000) throw new AppError('Gemeinsames Dokument ist zu lang', 413, 'DOCUMENT_TOO_LONG');
+      if (content.length > 50000)
+        throw new AppError('Gemeinsames Dokument ist zu lang', 413, 'DOCUMENT_TOO_LONG');
     }
     retainedImages(current, content);
     const revised = await reviseResource(

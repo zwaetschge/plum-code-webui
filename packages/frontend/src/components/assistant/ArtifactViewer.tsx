@@ -306,7 +306,10 @@ export function ArtifactViewer({
           {imageTask && (
             <p className="text-sm">
               Bildauftrag vorbereitet:{' '}
-              <a className="underline" href={`/assistant/tasks?resource=${encodeURIComponent(imageTask.id)}`}>
+              <a
+                className="underline"
+                href={`/assistant/tasks?resource=${encodeURIComponent(imageTask.id)}`}
+              >
                 {imageTask.title}
               </a>
               . Die Bearbeitung beginnt beim Starten des Tasks.

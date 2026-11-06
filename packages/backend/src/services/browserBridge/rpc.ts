@@ -175,17 +175,19 @@ const CLI_TO_USAGE: Record<string, string> = {
 
 /** The usage provider of the given session, else of the user's most recent one. */
 async function activeUsageProvider(userId: string, sessionId?: string): Promise<string | null> {
-  const row = (sessionId
-    ? await pgGet(
-        'SELECT cli_provider FROM sessions WHERE user_id = ? AND id = ?',
-        userId,
-        sessionId
-      )
-    : await pgGet(
-        `SELECT cli_provider FROM sessions WHERE user_id = ?
+  const row = (
+    sessionId
+      ? await pgGet(
+          'SELECT cli_provider FROM sessions WHERE user_id = ? AND id = ?',
+          userId,
+          sessionId
+        )
+      : await pgGet(
+          `SELECT cli_provider FROM sessions WHERE user_id = ?
           ORDER BY updated_at DESC NULLS LAST LIMIT 1`,
-        userId
-      )) as { cli_provider?: string } | undefined;
+          userId
+        )
+  ) as { cli_provider?: string } | undefined;
   return (row?.cli_provider && CLI_TO_USAGE[row.cli_provider]) || null;
 }
 

@@ -26,8 +26,14 @@ export async function assistantExportSnapshot(userId: string) {
             )
           )?.preferences ?? null,
         memoryJobs: await tx.all('SELECT * FROM assistant_memory_jobs WHERE user_id=?', userId),
-        memoryBackfills: await tx.all('SELECT * FROM assistant_memory_backfills WHERE user_id=?',userId),
-        memoryHistory: await tx.all('SELECT * FROM assistant_memory_history WHERE user_id=?', userId),
+        memoryBackfills: await tx.all(
+          'SELECT * FROM assistant_memory_backfills WHERE user_id=?',
+          userId
+        ),
+        memoryHistory: await tx.all(
+          'SELECT * FROM assistant_memory_history WHERE user_id=?',
+          userId
+        ),
         publications: await tx.all(
           'SELECT id,resource_id,revision,title,html,content_sha256,expires_at,revoked,created_at FROM assistant_publications WHERE user_id=? ORDER BY created_at,id',
           userId

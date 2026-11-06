@@ -167,7 +167,10 @@ export function AppTaskProposal({
       {task && (
         <p className="text-sm">
           Task-Entwurf erstellt:{' '}
-          <Link className="underline" to={`/assistant/tasks?resource=${encodeURIComponent(task.id)}`}>
+          <Link
+            className="underline"
+            to={`/assistant/tasks?resource=${encodeURIComponent(task.id)}`}
+          >
             {task.title}
           </Link>
         </p>

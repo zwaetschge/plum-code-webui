@@ -165,7 +165,10 @@ function loadConfig() {
       .map((p) => p.trim())
       .filter((p) => p.length > 0),
     previewHostname: env.PREVIEW_HOSTNAME?.toLowerCase(),
-    previewHostnameAliases: (env.PREVIEW_HOSTNAME_ALIASES || '').split(',').map(host => host.trim().toLowerCase()).filter(host => /^[a-z0-9.-]+$/.test(host)),
+    previewHostnameAliases: (env.PREVIEW_HOSTNAME_ALIASES || '')
+      .split(',')
+      .map((host) => host.trim().toLowerCase())
+      .filter((host) => /^[a-z0-9.-]+$/.test(host)),
     auth: {
       // Empty array means "no allowlist" — every successful OAuth/basic-auth
       // login is accepted. Set AUTH_ALLOWED_EMAILS to lock down a public

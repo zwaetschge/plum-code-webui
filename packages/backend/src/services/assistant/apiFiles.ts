@@ -110,7 +110,9 @@ export async function apiChatImages(userId: string, id: string) {
       id,
       userId
     )
-  ).filter((row) => String(row.mime_type).startsWith('image/')).map(metadata);
+  )
+    .filter((row) => String(row.mime_type).startsWith('image/'))
+    .map(metadata);
 }
 export async function apiChatImage(
   userId: string,

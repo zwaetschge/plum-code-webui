@@ -126,11 +126,7 @@ interface UsageLimitResult {
   error?: { code: string; message: string };
 }
 
-const TRACKED_USAGE_LIMIT_PROVIDERS: TrackedUsageLimitProvider[] = [
-  'codex',
-  'claude',
-  'zai',
-];
+const TRACKED_USAGE_LIMIT_PROVIDERS: TrackedUsageLimitProvider[] = ['codex', 'claude', 'zai'];
 
 function persistUsageLimitResult(userId: string, result: UsageLimitResult): UsageLimitResult {
   if (!result.success || !result.supported || !result.data) return result;

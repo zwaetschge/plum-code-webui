@@ -36,12 +36,12 @@ voice), thinking (dots circle above), speaking (mouth follows the voice), error
 `routes/browserBridge.ts`, authenticated with a `plum_ff_` device token as
 bearer token (Settings → Browser control lists and revokes it as "Plum Desk"):
 
-| Route | Body | Answer |
-|---|---|---|
-| `POST /api/browser-bridge/desk/transcribe` | 16 kHz mono WAV | `{text}` |
-| `POST /api/browser-bridge/desk/wake` | 16 kHz mono WAV (one phrase) | `{wake, question, text}` |
-| `POST /api/browser-bridge/desk/turn` | `{text, chatId?}` | `{chatId, text, speech[]}` (answer cut into spoken chunks, markdown removed) |
-| `POST /api/browser-bridge/desk/speech` | `{text, voice?}` | raw 16 kHz mono s16le PCM in the personalisation's voice |
+| Route                                      | Body                         | Answer                                                                       |
+| ------------------------------------------ | ---------------------------- | ---------------------------------------------------------------------------- |
+| `POST /api/browser-bridge/desk/transcribe` | 16 kHz mono WAV              | `{text}`                                                                     |
+| `POST /api/browser-bridge/desk/wake`       | 16 kHz mono WAV (one phrase) | `{wake, question, text}`                                                     |
+| `POST /api/browser-bridge/desk/turn`       | `{text, chatId?}`            | `{chatId, text, speech[]}` (answer cut into spoken chunks, markdown removed) |
+| `POST /api/browser-bridge/desk/speech`     | `{text, voice?}`             | raw 16 kHz mono s16le PCM in the personalisation's voice                     |
 
 They are open on the `/mobile` gateway (no SSO login) only because they check
 the device token themselves (`middleware/mobileGateway.ts`).

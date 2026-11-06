@@ -152,7 +152,11 @@ export async function pumpApiChatQueue(userId: string, chatId: string) {
   const claimed = await transaction(async (tx) => {
     const account = await tx.get('SELECT id,status FROM users WHERE id=? FOR UPDATE', userId);
     if (account?.status !== 'active') {
-      await tx.run("UPDATE assistant_api_turns SET status='cancelled',error='Konto nicht mehr aktiv' WHERE chat_id=? AND status IN ('queued','preparing') AND EXISTS(SELECT 1 FROM assistant_resources r WHERE r.id=chat_id AND r.user_id=?)", chatId, userId);
+      await tx.run(
+        "UPDATE assistant_api_turns SET status='cancelled',error='Konto nicht mehr aktiv' WHERE chat_id=? AND status IN ('queued','preparing') AND EXISTS(SELECT 1 FROM assistant_resources r WHERE r.id=chat_id AND r.user_id=?)",
+        chatId,
+        userId
+      );
       return null;
     }
     const resource = await tx.get(

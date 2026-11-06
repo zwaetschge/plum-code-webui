@@ -25,14 +25,14 @@ export function ConversationControls({
   onActivateBranch: (chatId: string) => Promise<void>;
 }) {
   const cache = useQueryClient();
-  const account = useAuthStore(state=>state.user?.id);
+  const account = useAuthStore((state) => state.user?.id);
   const profiles = useQuery({
-    queryKey: ['assistant', 'resources', 'profiles',account],
+    queryKey: ['assistant', 'resources', 'profiles', account],
     queryFn: async () =>
       (await api.get<{ data: AssistantResource[] }>('/api/assistant/profiles')).data.data,
   });
   const binding = useQuery({
-    queryKey: ['assistant', 'binding', session.id,account],
+    queryKey: ['assistant', 'binding', session.id, account],
     queryFn: async () =>
       (
         await api.get<{

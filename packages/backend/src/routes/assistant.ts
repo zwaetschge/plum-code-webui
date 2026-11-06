@@ -289,7 +289,9 @@ router.get(
           {
             id: 'cli:codex',
             name: 'Codex · vorhandener CLI-Login',
-            models: CLI_PROVIDERS.codex.models ?? [CLI_PROVIDERS.codex.defaultModel ?? 'gpt-6.1-sol'],
+            models: CLI_PROVIDERS.codex.models ?? [
+              CLI_PROVIDERS.codex.defaultModel ?? 'gpt-6.1-sol',
+            ],
           },
         ]
       : [];
@@ -2018,20 +2020,35 @@ router.get(
 // Only containers the directory knows; the hub itself can be restarted, never stopped.
 router.get('/swarm/containers/:name/logs', requireAdmin, async (req, res, next) => {
   try {
-    const host = z.string().regex(/^[a-zA-Z0-9_-]+$/).optional().parse(req.query.host);
+    const host = z
+      .string()
+      .regex(/^[a-zA-Z0-9_-]+$/)
+      .optional()
+      .parse(req.query.host);
     const data = await directoryLogs(directoryContainers(), req.params.name as string, host, 60);
     res.json({ success: true, data });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.post('/swarm/containers/:name/:action', requireAdmin, async (req, res, next) => {
   try {
     const action = z.enum(['start', 'stop', 'restart']).parse(req.params.action);
-    const { host } = z.object({ host: z.string().regex(/^[a-zA-Z0-9_-]+$/).optional() }).parse(req.body ?? {});
+    const { host } = z
+      .object({
+        host: z
+          .string()
+          .regex(/^[a-zA-Z0-9_-]+$/)
+          .optional(),
+      })
+      .parse(req.body ?? {});
     const name = req.params.name as string;
     const data = await directoryAction(directoryContainers(), name, action, host);
     res.json({ success: true, data });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 });
 router.post(
   '/sessions/:id/profile',
