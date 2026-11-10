@@ -18,7 +18,7 @@
     "test": "node scripts/test.mjs"
   },
   "dependencies": {
-    "fastify": "^5.2.1",
+    "fastify": "^5.12.8",
     "pino-pretty": "^13.0.0",
     "postgres": "^3.4.5",
     "yaml": "^2.7.0",

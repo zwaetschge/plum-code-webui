@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+# Also as a symlink: `node_modules/` only matches directories, which is how a
+# link into a local path got committed and broke `pnpm install` in CI.
+node_modules
 .pnpm-store/
 
 # Build outputs
@@ -149,3 +152,6 @@ packages/*/.screenshots/
 /research_notes/
 /reviews/
 /audio/
+
+# Scratch files sessions leave next to the code (probes, one-off scripts)
+.tmp-*
