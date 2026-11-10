@@ -78,8 +78,16 @@ RUN apk upgrade --no-cache && \
 # scripts/plum-python.sh wrapper). Its expected Chromium paths point at Plum's
 # Chromium, so unmodified `chromium.launch()` calls work.
 ARG PLUM_PYTHON_PLAYWRIGHT=1.63.0
+# PyMuPDF 2.x publishes no musllinux wheel, and pip prefers the newest release
+# even when it is source-only — which then fails here, because this stage has
+# no compiler on purpose. Stay on the 1.x line and take wheels only.
+# The venv starts with the pip that ships with Python; upgrade it first, because
+# the image scan reads pip's own bill of materials and the bundled release
+# vendors a msgpack with open advisories.
 RUN python3 -m venv /opt/plum-python && \
-    /opt/plum-python/bin/pip install --no-cache-dir pymupdf edge-tts pillow greenlet 'pyee>=13,<14' && \
+    /opt/plum-python/bin/pip install --no-cache-dir --upgrade pip && \
+    /opt/plum-python/bin/pip install --no-cache-dir --only-binary=pymupdf \
+      'pymupdf>=1.28,<2' edge-tts pillow greenlet 'pyee>=13,<14' && \
     /opt/plum-python/bin/pip download --no-deps --only-binary=:all: --platform manylinux1_x86_64 \
       --python-version 3.12 -d /tmp/pw "playwright==${PLUM_PYTHON_PLAYWRIGHT}" && \
     cp /tmp/pw/playwright-*.whl "/tmp/pw/playwright-${PLUM_PYTHON_PLAYWRIGHT}-py3-none-any.whl" && \
@@ -115,7 +123,7 @@ ENV XDG_RUNTIME_DIR=/tmp/runtime-node
 # while a fresh installation is usable before any network update completes.
 # The release build is native linux/amd64, so the shipped npm harnesses are
 # mandatory and version-smoke-tested instead of relying on an online bootstrap.
-ARG CLAUDE_CODE_VERSION=2.1.220
+ARG CLAUDE_CODE_VERSION=2.1.319
 ARG CODEX_VERSION=0.153.3
 ARG PI_CODING_AGENT_VERSION=0.83.0
 ARG PI_MCP_ADAPTER_VERSION=2.11.0
@@ -127,11 +135,13 @@ ARG PI_ANTIGRAVITY_VERSION=0.3.0
 # own pipx layer below instead of joining the npm prefix.
 ARG VIBE_VERSION=2.25.0
 ARG NPM_VERSION=12.0.2
-ARG NPM_BRACE_EXPANSION_VERSION=5.0.9
+ARG NPM_BRACE_EXPANSION_VERSION=5.0.12
 # Vendored inside npm itself and inside the Pi CLI; neither is reachable
 # through our lockfile, so they are replaced in place like brace-expansion.
 ARG NPM_IP_ADDRESS_VERSION=10.5.0
-ARG PI_UNDICI_VERSION=8.10.0
+ARG PI_UNDICI_VERSION=8.12.4
+# npm 12.0.2 bundles undici 6.27.0; same in-place replacement, on npm's own 6.x line.
+ARG NPM_UNDICI_VERSION=6.29.1
 # npm 12.0.2 still bundles tar 7.5.19 (CVE-2026-73566); drop this once an npm
 # release ships tar >= 7.5.21.
 ARG NPM_TAR_VERSION=7.5.21
@@ -205,6 +215,18 @@ RUN mkdir -p /home/node/.npm-global /opt/plum-cli && \
     node -p \
       "require('/opt/plum-cli/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/undici/package.json').version" \
       | grep -Fx "${PI_UNDICI_VERSION}" && \
+    /usr/local/bin/npm pack undici@${NPM_UNDICI_VERSION} \
+      --pack-destination /tmp --silent >/dev/null && \
+    rm -rf /usr/local/lib/node_modules/npm/node_modules/undici && \
+    mkdir -p /usr/local/lib/node_modules/npm/node_modules/undici && \
+    tar -xzf /tmp/undici-${NPM_UNDICI_VERSION}.tgz \
+      -C /usr/local/lib/node_modules/npm/node_modules/undici \
+      --strip-components=1 && \
+    rm -f /tmp/undici-${NPM_UNDICI_VERSION}.tgz && \
+    node -p \
+      "require('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version" \
+      | grep -Fx "${NPM_UNDICI_VERSION}" && \
+    /usr/local/bin/npm --version | grep -Fx "${NPM_VERSION}" && \
     /usr/local/bin/npm cache clean --force && rm -rf /root/.npm
 
 # Mistral Vibe (`vibe` / `vibe-acp`, persistent ACP harness) is a
@@ -218,8 +240,16 @@ RUN mkdir -p /home/node/.npm-global /opt/plum-cli && \
 # that installs but cannot start (missing musl wheel, broken entry point) fails
 # the build instead of the first session. Only the CLI itself is version-pinned;
 # pip resolves its transitive dependencies at build time.
+# Vibe 2.x pins its own dependencies with `==`, so releases with open advisories
+# stay in the venv until Vibe moves. They are lifted here to the patched
+# releases (patch or minor steps); pip reports the pin mismatch and carries on,
+# and the `--version` smoke test below still has to pass with the result.
+# `~=` on purpose: the list passes through `su -c "…"`, where `>` and `<` would
+# be redirections.
+ARG VIBE_PATCHED_DEPENDENCIES="gitpython~=3.2.1 pyjwt~=2.14 anyio~=4.14.2 certifi~=2026.10 pyasn1~=0.6.5 urllib3~=2.8"
 RUN set -eux; \
     su -s /bin/sh node -c "PIPX_HOME=/home/node/.local/pipx PIPX_BIN_DIR=/home/node/.local/bin pipx install --pip-args=--no-cache-dir mistral-vibe==${VIBE_VERSION}"; \
+    su -s /bin/sh node -c "PIPX_HOME=/home/node/.local/pipx PIPX_BIN_DIR=/home/node/.local/bin pipx runpip mistral-vibe install --no-cache-dir --upgrade ${VIBE_PATCHED_DEPENDENCIES}"; \
     ln -sfn /home/node/.local/bin/vibe /opt/plum-cli/bin/vibe; \
     ln -sfn /home/node/.local/bin/vibe-acp /opt/plum-cli/bin/vibe-acp; \
     su -s /bin/sh node -c "/opt/plum-cli/bin/vibe-acp --version" | grep -F "${VIBE_VERSION}"

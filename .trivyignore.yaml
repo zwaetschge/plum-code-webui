@@ -1,0 +1,12 @@
+# Accepted findings of the image scan in CI (.github/workflows/docker-publish.yml).
+# Every entry is scoped to one package version and says why it does not apply.
+vulnerabilities:
+  - id: CVE-2025-47273
+    purls:
+      - "pkg:pypi/setuptools@70.3.0"
+    statement: >-
+      Reported from pip's own bill of materials (pip/_vendor/bom.cdx.json): pip
+      vendors pkg_resources out of setuptools 70.3.0 and lists it under that
+      name. The advisory is a path traversal in setuptools.package_index, which
+      pip does not vendor and nothing in the image installs. Every pip release
+      up to 26.3 carries the same entry, so there is no version to move to.
