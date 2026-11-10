@@ -61,7 +61,7 @@ export function GitStatus({ workingDirectory, onFileSelect }: GitStatusProps) {
       setSelectedFiles(new Set());
     },
     onError: (error: Error) => {
-      toast({ title: 'Staging failed', description: error.message, variant: 'destructive' });
+      toast({ title: 'Stagen fehlgeschlagen', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -79,7 +79,11 @@ export function GitStatus({ workingDirectory, onFileSelect }: GitStatusProps) {
       setSelectedFiles(new Set());
     },
     onError: (error: Error) => {
-      toast({ title: 'Unstaging failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'Unstagen fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 
@@ -94,10 +98,14 @@ export function GitStatus({ workingDirectory, onFileSelect }: GitStatusProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['git-status', workingDirectory] });
-      toast({ title: 'Changes discarded' });
+      toast({ title: 'Änderungen verworfen' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Discard failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'Verwerfen fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 
@@ -184,6 +192,7 @@ export function GitStatus({ workingDirectory, onFileSelect }: GitStatusProps) {
           onClick={() => onFileSelect?.(file, type === 'staged')}
         >
           <button
+            aria-label={selectedFiles.has(file) ? 'Datei abwählen' : 'Datei auswählen'}
             onClick={(e) => {
               e.stopPropagation();
               toggleFileSelection(file);

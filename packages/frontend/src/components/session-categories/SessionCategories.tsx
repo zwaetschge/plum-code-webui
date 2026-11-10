@@ -155,6 +155,7 @@ export function SessionCategories({
       <div className="flex items-center justify-between px-3 py-2 border-b">
         <span className="text-sm font-medium">Categories</span>
         <Button
+          aria-label="Kategorie hinzufügen"
           variant="ghost"
           size="icon"
           className="h-6 w-6"
@@ -206,6 +207,7 @@ export function SessionCategories({
                     }}
                   />
                   <Button
+                    aria-label="Namen speichern"
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
@@ -214,6 +216,7 @@ export function SessionCategories({
                     <Check className="h-3 w-3" />
                   </Button>
                   <Button
+                    aria-label="Umbenennen abbrechen"
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
@@ -239,7 +242,12 @@ export function SessionCategories({
                     {/* Color picker */}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-6 w-6">
+                        <Button
+                          aria-label="Farbe wählen"
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                        >
                           <Palette className="h-3 w-3" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -264,6 +272,7 @@ export function SessionCategories({
 
                     {/* Edit */}
                     <Button
+                      aria-label="Kategorie umbenennen"
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6"
@@ -277,6 +286,7 @@ export function SessionCategories({
 
                     {/* Delete */}
                     <Button
+                      aria-label="Kategorie löschen"
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6 text-destructive"

@@ -116,10 +116,10 @@ export function CapabilityCatalogSections({
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['claude-agents', configProvider] });
-      toast({ title: data?.enabled ? 'Agent enabled' : 'Agent disabled' });
+      toast({ title: data?.enabled ? 'Agent aktiviert' : 'Agent deaktiviert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -132,10 +132,10 @@ export function CapabilityCatalogSections({
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['claude-skills', configProvider] });
-      toast({ title: data?.enabled ? 'Skill enabled' : 'Skill disabled' });
+      toast({ title: data?.enabled ? 'Skill aktiviert' : 'Skill deaktiviert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -157,17 +157,17 @@ export function CapabilityCatalogSections({
       const importedCount = data.imported.length;
       const skippedCount = data.skipped.length;
       const errorCount = data.errors.length;
-      const parts = [`${importedCount} imported`];
-      if (skippedCount) parts.push(`${skippedCount} skipped`);
-      if (errorCount) parts.push(`${errorCount} errors`);
+      const parts = [`${importedCount} importiert`];
+      if (skippedCount) parts.push(`${skippedCount} übersprungen`);
+      if (errorCount) parts.push(`${errorCount} Fehler`);
       toast({
-        title: importedCount > 0 ? 'Skills imported' : 'No skills imported',
+        title: importedCount > 0 ? 'Skills importiert' : 'Keine Skills importiert',
         description: parts.join(' · '),
         variant: errorCount > 0 ? 'destructive' : undefined,
       });
     },
     onError: (error: Error) => {
-      toast({ title: 'Import failed', description: error.message, variant: 'destructive' });
+      toast({ title: 'Import fehlgeschlagen', description: error.message, variant: 'destructive' });
     },
   });
 

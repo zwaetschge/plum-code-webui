@@ -1927,9 +1927,11 @@ export function SessionPage() {
           error instanceof Error ? error.message : 'The matching message could not be loaded.'
         );
         toast({
-          title: 'Could not jump to message',
+          title: 'Sprung zur Nachricht nicht möglich',
           description:
-            error instanceof Error ? error.message : 'The matching message could not be loaded.',
+            error instanceof Error
+              ? error.message
+              : 'Die passende Nachricht konnte nicht geladen werden.',
           variant: 'destructive',
         });
       }
@@ -2008,7 +2010,11 @@ export function SessionPage() {
       const description =
         error instanceof Error ? error.message : 'The latest messages could not be loaded.';
       setMessageJumpStatus(description);
-      toast({ title: 'Could not load latest messages', description, variant: 'destructive' });
+      toast({
+        title: 'Neueste Nachrichten konnten nicht geladen werden',
+        description,
+        variant: 'destructive',
+      });
     } finally {
       setIsLoadingLatestMessages(false);
     }
@@ -2138,12 +2144,12 @@ export function SessionPage() {
       useSessionStore.getState().updateSession(id, update);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       toast({
-        title: data.entityId ? 'Status light connected' : 'Status light disconnected',
+        title: data.entityId ? 'Statuslicht verbunden' : 'Statuslicht getrennt',
       });
     },
     onError: (error: Error) => {
       toast({
-        title: 'Light assignment failed',
+        title: 'Lichtzuordnung fehlgeschlagen',
         description: error.message,
         variant: 'destructive',
       });
@@ -2156,10 +2162,14 @@ export function SessionPage() {
       return status;
     },
     onSuccess: (status) => {
-      toast({ title: `Testing ${status} light pattern` });
+      toast({ title: `Lichtmuster «${status}» wird getestet` });
     },
     onError: (error: Error) => {
-      toast({ title: 'Light preview failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'Lichtvorschau fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 
@@ -2176,8 +2186,8 @@ export function SessionPage() {
         useSessionStore.getState().updateSession(id, data.data);
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
         toast({
-          title: 'Provider switched',
-          description: 'The running session was reloaded with the new provider.',
+          title: 'Anbieter gewechselt',
+          description: 'Die laufende Session wurde mit dem neuen Anbieter neu geladen.',
         });
       }
     },
@@ -2196,11 +2206,11 @@ export function SessionPage() {
         useSessionStore.getState().updateSession(id, data.data);
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
         toast({
-          title: 'Model updated',
+          title: 'Modell geändert',
           description:
             session?.status === 'running'
-              ? 'The running session was reloaded with the new model.'
-              : 'The new model will be used when the session starts.',
+              ? 'Die laufende Session wurde mit dem neuen Modell neu geladen.'
+              : 'Das neue Modell gilt ab dem Start der Session.',
         });
       }
     },
@@ -2234,11 +2244,11 @@ export function SessionPage() {
         useSessionStore.getState().updateSession(id, data.data);
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
         toast({
-          title: 'Subagent model updated',
+          title: 'Subagent-Modell geändert',
           description:
             session?.status === 'running'
-              ? 'The running session was reloaded; new subagents use the selected model.'
-              : 'Subagents will use the selected model when the session starts.',
+              ? 'Die laufende Session wurde neu geladen; neue Subagents verwenden das gewählte Modell.'
+              : 'Subagents verwenden das gewählte Modell ab dem Start der Session.',
         });
       }
     },
@@ -2257,11 +2267,11 @@ export function SessionPage() {
         useSessionStore.getState().updateSession(id, data.data);
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
         toast({
-          title: 'Reasoning updated',
+          title: 'Denkaufwand geändert',
           description:
             session?.status === 'running'
-              ? 'The running session was reloaded with the new reasoning level.'
-              : 'The new reasoning level will be used when the session starts.',
+              ? 'Die laufende Session wurde mit dem neuen Denkaufwand neu geladen.'
+              : 'Der neue Denkaufwand gilt ab dem Start der Session.',
         });
       }
     },
@@ -2280,11 +2290,11 @@ export function SessionPage() {
         useSessionStore.getState().updateSession(id, data.data);
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
         toast({
-          title: data.data.cliServiceTier === 'fast' ? 'Fast enabled' : 'Fast disabled',
+          title: data.data.cliServiceTier === 'fast' ? 'Fast aktiviert' : 'Fast deaktiviert',
           description:
             session?.status === 'running'
-              ? 'The running session was reloaded to apply Fast mode.'
-              : 'Fast mode will be applied when the session starts.',
+              ? 'Die laufende Session wurde für den Fast-Modus neu geladen.'
+              : 'Der Fast-Modus gilt ab dem Start der Session.',
         });
       }
     },
@@ -2344,12 +2354,18 @@ export function SessionPage() {
       queryClient.invalidateQueries({ queryKey: ['session-peers', id] });
       if (peer?.targetSessionId) setMeshDelegationTargetId(peer.targetSessionId);
       toast({
-        title: 'Peer linked',
-        description: peer?.target?.name ? `${peer.target.name} can now be consulted.` : undefined,
+        title: 'Peer verknüpft',
+        description: peer?.target?.name
+          ? `${peer.target.name} kann jetzt befragt werden.`
+          : undefined,
       });
     },
     onError: (error: Error) => {
-      toast({ title: 'Peer link failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'Peer-Verknüpfung fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 
@@ -2360,10 +2376,10 @@ export function SessionPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['session-peers', id] });
-      toast({ title: 'Peer unlinked' });
+      toast({ title: 'Peer-Verknüpfung gelöst' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Unlink failed', description: error.message, variant: 'destructive' });
+      toast({ title: 'Lösen fehlgeschlagen', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -2383,12 +2399,16 @@ export function SessionPage() {
       queryClient.invalidateQueries({ queryKey: ['session-delegations', id] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       toast({
-        title: 'Delegation sent',
+        title: 'Delegation gesendet',
         description: delegation?.correlationId,
       });
     },
     onError: (error: Error) => {
-      toast({ title: 'Delegation failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'Delegation fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 
@@ -2697,8 +2717,8 @@ export function SessionPage() {
               typeof data.provider === 'string' && data.provider ? data.provider : 'codex';
             window.location.href = `/auth/${encodeURIComponent(provider)}`;
             toast({
-              title: 'Login',
-              description: `Opening ${provider} login flow.`,
+              title: 'Anmeldung',
+              description: `${provider}-Anmeldung wird geöffnet.`,
             });
             break;
           }
@@ -2710,11 +2730,11 @@ export function SessionPage() {
               await api.put(`/api/sessions/${id}`, { name });
               await queryClient.invalidateQueries({ queryKey: ['session', id] });
               await queryClient.invalidateQueries({ queryKey: ['sessions'] });
-              toast({ title: 'Session renamed', description: `Now called "${name}".` });
+              toast({ title: 'Session umbenannt', description: `Heisst jetzt «${name}».` });
             } catch (err) {
               toast({
-                title: 'Rename failed',
-                description: err instanceof Error ? err.message : 'Unknown error',
+                title: 'Umbenennen fehlgeschlagen',
+                description: err instanceof Error ? err.message : 'Unbekannter Fehler',
                 variant: 'destructive',
               });
             }
@@ -2726,22 +2746,25 @@ export function SessionPage() {
             const assistantMessages = sessionMessages.filter((m) => m.role === 'assistant');
             const target = assistantMessages[assistantMessages.length - n];
             if (!target?.content) {
-              toast({ title: 'Nothing to copy', description: 'No matching response found.' });
+              toast({
+                title: 'Nichts zu kopieren',
+                description: 'Keine passende Antwort gefunden.',
+              });
               break;
             }
             try {
               await navigator.clipboard.writeText(target.content);
               toast({
-                title: 'Copied',
+                title: 'Kopiert',
                 description:
                   n > 1
-                    ? `Response #${n} copied to clipboard.`
-                    : 'Last response copied to clipboard.',
+                    ? `Antwort #${n} in die Zwischenablage kopiert.`
+                    : 'Letzte Antwort in die Zwischenablage kopiert.',
               });
             } catch {
               toast({
-                title: 'Copy failed',
-                description: 'Clipboard access denied by browser.',
+                title: 'Kopieren fehlgeschlagen',
+                description: 'Der Browser verweigert den Zugriff auf die Zwischenablage.',
                 variant: 'destructive',
               });
             }
@@ -2769,8 +2792,8 @@ export function SessionPage() {
             document.body.removeChild(link);
             URL.revokeObjectURL(url);
             toast({
-              title: 'Exported',
-              description: `Saved ${filename} (${sessionMessages.length} messages).`,
+              title: 'Exportiert',
+              description: `${filename} gespeichert (${sessionMessages.length} Nachrichten).`,
             });
             break;
           }
@@ -2781,7 +2804,7 @@ export function SessionPage() {
 
           case 'resume_session':
             navigate('/');
-            toast({ title: 'Session picker', description: 'Pick a session from the dashboard.' });
+            toast({ title: 'Session-Auswahl', description: 'Wähle eine Session im Dashboard.' });
             break;
 
           case 'open_settings': {
@@ -2801,8 +2824,9 @@ export function SessionPage() {
 
           case 'open_diff':
             toast({
-              title: 'Git diff',
-              description: 'Open the Git panel from the side dock to view uncommitted changes.',
+              title: 'Git-Diff',
+              description:
+                'Öffne das Git-Panel im Seitendock, um nicht committete Änderungen zu sehen.',
             });
             break;
 
@@ -2812,7 +2836,10 @@ export function SessionPage() {
               ? `https://github.com/anthropics/claude-code/issues/new?title=${encodeURIComponent(report.slice(0, 80))}&body=${encodeURIComponent(report)}`
               : 'https://github.com/anthropics/claude-code/issues/new';
             window.open(url, '_blank', 'noopener,noreferrer');
-            toast({ title: 'Feedback', description: 'Opening GitHub issues in a new tab.' });
+            toast({
+              title: 'Feedback',
+              description: 'GitHub-Issues werden in einem neuen Tab geöffnet.',
+            });
             break;
           }
 
@@ -2946,7 +2973,7 @@ export function SessionPage() {
       URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Export failed', error);
-      toast({ title: 'Export failed', variant: 'destructive' });
+      toast({ title: 'Export fehlgeschlagen', variant: 'destructive' });
     }
   }, [id, session?.name]);
 
@@ -3169,10 +3196,10 @@ export function SessionPage() {
           designStyleSkill: session.designStyleSkill ?? null,
           writingStyleSkill: session.writingStyleSkill ?? null,
         });
-        toast({ title: 'Template saved', description: name });
+        toast({ title: 'Vorlage gespeichert', description: name });
       } catch (error) {
         console.error('Template save failed', error);
-        toast({ title: 'Could not save template', variant: 'destructive' });
+        toast({ title: 'Vorlage konnte nicht gespeichert werden', variant: 'destructive' });
       }
     },
     [session]

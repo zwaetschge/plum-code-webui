@@ -72,7 +72,7 @@ const queryClient = new QueryClient({
     onError: (error, _variables, _context, mutation) => {
       if (mutation.options.onError || mutation.meta?.silenceErrorToast) return;
       toast({
-        title: 'Action failed',
+        title: 'Aktion fehlgeschlagen',
         description: error instanceof Error ? error.message : String(error),
         variant: 'destructive',
       });

@@ -32,6 +32,7 @@ import { mobileGatewayAuth } from './middleware/mobileGateway.js';
 import {
   previewVhostMiddleware,
   handlePreviewUpgrade,
+  previewFrameSources,
   previewVhostEnabled,
 } from './middleware/preview-vhost.js';
 import { ensureCliPath } from './utils/cliPaths.js';
@@ -335,7 +336,8 @@ async function main() {
           // media-src the browser falls back to default-src and blocks them.
           mediaSrc: ["'self'", 'blob:'],
           fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
-          frameSrc: ["'self'"],
+          // The preview hosts are a separate origin on purpose; framing them is the feature.
+          frameSrc: ["'self'", ...(previewVhostEnabled() ? previewFrameSources() : [])],
           objectSrc: ["'none'"],
           baseUri: ["'self'"],
           formAction: ["'self'"],

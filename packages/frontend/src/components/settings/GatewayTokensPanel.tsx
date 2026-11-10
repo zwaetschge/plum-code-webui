@@ -111,6 +111,7 @@ export function GatewayTokensPanel() {
               {issued}
             </code>
             <Button
+              aria-label={copied ? 'Token kopiert' : 'Token kopieren'}
               type="button"
               size="sm"
               variant="outline"

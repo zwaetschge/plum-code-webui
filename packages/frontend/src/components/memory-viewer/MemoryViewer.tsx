@@ -283,7 +283,13 @@ export function MemoryViewer({ workingDirectory, className }: MemoryViewerProps)
               className="flex-1 text-sm bg-background border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
               autoFocus
             />
-            <Button variant="ghost" size="sm" onClick={createFile}>
+            <Button
+              aria-label="Datei anlegen"
+              title="Datei anlegen"
+              variant="ghost"
+              size="sm"
+              onClick={createFile}
+            >
               <CheckCircle className="h-4 w-4" />
             </Button>
           </div>

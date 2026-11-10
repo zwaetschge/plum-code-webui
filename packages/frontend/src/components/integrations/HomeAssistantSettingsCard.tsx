@@ -57,11 +57,11 @@ export function HomeAssistantSettingsCard() {
       queryClient.setQueryData(['home-assistant-settings'], settings);
       queryClient.invalidateQueries({ queryKey: ['home-assistant-lights'] });
       setAccessToken('');
-      toast({ title: 'Home Assistant settings saved' });
+      toast({ title: 'Home-Assistant-Einstellungen gespeichert' });
     },
     onError: (error) => {
       toast({
-        title: 'Home Assistant error',
+        title: 'Home-Assistant-Fehler',
         description: errorMessage(error),
         variant: 'destructive',
       });
@@ -82,14 +82,14 @@ export function HomeAssistantSettingsCard() {
     onSuccess: (result) => {
       setTestResult(result || null);
       toast({
-        title: 'Home Assistant connected',
-        description: `${result?.locationName || 'Home Assistant'} · ${result?.lightCount ?? 0} lights`,
+        title: 'Home Assistant verbunden',
+        description: `${result?.locationName || 'Home Assistant'} · ${result?.lightCount ?? 0} Lampen`,
       });
     },
     onError: (error) => {
       setTestResult(null);
       toast({
-        title: 'Connection failed',
+        title: 'Verbindung fehlgeschlagen',
         description: errorMessage(error),
         variant: 'destructive',
       });

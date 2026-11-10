@@ -45,13 +45,13 @@ export function RenameSessionDialog({ session, open, onOpenChange }: RenameSessi
       updateSession(response.data.id, response.data);
       queryClient.setQueryData(['session', response.data.id], response.data);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      toast({ title: 'Session renamed' });
+      toast({ title: 'Session umbenannt' });
       onOpenChange(false);
     },
     onError: (error: Error) => {
       const description =
         error instanceof ApiError ? error.message : error.message || 'Rename failed';
-      toast({ title: 'Rename failed', description, variant: 'destructive' });
+      toast({ title: 'Umbenennen fehlgeschlagen', description, variant: 'destructive' });
     },
   });
 

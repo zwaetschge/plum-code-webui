@@ -1166,7 +1166,7 @@ export function SettingsPage() {
           : 'No update results returned.';
       const hasFailure = results.some((result) => result.status === 'failed');
       toast({
-        title: 'CLI update finished',
+        title: 'CLI-Update abgeschlossen',
         description: summary,
         variant: hasFailure ? 'destructive' : undefined,
       });
@@ -1175,7 +1175,11 @@ export function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['cli-providers'] });
     },
     onError: (error: Error) => {
-      toast({ title: 'CLI update failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'CLI-Update fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 
@@ -1188,10 +1192,10 @@ export function SettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
       queryClient.invalidateQueries({ queryKey: ['cli-providers'] });
-      toast({ title: 'Settings saved' });
+      toast({ title: 'Einstellungen gespeichert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1205,11 +1209,11 @@ export function SettingsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['codex-features'] });
-      toast({ title: 'Codex feature updated' });
+      toast({ title: 'Codex-Funktion geändert' });
     },
     onError: (error: Error) => {
       toast({
-        title: 'Codex feature update failed',
+        title: 'Codex-Funktion konnte nicht geändert werden',
         description: error.message,
         variant: 'destructive',
       });
@@ -1227,13 +1231,13 @@ export function SettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['codex-plugins'] });
       toast({
-        title: 'Codex plugin updated',
-        description: 'New Codex sessions will load the updated plugin set.',
+        title: 'Codex-Plugin aktualisiert',
+        description: 'Neue Codex-Sessions laden die aktualisierten Plugins.',
       });
     },
     onError: (error: Error) => {
       toast({
-        title: 'Codex plugin update failed',
+        title: 'Codex-Plugin konnte nicht aktualisiert werden',
         description: error.message,
         variant: 'destructive',
       });
@@ -1250,10 +1254,10 @@ export function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['mcp-servers'] });
       setShowMcpForm(false);
       setNewMcpServer({ name: '', type: 'subprocess', command: '', url: '' });
-      toast({ title: 'MCP server added' });
+      toast({ title: 'MCP-Server hinzugefügt' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1265,10 +1269,10 @@ export function SettingsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['mcp-servers'] });
-      toast({ title: 'MCP server deleted' });
+      toast({ title: 'MCP-Server gelöscht' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1295,11 +1299,11 @@ export function SettingsPage() {
       }));
 
       if (result?.connected) {
-        toast({ title: 'Connection successful', description: 'MCP server is responding' });
+        toast({ title: 'Verbindung erfolgreich', description: 'Der MCP-Server antwortet' });
       } else {
         toast({
-          title: 'Connection failed',
-          description: result?.error || 'Could not connect to server',
+          title: 'Verbindung fehlgeschlagen',
+          description: result?.error || 'Keine Verbindung zum Server',
           variant: 'destructive',
         });
       }
@@ -1313,8 +1317,8 @@ export function SettingsPage() {
         },
       }));
       toast({
-        title: 'Test failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Test fehlgeschlagen',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     }
@@ -1328,10 +1332,10 @@ export function SettingsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['installed-plugins', configProvider] });
-      toast({ title: 'Plugin uninstalled' });
+      toast({ title: 'Plugin deinstalliert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1345,10 +1349,10 @@ export function SettingsPage() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['installed-plugins', configProvider] });
-      toast({ title: data?.enabled ? 'Plugin enabled' : 'Plugin disabled' });
+      toast({ title: data?.enabled ? 'Plugin aktiviert' : 'Plugin deaktiviert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1364,10 +1368,10 @@ export function SettingsPage() {
     onSuccess: () => {
       refetchGithubToken();
       setGithubTokenInput('');
-      toast({ title: 'GitHub token saved' });
+      toast({ title: 'GitHub-Token gespeichert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1378,10 +1382,10 @@ export function SettingsPage() {
     },
     onSuccess: () => {
       refetchGithubToken();
-      toast({ title: 'GitHub token removed' });
+      toast({ title: 'GitHub-Token entfernt' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1399,12 +1403,12 @@ export function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['cli-providers'] });
       queryClient.invalidateQueries({ queryKey: ['usage-limits'] });
       toast({
-        title: 'Z.AI Code saved',
-        description: 'New and restarted Z.AI sessions will use this endpoint.',
+        title: 'Z.AI Code gespeichert',
+        description: 'Neue und neu gestartete Z.AI-Sessions verwenden diesen Endpunkt.',
       });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1419,12 +1423,12 @@ export function SettingsPage() {
       queryClient.invalidateQueries({ queryKey: ['cli-providers'] });
       queryClient.invalidateQueries({ queryKey: ['usage-limits'] });
       toast({
-        title: 'Z.AI configuration removed',
-        description: 'Claude subscription sessions are unchanged.',
+        title: 'Z.AI-Konfiguration entfernt',
+        description: 'Sessions mit Claude-Abo bleiben unverändert.',
       });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1440,12 +1444,12 @@ export function SettingsPage() {
     onSuccess: () => {
       refetchIntegrations();
       toast({
-        title: 'Integrations saved',
-        description: 'New sessions will use the updated URLs.',
+        title: 'Integrationen gespeichert',
+        description: 'Neue Sessions verwenden die geänderten URLs.',
       });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1462,10 +1466,10 @@ export function SettingsPage() {
       setDiscordBotTokenInput('');
       refetchDiscordSettings();
       queryClient.invalidateQueries({ queryKey: ['discord-outbox'] });
-      toast({ title: 'Discord settings saved' });
+      toast({ title: 'Discord-Einstellungen gespeichert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1478,15 +1482,21 @@ export function SettingsPage() {
       refetchDiscordSettings();
       queryClient.invalidateQueries({ queryKey: ['discord-outbox'] });
       toast({
-        title: result?.sent ? 'Discord test sent' : 'Discord test queued for retry',
+        title: result?.sent ? 'Discord-Test gesendet' : 'Discord-Test wartet auf erneuten Versuch',
         description:
           result?.error ||
-          (result?.sent ? undefined : 'The message is in the Discord outbox and will be retried.'),
+          (result?.sent
+            ? undefined
+            : 'Die Nachricht liegt in der Discord-Outbox und wird erneut versucht.'),
         variant: result?.sent ? 'default' : 'destructive',
       });
     },
     onError: (error: Error) => {
-      toast({ title: 'Discord test failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'Discord-Test fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 
@@ -1509,10 +1519,10 @@ export function SettingsPage() {
       setNewUsername('');
       setNewPassword('');
       setConfirmPassword('');
-      toast({ title: 'Success', description: data?.message || 'Credentials updated' });
+      toast({ title: 'Gespeichert', description: data?.message || 'Zugangsdaten aktualisiert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1527,10 +1537,10 @@ export function SettingsPage() {
     },
     onSuccess: (data) => {
       refetchBasicAuth();
-      toast({ title: data?.enabled ? 'Basic auth enabled' : 'Basic auth disabled' });
+      toast({ title: data?.enabled ? 'Basic Auth aktiviert' : 'Basic Auth deaktiviert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -1582,10 +1592,13 @@ export function SettingsPage() {
   const sendTestAlert = async () => {
     try {
       await api.post('/api/workspace/notifications/test', {});
-      toast({ title: 'Test alert sent', description: 'Check the bell in the sidebar.' });
+      toast({
+        title: 'Testalarm gesendet',
+        description: 'Schau bei der Glocke in der Seitenleiste nach.',
+      });
     } catch (error) {
       toast({
-        title: 'Test alert failed',
+        title: 'Testalarm fehlgeschlagen',
         description: error instanceof Error ? error.message : undefined,
         variant: 'destructive',
       });
@@ -1608,14 +1621,14 @@ export function SettingsPage() {
         details: data || undefined,
       });
       toast({
-        title: 'Oracle browser ready',
-        description: data?.message || 'Oracle browser settings validated.',
+        title: 'Oracle-Browser bereit',
+        description: data?.message || 'Oracle-Browser-Einstellungen geprüft.',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Oracle browser test failed';
       setOracleTestResult({ state: 'error', message });
       toast({
-        title: 'Oracle browser test failed',
+        title: 'Oracle-Browser-Test fehlgeschlagen',
         description: message,
         variant: 'destructive',
       });
@@ -2091,6 +2104,9 @@ export function SettingsPage() {
                           className="pl-10 pr-10"
                         />
                         <button
+                          aria-label={
+                            showCurrentPassword ? 'Passwort verbergen' : 'Passwort anzeigen'
+                          }
                           type="button"
                           onClick={() => setShowCurrentPassword(!showCurrentPassword)}
                           className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted"
@@ -2133,6 +2149,9 @@ export function SettingsPage() {
                             className="pl-10 pr-10"
                           />
                           <button
+                            aria-label={
+                              showNewPassword ? 'Passwort verbergen' : 'Passwort anzeigen'
+                            }
                             type="button"
                             onClick={() => setShowNewPassword(!showNewPassword)}
                             className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted"
@@ -2176,8 +2195,8 @@ export function SettingsPage() {
                       onClick={() => {
                         if (newPassword && newPassword !== confirmPassword) {
                           toast({
-                            title: 'Error',
-                            description: 'Passwords do not match',
+                            title: 'Fehler',
+                            description: 'Die Passwörter stimmen nicht überein',
                             variant: 'destructive',
                           });
                           return;
@@ -2242,6 +2261,7 @@ export function SettingsPage() {
                               className="settings-path-input h-10 flex-1 font-mono text-sm"
                             />
                             <Button
+                              aria-label="Ordner durchsuchen"
                               variant="secondary"
                               size="icon"
                               onClick={() => setShowFolderBrowser(true)}
@@ -2427,6 +2447,7 @@ export function SettingsPage() {
                                     </p>
                                   </div>
                                   <Button
+                                    aria-label="Codex-Funktionen neu laden"
                                     variant="ghost"
                                     size="sm"
                                     onClick={() =>
@@ -2519,6 +2540,7 @@ export function SettingsPage() {
                                       Marketplace
                                     </Button>
                                     <Button
+                                      aria-label="Codex-Plugins neu laden"
                                       variant="ghost"
                                       size="sm"
                                       onClick={() =>
@@ -2551,6 +2573,7 @@ export function SettingsPage() {
                                     />
                                     {codexPluginSearchQuery && (
                                       <button
+                                        aria-label="Suche leeren"
                                         type="button"
                                         onClick={() => setCodexPluginSearchQuery('')}
                                         className="absolute right-3 top-1/2 rounded p-0.5 -translate-y-1/2 hover:bg-muted"
@@ -3790,6 +3813,7 @@ export function SettingsPage() {
                                 className="font-mono text-sm pr-10"
                               />
                               <button
+                                aria-label={showGithubToken ? 'Token verbergen' : 'Token anzeigen'}
                                 type="button"
                                 onClick={() => setShowGithubToken(!showGithubToken)}
                                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-muted"
@@ -4616,6 +4640,7 @@ export function SettingsPage() {
                             </Button>
                             {!server.readOnly && (
                               <Button
+                                aria-label="MCP-Server löschen"
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => deleteMcpMutation.mutate(server.id)}
@@ -4760,6 +4785,7 @@ export function SettingsPage() {
                       />
                       {pluginSearchQuery && (
                         <button
+                          aria-label="Suche leeren"
                           type="button"
                           onClick={() => setPluginSearchQuery('')}
                           className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted"

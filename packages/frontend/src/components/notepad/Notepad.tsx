@@ -199,6 +199,7 @@ export function Notepad({ sessionId, onSendToChat, className }: NotepadProps) {
                       </p>
                     </div>
                     <Button
+                      aria-label="Notiz löschen"
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6 opacity-0 group-hover:opacity-100"

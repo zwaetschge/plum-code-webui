@@ -10,6 +10,8 @@ import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { applyTheme, normalizeTheme, useAppearanceStore } from '@/stores/appearanceStore';
 import { useSessionStore } from '@/stores/sessionStore';
+import { useAuthStore } from '@/stores/authStore';
+import { sweepSessionStorageInBrowser } from '@/lib/sessionStorageKeys';
 import { api } from '@/services/api';
 import type { Session, ApiResponse, UsageSnapshot, UserSettings } from '@plum-code-webui/shared';
 import { ProviderLogo } from '@/components/branding/ProviderLogo';
@@ -56,6 +58,9 @@ function selectFreshestUsage(
   }
   return storeUsage;
 }
+
+// Stale per-session storage is swept once per tab and account, not per list refetch.
+let storageSweptForUser: string | null = null;
 
 export function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -190,6 +195,33 @@ export function Layout() {
       setSessions(shellSessions);
     }
   }, [setSessions, shellSessions]);
+
+  const userId = useAuthStore((state) => state.user?.id) ?? null;
+  const sessionListLoaded = shellSessions !== undefined;
+  useEffect(() => {
+    if (!sessionListLoaded || !userId || storageSweptForUser === userId) return;
+    storageSweptForUser = userId;
+    void (async () => {
+      // The shell list omits archived sessions and maps failures to [], so it
+      // cannot prove a session is gone; ask for both halves explicitly.
+      const [active, archived] = await Promise.all([
+        api.get<ApiResponse<Session[]>>('/api/sessions'),
+        api.get<ApiResponse<Session[]>>('/api/sessions?archived=1'),
+      ]);
+      const lists = [active.data, archived.data];
+      if (!lists.every((list) => list.success && Array.isArray(list.data))) return;
+      const known = new Set(lists.flatMap((list) => list.data!.map((session) => session.id)));
+      if (known.size === 0 || useAuthStore.getState().user?.id !== userId) return;
+      // A session opened by URL may be newer than either response.
+      const openSessionId = window.location.pathname.match(
+        /^\/(?:chat\/session|session)\/([^/]+)/
+      )?.[1];
+      if (openSessionId) known.add(openSessionId);
+      sweepSessionStorageInBrowser(known, userId);
+    })().catch(() => {
+      storageSweptForUser = null;
+    });
+  }, [sessionListLoaded, userId]);
 
   const { data: routeSession } = useQuery({
     queryKey: ['session', routeSessionId],

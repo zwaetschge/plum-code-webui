@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { nativeShell } from '@/lib/nativeShell';
+import { clearSessionStorageInBrowser } from '@/lib/sessionStorageKeys';
 import type { User } from '@plum-code-webui/shared';
 import { api, ApiError } from '@/services/api';
 
@@ -50,6 +51,8 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
+        // Drafts and unsent messages are plain text; the next account must not see them.
+        clearSessionStorageInBrowser();
         set({ user: null, token: null, isAuthenticated: false });
         if (nativeShell()) {
           (window as Window & { PlumHost?: { logout(): void } }).PlumHost?.logout();

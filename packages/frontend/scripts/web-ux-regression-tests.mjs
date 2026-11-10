@@ -72,8 +72,8 @@ assert.match(socket, /Content-Range/);
 assert.match(socket, /X-Chunk-SHA256/);
 assert.match(socket, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/);
 assert.match(socket, /currentUpload\.missingChunks/);
-assert.match(socket, /title: 'Queued message was not sent'/);
-assert.match(socket, /title: 'Message is still waiting to send'/);
+assert.match(socket, /title: 'Wartende Nachricht wurde nicht gesendet'/);
+assert.match(socket, /title: 'Nachricht wartet noch auf den Versand'/);
 assert.match(socket, /lastSequence/);
 
 assert.match(

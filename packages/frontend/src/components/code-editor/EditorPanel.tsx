@@ -42,10 +42,14 @@ export function EditorPanel({ sessionId }: EditorPanelProps) {
     },
     onSuccess: (_, { path }) => {
       markFileSaved(sessionId, path);
-      toast({ title: 'File saved', description: getFileName(path) });
+      toast({ title: 'Datei gespeichert', description: getFileName(path) });
     },
     onError: (error: Error) => {
-      toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'Speichern fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 

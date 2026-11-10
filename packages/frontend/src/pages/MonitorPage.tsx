@@ -198,7 +198,7 @@ export function MonitorPage() {
             size="sm"
             onClick={() => {
               slotIds.forEach((id) => socketService.reconnectToSession(id));
-              toast({ title: 'Monitor refreshed' });
+              toast({ title: 'Monitor aktualisiert' });
             }}
           >
             <RefreshCw className="mr-2 h-3.5 w-3.5" />
@@ -411,8 +411,8 @@ function MonitorTile({
           : await socketService.sendMessage(id, text);
       if (ack && 'status' in ack && ack.status === 'rejected') {
         toast({
-          title: 'Message not delivered',
-          description: (ack as { error?: string }).error ?? 'The server rejected it.',
+          title: 'Nachricht nicht zugestellt',
+          description: (ack as { error?: string }).error ?? 'Der Server hat sie abgelehnt.',
           variant: 'destructive',
         });
       } else {
@@ -421,7 +421,7 @@ function MonitorTile({
       }
     } catch (error) {
       toast({
-        title: 'Message not delivered',
+        title: 'Nachricht nicht zugestellt',
         description: error instanceof Error ? error.message : String(error),
         variant: 'destructive',
       });
@@ -445,7 +445,7 @@ function MonitorTile({
       }
     } catch (error) {
       toast({
-        title: 'Could not answer approval',
+        title: 'Freigabe konnte nicht beantwortet werden',
         description: error instanceof Error ? error.message : String(error),
         variant: 'destructive',
       });
@@ -463,7 +463,7 @@ function MonitorTile({
       );
     } catch (error) {
       toast({
-        title: 'Could not answer question',
+        title: 'Frage konnte nicht beantwortet werden',
         description: error instanceof Error ? error.message : String(error),
         variant: 'destructive',
       });

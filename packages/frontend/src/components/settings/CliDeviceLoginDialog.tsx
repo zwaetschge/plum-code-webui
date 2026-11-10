@@ -199,11 +199,11 @@ export function CliDeviceLoginDialog({
     if (!login?.verificationCode) return;
     try {
       await navigator.clipboard.writeText(login.verificationCode);
-      toast({ title: 'Device code copied' });
+      toast({ title: 'Gerätecode kopiert' });
     } catch {
       toast({
-        title: 'Copy failed',
-        description: 'Select the device code and copy it manually.',
+        title: 'Kopieren fehlgeschlagen',
+        description: 'Markiere den Gerätecode und kopiere ihn von Hand.',
         variant: 'destructive',
       });
     }

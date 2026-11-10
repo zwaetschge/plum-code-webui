@@ -168,7 +168,13 @@ export function FolderBrowser({ value, onChange, onClose, showFiles = false }: F
         <span className="text-sm font-medium">Select Folder</span>
         <div className="flex-1" />
         {onClose && (
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+          <Button
+            aria-label="Schliessen"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={onClose}
+          >
             <X className="h-4 w-4" />
           </Button>
         )}
@@ -199,6 +205,8 @@ export function FolderBrowser({ value, onChange, onClose, showFiles = false }: F
       {/* Path input */}
       <div className="flex items-center gap-2 p-2 border-b">
         <Button
+          aria-label="Übergeordneter Ordner"
+          title="Übergeordneter Ordner"
           variant="ghost"
           size="icon"
           className="h-8 w-8 shrink-0"
@@ -235,6 +243,7 @@ export function FolderBrowser({ value, onChange, onClose, showFiles = false }: F
       <div className="flex items-center gap-1 px-3 py-2 text-xs text-muted-foreground overflow-x-auto border-b">
         {isPathAllowed('/') && (
           <button
+            aria-label="Stammverzeichnis"
             onClick={() => navigateTo('/')}
             className="hover:text-foreground transition-colors shrink-0"
           >

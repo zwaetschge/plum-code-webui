@@ -186,6 +186,17 @@ export const REGRESSION_SUITES = [
     ],
   },
   {
+    name: 'session storage keys',
+    command: 'pnpm',
+    args: [
+      '--filter',
+      '@plum-code-webui/backend',
+      'exec',
+      'tsx',
+      '../frontend/scripts/session-storage-keys-tests.ts',
+    ],
+  },
+  {
     name: 'ambient motion',
     command: 'pnpm',
     args: [

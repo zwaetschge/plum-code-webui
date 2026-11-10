@@ -36,6 +36,7 @@ const expectedSuites = [
   'home assistant status',
   'docker',
   'appearance themes',
+  'session storage keys',
   'ambient motion',
   'chat timeline',
   'operations view state',

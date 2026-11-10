@@ -224,13 +224,13 @@ export function OperationsPage() {
       queryClient.invalidateQueries({ queryKey: ['watchdogs'] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       toast({
-        title: 'Watchdog assigned',
-        description: watchdog ? `${watchdog.containerName} now has a session.` : undefined,
+        title: 'Watchdog zugewiesen',
+        description: watchdog ? `${watchdog.containerName} hat jetzt eine Session.` : undefined,
       });
     },
     onError: (error: Error) => {
       toast({
-        title: 'Watchdog assignment failed',
+        title: 'Watchdog-Zuweisung fehlgeschlagen',
         description: error.message,
         variant: 'destructive',
       });
@@ -247,12 +247,16 @@ export function OperationsPage() {
     onSuccess: (snapshot) => {
       queryClient.invalidateQueries({ queryKey: ['watchdogs'] });
       toast({
-        title: 'Snapshot captured',
+        title: 'Snapshot erstellt',
         description: snapshot?.summary?.slice(0, 140),
       });
     },
     onError: (error: Error) => {
-      toast({ title: 'Snapshot failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'Snapshot fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 
@@ -268,14 +272,18 @@ export function OperationsPage() {
       queryClient.invalidateQueries({ queryKey: ['watchdogs'] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
       toast({
-        title: 'Watchdog consulted',
+        title: 'Watchdog befragt',
         description: delegation
-          ? `Delegation ${delegation.correlationId} sent to the watchdog session.`
+          ? `Delegation ${delegation.correlationId} an die Watchdog-Session gesendet.`
           : undefined,
       });
     },
     onError: (error: Error) => {
-      toast({ title: 'Consult failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'Befragung fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 

@@ -270,12 +270,12 @@ export function AndroidDevicePanel({ sessionId, className }: AndroidDevicePanelP
     mutationFn: async () => api.post('/api/android/emulator/start', {}),
     onSuccess: () => {
       emulatorQuery.refetch();
-      toast({ title: 'Android emulator starting' });
+      toast({ title: 'Android-Emulator startet' });
     },
     onError: (error) => {
       toast({
-        title: 'Emulator start failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Emulator-Start fehlgeschlagen',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     },
@@ -285,12 +285,12 @@ export function AndroidDevicePanel({ sessionId, className }: AndroidDevicePanelP
     mutationFn: async () => api.post('/api/android/emulator/stop', {}),
     onSuccess: () => {
       emulatorQuery.refetch();
-      toast({ title: 'Android emulator stopped' });
+      toast({ title: 'Android-Emulator gestoppt' });
     },
     onError: (error) => {
       toast({
-        title: 'Emulator stop failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Emulator konnte nicht gestoppt werden',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     },
@@ -326,12 +326,14 @@ export function AndroidDevicePanel({ sessionId, className }: AndroidDevicePanelP
     },
     onSuccess: (data) => {
       onSnapshot(data);
-      toast({ title: data?.selectedSerial ? 'Android device selected' : 'Android device cleared' });
+      toast({
+        title: data?.selectedSerial ? 'Android-Gerät ausgewählt' : 'Android-Gerät abgewählt',
+      });
     },
     onError: (error) => {
       toast({
-        title: 'Device selection failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Geräteauswahl fehlgeschlagen',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     },
@@ -346,12 +348,12 @@ export function AndroidDevicePanel({ sessionId, className }: AndroidDevicePanelP
     },
     onSuccess: (data) => {
       onSnapshot(data?.devices);
-      toast({ title: 'Reconnect requested' });
+      toast({ title: 'Neuverbindung angefordert' });
     },
     onError: (error) => {
       toast({
-        title: 'Reconnect failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Neuverbindung fehlgeschlagen',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     },
@@ -375,15 +377,17 @@ export function AndroidDevicePanel({ sessionId, className }: AndroidDevicePanelP
       onSnapshot(data?.devices);
       setPairCode('');
       toast({
-        title: data?.connectError ? 'Paired, connect failed' : 'Android device paired',
+        title: data?.connectError
+          ? 'Gekoppelt, aber Verbindung fehlgeschlagen'
+          : 'Android-Gerät gekoppelt',
         description: data?.connectError,
         variant: data?.connectError ? 'destructive' : undefined,
       });
     },
     onError: (error) => {
       toast({
-        title: 'Pairing failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Kopplung fehlgeschlagen',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     },
@@ -402,12 +406,12 @@ export function AndroidDevicePanel({ sessionId, className }: AndroidDevicePanelP
     },
     onSuccess: (data) => {
       onSnapshot(data?.devices);
-      toast({ title: 'Android device connected' });
+      toast({ title: 'Android-Gerät verbunden' });
     },
     onError: (error) => {
       toast({
-        title: 'Connect failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Verbindung fehlgeschlagen',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     },
@@ -432,14 +436,14 @@ export function AndroidDevicePanel({ sessionId, className }: AndroidDevicePanelP
     onSuccess: (data) => {
       onSnapshot(data?.devices);
       toast({
-        title: 'Reconnected',
-        description: data?.selectedSerial ? `Now on ${data.selectedSerial}` : undefined,
+        title: 'Neu verbunden',
+        description: data?.selectedSerial ? `Jetzt auf ${data.selectedSerial}` : undefined,
       });
     },
     onError: (error) => {
       toast({
-        title: 'Reconnect failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Neuverbindung fehlgeschlagen',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     },
@@ -456,12 +460,12 @@ export function AndroidDevicePanel({ sessionId, className }: AndroidDevicePanelP
       } else {
         onSnapshot();
       }
-      toast({ title: 'Device forgotten' });
+      toast({ title: 'Gerät entfernt' });
     },
     onError: (error) => {
       toast({
-        title: 'Forget failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Entfernen fehlgeschlagen',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     },

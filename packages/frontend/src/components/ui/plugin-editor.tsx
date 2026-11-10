@@ -103,12 +103,12 @@ export function PluginEditor({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['installed-plugins', providerKey] });
-      toast({ title: 'Plugin created successfully' });
+      toast({ title: 'Plugin erstellt' });
       onSaved?.();
       onClose();
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -129,12 +129,12 @@ export function PluginEditor({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['installed-plugins', providerKey] });
-      toast({ title: 'Plugin updated successfully' });
+      toast({ title: 'Plugin aktualisiert' });
       onSaved?.();
       onClose();
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -147,12 +147,12 @@ export function PluginEditor({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['installed-plugins', providerKey] });
-      toast({ title: 'Plugin deleted' });
+      toast({ title: 'Plugin gelöscht' });
       onSaved?.();
       onClose();
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -185,7 +185,13 @@ export function PluginEditor({
               Define a custom plugin to extend Claude's capabilities
             </p>
           </div>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
+          <Button
+            aria-label="Schliessen"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={onClose}
+          >
             <X className="h-4 w-4" />
           </Button>
         </div>

@@ -83,6 +83,7 @@ import { SessionAssignmentDialog } from '@/components/session/SessionAssignmentD
 import { SessionSurfaceMenuItem } from '@/components/session/SessionSurfaceMenuItem';
 import { sessionSurface } from '@/lib/sessionSurface';
 import { TASK_WORKFLOWS, type TaskWorkflow } from '@/lib/taskWorkflows';
+import { forgetSessionInBrowser } from '@/lib/sessionStorageKeys';
 import { SessionOverview, SessionOverviewSwitcher } from '@/components/sessions/SessionOverview';
 import { useSessionOverviewView } from '@/components/sessions/sessionOverview';
 import {
@@ -565,7 +566,7 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
       }
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -792,12 +793,13 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
       await api.delete(`/api/sessions/${id}`);
       return id;
     },
-    onSuccess: () => {
+    onSuccess: (id) => {
+      forgetSessionInBrowser(id);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      toast({ title: 'Session deleted' });
+      toast({ title: 'Session gelöscht' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -820,7 +822,11 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
           : error instanceof Error
             ? error.message
             : 'Failed';
-      toast({ title: 'Failed to update star', description: message, variant: 'destructive' });
+      toast({
+        title: 'Stern konnte nicht gesetzt werden',
+        description: message,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -856,7 +862,11 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
           : error instanceof Error
             ? error.message
             : 'Failed';
-      toast({ title: 'Failed to update category', description: message, variant: 'destructive' });
+      toast({
+        title: 'Kategorie konnte nicht geändert werden',
+        description: message,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -940,8 +950,8 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
       });
       if (!category) {
         toast({
-          title: 'Failed to create category',
-          description: 'The category could not be created.',
+          title: 'Kategorie konnte nicht erstellt werden',
+          description: 'Die Kategorie konnte nicht erstellt werden.',
           variant: 'destructive',
         });
         return;
@@ -950,7 +960,7 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
       setDashboardCategoryColor(getNextDashboardCategoryColor([...categories, category]));
       setCreatingDashboardCategory(false);
       setCollapsedDashboardGroupIds((current) => ({ ...current, [category.id]: false }));
-      toast({ title: 'Category created' });
+      toast({ title: 'Kategorie erstellt' });
     } finally {
       setDashboardCategorySubmitting(false);
     }
@@ -981,17 +991,17 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
   const handleGenerateIcon = async (session: Session) => {
     if (iconBusySessionId) return;
     setIconBusySessionId(session.id);
-    toast({ title: 'Generating icon', description: 'This can take a moment.' });
+    toast({ title: 'Symbol wird erzeugt', description: 'Das kann einen Moment dauern.' });
     try {
       const response = await api.post<ApiResponse<Session>>(
         `/api/sessions/${session.id}/icon/generate`
       );
       await syncIconSession(response.data.data);
-      toast({ title: 'Session icon updated' });
+      toast({ title: 'Session-Symbol aktualisiert' });
     } catch (error) {
       toast({
-        title: 'Icon generation failed',
-        description: getIconErrorMessage(error, 'Failed to generate icon'),
+        title: 'Symbol konnte nicht erzeugt werden',
+        description: getIconErrorMessage(error, 'Symbol konnte nicht erzeugt werden'),
         variant: 'destructive',
       });
     } finally {
@@ -1007,11 +1017,14 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
         `/api/sessions/${session.id}/icon/project`
       );
       await syncIconSession(response.data.data);
-      toast({ title: 'Project icon applied' });
+      toast({ title: 'Projektsymbol übernommen' });
     } catch (error) {
       toast({
-        title: 'Project icon not found',
-        description: getIconErrorMessage(error, 'No usable icon was found in this project'),
+        title: 'Kein Projektsymbol gefunden',
+        description: getIconErrorMessage(
+          error,
+          'In diesem Projekt wurde kein brauchbares Symbol gefunden'
+        ),
         variant: 'destructive',
       });
     } finally {
@@ -1041,11 +1054,11 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
         formData
       );
       await syncIconSession(response.data.data);
-      toast({ title: 'Session icon uploaded' });
+      toast({ title: 'Session-Symbol hochgeladen' });
     } catch (error) {
       toast({
-        title: 'Icon upload failed',
-        description: getIconErrorMessage(error, 'Failed to upload icon'),
+        title: 'Symbol-Upload fehlgeschlagen',
+        description: getIconErrorMessage(error, 'Symbol konnte nicht hochgeladen werden'),
         variant: 'destructive',
       });
     } finally {
@@ -1061,11 +1074,11 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
     try {
       const response = await api.delete<ApiResponse<Session>>(`/api/sessions/${session.id}/icon`);
       await syncIconSession(response.data.data);
-      toast({ title: 'Session icon reset' });
+      toast({ title: 'Session-Symbol zurückgesetzt' });
     } catch (error) {
       toast({
-        title: 'Failed to reset icon',
-        description: getIconErrorMessage(error, 'Failed to reset icon'),
+        title: 'Symbol konnte nicht zurückgesetzt werden',
+        description: getIconErrorMessage(error, 'Symbol konnte nicht zurückgesetzt werden'),
         variant: 'destructive',
       });
     } finally {
@@ -1121,23 +1134,24 @@ export function DashboardPage({ surface = 'code' }: { surface?: 'code' | 'task' 
     const prompt = newSessionPrompt.trim();
     if (!prompt) {
       toast({
-        title: 'Write a request first',
-        description: 'The dashboard starts sessions from a prompt.',
+        title: 'Zuerst eine Anfrage schreiben',
+        description: 'Das Dashboard startet Sessions aus einem Prompt.',
       });
       return;
     }
     if (!isTask && sessionMode === 'new' && !hasDefaultDir) {
       toast({
-        title: 'Default folder missing',
-        description: 'Set a default working directory before creating new workspace folders.',
+        title: 'Standardordner fehlt',
+        description:
+          'Lege zuerst einen Standard-Arbeitsordner fest, damit neue Arbeitsordner angelegt werden können.',
         variant: 'destructive',
       });
       return;
     }
     if (sessionMode === 'existing' && !selectedFolder) {
       toast({
-        title: 'Choose a folder',
-        description: 'Select an existing workspace folder for this session.',
+        title: 'Ordner wählen',
+        description: 'Wähle einen bestehenden Arbeitsordner für diese Session.',
         variant: 'destructive',
       });
       return;

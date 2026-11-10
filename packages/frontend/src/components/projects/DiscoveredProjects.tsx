@@ -84,12 +84,15 @@ export function DiscoveredProjects({
     onSuccess: (data) => {
       if (data.success && data.data) {
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
-        toast({ title: 'Session created', description: `Started session for ${data.data.name}` });
+        toast({
+          title: 'Session erstellt',
+          description: `Session für ${data.data.name} gestartet`,
+        });
         navigate(`/session/${data.data.id}`);
       }
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 

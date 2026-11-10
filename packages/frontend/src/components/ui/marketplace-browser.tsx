@@ -117,10 +117,10 @@ export function MarketplaceBrowser({ onClose, configProvider }: MarketplaceBrows
       queryClient.invalidateQueries({ queryKey: ['marketplaces', providerKey] });
       setShowAddForm(false);
       setNewMarketplace({ name: '', source: 'github', repo: '', url: '' });
-      toast({ title: 'Marketplace added successfully' });
+      toast({ title: 'Marketplace hinzugefügt' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -136,10 +136,10 @@ export function MarketplaceBrowser({ onClose, configProvider }: MarketplaceBrows
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['marketplaces', providerKey] });
-      toast({ title: 'Marketplace refreshed' });
+      toast({ title: 'Marketplace aktualisiert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -152,10 +152,10 @@ export function MarketplaceBrowser({ onClose, configProvider }: MarketplaceBrows
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['marketplaces', providerKey] });
       setSelectedMarketplace(null);
-      toast({ title: 'Marketplace removed' });
+      toast({ title: 'Marketplace entfernt' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -184,10 +184,10 @@ export function MarketplaceBrowser({ onClose, configProvider }: MarketplaceBrows
       if (isCodex) {
         queryClient.invalidateQueries({ queryKey: ['codex-plugins'] });
       }
-      toast({ title: isCodex ? 'Codex plugin enabled' : 'Plugin installed successfully' });
+      toast({ title: isCodex ? 'Codex-Plugin aktiviert' : 'Plugin installiert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -262,7 +262,13 @@ export function MarketplaceBrowser({ onClose, configProvider }: MarketplaceBrows
               {(marketplaces?.length || 0) !== 1 ? 's' : ''}
             </p>
           </div>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
+          <Button
+            aria-label="Schliessen"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={onClose}
+          >
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -447,6 +453,7 @@ export function MarketplaceBrowser({ onClose, configProvider }: MarketplaceBrows
                         Refresh
                       </Button>
                       <Button
+                        aria-label="Marketplace entfernen"
                         size="sm"
                         variant="ghost"
                         onClick={() => deleteMarketplaceMutation.mutate(selectedMarketplaceData.id)}
@@ -473,6 +480,7 @@ export function MarketplaceBrowser({ onClose, configProvider }: MarketplaceBrows
                       />
                       {searchQuery && (
                         <button
+                          aria-label="Suche leeren"
                           type="button"
                           onClick={() => setSearchQuery('')}
                           className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"

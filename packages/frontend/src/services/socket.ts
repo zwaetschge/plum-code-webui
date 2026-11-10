@@ -112,6 +112,7 @@ const OUTBOX_RETRY_NOTICE_AFTER = 3;
 // v1 advanced on individual events and could skip an earlier pending DB write.
 const CURSOR_STORAGE_PREFIX = 'plum.chat.cursor.v2:';
 const CURSOR_PROTOCOL_STORAGE_PREFIX = 'plum.chat.cursor-verified.v2:';
+// These keys are also listed in lib/sessionStorageKeys so session delete and logout remove them.
 /**
  * How often a session's replay cursor may reach localStorage.
  *
@@ -340,7 +341,7 @@ class SocketService {
       // A moved project folder is fixed right from the message.
       const missing = /^Projektordner nicht gefunden: (.+?)\. /.exec(data.error ?? '');
       toast({
-        title: missing ? 'Projektordner nicht gefunden' : 'Session action failed',
+        title: missing ? 'Projektordner nicht gefunden' : 'Session-Aktion fehlgeschlagen',
         description: data.error,
         variant: 'destructive',
         ...(missing && {
@@ -544,8 +545,9 @@ class SocketService {
       }
       if (data.reason === 'context-limit') {
         toast({
-          title: 'Context limit reached',
-          description: data.error || 'Auto-compacting context to continue.',
+          title: 'Kontextlimit erreicht',
+          description:
+            data.error || 'Der Kontext wird automatisch verdichtet, damit es weitergeht.',
           variant: 'destructive',
         });
       }
@@ -978,10 +980,10 @@ class SocketService {
         if (!acknowledgement.retryable) {
           const sessionName =
             useSessionStore.getState().sessions.find((session) => session.id === entry.sessionId)
-              ?.name ?? 'Unknown session';
+              ?.name ?? 'Unbekannte Session';
           const preview = entry.message.trim().replace(/\s+/g, ' ').slice(0, 72);
           toast({
-            title: 'Queued message was not sent',
+            title: 'Wartende Nachricht wurde nicht gesendet',
             description: `${sessionName}${preview ? ` · “${preview}${entry.message.length > 72 ? '…' : ''}”` : ''}: ${acknowledgement.error}`,
             variant: 'destructive',
           });
@@ -993,10 +995,10 @@ class SocketService {
         ) {
           const sessionName =
             useSessionStore.getState().sessions.find((session) => session.id === entry.sessionId)
-              ?.name ?? 'Unknown session';
+              ?.name ?? 'Unbekannte Session';
           toast({
-            title: 'Message is still waiting to send',
-            description: `${sessionName}: ${acknowledgement.error} The draft remains safely in the outbox.`,
+            title: 'Nachricht wartet noch auf den Versand',
+            description: `${sessionName}: ${acknowledgement.error} Der Entwurf bleibt sicher in der Outbox.`,
             variant: 'destructive',
           });
         }
@@ -1644,8 +1646,8 @@ class SocketService {
   ): boolean {
     if (!this.socket) {
       toast({
-        title: 'Not connected',
-        description: 'The action was not sent. Reload the page and try again.',
+        title: 'Nicht verbunden',
+        description: 'Die Aktion wurde nicht gesendet. Lade die Seite neu und versuche es erneut.',
         variant: 'destructive',
       });
       return false;

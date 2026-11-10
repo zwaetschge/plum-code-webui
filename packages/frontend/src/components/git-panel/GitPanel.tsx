@@ -134,13 +134,15 @@ export function GitPanel({ workingDirectory, className }: GitPanelProps) {
         queryClient.invalidateQueries({ queryKey: ['git-log', workingDirectory] });
         queryClient.invalidateQueries({ queryKey: ['git-remote-status', workingDirectory] });
         toast({
-          title: 'Pull successful',
-          description: data.data ? `${data.data.files.length} files updated` : 'Already up to date',
+          title: 'Pull erfolgreich',
+          description: data.data
+            ? `${data.data.files.length} Dateien aktualisiert`
+            : 'Bereits aktuell',
         });
       }
     },
     onError: (error: Error) => {
-      toast({ title: 'Pull failed', description: error.message, variant: 'destructive' });
+      toast({ title: 'Pull fehlgeschlagen', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -156,10 +158,10 @@ export function GitPanel({ workingDirectory, className }: GitPanelProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['git-branches', workingDirectory] });
       queryClient.invalidateQueries({ queryKey: ['git-remote-status', workingDirectory] });
-      toast({ title: 'Fetch successful', description: 'Remote refs updated' });
+      toast({ title: 'Fetch erfolgreich', description: 'Remote-Refs aktualisiert' });
     },
     onError: (error: Error) => {
-      toast({ title: 'Fetch failed', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fetch fehlgeschlagen', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -183,14 +185,14 @@ export function GitPanel({ workingDirectory, className }: GitPanelProps) {
         setShowNewBranchDialog(false);
         setNewBranchName('');
         toast({
-          title: 'Branch created',
-          description: `Switched to ${data.data.branch}`,
+          title: 'Branch erstellt',
+          description: `Gewechselt zu ${data.data.branch}`,
         });
       }
     },
     onError: (error: Error) => {
       toast({
-        title: 'Branch creation failed',
+        title: 'Branch konnte nicht erstellt werden',
         description: error.message,
         variant: 'destructive',
       });
@@ -213,10 +215,14 @@ export function GitPanel({ workingDirectory, className }: GitPanelProps) {
       queryClient.invalidateQueries({ queryKey: ['git-branches', workingDirectory] });
       queryClient.invalidateQueries({ queryKey: ['git-status', workingDirectory] });
       queryClient.invalidateQueries({ queryKey: ['git-log', workingDirectory] });
-      toast({ title: 'Branch switched', description: `Now on ${data.data?.branch ?? ''}` });
+      toast({ title: 'Branch gewechselt', description: `Jetzt auf ${data.data?.branch ?? ''}` });
     },
     onError: (error: Error) => {
-      toast({ title: 'Checkout failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'Checkout fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 

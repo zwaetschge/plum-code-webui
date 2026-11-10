@@ -376,6 +376,22 @@ export function handlePreviewUpgrade(req: IncomingMessage, socket: Socket, head:
   return true;
 }
 
+/**
+ * Origins the application may put into a frame: the preview hosts. The policy
+ * said `frame-src 'self'` only, so the embedded preview — which exists to show
+ * workspace pages on their own, isolated origin — was blocked by the page that
+ * embeds it.
+ */
+export function previewFrameSources(
+  hostname: string | undefined = config.previewHostname,
+  aliases: string[] = config.previewHostnameAliases
+): string[] {
+  const hosts = [hostname, ...aliases].filter(
+    (host): host is string => typeof host === 'string' && /^[a-z0-9.-]+(:\d+)?$/i.test(host)
+  );
+  return [...new Set(hosts)].flatMap((host) => [`https://${host}`, `http://${host}`]);
+}
+
 export function previewVhostEnabled(): boolean {
   return Boolean(config.previewHostname);
 }

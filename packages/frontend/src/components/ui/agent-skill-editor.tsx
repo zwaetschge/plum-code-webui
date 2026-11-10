@@ -158,12 +158,12 @@ export function AgentSkillEditor({
       queryClient.invalidateQueries({
         queryKey: [isAgent ? 'claude-agents' : 'claude-skills', providerKey],
       });
-      toast({ title: `${isAgent ? 'Agent' : 'Skill'} created successfully` });
+      toast({ title: `${isAgent ? 'Agent' : 'Skill'} erstellt` });
       onSaved?.();
       onClose();
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -205,12 +205,12 @@ export function AgentSkillEditor({
       queryClient.invalidateQueries({
         queryKey: [isAgent ? 'claude-agents' : 'claude-skills', providerKey],
       });
-      toast({ title: `${isAgent ? 'Agent' : 'Skill'} updated successfully` });
+      toast({ title: `${isAgent ? 'Agent' : 'Skill'} aktualisiert` });
       onSaved?.();
       onClose();
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -227,12 +227,12 @@ export function AgentSkillEditor({
       queryClient.invalidateQueries({
         queryKey: [isAgent ? 'claude-agents' : 'claude-skills', providerKey],
       });
-      toast({ title: `${isAgent ? 'Agent' : 'Skill'} deleted` });
+      toast({ title: `${isAgent ? 'Agent' : 'Skill'} gelöscht` });
       onSaved?.();
       onClose();
     },
     onError: (error: Error) => {
-      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+      toast({ title: 'Fehler', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -298,7 +298,13 @@ export function AgentSkillEditor({
                 : 'Create a reusable skill with specific capabilities'}
             </p>
           </div>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose}>
+          <Button
+            aria-label="Schliessen"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={onClose}
+          >
             <X className="h-4 w-4" />
           </Button>
         </div>

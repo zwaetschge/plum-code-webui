@@ -44,13 +44,13 @@ export function GitCommit({ workingDirectory }: GitCommitProps) {
         queryClient.invalidateQueries({ queryKey: ['git-log', workingDirectory] });
         setMessage('');
         toast({
-          title: 'Commit created',
-          description: `${data.data.summary.insertions} insertions, ${data.data.summary.deletions} deletions`,
+          title: 'Commit erstellt',
+          description: `${data.data.summary.insertions} Einfügungen, ${data.data.summary.deletions} Löschungen`,
         });
       }
     },
     onError: (error: Error) => {
-      toast({ title: 'Commit failed', description: error.message, variant: 'destructive' });
+      toast({ title: 'Commit fehlgeschlagen', description: error.message, variant: 'destructive' });
     },
   });
 
@@ -69,13 +69,17 @@ export function GitCommit({ workingDirectory }: GitCommitProps) {
       if (data.success && data.data) {
         setMessage(data.data.message);
         toast({
-          title: 'Message generated',
-          description: 'AI-generated commit message added',
+          title: 'Nachricht erzeugt',
+          description: 'KI-Commit-Nachricht eingefügt',
         });
       }
     },
     onError: (error: Error) => {
-      toast({ title: 'Generation failed', description: error.message, variant: 'destructive' });
+      toast({
+        title: 'Erzeugen fehlgeschlagen',
+        description: error.message,
+        variant: 'destructive',
+      });
     },
   });
 

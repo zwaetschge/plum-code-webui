@@ -167,14 +167,14 @@ export function GitHubPanel({ workingDirectory, className }: GitHubPanelProps) {
       setBody('');
       refresh();
       toast({
-        title: tab === 'issues' ? 'Issue created' : 'Pull request created',
+        title: tab === 'issues' ? 'Issue erstellt' : 'Pull Request erstellt',
         description: data?.url,
       });
     },
     onError: (error) => {
       toast({
-        title: 'Create failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Erstellen fehlgeschlagen',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     },
@@ -186,12 +186,12 @@ export function GitHubPanel({ workingDirectory, className }: GitHubPanelProps) {
     },
     onSuccess: () => {
       refresh();
-      toast({ title: 'Pull request merged' });
+      toast({ title: 'Pull Request gemergt' });
     },
     onError: (error) => {
       toast({
-        title: 'Merge failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Merge fehlgeschlagen',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     },
@@ -203,12 +203,12 @@ export function GitHubPanel({ workingDirectory, className }: GitHubPanelProps) {
     },
     onSuccess: () => {
       refresh();
-      toast({ title: 'Re-run requested' });
+      toast({ title: 'Erneuter Lauf angefordert' });
     },
     onError: (error) => {
       toast({
-        title: 'Re-run failed',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        title: 'Erneuter Lauf fehlgeschlagen',
+        description: error instanceof Error ? error.message : 'Unbekannter Fehler',
         variant: 'destructive',
       });
     },

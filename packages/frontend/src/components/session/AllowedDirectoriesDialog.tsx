@@ -119,6 +119,7 @@ export function AllowedDirectoriesDialog({
                         {dir}
                       </span>
                       <Button
+                        aria-label="Ordner entfernen"
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive hover:bg-destructive/10"

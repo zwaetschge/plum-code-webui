@@ -98,11 +98,11 @@ export function CheckpointsPanel({ sessionId, className, onRestore }: Checkpoint
       setShowCreateDialog(false);
       setNewCheckpointName('');
       setNewCheckpointDescription('');
-      toast({ title: 'Checkpoint created', description: 'Session state saved successfully' });
+      toast({ title: 'Checkpoint erstellt', description: 'Session-Zustand gespeichert' });
     },
     onError: (error: Error) => {
       toast({
-        title: 'Failed to create checkpoint',
+        title: 'Checkpoint konnte nicht erstellt werden',
         description: error.message,
         variant: 'destructive',
       });
@@ -121,14 +121,14 @@ export function CheckpointsPanel({ sessionId, className, onRestore }: Checkpoint
       queryClient.invalidateQueries({ queryKey: ['messages', sessionId] });
       setShowRestoreDialog(null);
       toast({
-        title: 'Checkpoint restored',
-        description: `${data.data?.messagesRestored || 0} messages restored`,
+        title: 'Checkpoint wiederhergestellt',
+        description: `${data.data?.messagesRestored || 0} Nachrichten wiederhergestellt`,
       });
       onRestore?.();
     },
     onError: (error: Error) => {
       toast({
-        title: 'Failed to restore checkpoint',
+        title: 'Checkpoint konnte nicht wiederhergestellt werden',
         description: error.message,
         variant: 'destructive',
       });
@@ -155,11 +155,11 @@ export function CheckpointsPanel({ sessionId, className, onRestore }: Checkpoint
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['checkpoints', sessionId] });
       setShowEditDialog(null);
-      toast({ title: 'Checkpoint updated' });
+      toast({ title: 'Checkpoint aktualisiert' });
     },
     onError: (error: Error) => {
       toast({
-        title: 'Failed to update checkpoint',
+        title: 'Checkpoint konnte nicht aktualisiert werden',
         description: error.message,
         variant: 'destructive',
       });
@@ -175,11 +175,11 @@ export function CheckpointsPanel({ sessionId, className, onRestore }: Checkpoint
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['checkpoints', sessionId] });
       setShowDeleteDialog(null);
-      toast({ title: 'Checkpoint deleted' });
+      toast({ title: 'Checkpoint gelöscht' });
     },
     onError: (error: Error) => {
       toast({
-        title: 'Failed to delete checkpoint',
+        title: 'Checkpoint konnte nicht gelöscht werden',
         description: error.message,
         variant: 'destructive',
       });

@@ -446,6 +446,7 @@ export function OracleBrowserPanel({ sessionId, className }: OracleBrowserPanelP
             )}
           </Button>
           <Button
+            aria-label="Browser neu laden"
             type="button"
             size="sm"
             variant="outline"
@@ -455,6 +456,7 @@ export function OracleBrowserPanel({ sessionId, className }: OracleBrowserPanelP
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           <Button
+            aria-label="Browser stoppen"
             type="button"
             size="sm"
             variant="outline"
@@ -590,6 +592,7 @@ export function OracleBrowserPanel({ sessionId, className }: OracleBrowserPanelP
                 className="h-8 border-white/10 bg-black/30 text-xs text-slate-100 placeholder:text-slate-500"
               />
               <Button
+                aria-label="Text senden"
                 type="button"
                 size="sm"
                 variant="secondary"

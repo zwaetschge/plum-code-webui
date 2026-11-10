@@ -87,7 +87,7 @@ export function AdminUsersPage() {
 
   const handleError = (err: unknown, fallback: string) => {
     const message = err instanceof ApiError ? err.message : fallback;
-    toast({ title: 'Action failed', description: message, variant: 'destructive' });
+    toast({ title: 'Aktion fehlgeschlagen', description: message, variant: 'destructive' });
   };
 
   const updateUser = useMutation({
@@ -97,7 +97,7 @@ export function AdminUsersPage() {
     }) => api.patch(`/api/admin/users/${args.id}`, args.patch),
     onSuccess: () => {
       invalidate();
-      toast({ title: 'User updated' });
+      toast({ title: 'Benutzer aktualisiert' });
     },
     onError: (err) => handleError(err, 'Failed to update user'),
   });
@@ -107,7 +107,7 @@ export function AdminUsersPage() {
     onSuccess: () => {
       invalidate();
       setDeleteTarget(null);
-      toast({ title: 'User deleted' });
+      toast({ title: 'Benutzer gelöscht' });
     },
     onError: (err) => handleError(err, 'Failed to delete user'),
   });
@@ -118,7 +118,7 @@ export function AdminUsersPage() {
     onSuccess: () => {
       setPasswordTarget(null);
       setNewPassword('');
-      toast({ title: 'Password reset', description: 'New password is active.' });
+      toast({ title: 'Passwort zurückgesetzt', description: 'Das neue Passwort ist aktiv.' });
     },
     onError: (err) => handleError(err, 'Failed to reset password'),
   });
@@ -242,7 +242,12 @@ export function AdminUsersPage() {
                       <td className="px-4 py-3 text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Button
+                              aria-label="Aktionen"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                            >
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>

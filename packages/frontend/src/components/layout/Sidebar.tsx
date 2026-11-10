@@ -73,6 +73,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
+import { forgetSessionInBrowser } from '@/lib/sessionStorageKeys';
 import type { ApiResponse, Session } from '@plum-code-webui/shared';
 import type { UsageData } from '@plum-code-webui/shared';
 
@@ -577,6 +578,7 @@ export function Sidebar({
     try {
       await api.delete(`/api/sessions/${id}`);
       removeSession(id);
+      forgetSessionInBrowser(id);
       toast({ title: 'Session gelöscht' });
       if (activeId === id) navigate(surfaceHome);
     } catch (err) {

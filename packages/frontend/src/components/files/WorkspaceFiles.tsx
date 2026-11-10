@@ -738,9 +738,17 @@ export function WorkspaceFiles({
         if (targetDirectory !== workingDirectory) {
           await loadDirectory(workingDirectory, true);
         }
-        toast({ title: 'Upload complete', description: `${files.length} file(s) added.` });
+        toast({
+          title: 'Hochgeladen',
+          description:
+            files.length === 1 ? '1 Datei hinzugefügt.' : `${files.length} Dateien hinzugefügt.`,
+        });
       } catch (err) {
-        toast({ title: 'Upload failed', description: errorMessage(err), variant: 'destructive' });
+        toast({
+          title: 'Hochladen fehlgeschlagen',
+          description: errorMessage(err),
+          variant: 'destructive',
+        });
       } finally {
         setIsUploading(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -753,15 +761,19 @@ export function WorkspaceFiles({
     try {
       if (file.type === 'directory') {
         toast({
-          title: 'Preparing ZIP…',
-          description: `${file.name} is being packed (node_modules and .git are skipped).`,
+          title: 'ZIP wird vorbereitet …',
+          description: `${file.name} wird gepackt (ohne node_modules und .git).`,
         });
         await downloadFolder(file.path, file.name);
       } else {
         await downloadFile(file.path, file.name);
       }
     } catch (err) {
-      toast({ title: 'Download failed', description: errorMessage(err), variant: 'destructive' });
+      toast({
+        title: 'Download fehlgeschlagen',
+        description: errorMessage(err),
+        variant: 'destructive',
+      });
     }
   }, []);
 
@@ -779,7 +791,7 @@ export function WorkspaceFiles({
         onFileOpen(file.path, response.data.data.content);
       } catch (err) {
         toast({
-          title: 'Open failed',
+          title: 'Öffnen fehlgeschlagen',
           description: errorMessage(err),
           variant: 'destructive',
         });
@@ -1313,10 +1325,13 @@ function FileViewer({
     const src =
       htmlHostname && state.target ? buildStaticInitUrl(htmlHostname, state.target) : null;
     return state.inlineHtml ? (
+      // A static rendering: this frame shares the app's origin (its images and
+      // styles load with the session), so nothing in it may run or submit.
+      // Scripts get the isolated preview host through "open in new tab".
       <iframe
         srcDoc={buildInlineHtmlDocument(state.inlineHtml, state.file.path, state.projectPath)}
         className="workspace-html-frame h-full w-full border-0 bg-white"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
+        sandbox="allow-same-origin allow-popups allow-downloads"
         title={state.file.name}
       />
     ) : src ? (
