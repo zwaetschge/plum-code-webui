@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,12 +67,28 @@ async function waitForHealth(url: string, child: ChildProcess, timeoutMs = 60_00
   throw new Error(`server did not become healthy: ${lastError}`);
 }
 
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      probe.close((error) =>
+        error || !port ? reject(error ?? new Error('no port')) : resolve(port)
+      );
+    });
+  });
+}
+
 export async function startTestServer(): Promise<TestServer> {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'plum-it-'));
   const configHome = fs.mkdtempSync(path.join(os.tmpdir(), 'plum-it-cfg-'));
-  // Port 0 would be ideal, but the server logs its port rather than returning
-  // it; a high random port collides rarely enough and fails loudly if it does.
-  const port = 34000 + Math.floor(Math.random() * 4000);
+  // The server logs its port rather than returning it, so it cannot be started
+  // on port 0 directly. Asking the system for a free one first replaces the
+  // random pick from a fixed range, which collided between test files that run
+  // in parallel (EADDRINUSE) about once in a hundred runs.
+  const port = await freePort();
   const url = `http://127.0.0.1:${port}`;
 
   const userId = 'integration-user';
