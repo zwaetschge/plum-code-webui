@@ -30,7 +30,24 @@ assert.match(session, /runtimeModel === intended\.replace\(\/\\\[1m\\\]\$\/i, ''
 assert.match(session, /around: target\.messageId/);
 assert.match(session, /chat-message-\$\{messageId\}/);
 
-assert.match(sidebar, /const isCollapsed = mobile \? false : navigationOnly \? true : collapsed/);
+// One unified sidebar since 2026-10-14: the mode pill (Chat/Task/Code/Hermes)
+// picks the per-mode list on every route, so there is no dashboard-only rail.
+// The rail collapses only on desktop; the mobile sheet is always expanded.
+assert.match(sidebar, /const isCollapsed = mobile \? false : collapsed;/);
+assert.match(sidebar, /'app-sidebar-shell app-sidebar-refined/);
+assert.match(
+  sidebar,
+  /className=\{cn\(\s*'sidebar-mode-pill plum-glide-host shrink-0'[\s\S]*?aria-label="Modus"[\s\S]*?\{MODE_ITEMS\.map\(/
+);
+assert.match(
+  sidebar,
+  /const routeMode = routeSidebarMode\(location\.pathname, activeSession\);[\s\S]*?const mode: SidebarMode = routeMode \?\? rememberedMode;/,
+  'the route picks the sidebar mode; global pages keep the last one used'
+);
+assert.match(
+  sidebar,
+  /\{!mobile && \(\s*<button[\s\S]*?className="sidebar-collapse-button"[\s\S]*?onClick=\{\(\) => setCollapsed\(!isCollapsed\)\}/
+);
 assert.match(layout, /<header className="mobile-app-header md:hidden flex h-14/);
 assert.match(session, /session-right-dock session-content-dock hidden lg:flex/);
 assert.match(session, /createPortal\(/);
@@ -69,7 +86,11 @@ assert.match(styles, /\.dashboard-session-unread,[\s\S]*?\.sidebar-session-unrea
 
 // Mistral Vibe is a real harness, so it needs an entry in every exhaustive
 // provider map instead of silently falling back to the Plum/Codex defaults.
-assert.match(providers, /export type UiProvider = [^\n]*'kimi' \| 'vibe';/);
+// Kimi Code was retired (backend migration 017-retire-kimi-code).
+assert.match(
+  providers,
+  /export type UiProvider = 'plum' \| 'claude' \| 'zai' \| 'codex' \| 'pi' \| 'vibe';/
+);
 assert.match(providers, /CLI_PROVIDER_LABEL[\s\S]{0,300}vibe: 'Mistral Vibe',/);
 assert.match(providers, /CLI_PROVIDER_ICON[\s\S]{0,300}vibe: '🧡',/);
 assert.match(providers, /CLI_PROVIDER_DEFAULT_MODEL[\s\S]{0,400}vibe: 'mistral-medium-3\.5',/);
@@ -78,16 +99,27 @@ assert.match(providers, /CLI_PROVIDER_DEFAULT_MODEL[\s\S]{0,400}vibe: 'mistral-m
 assert.match(providers, /if \(cliProvider === 'vibe'\) return 'vibe';/);
 assert.match(providerLogo, /provider === 'vibe'/);
 
-// Vibe calls its reasoning levels "Thinking" and accepts off/low/medium/high/max.
+// Vibe accepts off/low/medium/high/max (plus Ultracode workflows); the levels
+// live in providers.ts and the composer's model picker shows them as
+// "Denkaufwand" like every non-Claude harness.
+assert.match(
+  providers,
+  /provider === 'vibe'\s*\?\s*\['off', 'low', 'medium', 'high', 'max', 'ultracode'\]/
+);
+assert.match(providers, /off: 'Aus',/);
 assert.match(
   session,
-  /if \(sessionProvider === 'vibe'\) \{[\s\S]{0,260}\{ value: 'off', label: 'Off' \}/
+  /getConversationReasoningOptions\(sessionProvider, selectedModel\)/,
+  'the session reasoning menu must use the provider-specific levels'
 );
-assert.match(session, /sessionProvider === 'vibe'\s*\?\s*'Thinking'/);
+assert.match(
+  session,
+  /sessionProvider === 'claude' \|\| sessionProvider === 'zai'\s*\?\s*'Aufwand'\s*:\s*'Denkaufwand'/
+);
 assert.match(session, /'codex', 'pi', 'vibe'\]\.includes\(/);
 
 // Sign-in: the shared cli-login dialog plus the write-only key field.
-assert.match(providerLogins, /DEVICE_LOGIN = new Set\(\['codex', 'claude', 'kimi', 'vibe'\]\)/);
+assert.match(providerLogins, /DEVICE_LOGIN = new Set\(\['codex', 'claude', 'vibe'\]\)/);
 assert.match(providerLogins, /api\.post\('\/api\/cli-login\/vibe\/key'/);
 assert.match(providerLogins, /api\.delete\('\/api\/cli-login\/vibe\/key'\)/);
 assert.match(providerLogins, /Vibe-Code-Kontingent \(255 EUR\/Monat\)/);

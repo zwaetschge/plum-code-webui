@@ -114,6 +114,10 @@ router.get('/:id/sessions', requireAuth, async (req, res) => {
 
   // Decode the project ID to get the directory name
   const dirName = Buffer.from(projectId, 'base64').toString('utf-8');
+  // The id is caller-supplied: one path segment only, never `..` or a slash.
+  if (!dirName || dirName !== path.basename(dirName) || dirName === '.' || dirName === '..') {
+    throw new AppError('Invalid project ID', 400, 'INVALID_PROJECT_ID');
+  }
   const claudeProjectPath = path.join(projectsDir, dirName);
 
   try {

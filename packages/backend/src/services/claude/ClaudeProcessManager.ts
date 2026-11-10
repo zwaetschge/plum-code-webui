@@ -133,8 +133,11 @@ import {
 import { buildSessionExecutionPrompt } from '../sessionExecutionContext.js';
 import { buildAssistantContext } from '../assistant/context.js';
 import { temporaryRuntime } from '../assistant/temporary.js';
+import { stripBackendSecretsFromEnv } from '../../utils/childProcessEnv.js';
+import { markTurnStart } from '../git/turnDiff.js';
 import { materializeAttachments, type FileAttachmentData } from '../attachments.js';
 import { onSessionCompacted } from '../memoryOptimizer.js';
+import { buildProjectMemoryContext } from '../../utils/projectMemory.js';
 import { persistMessageMedia, type PendingChatMedia } from '../chatMedia.js';
 import { recordAudit } from '../../utils/auditLog.js';
 import { getFallbackToolActionSummary } from '../tool-action-summarizer.js';
@@ -185,13 +188,20 @@ function isClaudeTransportProvider(provider: string): provider is 'claude' | 'za
   return provider === 'claude' || provider === 'zai';
 }
 
+/** Chat name of a journalled provider, for the resume notices. */
+function journalProviderLabel(provider: string): string {
+  if (provider === 'claude') return 'Claude';
+  if (provider === 'zai') return 'Z.AI Code';
+  return 'Pi';
+}
+
 export function buildClaudeTransportProcessEnv(
   provider: 'claude' | 'zai',
   configHome: string,
   zaiConfig: Parameters<typeof buildClaudeApiEnv>[0],
   inheritedEnv: NodeJS.ProcessEnv = process.env
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...inheritedEnv };
+  const env: NodeJS.ProcessEnv = stripBackendSecretsFromEnv(inheritedEnv);
   for (const key of CLAUDE_PROVIDER_OVERRIDE_ENV_KEYS) {
     delete env[key];
   }
@@ -332,6 +342,8 @@ const PI_REJECTED_PROMPT_RETRY_MS = 30_000;
 const PI_CRASH_RESUME_DELAY_MS = 4_000;
 // The running tool is journalled at most this often per session.
 const PI_JOURNAL_TOOL_THROTTLE_MS = 2_000;
+/** Per-stream-event logging floods the container log (~800 MB/day); opt in. */
+const STREAM_EVENT_LOGGING = process.env.LOG_STREAM_EVENTS === '1';
 /** One subagent's share of a turn, pending a turn id. */
 interface PendingSubagentUsage {
   agentId: string;
@@ -2574,6 +2586,8 @@ interface ClaudeProcess {
   pendingPermissionDenials: PermissionDenial[] | null;
   pendingChatMedia: PendingChatMedia[];
   sharedContextInjected: boolean;
+  /** Codex, Pi and Vibe got the project memory index (Claude Code loads it itself). */
+  projectMemoryInjected?: boolean;
   sessionStyleContextInjected?: string | null;
   modePromptInjected: SessionMode | null;
   androidDeviceSerialInjected?: string | null;
@@ -4939,7 +4953,7 @@ Discord Main Gateway:
       const child = spawnManagedProcess(providerConfig.command, acpArgs, {
         cwd: session.working_directory,
         env: {
-          ...process.env,
+          ...stripBackendSecretsFromEnv(),
           ...extraEnv,
           ...vibeEnv,
           ...vibeUltracodeEnv,
@@ -5372,7 +5386,7 @@ Discord Main Gateway:
       env: {
         ...(isClaudeTransportProvider(cliProvider)
           ? await buildClaudeTransportEnv(cliProvider, userId, configHome, sessionId)
-          : process.env),
+          : stripBackendSecretsFromEnv()),
         ...extraEnv,
         ...(cliProvider === 'claude' ? claudeContextWindowEnv(selectedModel) : {}),
         // Pass session ID so provider integrations can attribute image generation and permissions.
@@ -5527,34 +5541,49 @@ Discord Main Gateway:
           managedProc.streamingText = '';
           managedProc.isStreaming = false;
         }
-        // Pi died while a run was going (a stop clears the flag first). A
-        // backend shutdown leaves the journal for the next boot; otherwise say
-        // so in the chat and resume on a fresh process, within the bound.
-        if (managedProc.cliProvider === 'pi' && managedProc.piTurnInFlight && !this.shuttingDown) {
+        // Pi or Claude died while a run was going (a stop clears the flag or
+        // the journal first). A backend shutdown leaves the journal for the
+        // next boot; otherwise say so in the chat and resume on a fresh
+        // process, within the bound. Claude counts only with a journal entry:
+        // restarts and context recovery replace its process mid-turn on purpose.
+        const piCrashed = managedProc.cliProvider === 'pi' && !!managedProc.piTurnInFlight;
+        const claudeCrashed =
+          isClaudeTransportProvider(managedProc.cliProvider) &&
+          managedProc.claudeIdle === false &&
+          !managedProc.contextRecoveryPending &&
+          !!getPiRun(sessionId);
+        if ((piCrashed || claudeCrashed) && !this.shuttingDown) {
+          const label = journalProviderLabel(managedProc.cliProvider);
           managedProc.piTurnInFlight = false;
-          // Tools the dead Pi started (a build, a sleep) are still running in
-          // its process group; the resumed run would start them a second time.
+          if (claudeCrashed) managedProc.claudeIdle = true;
+          // Tools the dead process started (a build, a sleep) are still running
+          // in its process group; the resumed run would start them a second time.
           terminateManagedProcess(proc, 2_000);
           const ending = exitSignal
             ? `Signal ${exitSignal}`
             : `Exit-Code ${exitCode ?? 'unbekannt'}`;
-          await this.bookPiRunUsage(sessionId, managedProc);
+          if (piCrashed) await this.bookPiRunUsage(sessionId, managedProc);
+          else await this.saveUsageToDatabase(sessionId, managedProc).catch(() => undefined);
           const record = getPiRun(sessionId);
           const resume = !!record && recentPiResumes(record).length < PI_MAX_AUTO_RESUMES;
-          const waiting = managedProc.piQueuedTurns?.length ?? 0;
+          const waiting = piCrashed
+            ? (managedProc.piQueuedTurns?.length ?? 0)
+            : (managedProc.claudeQueuedTurns?.length ?? 0);
           const notice =
-            `**Pi wurde mitten im Lauf beendet** (${ending}).` +
+            `**${label} wurde mitten im Lauf beendet** (${ending}).` +
             (resume
               ? ' Plum setzt die Aufgabe in wenigen Sekunden automatisch fort' +
                 (waiting > 0 ? ', danach folgen die wartenden Nachrichten.' : '.')
               : (waiting > 0
                   ? ` ${waiting} wartende Nachricht${waiting === 1 ? ' wurde' : 'en wurden'} nicht gesendet.`
                   : '') + ' Schreib „weiter“, um an der Stelle fortzusetzen.');
-          console.warn(`[PI] Process exited mid-run [${sessionId}] ${ending}`);
+          console.warn(
+            `[${managedProc.cliProvider.toUpperCase()}] Process exited mid-run [${sessionId}] ${ending}`
+          );
           await this.saveAssistantMessage(sessionId, notice);
           this.io.to(`session:${sessionId}`).emit('session:error', {
             sessionId,
-            error: `Pi wurde mitten im Lauf beendet (${ending}).`,
+            error: `${label} wurde mitten im Lauf beendet (${ending}).`,
           });
           if (resume) {
             setTimeout(() => {
@@ -6144,6 +6173,7 @@ Discord Main Gateway:
     putPiRun({
       sessionId,
       userId: proc.userId,
+      provider: proc.cliProvider === 'pi' ? 'pi' : proc.cliProvider === 'zai' ? 'zai' : 'claude',
       chatId: turn.chatId ?? null,
       startedAt: now,
       lastActivityAt: now,
@@ -6152,6 +6182,11 @@ Discord Main Gateway:
       // A resumed run keeps counting against the resume bound.
       resumes: getPiRun(sessionId)?.resumes ?? [],
     });
+  }
+
+  /** Providers whose runs are journalled and picked up after a crash or restart. */
+  private isJournalledProvider(provider: string): boolean {
+    return provider === 'pi' || isClaudeTransportProvider(provider);
   }
 
   private journalPiRunEnd(sessionId: string): void {
@@ -6167,7 +6202,8 @@ Discord Main Gateway:
     chatId: string | null;
     attachments?: unknown[];
   }> {
-    return (proc.piQueuedTurns ?? []).map((turn) => ({
+    const queued = proc.cliProvider === 'pi' ? proc.piQueuedTurns : proc.claudeQueuedTurns;
+    return (queued ?? []).map((turn) => ({
       message: turn.originalMessage,
       chatId: turn.chatId ?? null,
       ...(turn.attachments?.length ? { attachments: turn.attachments as unknown[] } : {}),
@@ -6201,15 +6237,18 @@ Discord Main Gateway:
   }
 
   /**
-   * Picks up a Pi run that a crash or a backend restart cut off: a fresh Pi
-   * process on the same Pi session (`--session`; Pi gives the interrupted
-   * tool call an empty result), a bounded "continue", then the messages that
-   * were waiting in the queue. At most {@link PI_MAX_AUTO_RESUMES} times per
-   * hour, so a run that keeps crashing stops instead of looping.
+   * Picks up a run that a crash or a backend restart cut off: a fresh process
+   * on the same provider session (Pi `--session`, Claude `--resume`; both give
+   * the interrupted tool call an empty result), a bounded "continue", then the
+   * messages that were waiting in the queue. At most {@link PI_MAX_AUTO_RESUMES}
+   * times per hour, so a run that keeps crashing stops instead of looping.
    */
   async resumeInterruptedPiRun(sessionId: string, reason: 'crash' | 'restart'): Promise<boolean> {
     const record = getPiRun(sessionId);
     if (!record) return false;
+    const provider = record.provider ?? 'pi';
+    const label = journalProviderLabel(provider);
+    const tag = `[${provider.toUpperCase()}]`;
     const now = Date.now();
     if (now - Date.parse(record.lastActivityAt) > PI_RESUME_MAX_AGE_MS) {
       clearPiRun(sessionId);
@@ -6219,34 +6258,35 @@ Discord Main Gateway:
       'SELECT cli_provider, user_id FROM sessions WHERE id = ?',
       sessionId
     )) as unknown as { cli_provider: string | null; user_id: string } | undefined;
-    if (!session || session.cli_provider !== 'pi' || session.user_id !== record.userId) {
+    if (!session || session.cli_provider !== provider || session.user_id !== record.userId) {
       clearPiRun(sessionId);
       return false;
     }
     // Someone already continued it (a message, an opened chat).
-    if (this.processes.get(sessionId)?.piTurnInFlight) return false;
+    const live = this.processes.get(sessionId);
+    if (live && !this.isTurnSettled(live)) return false;
 
     const recent = recentPiResumes(record, now);
     if (recent.length >= PI_MAX_AUTO_RESUMES) {
       clearPiRun(sessionId);
-      console.warn(`[PI] Resume limit reached, not resuming [${sessionId}]`);
+      console.warn(`${tag} Resume limit reached, not resuming [${sessionId}]`);
       await this.saveAssistantMessage(
         sessionId,
-        `**Pi wurde ${recent.length + 1}-mal hintereinander unterbrochen.** ` +
+        `**${label} wurde ${recent.length + 1}-mal hintereinander unterbrochen.** ` +
           'Die automatische Fortsetzung ist gestoppt. Schreib „weiter“, wenn es weitergehen soll.'
       );
       return false;
     }
     putPiRun({ ...record, resumes: [...recent, new Date(now).toISOString()], queued: [] });
     console.log(
-      `[PI] Resuming interrupted run after ${reason} [${sessionId}]` +
+      `${tag} Resuming interrupted run after ${reason} [${sessionId}]` +
         (record.tool ? ` (was in ${record.tool.name})` : '')
     );
     try {
       if (reason === 'restart') {
         await this.saveAssistantMessage(
           sessionId,
-          '↻ **Plum wurde neu gestartet, während Pi arbeitete.** Pi setzt die Aufgabe automatisch fort' +
+          `↻ **Plum wurde neu gestartet, während ${label} arbeitete.** ${label} setzt die Aufgabe automatisch fort` +
             (record.tool ? ` (unterbrochen bei \`${record.tool.name}\`).` : '.')
         );
       }
@@ -6266,29 +6306,30 @@ Discord Main Gateway:
       }
       return true;
     } catch (error) {
-      console.error(`[PI] Resume failed [${sessionId}]:`, error);
+      console.error(`${tag} Resume failed [${sessionId}]:`, error);
       this.io.to(`session:${sessionId}`).emit('session:error', {
         sessionId,
-        error: `Pi konnte nicht automatisch fortsetzen: ${error instanceof Error ? error.message : String(error)}`,
+        error: `${label} konnte nicht automatisch fortsetzen: ${error instanceof Error ? error.message : String(error)}`,
       });
       return false;
     }
   }
 
-  /** Boot: resume every Pi run the previous backend left unfinished. */
+  /** Boot: resume every Pi and Claude run the previous backend left unfinished. */
   async resumeInterruptedPiRuns(): Promise<void> {
     const runs = Object.values(readPiRuns());
     if (runs.length === 0) return;
-    console.log(`[PI] ${runs.length} interrupted run(s) from before the restart`);
+    console.log(`[RESUME] ${runs.length} interrupted run(s) from before the restart`);
     for (const record of runs) {
       await this.resumeInterruptedPiRun(record.sessionId, 'restart').catch((error) =>
-        console.error(`[PI] Resume after restart failed [${record.sessionId}]:`, error)
+        console.error(`[RESUME] Resume after restart failed [${record.sessionId}]:`, error)
       );
     }
   }
 
   /** Writes one prepared turn to Pi and marks the run as in flight. */
   private dispatchPiTurn(sessionId: string, proc: ClaudeProcess, turn: ClaudePreparedTurn): void {
+    markTurnStart(sessionId, proc.workingDirectory);
     this.clearPiCompactResumeTimer(proc);
     proc.currentChatId = turn.chatId;
     if (turn.updateLastMessage) {
@@ -7597,7 +7638,7 @@ Discord Main Gateway:
     const newChildProc = spawnManagedProcess(providerConfig.command, args, {
       cwd: session.working_directory,
       env: {
-        ...process.env,
+        ...stripBackendSecretsFromEnv(),
         ...extraEnv,
         WEBUI_SESSION_ID: sessionId,
         WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
@@ -8300,9 +8341,11 @@ Discord Main Gateway:
       return; // Child output must never replace the parent assistant stream.
     }
 
-    console.log(
-      `[MSG] type=${msg.type} subtype=${msg.subtype || ''} event.type=${msg.event?.type || ''}`
-    );
+    if (STREAM_EVENT_LOGGING) {
+      console.log(
+        `[MSG] type=${msg.type} subtype=${msg.subtype || ''} event.type=${msg.event?.type || ''}`
+      );
+    }
 
     if (msg.type === 'error' || (msg.type === 'system' && msg.subtype === 'error')) {
       const errorText = this.extractErrorText(msg);
@@ -8312,8 +8355,8 @@ Discord Main Gateway:
       }
     }
 
-    // Debug: Log full message for stream_event
-    if (msg.type === 'stream_event') {
+    // Per-event detail is ~95% of production log volume; off unless requested.
+    if (STREAM_EVENT_LOGGING && msg.type === 'stream_event') {
       console.log(`[MSG] stream_event details:`, JSON.stringify(msg.event).substring(0, 200));
     }
 
@@ -8504,6 +8547,10 @@ Discord Main Gateway:
               toolName: proc.currentToolName,
               input: inputData,
             });
+          }
+
+          if (isClaudeTransportProvider(proc.cliProvider) && proc.claudeIdle === false) {
+            this.journalPiTool(sessionId, proc.currentToolName, inputData ?? undefined);
           }
 
           // Note: The actual result will be captured from tool_result message
@@ -8939,6 +8986,8 @@ The planning phase is complete. You are now in Auto-Accept mode.
       queueMicrotask(() => this.applyDeferredRestart(sessionId));
       if (msg.type === 'result' && isClaudeTransportProvider(proc.cliProvider)) {
         proc.claudeIdle = true;
+        // The turn is over; a queued follow-up journals itself when it starts.
+        this.journalPiRunEnd(sessionId);
         this.emitQueueState(sessionId, proc);
         queueMicrotask(() => this.drainClaudeQueuedTurns(sessionId, proc));
         queueMicrotask(async () => await this.applyDeferredModeRestart(sessionId, proc));
@@ -9175,7 +9224,10 @@ The planning phase is complete. You are now in Auto-Accept mode.
 
   private emitQueueState(sessionId: string, proc: ClaudeProcess): void {
     // Queued Pi messages must survive a crash or restart with the run.
-    if (proc.cliProvider === 'pi' && proc.piTurnInFlight) {
+    if (
+      (proc.cliProvider === 'pi' && proc.piTurnInFlight) ||
+      (isClaudeTransportProvider(proc.cliProvider) && proc.claudeIdle === false)
+    ) {
       patchPiRun(sessionId, { queued: this.piQueueForJournal(proc) });
     }
     const items = this.getQueuedTurnItems(proc).map((turn) => ({
@@ -9210,6 +9262,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     proc: ClaudeProcess,
     turn: ClaudePreparedTurn
   ): void {
+    markTurnStart(sessionId, proc.workingDirectory);
     proc.currentChatId = turn.chatId;
     proc.claudeIdle = false;
     if (turn.updateLastMessage) {
@@ -9233,6 +9286,8 @@ The planning phase is complete. You are now in Auto-Accept mode.
       console.log(
         `Sent message [${sessionId}] via ${proc.cliProvider}: ${turn.messageForClaude.substring(0, 100)}...`
       );
+      // Like Pi: a crash or a Plum restart mid-turn resumes from the journal.
+      this.journalPiRunStart(sessionId, proc, turn);
     } else {
       console.warn(
         `[SEND] stdin no longer writable for ${proc.cliProvider} [${sessionId}]; dropping dispatched turn`
@@ -9927,6 +9982,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     proc: ClaudeProcess,
     turn: CodexPreparedTurn
   ): Promise<void> {
+    markTurnStart(sessionId, proc.workingDirectory);
     const connection = proc.acpConnection;
     const nativeSessionId = proc.acpSessionId;
     const acpLabel = acpProviderLabel(proc.cliProvider);
@@ -10100,6 +10156,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
     proc: ClaudeProcess,
     turn: CodexPreparedTurn
   ): Promise<void> {
+    markTurnStart(sessionId, proc.workingDirectory);
     if (proc.cliProvider !== 'codex') {
       throw new Error('dispatchCodexTurn called for non-Codex session');
     }
@@ -10371,6 +10428,25 @@ ${proc.contextReminder.summary}
         messageForClaude = `${sharedContext}\n\n${messageForClaude}`;
       }
       proc.sharedContextInjected = true;
+    }
+
+    // Project memory for the providers that do not load Claude's MEMORY.md.
+    if (
+      (proc.cliProvider === 'codex' ||
+        proc.cliProvider === 'pi' ||
+        isAcpProvider(proc.cliProvider)) &&
+      !codexReviewCommand &&
+      !providerNativeSlashCommand &&
+      !proc.projectMemoryInjected
+    ) {
+      proc.projectMemoryInjected = true;
+      const projectMemory = await buildProjectMemoryContext(proc.workingDirectory).catch(
+        () => null
+      );
+      if (projectMemory)
+        messageForClaude = `${projectMemory}
+
+${messageForClaude}`;
     }
 
     if (
@@ -10697,6 +10773,27 @@ ${proc.contextReminder.summary}
       };
 
       if (proc.claudeIdle === false || proc.claudeQueueDraining) {
+        // Steering: Claude Code takes a message that arrives mid-turn into the
+        // running turn (after the current tool call) and ends with one result,
+        // so it goes straight to stdin instead of Plum's queue.
+        if (
+          options?.activeFollowupMode === 'steer' &&
+          proc.claudeIdle === false &&
+          !proc.claudeQueueDraining &&
+          proc.process.stdin?.writable
+        ) {
+          proc.process.stdin.write(
+            formatInputMessage(proc.cliProvider, withUltrathink(proc, messageForClaude))
+          );
+          console.log(`[CLAUDE] Steering message into the running turn [${sessionId}]`);
+          return {
+            ...(recordMessage ? { messageId: recordedMessageId } : {}),
+            chatId: recordedChatId,
+            disposition: 'dispatched',
+            highWatermark:
+              recordedEventSequence ?? (await getSessionSyncState(sessionId)).highWatermark,
+          };
+        }
         this.queueClaudeTurn(sessionId, proc, claudeTurn);
         return {
           ...(recordMessage ? { messageId: recordedMessageId } : {}),
@@ -10949,6 +11046,9 @@ ${proc.contextReminder.summary}
       return;
     }
 
+    // Stopped on purpose: nothing to resume after a crash or restart.
+    if (isClaudeTransportProvider(proc.cliProvider)) this.journalPiRunEnd(sessionId);
+
     // Send interrupt signal
     signalManagedProcess(proc.process, 'SIGINT');
   }
@@ -10986,7 +11086,7 @@ ${proc.contextReminder.summary}
 
     // A stopped Pi run is over by request, not a crash (see the exit handler).
     proc.piTurnInFlight = false;
-    if (proc.cliProvider === 'pi') this.journalPiRunEnd(sessionId);
+    if (this.isJournalledProvider(proc.cliProvider)) this.journalPiRunEnd(sessionId);
 
     // Close stdin to signal end
     proc.process.stdin?.end();
@@ -11070,6 +11170,9 @@ ${proc.contextReminder.summary}
       if (!options.preserveNativeContext)
         proc.contextRecoveryVersion = (proc.contextRecoveryVersion || 0) + 1;
       this.discardQueuedTurns(sessionId, proc);
+      // Busy reloads were deferred above, so a run here was restarted on
+      // purpose; the next boot must not resume it.
+      this.journalPiRunEnd(sessionId);
       // Stop the provider transport immediately.
       this.detachProcessForRestart(proc);
       this.completeActiveSubagents(sessionId, proc, { includeBackground: true });
@@ -11712,7 +11815,7 @@ ${proc.contextReminder.summary}
       env: {
         ...(isClaudeTransportProvider(cliProvider)
           ? await buildClaudeTransportEnv(cliProvider, userId, configHome, sessionId)
-          : process.env),
+          : stripBackendSecretsFromEnv()),
         ...(await buildSessionConnectionEnv(sessionId, userId)),
         ...(cliProvider === 'claude' ? claudeContextWindowEnv(requestedModel) : {}),
         WEBUI_SESSION_ID: sessionId,

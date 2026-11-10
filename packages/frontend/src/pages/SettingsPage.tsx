@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useMemo, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
@@ -1034,7 +1034,6 @@ export function SettingsPage() {
         '/api/settings/integrations'
       );
       const data = response.data.data ?? { comfyuiUrl: '' };
-      setComfyuiUrlInput(data.comfyuiUrl || '');
       return data;
     },
     enabled: activeTab === 'integrations',
@@ -1046,23 +1045,38 @@ export function SettingsPage() {
       const response =
         await api.get<ApiResponse<DiscordIntegrationSettings>>('/api/discord/settings');
       const data = response.data.data;
-      if (data) {
-        setDiscordEnabled(data.enabled);
-        setDiscordTransport(data.transport);
-        setDiscordChannelIdInput(data.channelId || '');
-        setDiscordChannelLabelInput(data.channelLabel || '');
-        setDiscordCriticalRoleIdInput(data.criticalRoleId || '');
-        setDiscordMinSeverity(data.minSeverity);
-        setDiscordGatewayMode(data.gatewayMode);
-        setDiscordMaintenancePolicy(data.maintenancePolicy);
-        setDiscordInboundJobsEnabled(data.inboundJobsEnabled);
-      }
       return data;
     },
     enabled: activeTab === 'integrations',
   });
 
   // Fetch basic auth credentials info
+  // Seed the integration drafts from the loaded data. React Query serves this
+  // from cache on remount, so the queryFn does not re-run; seeding here (guarded
+  // so we never clobber in-progress edits) stops Save from writing empty values
+  // over the real Discord/ComfyUI settings.
+  const comfyuiSeededRef = useRef(false);
+  useEffect(() => {
+    if (!integrations || comfyuiSeededRef.current) return;
+    comfyuiSeededRef.current = true;
+    setComfyuiUrlInput(integrations.comfyuiUrl || '');
+  }, [integrations]);
+
+  const discordSeededRef = useRef(false);
+  useEffect(() => {
+    if (!discordSettings || discordSeededRef.current) return;
+    discordSeededRef.current = true;
+    setDiscordEnabled(discordSettings.enabled);
+    setDiscordTransport(discordSettings.transport);
+    setDiscordChannelIdInput(discordSettings.channelId || '');
+    setDiscordChannelLabelInput(discordSettings.channelLabel || '');
+    setDiscordCriticalRoleIdInput(discordSettings.criticalRoleId || '');
+    setDiscordMinSeverity(discordSettings.minSeverity);
+    setDiscordGatewayMode(discordSettings.gatewayMode);
+    setDiscordMaintenancePolicy(discordSettings.maintenancePolicy);
+    setDiscordInboundJobsEnabled(discordSettings.inboundJobsEnabled);
+  }, [discordSettings]);
+
   const { data: basicAuthCredentials, refetch: refetchBasicAuth } = useQuery({
     queryKey: ['basic-auth-credentials'],
     queryFn: async () => {

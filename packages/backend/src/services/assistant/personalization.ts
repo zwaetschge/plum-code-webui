@@ -39,6 +39,12 @@ const preferences = z
     voiceHistory: z.boolean(),
     webSearch: z.boolean(),
     voiceChat: z.boolean(),
+    /** „Darstellung“: simple = no interactive views, only suggestion chips. */
+    answerDisplay: z.enum(['standard', 'simple']),
+    /** Chat model menu, `providerId/model`, default first; empty = every model. */
+    chatModels: z.array(z.string().trim().min(3).max(300)).max(300),
+    /** Voice mode recognition: the device's own recognizer or Vocarium (Whisper). */
+    speechRecognition: z.enum(['device', 'server']),
     voiceName: z.string().trim().max(100),
     projectSearch: z.boolean(),
     connectorSearch: z.boolean(),

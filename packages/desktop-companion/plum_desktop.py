@@ -50,7 +50,10 @@ import json
 import math
 import os
 import platform
+import re
 import select
+import signal
+import shlex
 import shutil
 import subprocess
 import sys
@@ -92,7 +95,7 @@ from PySide6.QtWidgets import QApplication, QGridLayout, QHBoxLayout, QLabel, QL
 
 import websockets
 
-VERSION = "0.8.3"
+VERSION = "0.10.1"
 CONFIG_DIR = os.path.expanduser("~/.config/plum-desktop")
 CONFIG = os.path.join(CONFIG_DIR, "config.json")
 STATE = os.path.join(CONFIG_DIR, "state.json")
@@ -116,6 +119,14 @@ COLORS = {
     "yellow": "#f5c400",
 }
 MODE_LABELS = {"control": "Steuern", "guide": "Nur zeigen", "paused": "Pausiert"}
+# Parallel work: the user keeps using the PC while Plum acts. Pointer and
+# keyboard are shared, so Plum uses them only once the user paused this long,
+# and gives pointer and focus back while the user is around.
+USER_IDLE_S = 1.5
+USER_IDLE_WAIT_S = 25
+USER_PRESENT_S = 20
+# AT-SPI action names that mean "click this", in order of preference.
+A11Y_CLICK_ACTIONS = ("click", "press", "activate", "jump", "toggle", "open", "select", "showmenu")
 # Tools that change something; blocked in guide mode.
 INPUT_TOOLS = {
     "desktop_click",
@@ -2558,6 +2569,664 @@ def take_screenshot(path):
     raise RuntimeError("Screenshot wurde nicht vollständig gespeichert")
 
 
+# --------------------------------------------------------------------------- Plum's own workspace
+
+WORKSPACE_DISPLAYS = range(17, 40)
+WS_BAR_H = 36  # Plum bar at the top of the workspace, in workspace pixels
+WS_CURSOR = [(0, 0), (0, 22), (6, 16), (10, 25), (14, 23), (10, 15), (18, 15)]  # arrow outline
+# Key names the agent uses, as X keysym names.
+WS_KEY_NAMES = {
+    "enter": "Return", "return": "Return", "esc": "Escape", "escape": "Escape", "tab": "Tab",
+    "space": "space", "backspace": "BackSpace", "delete": "Delete", "del": "Delete", "insert": "Insert",
+    "home": "Home", "end": "End", "pageup": "Prior", "pagedown": "Next", "up": "Up", "down": "Down",
+    "left": "Left", "right": "Right", "ctrl": "Control_L", "control": "Control_L", "shift": "Shift_L",
+    "alt": "Alt_L", "altgr": "ISO_Level3_Shift", "super": "Super_L", "meta": "Super_L", "win": "Super_L",
+    "menu": "Menu", "print": "Print",
+}
+# Apps that would otherwise join the user's running instance on the host.
+WS_SEPARATE = {"firefox": ["--no-remote", "--profile", "{profile}/firefox"], "konsole": ["--separate"],
+               "gimp": ["--new-instance"], "chromium-browser": ["--user-data-dir={profile}/chromium"],
+               "google-chrome": ["--user-data-dir={profile}/chrome"]}
+
+
+def ws_keysym(ch):
+    """Keysym of one character: Latin-1 keysyms equal the code point, the rest use Unicode keysyms."""
+    code = ord(ch)
+    if ch == "\n":
+        return 0xFF0D  # Return
+    if ch == "\t":
+        return 0xFF09
+    return code if 0x20 <= code <= 0x7E or 0xA0 <= code <= 0xFF else 0x01000000 + code
+
+
+class WorkspaceWM(threading.Thread):
+    """A tiny window manager for the workspace: main windows fill it, dialogs are centred."""
+
+    def __init__(self, name, width, height, bar=None, cursor=None):
+        super().__init__(daemon=True)
+        self.name, self.width, self.height = name, width, height
+        self.bar, self.cursor = bar, cursor  # chrome windows Plum draws (Workspace)
+        self.tabs = []  # (x0, x1, window id) of the bar's tabs, set by Workspace.draw_bar
+        self.stack = []  # window ids, topmost last
+        self.lock = threading.Lock()
+        self.changed = True
+
+    def run(self):
+        from Xlib import X, display, error
+        try:
+            d = display.Display(self.name)
+        except Exception as failure:  # noqa: BLE001
+            log("workspace WM: no display", failure)
+            return
+        root = d.screen().root
+        catch = error.CatchError(error.BadAccess)
+        root.change_attributes(event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask, onerror=catch)
+        if self.bar:
+            d.create_resource_object("window", self.bar).change_attributes(event_mask=X.ButtonPressMask)
+        d.sync()
+        while True:
+            try:
+                event = d.next_event()
+            except Exception:  # noqa: BLE001  the server went away
+                return
+            try:
+                if event.type == X.ButtonPress and self.bar and event.window.id == self.bar:
+                    # The user picks an app from the bar's tabs.
+                    hit = next((wid for x0, x1, wid in self.tabs if x0 <= event.event_x < x1), None)
+                    if hit:
+                        target = d.create_resource_object("window", hit)
+                        target.configure(stack_mode=X.Above)
+                        target.set_input_focus(X.RevertToParent, X.CurrentTime)
+                        with self.lock:
+                            if hit in self.stack:
+                                self.stack.remove(hit)
+                                self.stack.append(hit)
+                            self.changed = True
+                        self._cursor_on_top(d)
+                elif event.type == X.MapRequest:
+                    self._manage(d, event.window)
+                elif event.type == X.ConfigureRequest:
+                    self._configure(d, event)
+                elif event.type in (X.DestroyNotify, X.UnmapNotify):
+                    top = None
+                    with self.lock:
+                        if event.window.id in self.stack:
+                            self.stack.remove(event.window.id)
+                            top = self.stack[-1] if self.stack else None
+                            self.changed = True
+                    if event.window.id and top:
+                        d.create_resource_object("window", top).set_input_focus(X.RevertToParent, X.CurrentTime)
+                d.flush()
+            except Exception as failure:  # noqa: BLE001  a window vanished mid-request
+                log("workspace WM:", failure)
+
+    def _dialog(self, window):
+        try:
+            return window.get_wm_transient_for() is not None
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _cursor_on_top(self, d):
+        from Xlib import X
+        if self.cursor:
+            d.create_resource_object("window", self.cursor).configure(stack_mode=X.Above)
+
+    def _manage(self, d, window):
+        from Xlib import X
+        top = WS_BAR_H if self.bar else 0
+        if self._dialog(window):
+            geometry = window.get_geometry()
+            window.configure(x=max(0, (self.width - geometry.width) // 2),
+                             y=max(top, top + (self.height - top - geometry.height) // 2))
+        else:
+            window.configure(x=0, y=top, width=self.width, height=self.height - top, border_width=0)
+        window.map()
+        window.configure(stack_mode=X.Above)
+        window.set_input_focus(X.RevertToParent, X.CurrentTime)
+        self._cursor_on_top(d)
+        with self.lock:
+            if window.id in self.stack:
+                self.stack.remove(window.id)
+            self.stack.append(window.id)
+            self.changed = True
+
+    def _configure(self, d, event):
+        from Xlib import X
+        values = {}
+        top = WS_BAR_H if self.bar else 0
+        if event.window.id in self.stack and not self._dialog(event.window):
+            values = {"x": 0, "y": top, "width": self.width, "height": self.height - top}
+        else:
+            for flag, key in ((X.CWX, "x"), (X.CWY, "y"), (X.CWWidth, "width"), (X.CWHeight, "height")):
+                if event.value_mask & flag:
+                    values[key] = getattr(event, key)
+        if values:
+            event.window.configure(**values)
+
+    def windows(self):
+        with self.lock:
+            return list(self.stack)
+
+
+class Workspace:
+    """Plum's own desktop: a rootful Xwayland in a window on the host.
+
+    It has its own pointer, keyboard focus and clipboard. Plum starts its apps
+    there (DISPLAY=:N) and drives them through XTest, so it works in parallel
+    without ever touching the user's pointer or focus.
+    """
+
+    def __init__(self, app_state):
+        self.s = app_state
+        self.proc = None
+        self.number = None
+        self.width = self.height = 0
+        self.d = None
+        self.wm = None
+        self.host_window = None
+        self.spare = None
+        self.children = []
+        self.bar = self.cursor = None
+        self.note = "Bereit"
+        self._bar_key = None
+        self.profile = os.path.join(CONFIG_DIR, "workspace")
+        self.pid_file = os.path.join(CONFIG_DIR, "workspace.pid")
+        self._reap_leftover()
+
+    def _reap_leftover(self):
+        """A self-update kills the companion without aboutToQuit; end the workspace it left behind."""
+        try:
+            with open(self.pid_file, encoding="utf-8") as handle:
+                pid = int(handle.read().strip() or 0)
+            with open(f"/proc/{pid}/cmdline", "rb") as handle:
+                if b"Xwayland" in handle.read():
+                    os.killpg(pid, signal.SIGTERM)
+                    log("workspace: ended the one left by the previous run")
+        except (OSError, ValueError, ProcessLookupError):
+            pass
+        try:
+            os.remove(self.pid_file)
+        except OSError:
+            pass
+
+    @property
+    def active(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    @property
+    def name(self):
+        return f":{self.number}"
+
+    def _screen(self):
+        """Left half of the largest screen, in KWin coordinates, with its scale."""
+        return self.s.kwin.run(
+            "var ss = workspace.screens, best = null;"
+            "for (var i = 0; i < ss.length; i++) { var g = ss[i].geometry;"
+            " if (!best || g.width * g.height > best.width * best.height)"
+            "  best = {x: g.x, y: g.y, width: g.width, height: g.height, scale: ss[i].devicePixelRatio || 1, name: ss[i].name}; }"
+            "reply(best);"
+        )
+
+    def start(self):
+        if self.active:
+            return
+        try:
+            from Xlib import display as xdisplay
+        except ImportError as missing:
+            raise RuntimeError("python3-xlib fehlt (dnf install python3-xlib)") from missing
+        if not shutil.which("Xwayland"):
+            raise RuntimeError("Xwayland fehlt")
+        screen = self._screen()
+        logical = {"x": screen["x"], "y": screen["y"], "width": screen["width"] // 2, "height": screen["height"]}
+        scale = float(screen.get("scale") or 1)
+        width, height = round(logical["width"] * scale), round(logical["height"] * scale)
+        number = next(n for n in WORKSPACE_DISPLAYS if not os.path.exists(f"/tmp/.X11-unix/X{n}"))
+        before = {w["id"] for w in self.s.kwin.windows()}
+        self.proc = subprocess.Popen(["Xwayland", f":{number}", "-geometry", f"{width}x{height}", "-noreset"],
+                                     env=CHILD_ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                     start_new_session=True)
+        deadline = time.time() + 10
+        while not os.path.exists(f"/tmp/.X11-unix/X{number}"):
+            if self.proc.poll() is not None or time.time() > deadline:
+                self.proc = None
+                raise RuntimeError("Die Plum-Arbeitsfläche (Xwayland) ist nicht gestartet")
+            pump(0.1)
+        self.number, self.width, self.height = number, width, height
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            with open(self.pid_file, "w", encoding="utf-8") as handle:
+                handle.write(str(self.proc.pid))
+        except OSError:
+            pass
+        for _attempt in range(30):
+            try:
+                self.d = xdisplay.Display(self.name)
+                break
+            except Exception:  # noqa: BLE001  socket there, server not yet accepting
+                pump(0.1)
+        if self.d is None:
+            self.stop()
+            raise RuntimeError("Keine Verbindung zur Plum-Arbeitsfläche")
+        if not self.d.has_extension("XTEST"):
+            self.stop()
+            raise RuntimeError("Die Plum-Arbeitsfläche hat kein XTest")
+        self.note = "Bereit"
+        self._bar_key = None
+        try:
+            self._make_chrome()
+        except Exception as failure:  # noqa: BLE001  the workspace works without its chrome
+            log("workspace chrome:", failure)
+            self.bar = self.cursor = None
+        self.wm = WorkspaceWM(self.name, width, height, self.bar.id if self.bar else None,
+                              self.cursor.id if self.cursor else None)
+        self.wm.start()
+        self._remember(True)
+        self.draw_bar(force=True)
+        os.makedirs(os.path.join(self.profile, "firefox"), exist_ok=True)
+        for _attempt in range(40):
+            pump(0.15)
+            new = [w for w in self.s.kwin.windows() if w["id"] not in before]
+            if new:
+                self.host_window = new[0]["id"]
+                break
+        if self.host_window:
+            try:
+                self.s.kwin.run(
+                    self.s.kwin.WINDOWS_JS.replace("var out = [];", "var out = [];")
+                    + f"""
+var target = null;
+for (var j = 0; j < list.length; j++) if (String(list[j].internalId) === {json.dumps(self.host_window)}) target = list[j];
+if (!target) {{ reply({{error: 'Fenster nicht gefunden'}}); }}
+else {{ target.noBorder = true;
+  target.frameGeometry = {{x: {logical['x']}, y: {logical['y']}, width: {logical['width']}, height: {logical['height']}}};
+  reply({{ok: true}}); }}"""
+                )
+            except RuntimeError as failure:
+                log("workspace: could not place the window:", failure)
+        log("workspace started", self.name, f"{width}x{height}", "on", screen.get("name"))
+
+    # ---- chrome: background, Plum bar and Plum's cursor, drawn as X windows of the workspace
+
+    def _put(self, drawable, image):
+        """Uploads a QImage (RGB32) in strips small enough for one X request."""
+        from Xlib import X
+        gc = drawable.create_gc()
+        image = image.convertToFormat(QImage.Format_RGB32)
+        row = image.bytesPerLine()
+        limit = max(1, (self.d.display.info.max_request_length * 4 - 4096) // row)
+        data = bytes(image.constBits())
+        for top in range(0, image.height(), limit):
+            rows = min(limit, image.height() - top)
+            drawable.put_image(gc, 0, top, image.width(), rows, X.ZPixmap, self.d.screen().root_depth, 0,
+                               data[top * row:(top + rows) * row])
+        gc.free()
+
+    def _make_chrome(self):
+        from Xlib import X
+        from Xlib.ext import shape
+        screen = self.d.screen()
+        root = screen.root
+        # Background, seen while no app is open.
+        wallpaper = QImage(self.width, self.height, QImage.Format_RGB32)
+        painter = QPainter(wallpaper)
+        gradient = QLinearGradient(0, 0, self.width, self.height)
+        gradient.setColorAt(0, QColor("#1b1626"))
+        gradient.setColorAt(1, QColor("#2a1c3d"))
+        painter.fillRect(wallpaper.rect(), gradient)
+        painter.setPen(QColor("#b9a6e8"))
+        font = QFont("Sans")
+        font.setPixelSize(44)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(QRect(0, self.height // 2 - 70, self.width, 60), Qt.AlignCenter, "Plum-Arbeitsfläche")
+        font.setPixelSize(20)
+        font.setBold(False)
+        painter.setFont(font)
+        painter.setPen(QColor("#8d84a6"))
+        painter.drawText(QRect(0, self.height // 2, self.width, 40), Qt.AlignCenter,
+                         "Hier öffnet Plum seine Apps, mit eigenem Zeiger. Du arbeitest daneben ungestört weiter.")
+        painter.end()
+        pixmap = root.create_pixmap(self.width, self.height, screen.root_depth)
+        self._put(pixmap, wallpaper)
+        root.change_attributes(background_pixmap=pixmap)
+        root.clear_area(0, 0, 0, 0, False)
+        # The bar: what Plum does, and the open apps as tabs.
+        self.bar = root.create_window(0, 0, self.width, WS_BAR_H, 0, screen.root_depth, X.InputOutput, X.CopyFromParent,
+                                      override_redirect=True, background_pixel=0x17141F)
+        self.bar.map()
+        # Plum's cursor: a purple arrow that follows Plum's pointer, always on top.
+        self.cursor = root.create_window(0, 0, 20, 27, 0, screen.root_depth, X.InputOutput, X.CopyFromParent,
+                                         override_redirect=True, background_pixel=0x7A4CFF)
+        mask = self.cursor.create_pixmap(20, 27, 1)
+        clear = mask.create_gc(foreground=0, background=0)
+        mask.fill_rectangle(clear, 0, 0, 20, 27)
+        solid = mask.create_gc(foreground=1, background=0)
+        mask.fill_poly(solid, X.Complex, X.CoordModeOrigin, WS_CURSOR)
+        self.cursor.shape_mask(shape.SO.Set, shape.SK.Bounding, 0, 0, mask)
+        self.cursor.configure(x=self.width // 2, y=self.height // 2)
+        self.cursor.map()
+        self.d.sync()
+
+    def draw_bar(self, force=False):
+        """Redraws the bar when the activity or the open apps changed (called from a Qt timer)."""
+        if not self.active or not self.bar or not self.wm:
+            return
+        windows = self.windows()
+        status = self.s.activity_state
+        text = f"Plum · {self.note}"
+        if status.get("status") and status.get("status") not in ("Bereit",):
+            text = f"Plum · {status.get('status')} · {self.note}"
+        key = (text, tuple((w["id"], w["caption"], w["active"]) for w in windows))
+        if key == self._bar_key and not force and not self.wm.changed:
+            return
+        self._bar_key = key
+        self.wm.changed = False
+        image = QImage(self.width, WS_BAR_H, QImage.Format_RGB32)
+        image.fill(QColor("#17141f"))
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(QColor("#7a4cff"))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QRectF(12, WS_BAR_H / 2 - 6, 12, 12))
+        font = QFont("Sans")
+        font.setPixelSize(15)
+        painter.setFont(font)
+        painter.setPen(QColor("#ece9f5"))
+        status_width = min(self.width // 2, 560)
+        painter.drawText(QRect(32, 0, status_width - 40, WS_BAR_H), Qt.AlignVCenter | Qt.AlignLeft,
+                         painter.fontMetrics().elidedText(text, Qt.ElideRight, status_width - 40))
+        tabs = []
+        x = status_width
+        for window in windows:
+            label = window["caption"] or window["cls"] or "Fenster"
+            width = min(260, max(120, painter.fontMetrics().horizontalAdvance(label) + 28))
+            if x + width > self.width - 8:
+                break
+            rect = QRectF(x, 5, width - 6, WS_BAR_H - 10)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor("#3a2d57") if window["active"] else QColor("#241f30"))
+            painter.drawRoundedRect(rect, 7, 7)
+            painter.setPen(QColor("#ffffff") if window["active"] else QColor("#b3adc4"))
+            painter.drawText(rect.adjusted(12, 0, -8, 0), Qt.AlignVCenter | Qt.AlignLeft,
+                             painter.fontMetrics().elidedText(label, Qt.ElideRight, int(rect.width()) - 20))
+            tabs.append((x, x + width, int(str(window["id"]).lstrip("w"))))
+            x += width
+        painter.end()
+        self.wm.tabs = tabs
+        try:
+            self._put(self.bar, image)
+            self.d.sync()
+        except Exception as failure:  # noqa: BLE001
+            log("workspace bar:", failure)
+
+    def _remember(self, running):
+        """The workspace comes back after a self-update or restart if it was on."""
+        state = getattr(self.s, "state", None)
+        if isinstance(state, dict) and state.get("workspace") != running:
+            state["workspace"] = running
+            save_state(state)
+
+    def stop(self, remember=True):
+        if remember:
+            self._remember(False)
+        for child in self.children:
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except (OSError, ProcessLookupError):
+                pass
+        self.children = []
+        if self.proc is not None:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=3)
+            except (OSError, subprocess.SubprocessError):
+                try:
+                    self.proc.kill()
+                except OSError:
+                    pass
+        self.proc = None
+        self.d = None
+        self.wm = None
+        self.host_window = None
+        self.spare = None
+        self.bar = self.cursor = None
+        try:
+            os.remove(self.pid_file)
+        except OSError:
+            pass
+
+    # ---- where the workspace is on the host, for Plum's visible cursor
+
+    def host_point(self, x, y):
+        """Workspace pixel -> host point (Qt global coordinates), or None."""
+        if not self.host_window:
+            return None
+        try:
+            window = next((w for w in self.s.kwin.windows() if w["id"] == self.host_window), None)
+        except RuntimeError:
+            return None
+        if not window or window.get("minimized"):
+            return None
+        return QPointF(window["x"] + x * window["width"] / max(1, self.width),
+                       window["y"] + y * window["height"] / max(1, self.height))
+
+    # ---- input
+
+    def _sync(self):
+        self.d.sync()
+
+    def move(self, x, y):
+        from Xlib import X
+        from Xlib.ext import xtest
+        x, y = int(max(0, min(x, self.width - 1))), int(max(0, min(y, self.height - 1)))
+        xtest.fake_input(self.d, X.MotionNotify, x=x, y=y)
+        if self.cursor:
+            self.cursor.configure(x=x, y=y, stack_mode=X.Above)
+        self._sync()
+
+    def focus_at(self, x, y):
+        """Without a full window manager, a click also hands keyboard focus to that window."""
+        from Xlib import X
+        root = self.d.screen().root
+        child = root.query_pointer().child
+        chrome = {getattr(self.bar, "id", None), getattr(self.cursor, "id", None)}
+        if child and child != X.NONE and getattr(child, "id", child) not in chrome:
+            child.set_input_focus(X.RevertToParent, X.CurrentTime)
+            child.configure(stack_mode=X.Above)
+            self._sync()
+
+    def button(self, button, down):
+        from Xlib import X
+        from Xlib.ext import xtest
+        number = {"left": 1, "middle": 2, "right": 3}.get(button, button)
+        xtest.fake_input(self.d, X.ButtonPress if down else X.ButtonRelease, number)
+        self._sync()
+
+    def click(self, x, y, button="left", count=1, modifiers=()):
+        self.move(x, y)
+        self.focus_at(x, y)
+        self.hold(modifiers, True)
+        try:
+            for index in range(count):
+                self.button(button, True)
+                time.sleep(0.03)
+                self.button(button, False)
+                if index + 1 < count:
+                    time.sleep(0.06)
+        finally:
+            self.hold(list(reversed(list(modifiers))), False)
+
+    def wheel(self, dx, dy, amount):
+        for _ in range(amount):
+            for number in ([4] if dy > 0 else [5] if dy < 0 else []) + ([6] if dx < 0 else [7] if dx > 0 else []):
+                self.button(number, True)
+                self.button(number, False)
+            time.sleep(0.02)
+
+    def _layout_keycode(self, keysym):
+        """Keycode of a layout-independent key (Return, Tab, F5, Control_L …) at level 0, or None."""
+        for keycode, index in self.d.keysym_to_keycodes(keysym):
+            if index == 0:
+                return keycode
+        return None
+
+    def _spares(self):
+        if self.spare is None:
+            first = self.d.display.info.min_keycode
+            count = self.d.display.info.max_keycode - first + 1
+            mapping = self.d.get_keyboard_mapping(first, count)
+            self.levels = len(mapping[0]) if mapping and mapping[0] else 2
+            self.spare = [first + i for i, row in enumerate(mapping) if not any(row)] or [self.d.display.info.max_keycode]
+        return self.spare
+
+    def _bind(self, keysyms):
+        """Puts keysyms on unused keycodes on every level, so the keyboard layout cannot change them
+        (on the Swiss layout z/y and ü/[ came out swapped through the layout's own keys)."""
+        binding = {}
+        for keysym, keycode in zip(keysyms, self._spares()):
+            self.d.change_keyboard_mapping(keycode, [tuple([keysym] * self.levels)])
+            binding[keysym] = keycode
+        self._sync()
+        time.sleep(0.03)
+        return binding
+
+    def _unbind(self):
+        if self.spare:
+            for keycode in self.spare:
+                self.d.change_keyboard_mapping(keycode, [tuple([0] * self.levels)])
+            self._sync()
+
+    def _press(self, keycode):
+        from Xlib import X
+        from Xlib.ext import xtest
+        xtest.fake_input(self.d, X.KeyPress, keycode)
+        xtest.fake_input(self.d, X.KeyRelease, keycode)
+        self._sync()
+
+    def type_text(self, text):
+        chars = list(text)
+        spares = len(self._spares())
+        index = 0
+        try:
+            while index < len(chars):
+                chunk, distinct = [], []
+                while index < len(chars):
+                    keysym = ws_keysym(chars[index])
+                    if keysym not in distinct:
+                        if len(distinct) == spares:
+                            break
+                        distinct.append(keysym)
+                    chunk.append(keysym)
+                    index += 1
+                binding = self._bind(distinct)
+                for keysym in chunk:
+                    self._press(binding[keysym])
+                    time.sleep(0.008)
+        finally:
+            self._unbind()
+
+    def _named(self, name):
+        from Xlib import XK
+        key = WS_KEY_NAMES.get(name.lower(), name)
+        keysym = XK.string_to_keysym(key)
+        if not keysym and len(name) == 1:
+            keysym = ws_keysym(name)
+        if not keysym and len(key) > 1:
+            keysym = XK.string_to_keysym(key[:1].upper() + key[1:])  # f5 -> F5
+        if not keysym:
+            raise RuntimeError(f"Unbekannte Taste „{name}“")
+        return keysym
+
+    def hold(self, names, down):
+        from Xlib import X
+        from Xlib.ext import xtest
+        for name in names:
+            keycode = self._layout_keycode(self._named(name))
+            if keycode:
+                xtest.fake_input(self.d, X.KeyPress if down else X.KeyRelease, keycode)
+        self._sync()
+
+    def combo(self, spec):
+        parts = [part for part in spec.split("+") if part]
+        if not parts:
+            return
+        *modifiers, key = parts
+        keysym = self._named(key)
+        # Characters go through a spare keycode too: ctrl+z must not become ctrl+y.
+        keycode = None if len(key) == 1 else self._layout_keycode(keysym)
+        self.hold(modifiers, True)
+        try:
+            if keycode:
+                self._press(keycode)
+            else:
+                self._press(self._bind([keysym])[keysym])
+        finally:
+            self.hold(list(reversed(modifiers)), False)
+            if not keycode:
+                self._unbind()
+
+    # ---- look
+
+    def screenshot(self):
+        from Xlib import X
+        root = self.d.screen().root
+        raw = root.get_image(0, 0, self.width, self.height, X.ZPixmap, 0xFFFFFFFF)
+        image = QImage(raw.data, self.width, self.height, QImage.Format_RGB32)
+        return image.copy()
+
+    def windows(self):
+        out = []
+        if not self.wm:
+            return out
+        stack = self.wm.windows()
+        for index, wid in enumerate(stack):
+            window = self.d.create_resource_object("window", wid)
+            try:
+                name = window.get_full_text_property(self.d.intern_atom("_NET_WM_NAME")) or window.get_wm_name() or ""
+                cls = (window.get_wm_class() or ("", ""))[1]
+                geometry = window.get_geometry()
+            except Exception:  # noqa: BLE001  gone meanwhile
+                continue
+            out.append({"id": f"w{wid}", "caption": str(name), "cls": str(cls), "x": geometry.x, "y": geometry.y,
+                        "width": geometry.width, "height": geometry.height, "active": index == len(stack) - 1})
+        return out
+
+    def activate(self, window_id):
+        from Xlib import X
+        wid = int(str(window_id).lstrip("w"))
+        window = self.d.create_resource_object("window", wid)
+        window.configure(stack_mode=X.Above)
+        window.set_input_focus(X.RevertToParent, X.CurrentTime)
+        self._sync()
+        with self.wm.lock:
+            if wid in self.wm.stack:
+                self.wm.stack.remove(wid)
+                self.wm.stack.append(wid)
+
+    # ---- apps
+
+    def launch(self, argv):
+        env = dict(CHILD_ENV)
+        env.pop("WAYLAND_DISPLAY", None)
+        env.update({"DISPLAY": self.name, "QT_QPA_PLATFORM": "xcb", "GDK_BACKEND": "x11", "MOZ_ENABLE_WAYLAND": "0",
+                    "SDL_VIDEODRIVER": "x11", "ELECTRON_OZONE_PLATFORM_HINT": "x11", "XDG_SESSION_TYPE": "x11"})
+        name = os.path.basename(argv[0])
+        extra = [arg.format(profile=self.profile) for arg in WS_SEPARATE.get(name, [])]
+        child = subprocess.Popen([argv[0], *extra, *argv[1:]], env=env, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+        self.children.append(child)
+        return child
+
+
+def desktop_entry_exec(path):
+    """argv of a .desktop file's Exec line, field codes removed."""
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if line.startswith("Exec="):
+                return [part for part in shlex.split(line[5:].strip()) if not re.fullmatch(r"%[a-zA-Z]", part)]
+    raise RuntimeError(f"{path} hat keine Exec-Zeile")
+
+
 class Tools(QObject):
     """Runs tool calls on the Qt thread; replies go back through `reply`."""
 
@@ -2569,6 +3238,8 @@ class Tools(QObject):
         self.overlay = app_state.overlay
         self.session = {}
         self.refs = {}  # "d12" -> (accessible, client origin QPointF, window id)
+        # Window Plum works in, so keys reach it even while the user has another one focused.
+        self.agent_window = None
         # Waiting on KWin or an animation processes events, which would start the
         # next queued call inside the current one; calls run strictly one by one.
         self.busy = False
@@ -2593,6 +3264,9 @@ class Tools(QObject):
             handler = getattr(self, tool, None)
             if not tool.startswith("desktop_") or handler is None:
                 raise RuntimeError(f"Unbekanntes Desktop-Werkzeug: {tool} (Plum Desktop {VERSION})")
+            # With Plum's own workspace running, the tools act there, not on the user's desktop.
+            if tool != "desktop_workspace" and self.s.workspace.active:
+                handler = getattr(self, "ws_" + tool[len("desktop_"):], handler)
             if self.s.mode == "paused" and tool not in ("desktop_status", "desktop_task", "desktop_layout"):
                 raise RuntimeError("Plum Desktop ist pausiert. Bitte den Nutzer, es im Tray-Symbol fortzusetzen.")
             if self.s.mode == "guide" and tool in INPUT_TOOLS:
@@ -2614,7 +3288,8 @@ class Tools(QObject):
             ABORT["set"] = False
             if tool in INPUT_TOOLS:
                 self.s.last_action = time.time()
-                self.s.preview(tool, args or {})
+                if not self.s.workspace.active:
+                    self.s.preview(tool, args or {})
             content = handler(args or {})
             if tool != "desktop_status":
                 self.s.record_step(self.s.describe_action(tool, args or {}))
@@ -3078,11 +3753,12 @@ class Tools(QObject):
         self._black_out(image, self.overlay.geometry())
         return image
 
-    def _ocr(self, image, region=None):
+    def _ocr(self, image, region=None, ratio=None):
         """Words with boxes in screenshot pixels, via tesseract."""
         if not shutil.which("tesseract"):
             raise RuntimeError("Texterkennung fehlt (dnf install tesseract tesseract-langpack-deu)")
-        ratio = image.width() / max(1, self.overlay.geometry().width()) / self.overlay.factor  # image px per shot px
+        if ratio is None:
+            ratio = image.width() / max(1, self.overlay.geometry().width()) / self.overlay.factor  # image px per shot px
         ox = oy = 0
         if region:
             ox, oy = region[0], region[1]
@@ -3281,10 +3957,374 @@ class Tools(QObject):
         if not match:
             raise RuntimeError(f"Kein Fenster passt zu „{query}“; desktop_windows listet alle")
         result = self.s.kwin.activate(match["id"])
+        self.agent_window = match["id"]
         center = self.overlay.local_point(QPointF(match["x"] + match["width"] / 2, match["y"] + 24))
         self._acting(center, "Fenster")
         self.overlay.glide(center, self._label())
         return [self._text(f"Fenster aktiviert: {result.get('caption', match['caption'])}")]
+
+    # ---- Plum's own workspace (class Workspace): own pointer, focus and clipboard
+
+    @property
+    def ws_factor(self):
+        """Screenshot pixels per workspace pixel (large workspaces are scaled to SHOT_MAX_EDGE)."""
+        ws = self.s.workspace
+        return min(1.0, SHOT_MAX_EDGE / max(ws.width, ws.height, 1))
+
+    def desktop_workspace(self, args):
+        action = str(args.get("action") or "status").lower()
+        ws = self.s.workspace
+        if action == "start":
+            ws.start()
+            self.s.refresh_workspace_action()
+            return [self._text(
+                f"Plum-Arbeitsfläche läuft ({ws.width}×{ws.height}, Display {ws.name}) auf der linken Hälfte des grossen "
+                "Bildschirms, mit eigenem Zeiger und eigener Tastatur. Alle desktop_*-Werkzeuge wirken jetzt dort, der Nutzer "
+                "arbeitet ungestört weiter. desktop_open startet Apps darin; dann desktop_screenshot, Koordinaten in dessen Pixeln."
+            )]
+        if action == "stop":
+            ws.stop()
+            self.s.refresh_workspace_action()
+            return [self._text("Plum-Arbeitsfläche beendet; desktop_*-Werkzeuge wirken wieder auf dem Desktop des Nutzers.")]
+        if ws.active:
+            return [self._text(f"Plum-Arbeitsfläche aktiv: {ws.width}×{ws.height} ({ws.name}), {len(ws.windows())} Fenster.")]
+        return [self._text("Keine Plum-Arbeitsfläche aktiv. desktop_workspace mit action start öffnet eine eigene Arbeitsfläche.")]
+
+    def _ws_note(self, text):
+        """What Plum does right now, shown in the workspace bar."""
+        self.s.workspace.note = str(text)[:120]
+        self.s.workspace.draw_bar()
+
+    def _ws_show(self, wx, wy, what, color=None):
+        """Plum's cursor on the host, over the workspace window, so the user sees what it does."""
+        self.s.last_action = time.time()
+        host = self.s.workspace.host_point(wx, wy)
+        if host is None:
+            return
+        local = self.overlay.local_point(host)
+        self.overlay.glide(local, f"{self._label()} · {what}")
+        self.overlay.ripple(local, color or COLORS["purple"])
+
+    def _ws_xy(self, args, x="x", y="y"):
+        if args.get("ref"):
+            raise RuntimeError("In der Plum-Arbeitsfläche gibt es noch keine Element-Referenzen: desktop_screenshot und x/y oder text verwenden")
+        if args.get("text") and x == "x" and args.get(x) is None:
+            hits = self._ws_find_text(str(args["text"]))
+            if not hits:
+                raise RuntimeError(f"Text „{args['text']}“ nicht in der Plum-Arbeitsfläche gefunden")
+            return hits[0][1] / self.ws_factor, hits[0][2] / self.ws_factor
+        if args.get(x) is None or args.get(y) is None:
+            raise RuntimeError(f"{x} und {y} (Pixel des Arbeitsflächen-Screenshots) oder text fehlen")
+        return float(args[x]) / self.ws_factor, float(args[y]) / self.ws_factor
+
+    def ws_status(self, args):
+        ws = self.s.workspace
+        head = self._text(f"Plum-Arbeitsfläche aktiv ({ws.width}×{ws.height}, {ws.name}): desktop_*-Werkzeuge wirken dort. "
+                          f"Fenster: {', '.join(w['caption'] or w['cls'] for w in ws.windows()) or 'keine'}")
+        return [head, *self.desktop_status(args)]
+
+    def ws_screenshot(self, args):
+        self._ws_note("Schaut hin")
+        ws = self.s.workspace
+        image = ws.screenshot()
+        scale = self.ws_factor
+        full_w, full_h = round(image.width() * scale), round(image.height() * scale)
+        if args.get("width") and args.get("height"):
+            ratio = 1 / scale
+            x, y, w, h = (float(args.get(k) or 0) for k in ("x", "y", "width", "height"))
+            crop = image.copy(QRect(round(x * ratio), round(y * ratio), round(w * ratio), round(h * ratio)))
+            zoom = min(1.0, SHOT_MAX_EDGE / max(crop.width(), crop.height(), 1))
+            shot = crop.scaled(round(crop.width() * zoom), round(crop.height() * zoom), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            note = (f"Ausschnitt der Plum-Arbeitsfläche {round(x)},{round(y)} {round(w)}×{round(h)}. Für Klicks: "
+                    f"x = {round(x)} + Bild-x × {w / max(1, shot.width()):.3f}, y = {round(y)} + Bild-y × {h / max(1, shot.height()):.3f}.")
+        else:
+            shot = image if scale >= 1 else image.scaled(full_w, full_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            note = (f"Plum-Arbeitsfläche {shot.width()}×{shot.height()} (eigener Zeiger, der Nutzer arbeitet daneben). "
+                    "x/y aller desktop_*-Werkzeuge in diesen Pixeln.")
+        data = QByteArray()
+        buffer = QBuffer(data)
+        buffer.open(QIODevice.WriteOnly)
+        shot.save(buffer, "JPEG", 82)
+        return [{"type": "image", "data": base64.b64encode(bytes(data)).decode(), "mimeType": "image/jpeg"}, self._text(note)]
+
+    def _ws_find_text(self, query, region=None):
+        needle = query.lower()
+        hits = []
+        image = self.s.workspace.screenshot()
+        for line in self._lines(self._ocr(image, region, ratio=1 / self.ws_factor)):
+            if needle in line["text"].lower():
+                hits.append((line["text"], round(line["x"] + line["w"] / 2), round(line["y"] + line["h"] / 2)))
+        return hits
+
+    def ws_ocr(self, args):
+        self._ws_note("Liest Text")
+        region = None
+        if args.get("width") and args.get("height"):
+            region = tuple(float(args.get(k) or 0) for k in ("x", "y", "width", "height"))
+        query = str(args.get("query") or "").strip()
+        if query:
+            hits = self._ws_find_text(query, region)
+            if not hits:
+                return [self._text(f"„{query}“ nicht in der Plum-Arbeitsfläche gefunden")]
+            return [self._text("\n".join(f"„{text[:100]}“ @ {x},{y}" for text, x, y in hits[:20]))]
+        lines = self._lines(self._ocr(self.s.workspace.screenshot(), region, ratio=1 / self.ws_factor))
+        if not lines:
+            return [self._text("Kein Text erkannt")]
+        return [self._text("\n".join(f"@ {round(l['x'] + l['w'] / 2)},{round(l['y'] + l['h'] / 2)}  {l['text'][:160]}" for l in lines[:300]))]
+
+    def _ws_unsupported(self, _args):
+        raise RuntimeError("In der Plum-Arbeitsfläche noch nicht verfügbar: desktop_screenshot, desktop_ocr und Klicks per x/y oder text verwenden")
+
+    ws_read_ui = ws_find = ws_get_text = ws_wait_for = ws_wait_change = ws_macro_run = _ws_unsupported
+
+    def ws_click(self, args):
+        wx, wy = self._ws_xy(args)
+        button = str(args.get("button") or "left")
+        if button not in ("left", "right", "middle"):
+            raise RuntimeError("button: left, right oder middle")
+        count = 2 if args.get("double") else 1
+        modifiers = [str(m) for m in (args.get("modifiers") or [])]
+        self._ws_note("Doppelklick" if count == 2 else "Klick")
+        self._ws_show(wx, wy, "Doppelklick" if count == 2 else "Klick")
+        self.s.workspace.click(wx, wy, button, count, modifiers)
+        pump(0.25)
+        return [self._text(f"Klick in der Plum-Arbeitsfläche bei {round(wx * self.ws_factor)},{round(wy * self.ws_factor)}")]
+
+    def ws_hover(self, args):
+        wx, wy = self._ws_xy(args)
+        self._ws_show(wx, wy, "Zeiger")
+        self.s.workspace.move(wx, wy)
+        pump(0.3)
+        return [self._text("Zeiger in der Plum-Arbeitsfläche bewegt")]
+
+    def ws_drag(self, args):
+        self._ws_note("Zieht")
+        ws = self.s.workspace
+        sx, sy = self._ws_xy(args, "fromX", "fromY")
+        ex, ey = self._ws_xy(args, "toX", "toY")
+        self._ws_show(sx, sy, "Ziehen")
+        ws.move(sx, sy)
+        ws.button("left", True)
+        try:
+            for index in range(1, 25):
+                k = ease(index / 24)
+                ws.move(sx + (ex - sx) * k, sy + (ey - sy) * k)
+                time.sleep(0.015)
+        finally:
+            ws.button("left", False)
+        self._ws_show(ex, ey, "Ziehen")
+        return [self._text("In der Plum-Arbeitsfläche gezogen")]
+
+    def ws_scroll(self, args):
+        self._ws_note("Scrollt")
+        ws = self.s.workspace
+        if args.get("text") or (args.get("x") is not None and args.get("y") is not None):
+            wx, wy = self._ws_xy(args)
+            self._ws_show(wx, wy, "Scrollen", COLORS["blue"])
+            ws.move(wx, wy)
+        direction = str(args.get("direction") or "down")
+        amount = max(1, min(int(float(args.get("amount") or 3)), 30))
+        dx, dy = {"down": (0, -1), "up": (0, 1), "left": (-1, 0), "right": (1, 0)}.get(direction, (0, -1))
+        ws.wheel(dx, dy, amount)
+        pump(0.2)
+        return [self._text(f"{amount}× gescrollt ({direction}) in der Plum-Arbeitsfläche")]
+
+    def ws_press_key(self, args):
+        keys = str(args.get("keys") or "").strip()
+        if not keys:
+            raise RuntimeError('keys fehlt, z. B. "Enter", "ctrl+s" oder "Tab Tab Enter"')
+        self._ws_note(f"Tasten {keys}")
+        for spec in keys.split():
+            self.s.workspace.combo(spec)
+            time.sleep(0.05)
+        self.s.last_action = time.time()
+        return [self._text(f"Gedrückt in der Plum-Arbeitsfläche: {keys}")]
+
+    def ws_type(self, args):
+        text = str(args.get("text") or "")
+        if not text:
+            raise RuntimeError("text fehlt")
+        ws = self.s.workspace
+        if args.get("text_at") or args.get("ref") or (args.get("x") is not None and args.get("y") is not None):
+            self.ws_click({k: args[k] for k in ("x", "y", "ref") if args.get(k) is not None})
+        if args.get("replace"):
+            ws.combo("ctrl+a")
+        self._ws_note(f"Tippt: {text[:60]}")
+        ws.type_text(text)
+        if args.get("submit"):
+            ws.combo("Return")
+        self.s.last_action = time.time()
+        return [self._text(f"Eingetippt in der Plum-Arbeitsfläche: {len(text)} Zeichen{' + Enter' if args.get('submit') else ''}")]
+
+    def ws_open(self, args):
+        target = str(args.get("target") or "").strip()
+        if not target:
+            raise RuntimeError("target fehlt: App-Name, Datei oder URL")
+        ws = self.s.workspace
+        if "://" in target or target.startswith("mailto:"):
+            browser = next((b for b in ("firefox", "chromium-browser", "google-chrome") if shutil.which(b)), None)
+            if not browser:
+                raise RuntimeError("Kein Browser für die Plum-Arbeitsfläche gefunden")
+            ws.launch([shutil.which(browser), target])
+            return [self._text(f"Geöffnet in der Plum-Arbeitsfläche: {target}. Danach desktop_screenshot.")]
+        path = os.path.expanduser(target)
+        if os.path.exists(path):
+            mime = subprocess.run(["xdg-mime", "query", "filetype", path], capture_output=True, text=True, timeout=5, env=CHILD_ENV).stdout.strip()
+            desktop = subprocess.run(["xdg-mime", "query", "default", mime], capture_output=True, text=True, timeout=5, env=CHILD_ENV).stdout.strip()
+            entry = find_desktop_entry(desktop) if desktop else None
+            if not entry:
+                raise RuntimeError(f"Keine App für {mime or 'diese Datei'} gefunden")
+            ws.launch([*desktop_entry_exec(entry[0]), path])
+            return [self._text(f"Geöffnet in der Plum-Arbeitsfläche: {target} mit {entry[1]}")]
+        entry = find_desktop_entry(target)
+        if not entry:
+            raise RuntimeError(f"Keine App „{target}“ gefunden")
+        self._ws_note(f"Startet {entry[1]}")
+        argv = desktop_entry_exec(entry[0])
+        argv[0] = shutil.which(argv[0]) or argv[0]
+        ws.launch(argv)
+        return [self._text(f"Gestartet in der Plum-Arbeitsfläche: {entry[1]}. Danach desktop_screenshot oder desktop_windows.")]
+
+    def ws_windows(self, _args):
+        windows = self.s.workspace.windows()
+        if not windows:
+            return [self._text("Keine Fenster in der Plum-Arbeitsfläche")]
+        f = self.ws_factor
+        return [self._text("\n".join(
+            f"{w['id']} · {w['caption']} ({w['cls']}) bei {round(w['x'] * f)},{round(w['y'] * f)} "
+            f"{round(w['width'] * f)}×{round(w['height'] * f)}{' · aktiv' if w['active'] else ''}" for w in windows
+        ))]
+
+    def ws_activate_window(self, args):
+        query = str(args.get("window") or "").strip()
+        if not query:
+            raise RuntimeError("window fehlt: Kennung aus desktop_windows, Titel oder Programmklasse")
+        needle = query.lower()
+        windows = self.s.workspace.windows()
+        match = next((w for w in windows if w["id"] == query), None) or next(
+            (w for w in windows if needle in w["caption"].lower() or needle in w["cls"].lower()), None)
+        if not match:
+            raise RuntimeError(f"Kein Fenster der Plum-Arbeitsfläche passt zu „{query}“")
+        self.s.workspace.activate(match["id"])
+        return [self._text(f"Fenster aktiviert (Plum-Arbeitsfläche): {match['caption']}")]
+
+    # ---- parallel work: background actions and a shared pointer/keyboard
+
+    def _user_present(self):
+        return self.s.parallel and time.time() - self.s.last_human < USER_PRESENT_S
+
+    def _wait_for_user(self, what):
+        """Pointer and keyboard are shared: use them only after the user paused briefly."""
+        if not self.s.parallel:
+            return
+        deadline = time.time() + USER_IDLE_WAIT_S
+        noted = False
+        while time.time() - self.s.last_human < USER_IDLE_S:
+            if ABORT["set"] or self.s.mode == "paused":
+                raise Stopped("Plum Desktop wurde gestoppt")
+            if time.time() > deadline:
+                raise RuntimeError(
+                    f"Der Nutzer arbeitet gerade am PC; {what} braucht Maus oder Tastatur. "
+                    "Nutze ref-basierte Klicks und Eingaben (laufen im Hintergrund) oder versuche es gleich erneut."
+                )
+            if not noted:
+                noted = True
+                self.s.pill.flash(QGuiApplication.primaryScreen().geometry(), f"Plum wartet kurz · {what}")
+            pump(0.1)
+
+    def _active_window_id(self):
+        try:
+            return next((w["id"] for w in self.s.kwin.windows() if w.get("active")), None)
+        except RuntimeError:
+            return None
+
+    def _shared_pointer(self, what, action):
+        """Runs a pointer action; while the user is around, their pointer and focus come back after."""
+        self._wait_for_user(what)
+        present = self._user_present()
+        pointer = None
+        focus = None
+        if present:
+            try:
+                pointer = self.s.kwin.cursor()
+            except RuntimeError:
+                pointer = None
+            focus = self._active_window_id()
+        try:
+            return action()
+        finally:
+            if present:
+                if pointer is not None:
+                    self.s.input.move(pointer)
+                if focus and self._active_window_id() != focus:
+                    try:
+                        self.s.kwin.activate(focus)
+                    except RuntimeError:
+                        pass
+
+    def _in_agent_window(self, what, action):
+        """Keys go to the window Plum works in; the user's window gets focus back after."""
+        self._wait_for_user(what)
+        if not self._user_present() or not self.agent_window:
+            return action()
+        focus = self._active_window_id()
+        if not focus or focus == self.agent_window:
+            return action()
+        try:
+            self.s.kwin.activate(self.agent_window)
+        except RuntimeError:
+            return action()
+        pump(0.15)
+        try:
+            return action()
+        finally:
+            try:
+                self.s.kwin.activate(focus)
+            except RuntimeError:
+                pass
+
+    def _a11y_click(self, ref):
+        """Clicks an element through AT-SPI: no pointer, no focus change. None when it has no action."""
+        entry = self.refs.get(ref)
+        if not entry or Atspi is None:
+            return None
+        node = entry[0]
+        try:
+            action = node.get_action_iface()
+            if not action:
+                return None
+            names = [(i, (Atspi.Action.get_action_name(action, i) or "").lower()) for i in range(Atspi.Action.get_n_actions(action))]
+        except Exception:  # noqa: BLE001
+            return None
+        for wanted in A11Y_CLICK_ACTIONS:
+            for index, name in names:
+                if name == wanted or name.startswith(wanted):
+                    try:
+                        if Atspi.Action.do_action(action, index):
+                            return name
+                    except Exception:  # noqa: BLE001
+                        return None
+        return None
+
+    def _a11y_type(self, ref, text, replace=False):
+        """Types into an editable element through AT-SPI, without keyboard or clipboard."""
+        entry = self.refs.get(ref)
+        if not entry or Atspi is None:
+            return False
+        node = entry[0]
+        try:
+            editable = node.get_editable_text_iface()
+            if not editable:
+                return False
+            if replace:
+                return bool(Atspi.EditableText.set_text_contents(editable, text))
+            plain = node.get_text_iface()
+            position = Atspi.Text.get_caret_offset(plain) if plain else -1
+            if position is None or position < 0:
+                position = Atspi.Text.get_character_count(plain) if plain else 0
+            return bool(Atspi.EditableText.insert_text(editable, position, text, len(text.encode("utf-8"))))
+        except Exception:  # noqa: BLE001
+            return False
 
     def desktop_click(self, args):
         local = self._point(args)
@@ -3294,20 +4334,41 @@ class Tools(QObject):
         count = 2 if args.get("double") else 1
         modifiers = [str(m) for m in (args.get("modifiers") or [])]
         self._guard(local, "zu klicken")
-        self._acting(local, "Doppelklick" if count == 2 else ("Rechtsklick" if button == "right" else "Klick"))
-        self._pointer_to(local)
-        self.s.input.hold(modifiers, True)
-        try:
-            for index in range(count):
-                self.s.input.button(button, True)
-                pump(0.04)
-                self.s.input.button(button, False)
-                if index + 1 < count:
-                    pump(0.08)
-        finally:
-            self.s.input.hold(list(reversed(modifiers)), False)
-        self.overlay.ripple(local)
-        pump(0.25)
+        ref = str(args.get("ref") or "")
+        if ref and self.s.parallel and button == "left" and count == 1 and not modifiers:
+            done = self._a11y_click(ref)
+            if done:
+                self.s.last_action = time.time()
+                self.agent_window = self.refs[ref][2]
+                self.overlay.ripple(local)
+                pump(0.25)
+                return [self._text(f"Klick im Hintergrund bei {ref} (Aktion „{done}“, Zeiger und Fokus unverändert)")]
+
+        def press():
+            self._acting(local, "Doppelklick" if count == 2 else ("Rechtsklick" if button == "right" else "Klick"))
+            self._pointer_to(local)
+            self.s.input.hold(modifiers, True)
+            try:
+                for index in range(count):
+                    self.s.input.button(button, True)
+                    pump(0.04)
+                    self.s.input.button(button, False)
+                    if index + 1 < count:
+                        pump(0.08)
+            finally:
+                self.s.input.hold(list(reversed(modifiers)), False)
+            self.overlay.ripple(local)
+            pump(0.25)
+
+        if ref and ref in self.refs:
+            self.agent_window = self.refs[ref][2]
+        else:
+            try:
+                under = self._window_at(self.s.kwin.windows(), local)
+                self.agent_window = under["id"] if under else self.agent_window
+            except RuntimeError:
+                pass
+        self._shared_pointer("einen Klick", press)
         what = "Doppelklick" if count == 2 else {"left": "Klick", "right": "Rechtsklick", "middle": "Mittelklick"}[button]
         where = args.get("ref") or (f"„{args['text']}“" if args.get("text") and args.get("x") is None else f"{args.get('x')},{args.get('y')}")
         return [self._text(f"{what} bei {where}")]
@@ -3315,6 +4376,7 @@ class Tools(QObject):
     def desktop_hover(self, args):
         local = self._point(args)
         self._guard(local, "den Zeiger zu bewegen")
+        self._wait_for_user("den Zeiger")
         self._acting(local, "Zeiger")
         self._pointer_to(local)
         pump(0.3)
@@ -3325,41 +4387,51 @@ class Tools(QObject):
         start = self._point(args, "fromX", "fromY")
         end = self._point(args, "toX", "toY")
         self._guard(start, "zu ziehen")
-        self._acting(start, "Ziehen")
-        self._pointer_to(start)
-        self.s.input.button("left", True)
-        try:
-            steps = 24
-            for index in range(1, steps + 1):
-                k = ease(index / steps)
-                local = QPointF(start.x() + (end.x() - start.x()) * k, start.y() + (end.y() - start.y()) * k)
-                self.s.input.move(self.overlay.global_point(local))
-                self.overlay.set_cursor(local, self._label())
-                self.overlay.repaint()
-                pump(0.018)
-            pump(0.08)
-        finally:
-            self.s.input.button("left", False)
-        self.overlay.ripple(end)
+
+        def drag():
+            self._acting(start, "Ziehen")
+            self._pointer_to(start)
+            self.s.input.button("left", True)
+            try:
+                steps = 24
+                for index in range(1, steps + 1):
+                    k = ease(index / steps)
+                    local = QPointF(start.x() + (end.x() - start.x()) * k, start.y() + (end.y() - start.y()) * k)
+                    self.s.input.move(self.overlay.global_point(local))
+                    self.overlay.set_cursor(local, self._label())
+                    self.overlay.repaint()
+                    pump(0.018)
+                pump(0.08)
+            finally:
+                self.s.input.button("left", False)
+            self.overlay.ripple(end)
+
+        self._shared_pointer("Ziehen", drag)
         return [self._text(f"Gezogen von {args['fromX']},{args['fromY']} nach {args['toX']},{args['toY']}")]
 
     def desktop_scroll(self, args):
+        local = None
         if args.get("ref") or (args.get("x") is not None and args.get("y") is not None):
             local = self._point(args)
             self._guard(local, "zu scrollen")
-            self._acting(local, "Scrollen")
-            self._pointer_to(local)
         direction = str(args.get("direction") or "down")
         amount = max(1, min(int(float(args.get("amount") or 3)), 30))
         dx, dy = {"down": (0, -1), "up": (0, 1), "left": (-1, 0), "right": (1, 0)}.get(direction, (0, -1))
-        point = self.overlay.cursor[0] if self.overlay.cursor else self.overlay.local_point(self.s.kwin.cursor())
         symbol = {"down": "↓", "up": "↑", "left": "←", "right": "→"}.get(direction, "↓")
-        self.overlay.set_cursor(point, f"{symbol} Scrollen")
-        self.overlay.ripple(point, COLORS["blue"])
-        for _ in range(amount):
-            self.s.input.wheel(dx, dy)
-            pump(0.03)
-        pump(0.2)
+
+        def scroll():
+            if local is not None:
+                self._acting(local, "Scrollen")
+                self._pointer_to(local)
+            point = self.overlay.cursor[0] if self.overlay.cursor else self.overlay.local_point(self.s.kwin.cursor())
+            self.overlay.set_cursor(point, f"{symbol} Scrollen")
+            self.overlay.ripple(point, COLORS["blue"])
+            for _ in range(amount):
+                self.s.input.wheel(dx, dy)
+                pump(0.03)
+            pump(0.2)
+
+        self._shared_pointer("Scrollen", scroll)
         return [self._text(f"{amount}× gescrollt ({direction})")]
 
     def desktop_press_key(self, args):
@@ -3367,20 +4439,42 @@ class Tools(QObject):
         if not keys:
             raise RuntimeError('keys fehlt, z. B. "Enter", "ctrl+s" oder "Tab Tab Enter"')
         self._guard(None, f"Tasten zu drücken ({keys})")
-        if self.overlay.cursor:
-            self._acting(self.overlay.cursor[0], keys)
-        for spec in keys.split():
-            self.s.input.combo(spec)
-            pump(0.06)
+
+        def press():
+            if self.overlay.cursor:
+                self._acting(self.overlay.cursor[0], keys)
+            for spec in keys.split():
+                self.s.input.combo(spec)
+                pump(0.06)
+
+        self._in_agent_window(f"Tasten {keys}", press)
         return [self._text(f"Gedrückt: {keys}")]
 
     def desktop_type(self, args):
         text = str(args.get("text") or "")
         if not text:
             raise RuntimeError("text fehlt")
+        ref = str(args.get("ref") or "")
+        if ref and self.s.parallel and ref in self.refs:
+            self._guard(self._ref_center(ref), f"Text einzugeben ({len(text)} Zeichen)")
+            if self._a11y_type(ref, text, replace=bool(args.get("replace"))):
+                self.s.last_action = time.time()
+                self.agent_window = self.refs[ref][2]
+                self.overlay.ripple(self._ref_center(ref), COLORS["blue"])
+                submitted = ""
+                if args.get("submit"):
+                    if self._a11y_click(ref) == "activate":
+                        submitted = " + Bestätigt"
+                    else:
+                        self._in_agent_window("Enter", lambda: self.s.input.combo("Enter"))
+                        submitted = " + Enter"
+                return [self._text(f"Im Hintergrund eingetippt: {len(text)} Zeichen{submitted}")]
         if args.get("ref") or (args.get("x") is not None and args.get("y") is not None):
             self.desktop_click({k: args[k] for k in ("x", "y", "ref") if args.get(k) is not None})
         self._guard(None, f"Text einzugeben ({len(text)} Zeichen)")
+        return self._in_agent_window(f"Tippen ({len(text)} Zeichen)", lambda: self._paste_text(text, args))
+
+    def _paste_text(self, text, args):
         if self.overlay.cursor:
             self._acting(self.overlay.cursor[0], "Tippen")
         if not shutil.which("wl-copy"):
@@ -4108,6 +5202,15 @@ class App(QObject):
         self.rules = self.state.get("rules") if isinstance(self.state.get("rules"), list) else []
         self.allowed_until = {}
         self.last_action = 0.0
+        self.parallel = self.state.get("parallel", True) is not False
+        self.last_human = 0.0
+        self.workspace = Workspace(self)
+        # Keeps the workspace bar current (activity, open apps); idle while no workspace runs.
+        self.workspace_timer = QTimer(self)
+        self.workspace_timer.timeout.connect(self.workspace.draw_bar)
+        self.workspace_timer.start(800)
+        if self.state.get("workspace"):
+            QTimer.singleShot(4000, lambda: self.toggle_workspace(True))
         self.last_session = self.state.get("session") or {}
         self.activity_state = {"sessionId": "", "sessionName": "Plum", "status": "Bereit", "action": "",
                                "progress": "", "history": [], "result": "", "resultTarget": ""}
@@ -4363,7 +5466,29 @@ class App(QObject):
             self.activity_state["result"] = f"Desktop gestoppt; Chat-Stopp fehlgeschlagen: {error}"[:2000]
         self.publish_activity()
 
+    def toggle_workspace(self, enabled):
+        try:
+            if enabled:
+                self.workspace.start()
+            else:
+                self.workspace.stop()
+        except RuntimeError as failure:
+            self.pill.flash(QGuiApplication.primaryScreen().geometry(), f"Arbeitsfläche: {failure}"[:120])
+            log("workspace:", failure)
+        self.refresh_workspace_action()
+
+    def refresh_workspace_action(self):
+        self.workspace_action.setChecked(self.workspace.active)
+
+    def set_parallel(self, enabled):
+        self.parallel = bool(enabled)
+        self.state["parallel"] = self.parallel
+        save_state(self.state)
+        self.parallel_action.setChecked(self.parallel)
+        log("parallel:", self.parallel)
+
     def _human_input(self, keyboard=False):
+        self.last_human = time.time()
         if self.mode == "paused" or self.recorder.active or self.selection_pending:
             return
         # Typing into Plum's own chat must remain possible during agent work.
@@ -4378,6 +5503,13 @@ class App(QObject):
         # Only a turn that is steering this desktop counts as Plum acting: a busy
         # session that codes or browses must not pause on every mouse move.
         steering = self.turn_active and time.time() - self.last_action < self.TAKEOVER_WINDOW_S
+        if self.parallel:
+            # The user keeps working; Plum yields pointer and keyboard to them
+            # (Tools._wait_for_user) and acts in the background meanwhile.
+            if (self.tools.busy or steering) and time.time() - getattr(self, "_parallel_note_at", 0) > 30:
+                self._parallel_note_at = time.time()
+                self.pill.flash(QGuiApplication.primaryScreen().geometry(), "Plum arbeitet im Hintergrund weiter · Esc stoppt")
+            return
         if self.tools.busy or steering:
             self.set_mode("paused")
             self.activity_state.update(status="Du übernimmst gerade", action="Mit Weiter die Desktop-Steuerung zurückgeben")
@@ -4506,6 +5638,15 @@ class App(QObject):
             group.addAction(action)
             menu.addAction(action)
             self.mode_actions[mode] = action
+        self.parallel_action = QAction("Parallel zu mir arbeiten", menu, checkable=True)
+        self.parallel_action.setChecked(self.parallel)
+        self.parallel_action.setToolTip("An: Mausbewegungen pausieren Plum nicht; Plum wartet kurz und arbeitet weiter. Aus: jede Eingabe pausiert Plum.")
+        self.parallel_action.triggered.connect(self.set_parallel)
+        menu.addAction(self.parallel_action)
+        self.workspace_action = QAction("Eigene Arbeitsfläche (linke Bildschirmhälfte)", menu, checkable=True)
+        self.workspace_action.setToolTip("Plum arbeitet in einem eigenen Desktop-Fenster mit eigenem Zeiger; du nutzt den Rest ungestört.")
+        self.workspace_action.triggered.connect(self.toggle_workspace)
+        menu.addAction(self.workspace_action)
         menu.addSeparator()
         self.record_action = QAction("Vorführung aufnehmen", menu)
         self.record_action.triggered.connect(self.toggle_recording)
@@ -4855,6 +5996,8 @@ def main():
     app.setWindowIcon(plum_icon(APP_COLOR))
     app.setQuitOnLastWindowClosed(False)
     plum = App(config)
+    # Plum's workspace and the apps in it end with the companion (also on self-update).
+    app.aboutToQuit.connect(lambda: plum.workspace.stop(remember=False))
     plum.bridge.start()
     geometry = plum.overlay.geometry()
     log(f"running {VERSION}, overlay {geometry.width()}×{geometry.height()}, mode {plum.mode}")

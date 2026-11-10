@@ -113,6 +113,11 @@ export default defineConfig({
         target: backendUrl,
         changeOrigin: true,
       },
+      // Login code exchange of the callback page (POST /auth/web/exchange).
+      '/auth/web': {
+        target: backendUrl,
+        changeOrigin: true,
+      },
       '/auth/logout': {
         target: backendUrl,
         changeOrigin: true,

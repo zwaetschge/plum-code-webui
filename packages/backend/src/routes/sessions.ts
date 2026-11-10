@@ -1,4 +1,5 @@
 import { getSubagentHistory } from '../services/subagentHistory.js';
+import { requireRunnerAccess } from '../middleware/runnerGate.js';
 import {
   get as pgGet,
   all as pgAll,
@@ -64,6 +65,21 @@ import {
 } from '../services/sessionSync.js';
 import { getEnabledCliProvidersForUser, getZaiApiConfigForUser } from './settings.js';
 
+/**
+ * Serves a file from a session's attachment folder. Those folders start with a
+ * dot (`.claude-webui-attachments`), and Express 5's `send` answers "Not Found"
+ * for any path with a dot segment unless dotfiles are allowed — which surfaced
+ * as a 500 with a stack trace for every chat image. A missing file is a 404.
+ */
+function sendWorkspaceFile(res: Response, filePath: string): void {
+  res.sendFile(filePath, { dotfiles: 'allow' }, (error) => {
+    if (!error || res.headersSent) return;
+    res
+      .status(404)
+      .json({ success: false, error: { code: 'NOT_FOUND', message: 'File not found' } });
+  });
+}
+
 const router = Router();
 
 const PROJECT_DESCRIPTION_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -95,7 +111,7 @@ router.get('/:id/agents', requireAuth, async (req, res) => {
 export const createSessionSchema = z.object({
   name: z.string().min(1).max(100),
   workingDirectory: z.string().optional(), // Optional - will be auto-generated from name
-  cliProvider: z.enum(['claude', 'zai', 'codex', 'pi', 'vibe']).optional().default('codex'),
+  cliProvider: z.enum(['claude', 'zai', 'codex', 'pi', 'vibe']).optional().default('claude'),
   cliModel: z.string().trim().min(1).max(200).nullable().optional(),
   cliReasoning: z.string().trim().min(1).max(50).nullable().optional(),
   cliServiceTier: z.enum(['fast']).nullable().optional(),
@@ -1129,6 +1145,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 router.post(
   '/',
   requireAuth,
+  requireRunnerAccess,
   rateLimiters.sessionCreation,
   rateLimiters.upload,
   parseCreateSessionUpload,
@@ -3090,7 +3107,7 @@ router.get('/:id/images/:filename', async (req, res, next) => {
     try {
       await fs.access(imagePath);
       applyUntrustedFileHeaders(res, imagePath);
-      res.sendFile(imagePath);
+      sendWorkspaceFile(res, imagePath);
     } catch {
       return res
         .status(404)
@@ -3139,13 +3156,13 @@ router.get('/:id/attachments/:filename', async (req, res, next) => {
     try {
       await fs.access(attachmentPath);
       applyUntrustedFileHeaders(res, attachmentPath);
-      res.sendFile(attachmentPath);
+      sendWorkspaceFile(res, attachmentPath);
     } catch {
       // Try legacy image path
       try {
         await fs.access(legacyImagePath);
         applyUntrustedFileHeaders(res, legacyImagePath);
-        res.sendFile(legacyImagePath);
+        sendWorkspaceFile(res, legacyImagePath);
       } catch {
         return res
           .status(404)

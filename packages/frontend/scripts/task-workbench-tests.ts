@@ -41,7 +41,9 @@ assert.deepEqual(getTaskWorkbenchState(baseInput), {
   headerStatusLabel: 'Idle',
   headerDetail: 'No active task yet',
   progressLabel: 'No plan yet',
-  composerStatusLabel: '',
+  // The bubble above the chat bar always names what the agent does now (5daefce):
+  // an idle agent waits for the user instead of showing nothing.
+  composerStatusLabel: 'Wartet auf dich',
   composerStatusDetail: '',
 });
 
@@ -60,7 +62,7 @@ assert.equal(queuedState.headerTone, 'working');
 assert.equal(queuedState.headerStatusLabel, 'Working');
 assert.equal(queuedState.headerDetail, 'Typechecking frontend');
 assert.equal(queuedState.progressLabel, '1/3 done');
-assert.equal(queuedState.composerStatusLabel, '2 queued');
+assert.equal(queuedState.composerStatusLabel, 'Arbeitet · 2 in der Warteschlange');
 assert.equal(queuedState.composerStatusDetail, 'Running focused tests');
 
 const steeringState = getTaskWorkbenchState({
@@ -71,7 +73,7 @@ const steeringState = getTaskWorkbenchState({
 });
 assert.equal(steeringState.headerStatusLabel, 'Steering');
 assert.equal(steeringState.headerDetail, 'Reviewer running');
-assert.equal(steeringState.composerStatusLabel, 'Steering active run');
+assert.equal(steeringState.composerStatusLabel, 'Arbeitet · lenkbar');
 assert.equal(steeringState.composerStatusDetail, 'Reviewer running');
 
 const errorState = getTaskWorkbenchState({
@@ -84,6 +86,27 @@ const errorState = getTaskWorkbenchState({
 assert.equal(errorState.headerTone, 'error', 'errors must dominate active-run styling');
 assert.equal(errorState.headerStatusLabel, 'Needs attention');
 assert.equal(errorState.headerDetail, 'Provider disconnected');
+assert.equal(errorState.composerStatusLabel, 'Braucht dich', 'errors must dominate the bubble too');
+const failedRun = getTaskWorkbenchState({ ...baseInput, sessionStatus: 'error' });
+assert.equal(failedRun.composerStatusLabel, 'Braucht dich');
+assert.equal(failedRun.composerStatusDetail, 'Der letzte Lauf ist fehlgeschlagen.');
+
+const plainRun = getTaskWorkbenchState({ ...baseInput, isActive: true });
+assert.equal(plainRun.composerStatusLabel, 'Arbeitet');
+assert.equal(plainRun.composerStatusDetail, '');
+const emptyQueue = getTaskWorkbenchState({
+  ...baseInput,
+  isActive: true,
+  composerQueuesWhileActive: true,
+});
+assert.equal(emptyQueue.composerStatusLabel, 'Arbeitet');
+assert.equal(
+  emptyQueue.composerStatusDetail,
+  'Neue Nachrichten warten, bis der Lauf fertig ist.',
+  'a queueing run explains where new messages go'
+);
+const idleWithTodo = getTaskWorkbenchState({ ...baseInput, activeTodoText: 'Left over' });
+assert.equal(idleWithTodo.composerStatusDetail, '', 'an idle bubble carries no stale run detail');
 
 const selectedToolState = getTaskWorkbenchState({
   ...baseInput,
@@ -94,6 +117,10 @@ const selectedToolState = getTaskWorkbenchState({
 assert.equal(selectedToolState.progressLabel, 'No task list');
 assert.equal(selectedToolState.composerStatusLabel, 'Android builder');
 
+// The workbench header with run view, goal and stop/restart buttons was folded
+// into the composer on 2026-09-28: TaskWorkbench.tsx now only renders the
+// floating todo strip above the chat bar, and the composer bubble owns status,
+// interrupt and details.
 const componentSource = fs.readFileSync(
   new URL('../src/components/session/TaskWorkbench.tsx', import.meta.url),
   'utf8'
@@ -102,22 +129,39 @@ const chatInputSource = fs.readFileSync(
   new URL('../src/components/chat/ChatInput.tsx', import.meta.url),
   'utf8'
 );
-assert.match(componentSource, /title="Open run view"/);
-assert.match(componentSource, /title="Open goal and tasks"/);
+const sessionPageSource = fs.readFileSync(
+  new URL('../src/pages/SessionPage.tsx', import.meta.url),
+  'utf8'
+);
 assert.match(
   componentSource,
-  /title=\{canInterruptActiveRun \? 'Stop active run' : 'Restart session'\}/
+  /if \(!todo \|\| pendingTasksCount === 0\) return null;/,
+  'the todo strip must disappear once nothing is left to do'
 );
-assert.match(componentSource, /mode === 'desktop' \? 'hidden md:flex' : 'md:hidden'/);
 assert.match(componentSource, /todo\.status === 'in_progress' && todo\.activeForm/);
 assert.match(
-  chatInputSource,
-  /queueDepth > 0 && isActive && onInterrupt && \([\s\S]*?onClick=\{onInterrupt\}[\s\S]*?Interrupt &amp; run now/,
-  'queued follow-ups should expose an explicit interrupt-and-run action'
+  componentSource,
+  /aria-label=\{`Tasks: \$\{completedTasksCount\}\/\$\{totalTasksCount\} complete, \$\{pendingTasksCount\} remaining\. Open task list`\}/,
+  'the strip must announce its progress and that it opens the task list'
+);
+assert.match(
+  sessionPageSource,
+  /<TodoFloatingStrip[\s\S]*?onOpenTasks=\{\(\) => openRightPanel\('progress'\)\}/,
+  'the strip must open the progress panel'
+);
+assert.match(
+  sessionPageSource,
+  /activeStatusLabel=\{taskWorkbenchState\.composerStatusLabel\}[\s\S]*?activeStatusDetail=\{taskWorkbenchState\.composerStatusDetail\}/,
+  'the composer bubble must show the workbench state'
 );
 assert.match(
   chatInputSource,
-  /className="composer-brief-run"[\s\S]*?Details/,
+  /onInterrupt && canInterrupt && \([\s\S]*?onClick=\{onInterrupt\}[\s\S]*?aria-label=\{isExecutingTool \? 'Cancel tool' : 'Interrupt current run'\}/,
+  'an interruptible run should expose an explicit interrupt action in the bubble'
+);
+assert.match(
+  chatInputSource,
+  /onOpenRun && isActive && \([\s\S]*?className="composer-brief-run"[\s\S]*?Details/,
   'the run-view action should be labelled as details rather than execution'
 );
 

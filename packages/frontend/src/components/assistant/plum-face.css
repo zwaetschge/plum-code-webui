@@ -1,0 +1,234 @@
+/* Plum's face — the voice mode's plum with eyes.
+   One blob, two eyes; the eyes carry the phase, the blob breathes with the
+   voice. Everything is SVG + CSS transforms, so no layout work per frame. */
+
+.plum-face {
+  --pf-level: 0;
+  --pf-ink: hsl(160 30% 9% / 0.88);
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.plum-face svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* ------------------------------------------------------------ blob */
+
+.pf-stop-light {
+  stop-color: hsl(var(--primary) / 0.98);
+}
+.pf-stop-mid {
+  stop-color: hsl(var(--accent) / 0.92);
+}
+.pf-stop-deep {
+  stop-color: hsl(var(--accent) / 0.68);
+}
+.pf-stop-glow {
+  stop-color: hsl(var(--accent) / 0.5);
+}
+.pf-stop-glow-out {
+  stop-color: hsl(var(--accent) / 0);
+}
+
+.pf-halo {
+  opacity: calc(0.28 + var(--pf-level) * 0.55);
+  transition: opacity 420ms ease;
+}
+
+.pf-sheen {
+  fill: hsl(0 0% 100% / 0.26);
+}
+
+.is-failed .pf-sheen {
+  fill: hsl(0 0% 100% / 0.1);
+}
+
+.pf-head {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: pf-breathe 5.6s ease-in-out infinite;
+  transition: transform 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pf-eyes {
+  transform-box: fill-box;
+  transform-origin: 50% 58%;
+  transition: transform 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pf-eye {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pf-eye rect {
+  fill: var(--pf-ink);
+  transition: fill 380ms ease;
+}
+
+.pf-blink {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: pf-blink 6.4s ease-in-out infinite;
+}
+
+/* ------------------------------------------------------------ phases */
+
+/* Waiting for the first turn: attentive, a touch taller, following your voice. */
+.is-idle .pf-eye {
+  transform: translateY(0) scale(1, 1);
+}
+
+/* Listening: eyes open wide, opening further as you get louder. */
+.is-listening .pf-eye {
+  transform: translateY(-2px) scale(1.05, calc(1.08 + var(--pf-level) * 0.26));
+}
+.is-listening .pf-head {
+  animation: pf-breathe 2.6s ease-in-out infinite;
+}
+.is-listening .pf-eyes {
+  animation: pf-attend 3.8s ease-in-out infinite;
+}
+
+/* Writing down what you said: narrow eyes, looking down at the words. */
+.is-transcribing .pf-eye {
+  transform: translateY(6px) scale(1.06, 0.38);
+}
+.is-transcribing .pf-head {
+  animation: pf-breathe 4.2s ease-in-out infinite;
+}
+
+/* Thinking: eyes up and away, slowly searching. */
+.is-thinking .pf-eye {
+  transform: translateY(-10px) scale(1, 0.66);
+}
+.is-thinking .pf-eyes {
+  animation: pf-look-around 4.8s ease-in-out infinite;
+}
+.is-thinking .pf-head {
+  animation: pf-breathe 3.4s ease-in-out infinite;
+}
+
+/* Speaking: eyes squeezed with every spoken beat. */
+.is-speaking .pf-eye {
+  transform: translateY(-2px) scale(1.04, 0.72);
+}
+.is-speaking .pf-eyes {
+  animation: pf-talk 320ms ease-in-out infinite alternate;
+}
+.is-speaking .pf-head {
+  animation: pf-breathe 1.9s ease-in-out infinite;
+}
+
+/* Paused: eyes closed, slow sleeping breath. */
+.is-paused .pf-eye {
+  transform: scale(1.08, 0.09);
+  transition-duration: 620ms;
+}
+.is-paused .pf-head {
+  animation: pf-breathe 8s ease-in-out infinite;
+}
+.is-paused .pf-halo {
+  opacity: 0.1;
+}
+
+/* Something failed: the head sinks, the eyes droop outwards. */
+.is-failed .pf-eye-left {
+  transform: translate(3px, 9px) rotate(16deg) scale(1, 0.48);
+}
+.is-failed .pf-eye-right {
+  transform: translate(-3px, 9px) rotate(-16deg) scale(1, 0.48);
+}
+.is-failed .pf-head {
+  animation: none;
+  transform: translateY(6px);
+}
+.is-failed .pf-halo {
+  opacity: 0.16;
+}
+
+/* ------------------------------------------------------------ motion */
+
+@keyframes pf-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.028);
+  }
+}
+
+@keyframes pf-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  94.5%,
+  95.8% {
+    transform: scaleY(0.06);
+  }
+}
+
+@keyframes pf-attend {
+  0%,
+  100% {
+    transform: translateX(-2.5px);
+  }
+  50% {
+    transform: translateX(2.5px);
+  }
+}
+
+@keyframes pf-look-around {
+  0%,
+  100% {
+    transform: translate(-5px, 0);
+  }
+  45% {
+    transform: translate(6px, -2px);
+  }
+  75% {
+    transform: translate(2px, 1px);
+  }
+}
+
+@keyframes pf-talk {
+  from {
+    transform: scaleY(0.92);
+  }
+  to {
+    transform: scaleY(1.04);
+  }
+}
+
+/* Reduced motion and e-ink: the expression stays, nothing moves. */
+.plum-face.is-still .pf-head,
+.plum-face.is-still .pf-eyes,
+.plum-face.is-still .pf-blink {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plum-face .pf-head,
+  .plum-face .pf-eyes,
+  .plum-face .pf-blink {
+    animation: none !important;
+  }
+}
+
+/* The face sits beside the voice status: a small row, not a hero. */
+.plum-voice-presence {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.25rem 0 0.5rem;
+}

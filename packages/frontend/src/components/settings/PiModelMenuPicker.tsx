@@ -16,9 +16,14 @@ export function PiModelMenuPicker({
   providerDefault,
   saving,
   onSave,
+  groupLabels,
+  searchLabel = 'Pi-Modell suchen',
 }: {
-  /** Every runnable Pi model, `provider/model`. */
+  /** Every runnable model, `provider/model`. */
   models: string[];
+  /** Display names of the provider groups (default: the provider id). */
+  groupLabels?: Record<string, string>;
+  searchLabel?: string;
   /** The stored pick; empty means every model. */
   stored: string[];
   providerDefault: string | null;
@@ -121,7 +126,7 @@ export function PiModelMenuPicker({
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Modell suchen"
           className="h-9 pl-8 text-sm"
-          aria-label="Pi-Modell suchen"
+          aria-label={searchLabel}
         />
       </div>
 
@@ -135,7 +140,9 @@ export function PiModelMenuPicker({
               className="min-w-0 rounded-lg border border-border/70 bg-card/40 p-3"
             >
               <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="truncate text-sm font-semibold">{providerId}</p>
+                <p className="truncate text-sm font-semibold">
+                  {groupLabels?.[providerId] ?? providerId}
+                </p>
                 <div className="flex items-center gap-2">
                   <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
                     {shown}/{groupModels.length}

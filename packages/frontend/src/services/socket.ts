@@ -15,6 +15,7 @@ import type {
   ChatUpload,
   ApiResponse,
   Message,
+  UiResultEvent,
 } from '@plum-code-webui/shared';
 import type { SessionChatSync } from '@/lib/sessionChatSync';
 import { useAuthStore } from '@/stores/authStore';
@@ -192,6 +193,8 @@ class SocketService {
   private activeSessions: Set<string> = new Set(); // Track sessions that are actively working
   private modeListeners: Set<(data: { sessionId: string; mode: SessionMode }) => void> = new Set();
   private chatSyncListeners = new Set<(data: SessionChatSync) => void>();
+  /** Dynamic UI live widget results of model-chat turns (user room). */
+  private uiResultListeners = new Set<(event: UiResultEvent) => void>();
   private lastSequenceBySession = new Map<string, number>();
   private verifiedCursorSessions = new Set<string>();
   private activeChatBySession = new Map<string, string | null>();
@@ -274,6 +277,10 @@ class SocketService {
 
     this.socket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason);
+    });
+
+    this.socket.on('assistant:ui-result', (event) => {
+      for (const listener of this.uiResultListeners) listener(event);
     });
 
     this.socket.on('session:output', (data) => {
@@ -721,6 +728,14 @@ class SocketService {
   private applyChatSync(data: SessionChatSync): void {
     this.setSessionChat(data.sessionId, data.activeChatId);
     for (const listener of this.chatSyncListeners) listener(data);
+  }
+
+  /** A live widget of a model-chat answer resolved, failed or was refreshed. */
+  onUiResult(listener: (event: UiResultEvent) => void): () => void {
+    this.uiResultListeners.add(listener);
+    return () => {
+      this.uiResultListeners.delete(listener);
+    };
   }
 
   onChatSync(listener: (data: SessionChatSync) => void): () => void {

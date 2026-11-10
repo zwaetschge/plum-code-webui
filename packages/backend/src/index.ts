@@ -1,5 +1,7 @@
-import { resolveAuthenticatedUserId } from './middleware/auth.js';
+import { resolveAuthenticatedUserId, requireAuth } from './middleware/auth.js';
+import { requireRunnerAccess } from './middleware/runnerGate.js';
 import { startMemoryWorker } from './services/assistant/memory.js';
+import { startMemoryDreaming } from './services/memoryDreaming.js';
 import { startChatScheduleWorker } from './services/assistant/chatSchedules.js';
 import { startApiChatQueueWorker } from './services/assistant/apiChatQueue.js';
 import { relocateMissingSessionDirectories } from './services/claude/sessionRelocation.js';
@@ -178,20 +180,25 @@ function registerGracefulShutdown(
     forceExit.unref();
 
     try {
-      // Stop accepting new HTTP connections / upgrades.
-      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-      // Disconnect all WebSocket clients so they reconnect to the new instance.
+      // Disconnect WebSocket clients first so their long-lived connections do
+      // not keep httpServer.close() pending past the grace period. They
+      // reconnect to the new instance.
       io.disconnectSockets(true);
-      // Dynamically import to avoid circular load if shutdown fires before setup.
+      // Book mid-turn usage and leave the Pi/Claude run journals for resume
+      // before the sockets and HTTP server go away.
       const { getProcessManager } = await import('./websocket/index.js');
       try {
         await getProcessManager().shutdownAll();
       } catch (err) {
         console.warn('[SHUTDOWN] processManager shutdown skipped:', err);
       }
+      // Now stop accepting connections and force any lingering sockets closed.
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+      (httpServer as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
     } catch (err) {
       console.error('[SHUTDOWN] Drain error:', err);
     } finally {
+      clearTimeout(forceExit);
       process.exit(0);
     }
   };
@@ -452,18 +459,18 @@ async function main() {
   app.use('/api/assistant', assistantRoutes);
   app.use('/published', publicationRoutes);
   app.use('/api/office', officeRoutes);
-  app.use('/api/files', filesRoutes);
-  app.use('/api/git', gitRoutes);
+  app.use('/api/files', requireAuth, requireRunnerAccess, filesRoutes);
+  app.use('/api/git', requireAuth, requireRunnerAccess, gitRoutes);
   app.use('/api/settings', settingsRoutes);
-  app.use('/api/oracle', oracleRoutes);
+  app.use('/api/oracle', requireAuth, requireRunnerAccess, oracleRoutes);
   app.use('/api/mcp-servers', mcpRoutes);
-  app.use('/api/claude', claudeRoutes);
+  app.use('/api/claude', requireAuth, requireRunnerAccess, claudeRoutes);
   app.use('/api/claude-config', claudeConfigRoutes);
   app.use('/api/permissions', permissionsRoutes);
   app.use('/api/usage', usageRoutes);
   app.use('/api/cli-tools', cliToolsRoutes);
-  app.use('/api/projects', projectsRoutes);
-  app.use('/api/github', githubRoutes);
+  app.use('/api/projects', requireAuth, requireRunnerAccess, projectsRoutes);
+  app.use('/api/github', requireAuth, requireRunnerAccess, githubRoutes);
   app.use('/api/commands', commandsRoutes);
   app.use('/api/analytics', analyticsRoutes);
   app.use('/api/checkpoints', checkpointsRoutes);
@@ -479,12 +486,12 @@ async function main() {
   app.use('/api/device-bridge', deviceBridgeRoutes);
   app.use('/api/codex', codexRoutes);
   app.use('/api/model-providers', modelProvidersRoutes);
-  app.use('/api/memories', memoriesRoutes);
-  app.use('/api/android', androidRoutes);
+  app.use('/api/memories', requireAuth, requireRunnerAccess, memoriesRoutes);
+  app.use('/api/android', requireAuth, requireRunnerAccess, androidRoutes);
   app.use('/api/app', appRoutes);
   app.use('/api/workspace', workspaceRoutes);
   app.use('/api/transcribe', transcribeRoutes);
-  app.use('/api/preview', previewRoutes);
+  app.use('/api/preview', requireAuth, requireRunnerAccess, previewRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/comfyui', comfyuiRoutes);
   app.use('/api/ultracode', ultracodeRoutes);
@@ -572,6 +579,15 @@ async function main() {
             );
             res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
           }
+          // Dynamic UI tiles (model-authored code): own sandboxed, offline document.
+          if (filePath === path.join(productionFrontendPath, 'ui-widget.html')) {
+            res.setHeader(
+              'Content-Security-Policy',
+              "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src data: https://fonts.gstatic.com; img-src data: blob:; media-src data: blob:; worker-src blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'"
+            );
+            res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+            res.setHeader('Referrer-Policy', 'no-referrer');
+          }
           if (filePath.startsWith(path.join(productionFrontendPath, 'python-runtime') + path.sep)) {
             res.setHeader('Access-Control-Allow-Origin', '*');
             res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
@@ -641,6 +657,13 @@ async function main() {
     // In-process, over the connection this server already owns. See
     // services/backup.ts for why a second connection is what corrupts the file.
     startBackupSchedule();
+    // Nightly pass that checks project memory against the day's transcripts.
+    startMemoryDreaming();
+    // One-off cleanup of the turn-diff table, which grew unbounded while the
+    // per-turn start mark was missing.
+    void import('./services/git/turnDiff.js')
+      .then(({ pruneTurnDiffs }) => pruneTurnDiffs(30))
+      .catch((error) => console.warn('[TurnDiff] startup prune failed:', error));
     // Pi runs the previous backend left unfinished (a rebuild, a crash) carry on
     // once the server has settled; see services/claude/piRunJournal.ts.
     setTimeout(() => {

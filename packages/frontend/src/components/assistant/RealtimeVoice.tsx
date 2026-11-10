@@ -4,6 +4,7 @@ import { nativeShell } from '@/lib/nativeShell';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { PlumFace, type FacePhase } from './PlumFace';
 
 /** Full-duplex PCM; recognition, audio generation and interruption stay in one model session. */
 export function RealtimeVoice({ chatId, onSaved }: { chatId: string; onSaved?: () => void }) {
@@ -13,6 +14,10 @@ export function RealtimeVoice({ chatId, onSaved }: { chatId: string; onSaved?: (
   const [heard, setHeard] = useState(''),
     [answer, setAnswer] = useState(''),
     [muted, setMuted] = useState(false);
+  /** What the face shows; follows the same steps as the status line. */
+  const [phase, setPhase] = useState<FacePhase>('idle'),
+    [level, setLevel] = useState(0);
+  const loud = useRef(0);
   const resources = useRef<{
     socket?: Socket;
     media?: MediaStream;
@@ -78,15 +83,18 @@ export function RealtimeVoice({ chatId, onSaved }: { chatId: string; onSaved?: (
         socket.on('connect_error', () => {
           setError('Sprachverbindung nicht möglich');
           setStatus('Verbindung beendet');
+          setPhase('failed');
           close();
         });
         socket.on('problem', (message: string) => {
           setError(message);
           setStatus('Verbindung beendet');
+          setPhase('failed');
           close();
         });
         socket.on('ready', () => {
           setStatus('Hört zu');
+          setPhase('listening');
           const input = context.createScriptProcessor(4096, 1, 1);
           resources.current.input = input;
           const source = context.createMediaStreamSource(media),
@@ -99,6 +107,9 @@ export function RealtimeVoice({ chatId, onSaved }: { chatId: string; onSaved?: (
             if (!active || media.getAudioTracks()[0]?.enabled === false) return;
             const samples = e.inputBuffer.getChannelData(0),
               ratio = context.sampleRate / 24000;
+            let energy = 0;
+            for (const sample of samples) energy += sample * sample;
+            loud.current = Math.min(1, Math.sqrt(energy / samples.length) * 6);
             const bytes = new Uint8Array(Math.floor(samples.length / ratio) * 2),
               view = new DataView(bytes.buffer);
             for (let i = 0; i < bytes.length / 2; i++)
@@ -133,12 +144,17 @@ export function RealtimeVoice({ chatId, onSaved }: { chatId: string; onSaved?: (
           next = Math.max(next, context.currentTime + 0.02);
           source.start(next);
           next += buffer.duration;
+          let energy = 0;
+          for (const value of values) energy += value * value;
+          loud.current = Math.min(1, Math.sqrt(energy / values.length) * 6);
           setStatus('Spricht');
+          setPhase('speaking');
         });
         socket.on('speech', () => {
           clear();
           setAnswer('');
           setStatus('Hört zu');
+          setPhase('listening');
         });
         socket.on('transcript', (t: { role: string; text: string }) => {
           if (t.role === 'user') setHeard(t.text);
@@ -148,12 +164,14 @@ export function RealtimeVoice({ chatId, onSaved }: { chatId: string; onSaved?: (
         socket.on('disconnect', () => {
           if (active) {
             setStatus('Verbindung beendet');
+            setPhase('paused');
             close();
           }
         });
       } catch {
         if (active) {
           setError('Mikrofon oder Audioverbindung nicht verfügbar');
+          setPhase('failed');
           close();
         }
       }
@@ -163,8 +181,13 @@ export function RealtimeVoice({ chatId, onSaved }: { chatId: string; onSaved?: (
     setAnswer('');
     setMuted(false);
     setStatus('Verbindet …');
+    setPhase('idle');
+    loud.current = 0;
+    // The blob breathes with whatever is loud right now: your voice or Plum's.
+    const meter = setInterval(() => setLevel(loud.current), 120);
     void connect();
     return () => {
+      clearInterval(meter);
       clear();
       close();
     };
@@ -177,7 +200,10 @@ export function RealtimeVoice({ chatId, onSaved }: { chatId: string; onSaved?: (
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogTitle>Realtime-Sprache</DialogTitle>
-          <p role="status">{status}</p>
+          <div className="plum-voice-presence">
+            <PlumFace phase={muted ? 'paused' : phase} level={level} size={112} title="Plum" />
+            <p role="status">{status}</p>
+          </div>
           {heard && <p>{heard}</p>}
           {answer && <p aria-live="polite">{answer}</p>}
           {error && (

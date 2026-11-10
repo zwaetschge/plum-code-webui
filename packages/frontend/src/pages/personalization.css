@@ -354,3 +354,48 @@ html.eink :is(.personalization-group, .personalization-save, .personalization-di
   font: inherit;
   cursor: pointer;
 }
+
+/* Two-option switch (Darstellung: Standard / Einfach). */
+.personalization-row > div:first-child > span {
+  font-weight: 500;
+  font-size: 14px;
+}
+.personalization-segmented {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--foreground) / 0.05);
+}
+.personalization-segmented button {
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease;
+}
+.personalization-segmented button.is-active {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+  background: hsl(var(--background));
+  box-shadow: 0 1px 3px hsl(0 0% 0% / 0.14);
+}
+.dark .personalization-segmented button.is-active {
+  background: hsl(0 0% 100% / 0.14);
+}
+.personalization-segmented button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+}
+@media (max-width: 520px) {
+  .personalization-row.is-choice {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}

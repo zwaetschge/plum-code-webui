@@ -10,8 +10,10 @@ import type {
   SessionPresenceSnapshot,
   SessionSendAck,
   SessionSendPayload,
+  UiResultEvent,
 } from '@plum-code-webui/shared';
 import { config } from '../config.js';
+import { liveEvents } from '../services/liveEvents.js';
 import { GATEWAY_TOKEN_PREFIX, resolveGatewayToken } from '../services/gateway/tokens.js';
 import { ClaudeProcessManager } from '../services/claude/ClaudeProcessManager.js';
 import { getRunnerAccessDecision } from '../utils/runnerAccess.js';
@@ -220,6 +222,11 @@ export function setupWebSocket(httpServer: HttpServer): Server {
   const processManager = new ClaudeProcessManager(io);
   _processManager = processManager;
   _io = io;
+  // Dynamic UI live widgets (services/assistant/dynamicUiLive.ts) reach every
+  // device of the chat owner.
+  liveEvents.on('assistant:ui-result', (userId: string, event: UiResultEvent) => {
+    io.to(`user:${userId}`).emit('assistant:ui-result', event);
+  });
 
   // Live duplicates share one promise; terminal receipts live in SQLite so a
   // retry after either a socket or backend restart remains idempotent.

@@ -4,7 +4,11 @@
  * backend. The properties that matter:
  *
  * - the spawned CLI gets exactly the headless invocation we promise
- *   (codex exec --json --full-auto, claude -p --output-format json, pi -p)
+ *   (codex exec --json over the HTTPS transport, claude -p --output-format
+ *   json, pi -p)
+ * - a pi model is resolved against the backend's model list: a bare name that
+ *   exists on two APIs is refused instead of left to Pi's fuzzy match, which
+ *   silently billed the wrong account
  * - a codex/pi child must NOT inherit ANTHROPIC_* router overrides,
  *   while a claude child keeps them (that's how nested GLM routing works)
  * - a `zai` child runs the claude binary but on the Z.AI endpoint the backend
@@ -141,6 +145,37 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
   const claudeRecord = writeFakeCli(bin, 'claude', claudeStdout);
   const piRecord = writeFakeCli(bin, 'pi', 'pi says hi\n');
 
+  const piModels = [
+    {
+      id: 'z-ai/glm-5.3',
+      provider: 'z-ai',
+      model: 'glm-5.3',
+      route: 'direct',
+      description: 'z-ai API',
+    },
+    {
+      id: 'deepseek/deepseek-flash',
+      provider: 'deepseek',
+      model: 'deepseek-flash',
+      route: 'direct',
+      description: 'DeepSeek direct (own deepseek API key)',
+    },
+    {
+      id: 'mistral/deepseek-flash',
+      provider: 'mistral',
+      model: 'deepseek-flash',
+      route: 'hosted',
+      description: 'DeepSeek hosted by mistral (bills the mistral account)',
+    },
+    {
+      id: 'mistral/devstral-latest',
+      provider: 'mistral',
+      model: 'devstral-latest',
+      route: 'direct',
+      description: 'Mistral direct (own mistral API key)',
+    },
+  ];
+
   // Stub backend: serves the configured entries and records usage postings.
   const usagePosts: any[] = [];
   const backend = http.createServer((req, res) => {
@@ -168,7 +203,12 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
                 },
                 { id: '3', label: 'Claude', provider: 'claude', model: '', enabled: true },
                 { id: '4', label: 'Z.AI', provider: 'zai', model: '', enabled: true },
+                { id: '5', label: 'Pi', provider: 'pi', model: '', enabled: true },
               ],
+              // The user's available Pi models with their route (shape of
+              // describePiModelRoute in utils/piConfig.ts). DeepSeek Flash sits
+              // on two APIs: its own key and hosted by Mistral.
+              piModels,
               // Pi runs from a per-user agent dir; the bridge must forward it
               // to pi children only. The zai block is the user's Z.AI
               // endpoint, which replaces the inherited upstream.
@@ -221,9 +261,32 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
     ]);
 
     const listed = await mcp.call('tools/call', { name: 'list_subagents', arguments: {} });
-    const listedText = toolText(listed);
-    assert.match(listedText, /GLM/);
-    assert.match(listedText, /z-ai\/glm-5\.3/);
+    const listedBody = JSON.parse(toolText(listed)) as {
+      subagents: Array<{ subagent: string; provider: string; model: string; route?: string }>;
+      pi_models: Array<{ model: string; route: string }>;
+      pi_note: string;
+    };
+    const listedEntry = (label: string) => {
+      const entry = listedBody.subagents.find((item) => item.subagent === label);
+      assert.ok(entry, `list_subagents must list ${label}`);
+      return entry;
+    };
+    const listedGlm = listedEntry('GLM');
+    assert.equal(listedGlm.provider, 'pi');
+    assert.equal(listedGlm.model, 'z-ai/glm-5.3');
+    assert.equal(listedGlm.route, 'z-ai API', 'a pi entry names the API it bills');
+    // A pi entry without a model runs Pi's first available model, named so.
+    const listedPi = listedEntry('Pi');
+    assert.equal(listedPi.model, 'z-ai/glm-5.3 (Pi default)');
+    assert.equal(listedPi.route, 'z-ai API');
+    const listedCodex = listedEntry('Codex');
+    assert.equal(listedCodex.model, '(provider default)');
+    assert.equal('route' in listedCodex, false, 'only pi entries carry a route');
+    assert.deepEqual(
+      listedBody.pi_models,
+      piModels.map((entry) => ({ model: entry.id, route: entry.description }))
+    );
+    assert.match(listedBody.pi_note, /provider part decides which account is billed/);
 
     // Codex: headless invocation, router env stripped, usage booked.
     const codexRun = await mcp.call('tools/call', {
@@ -240,6 +303,12 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
       'workspace-write',
       '-c',
       'approval_policy="never"',
+      // HTTPS streaming instead of the Responses WebSocket, which the server
+      // closed mid-turn (codexTransportArgs in the backend does the same).
+      '-c',
+      'model_providers.openai-https={name="OpenAI",requires_openai_auth=true,wire_api="responses",supports_websockets=false}',
+      '-c',
+      'model_provider="openai-https"',
       'do the thing',
     ]);
     assert.equal(codexSeen.cwd, work);
@@ -266,6 +335,63 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
       piSeen.env.PI_CODING_AGENT_DIR,
       '/tenant/pi-agent',
       'pi must run in the calling user agent dir'
+    );
+
+    // Pi without a model: the first available model is named explicitly, so
+    // the run says which API it used instead of taking Pi's own default.
+    await mcp.call('tools/call', {
+      name: 'run_subagent',
+      arguments: { subagent: 'Pi', prompt: 'default model', working_directory: work },
+    });
+    assert.deepEqual(JSON.parse(readFileSync(piRecord, 'utf8')).argv, [
+      '-p',
+      '--no-session',
+      '--model',
+      'z-ai/glm-5.3',
+      'default model',
+    ]);
+
+    // A bare name that exists once resolves to its full provider/model id.
+    await mcp.call('tools/call', {
+      name: 'run_subagent',
+      arguments: { subagent: 'Pi', prompt: 'bare', model: 'devstral', working_directory: work },
+    });
+    assert.deepEqual(JSON.parse(readFileSync(piRecord, 'utf8')).argv, [
+      '-p',
+      '--no-session',
+      '--model',
+      'mistral/devstral-latest',
+      'bare',
+    ]);
+
+    // A bare name on two APIs is refused before Pi starts, listing both routes.
+    const piRunsBefore = readFileSync(piRecord, 'utf8');
+    const ambiguous = await mcp.call('tools/call', {
+      name: 'run_subagent',
+      arguments: { subagent: 'Pi', prompt: 'which?', model: 'deepseek-flash' },
+    });
+    assert.equal(ambiguous.result.isError, true);
+    assert.match(toolText(ambiguous), /"deepseek-flash" is ambiguous in Pi/);
+    assert.match(
+      toolText(ambiguous),
+      /deepseek\/deepseek-flash — DeepSeek direct \(own deepseek API key\)/
+    );
+    assert.match(
+      toolText(ambiguous),
+      /mistral\/deepseek-flash — DeepSeek hosted by mistral \(bills the mistral account\)/
+    );
+    // A full id that is not in the list is refused too, with the same-name ids.
+    const missing = await mcp.call('tools/call', {
+      name: 'run_subagent',
+      arguments: { subagent: 'Pi', prompt: 'gone', model: 'openrouter/deepseek-flash' },
+    });
+    assert.equal(missing.result.isError, true);
+    assert.match(toolText(missing), /Pi model "openrouter\/deepseek-flash" is not available/);
+    assert.match(toolText(missing), /Choose one of:\n {2}deepseek\/deepseek-flash/);
+    assert.equal(
+      readFileSync(piRecord, 'utf8'),
+      piRunsBefore,
+      'a refused model must never reach the pi CLI'
     );
 
     // Claude: keeps the router env — nested GLM routing depends on it.
@@ -361,9 +487,31 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
       arguments: { subagent: 'nope', prompt: 'x' },
     });
     assert.equal(unknown.result.isError, true);
-    assert.match(toolText(unknown), /Configured: Codex, GLM, Claude, Z.AI/);
+    assert.match(toolText(unknown), /Configured: Codex, GLM, Claude, Z.AI, Pi/);
   } finally {
     mcp.close();
+  }
+
+  // PLUM_CODEX_WEBSOCKETS=1 keeps the Responses WebSocket as an opt-out.
+  const websockets = startMcp({ ...baseEnv, PLUM_CODEX_WEBSOCKETS: '1' });
+  try {
+    await websockets.call('initialize', { protocolVersion: '2024-11-05' });
+    await websockets.call('tools/call', {
+      name: 'run_subagent',
+      arguments: { subagent: 'Codex', prompt: 'over websockets', working_directory: work },
+    });
+    assert.deepEqual(JSON.parse(readFileSync(codexRecord, 'utf8')).argv, [
+      'exec',
+      '--json',
+      '--skip-git-repo-check',
+      '--sandbox',
+      'workspace-write',
+      '-c',
+      'approval_policy="never"',
+      'over websockets',
+    ]);
+  } finally {
+    websockets.close();
     backend.close();
   }
 

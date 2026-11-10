@@ -80,19 +80,36 @@ assert.doesNotMatch(
 // Only the rules that actually target Gecko. Slicing to end-of-file used to be
 // equivalent because the Gecko block sat last, so any stylesheet appended after
 // it — a search field with its own blur, say — failed a guard about Firefox.
-const geckoGuard = css
+// A rule targets Gecko when its own selector names `plum-engine-gecko` outside
+// a `:not(...)`: the glass themes exclude Gecko with `:not(.plum-engine-gecko)`
+// and sit in `@supports (backdrop-filter: blur(1px))`, which is neither a Gecko
+// rule nor a declaration.
+const cssRules = css
+  .replace(/\/\*[\s\S]*?\*\//g, '')
   .split('}')
-  .filter((block) => block.includes('plum-engine-gecko'))
-  .join('}\n');
+  .filter((block) => block.includes('{'))
+  .map((block) => {
+    const open = block.lastIndexOf('{');
+    const head = block.slice(0, open);
+    return {
+      selector: head.slice(head.lastIndexOf('{') + 1).trim(),
+      declarations: block.slice(open + 1),
+    };
+  });
+const geckoRules = cssRules.filter(({ selector }) =>
+  selector.replace(/:not\([^)]*\)/g, '').includes('plum-engine-gecko')
+);
+const geckoGuard = geckoRules
+  .map(({ selector, declarations }) => `${selector} {${declarations}}`)
+  .join('\n');
 assert.ok(geckoGuard.length > 0, 'the Gecko performance path must still exist');
 assert.match(geckoGuard, /backdrop-filter:\s*none\s*!important/);
 // One live blur is affordable; a full-screen one is not. The composer bar is
 // the single documented exception — every other Gecko rule must stay filterless,
 // or Firefox repaints the moving background for that surface on every frame.
-const geckoLiveBlurSelectors = css
-  .split('}')
-  .filter((block) => block.includes('plum-engine-gecko') && /backdrop-filter:\s*blur\(/.test(block))
-  .map((block) => block.slice(block.lastIndexOf('*/') + 2, block.indexOf('{')).trim());
+const geckoLiveBlurSelectors = geckoRules
+  .filter(({ declarations }) => /backdrop-filter:\s*blur\(/.test(declarations))
+  .map(({ selector }) => selector);
 assert.deepEqual(
   geckoLiveBlurSelectors,
   ['html.plum-engine-gecko body .chat-composer-form'],
@@ -103,10 +120,19 @@ assert.match(
   /hsl\(var\(--card\)\s*\/\s*0\.(?:24|3|34|36)\)/,
   'Gecko optical glass must remain translucent rather than becoming an opaque fallback'
 );
-assert.doesNotMatch(
-  geckoGuard,
-  /hsl\(var\(--card\)\s*\/\s*0\.9[0-9]*\)/,
-  'Gecko optical glass must not regress to the old opaque card fallback'
+// Settings is the one deliberate opaque surface: without a live blur its dense
+// forms stay readable over every animated theme ("Keep the material readable",
+// index.css), shared with e-ink. Every other Gecko rule keeps optical glass.
+const geckoOpaqueCardSelectors = geckoRules
+  .filter(({ declarations }) => /hsl\(var\(--card\)\s*\/\s*0\.9[0-9]*\)/.test(declarations))
+  .map(({ selector }) => selector.replace(/\s+/g, ' '));
+assert.deepEqual(
+  geckoOpaqueCardSelectors,
+  [
+    'html.plum-engine-gecko .settings-dashboard :is(.settings-sidebar-panel, .settings-panel-card, .settings-utility-card), ' +
+      'html.eink .settings-dashboard :is(.settings-sidebar-panel, .settings-panel-card, .settings-utility-card)',
+  ],
+  'Gecko optical glass must not regress to the old opaque card fallback outside settings'
 );
 
 console.log('Ambient motion regression tests passed.');

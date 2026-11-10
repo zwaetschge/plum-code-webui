@@ -71,9 +71,40 @@ async function requestApproval(toolName: string, input: unknown): Promise<boolea
   return result.approved === true;
 }
 
+/**
+ * The Z.AI vision MCP gives text-only GLM 5.3 eyes and bills the Z.AI plan.
+ * Other models see images themselves (or cannot use them); DeepSeek kept
+ * reaching for it anyway.
+ */
+const ZAI_VISION_MODEL = /glm[-_.]?5[-_.]3/i;
+const ZAI_VISION_TARGET = /zai[-_]vision/i;
+
+/** Whether a tool call goes to the zai-vision server, directly or via the `mcp` proxy. */
+export function targetsZaiVision(toolName: string, input: unknown): boolean {
+  if (ZAI_VISION_TARGET.test(toolName)) return true;
+  if (toolName !== 'mcp' || !input || typeof input !== 'object') return false;
+  const args = input as Record<string, unknown>;
+  return ['server', 'connect', 'describe', 'tool'].some(
+    (key) => typeof args[key] === 'string' && ZAI_VISION_TARGET.test(args[key] as string)
+  );
+}
+
+export function zaiVisionAllowedFor(modelId: string | undefined): boolean {
+  return !!modelId && ZAI_VISION_MODEL.test(modelId);
+}
+
 export default function webuiPermissions(pi: ExtensionAPI) {
-  pi.on('tool_call', async (event) => {
+  pi.on('tool_call', async (event, ctx) => {
     const toolName = event.toolName || 'unknown';
+    const modelId = ctx?.model?.id;
+    if (targetsZaiVision(toolName, event.input) && !zaiVisionAllowedFor(modelId)) {
+      return {
+        block: true,
+        reason:
+          `zai-vision is reserved for GLM 5.3 and is not available to ${modelId || 'this model'}. ` +
+          'Do not call it again. To look at an image, open the file with the read tool.',
+      };
+    }
     const mode = (process.env.WEBUI_SESSION_MODE || 'auto-accept').toLowerCase();
 
     if (mode === 'danger' || mode === 'auto-accept') return;

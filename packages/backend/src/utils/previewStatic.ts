@@ -1,5 +1,5 @@
 import path from 'path';
-import { isAllowedBasePath, isPathInside } from './allowedPaths.js';
+import { isAllowedBasePath, isPathInside, isSensitivePath } from './allowedPaths.js';
 
 export const STATIC_INIT_PATH = '/__preview-static-init';
 export const STATIC_ROOT_COOKIE = 'preview_static_root';
@@ -82,6 +82,7 @@ export function resolvePreviewStaticPath(rootPath: string, requestPath: string):
   const resolved = path.resolve(root, relativePath);
   if (!isPathInside(root, resolved)) return null;
   if (!isAllowedBasePath(resolved)) return null;
+  if (isSensitivePath(resolved)) return null;
   if (!isPreviewStaticFile(resolved)) return null;
   return resolved;
 }

@@ -4,8 +4,14 @@ import {
   assistantSpeech,
   assistantTranscription,
   assistantVoices,
+  parseMistralVoices,
+  pickMistralVoices,
 } from '../src/services/assistant/voice.js';
-import { splitSpeech } from '../../frontend/src/components/assistant/voiceSegments.js';
+import {
+  playbackSegments,
+  recognitionLocale,
+  splitSpeech,
+} from '../../frontend/src/components/assistant/voiceSegments.js';
 const calls: Array<{ url: string; body: string; user: string }> = [];
 const server = createServer(async (req, res) => {
   const buffers = [];
@@ -75,6 +81,47 @@ try {
     assert.ok(pieces.every((piece) => !/[\uD800-\uDBFF]$/.test(piece)));
   }
   assert.throws(() => splitSpeech('test', 1));
+
+  // Spoken playback: a short first piece at a sentence end, nothing lost.
+  const answer =
+    'Morgen wird es in Zürich bewölkt. Am Nachmittag zieht Regen durch, nimm einen Schirm mit! ' +
+    'Ab Dienstag wird es freundlicher, mit bis zu zwölf Grad. '.repeat(30) +
+    'Gute Reise.';
+  const spoken = playbackSegments(answer);
+  assert.equal(spoken.join(''), answer);
+  assert.ok(spoken.length >= 3, String(spoken.length));
+  assert.ok(spoken[0]!.length <= 220 && /[.!?]\s*$/.test(spoken[0]!), spoken[0]);
+  assert.ok(spoken.slice(1, -1).every((piece) => piece.length <= 900 && /[.!?]\s*$/.test(piece)));
+  assert.deepEqual(playbackSegments('Kurz.'), ['Kurz.']);
+  assert.deepEqual(playbackSegments('   '), []);
+  // One long sentence without a stop still splits losslessly within the size limit.
+  const runOn = 'wort '.repeat(2000);
+  assert.equal(playbackSegments(runOn).join(''), runOn);
+  assert.ok(playbackSegments(runOn).every((piece) => piece.length <= 4500));
+  assert.equal(recognitionLocale('German'), 'de-CH');
+  assert.equal(recognitionLocale('English'), 'en-US');
+
+  // Mistral's catalogue: one page of `items` with languages; the pickers get
+  // German first, then French, Italian and English, labelled, other languages left out.
+  const page = parseMistralVoices({
+    items: [
+      { id: 'en-1', name: 'James', languages: ['en_us'] },
+      { id: 'ja-1', name: 'Haruto', languages: ['ja'] },
+      { id: 'fr-1', name: 'Marie', languages: ['fr_fr'] },
+      { id: 'de-1', name: 'Heidi', languages: ['de'] },
+      { id: 'en-2', name: 'Harriet', languages: ['en_GB'] },
+    ],
+    total: 66,
+  });
+  assert.deepEqual(
+    pickMistralVoices(page).map((voice) => [voice.id, voice.name]),
+    [
+      ['mistral:de-1', 'Heidi · Deutsch'],
+      ['mistral:fr-1', 'Marie · Französisch'],
+      ['mistral:en-2', 'Harriet · Englisch'],
+      ['mistral:en-1', 'James · Englisch'],
+    ]
+  );
   console.log(
     'PASS: OmniVoice-only synthesis, tenant attribution, Whisper word timestamps and lossless long-text segments'
   );

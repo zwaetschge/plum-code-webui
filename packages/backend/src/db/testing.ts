@@ -24,10 +24,46 @@ import { closePool, getPool } from './pg.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** Test schemas older than this are leftovers of a run that never cleaned up. */
+const STALE_TEST_SCHEMA_SECONDS = 3 * 60 * 60;
+
+/**
+ * `test_<unix seconds, base 36>_<random>`: the time is in the name because
+ * Postgres does not record when a schema was created, and a run that crashes
+ * before `dropTestSchema()` leaves its schema behind — 37 of them had piled up
+ * in the production database, which these tests share.
+ */
 export function useTestSchema(): string {
-  const schema = `test_${randomBytes(6).toString('hex')}`;
+  const stamp = Math.floor(Date.now() / 1000).toString(36);
+  const schema = `test_${stamp}_${randomBytes(4).toString('hex')}`;
   process.env.PGSCHEMA = schema;
   return schema;
+}
+
+/** Whether a schema name is a test schema old enough to be a leftover. */
+export function isStaleTestSchema(name: string, nowSeconds = Date.now() / 1000): boolean {
+  const stamped = /^test_([0-9a-z]{6,8})_[0-9a-f]{8}$/.exec(name);
+  if (stamped) {
+    const created = parseInt(stamped[1]!, 36);
+    return Number.isFinite(created) && nowSeconds - created > STALE_TEST_SCHEMA_SECONDS;
+  }
+  // The scheme before the timestamp: nothing creates these any more.
+  return /^test_[0-9a-f]{12}$/.test(name);
+}
+
+/** Drops leftovers of earlier runs; never the schema of this run. */
+async function sweepStaleTestSchemas(current: string): Promise<void> {
+  try {
+    const { rows } = await getPool().query<{ nspname: string }>(
+      "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'test\\_%'"
+    );
+    for (const { nspname } of rows) {
+      if (nspname === current || !isStaleTestSchema(nspname)) continue;
+      await getPool().query(`DROP SCHEMA IF EXISTS "${nspname}" CASCADE`);
+    }
+  } catch {
+    // Housekeeping only; a test run must not fail because of it.
+  }
 }
 
 /**
@@ -42,6 +78,7 @@ export async function createTestSchema(options: { runMigrations?: boolean } = {}
   if (!schema) throw new Error('useTestSchema() must run before createTestSchema()');
 
   const pool = getPool();
+  await sweepStaleTestSchemas(schema);
   await pool.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await pool.query(sql);

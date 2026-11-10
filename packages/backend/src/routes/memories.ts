@@ -5,6 +5,7 @@ import os from 'os';
 import { requireAuth } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { isAllowedBasePath, isPathInside } from '../utils/allowedPaths.js';
+import { claudeProjectSlug } from '../utils/projectMemory.js';
 
 const router = Router();
 
@@ -13,7 +14,9 @@ const router = Router();
  * e.g., "/mnt/cache/appdata/plum-code-webui" -> "-mnt-cache-appdata-plum-code-webui"
  */
 function encodeClaudePath(workingDirectory: string): string {
-  return workingDirectory.replace(/\//g, '-');
+  // Claude Code turns every character outside [A-Za-z0-9] into '-', so a
+  // project path with a space, dot or umlaut found no memory before.
+  return claudeProjectSlug(workingDirectory);
 }
 
 /**

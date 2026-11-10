@@ -7,7 +7,8 @@ import {
   useState,
   type ComponentPropsWithoutRef,
 } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown';
+import { parseUiEntityHref } from '@plum-code-webui/shared';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -19,6 +20,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { CitationChip } from './ChatWebSources';
+import { EntityLink } from './dynamic-ui/EntityLink';
 import { isCitationLabel, normalizeUrl, sourceIndex, type WebSource } from './webSources';
 
 const SourceFiles = createContext<Array<{ id: string; revision: number }>>([]);
@@ -103,6 +105,9 @@ function MarkdownLink({
 }: ComponentPropsWithoutRef<'a'> & { node?: unknown }) {
   const index = useContext(WebSources);
   const group = (props as Record<string, unknown>)['data-cite-refs'];
+  // Dynamic UI v2: `[Ada Lovelace](entity:Ada_Lovelace)` opens a Wikipedia card.
+  const entity = href ? parseUiEntityHref(href) : null;
+  if (entity) return <EntityLink title={entity}>{children}</EntityLink>;
   if (href && index.size) {
     const sources = [
       ...new Set(
@@ -268,6 +273,8 @@ export function CodePlayground({ code, language }: { code: string; language: str
     </>
   );
 }
+/** Keeps `entity:` link targets (Dynamic UI entity cards); everything else as default. */
+const urlTransform = (url: string) => (url.startsWith('entity:') ? url : defaultUrlTransform(url));
 const markdownComponents: Components = {
   a: MarkdownLink,
   pre: ({ children }) => <div className="not-prose plum-prose-code">{children}</div>,
@@ -306,6 +313,7 @@ export const ChatRichText = memo(function ChatRichText({
             remarkPlugins={[remarkGfm, remarkMath]}
             rehypePlugins={[rehypeKatex, [rehypeCitationGroups, { index }]]}
             components={markdownComponents}
+            urlTransform={urlTransform}
           >
             {text}
           </ReactMarkdown>

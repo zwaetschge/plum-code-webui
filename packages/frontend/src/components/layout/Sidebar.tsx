@@ -76,6 +76,9 @@ import {
 import type { ApiResponse, Session } from '@plum-code-webui/shared';
 import type { UsageData } from '@plum-code-webui/shared';
 
+/** Run states the collapsed rail marks with a dot; idle sessions stay plain. */
+const COLLAPSED_RUN_TONES = new Set(['working', 'needs-you', 'error']);
+
 /** Zone ①: the work modes. The route decides which one is active. */
 /** Page code per area, fetched before the area transition starts. */
 const AREA_PRELOAD: Record<SidebarMode, () => Promise<unknown>> = {
@@ -758,9 +761,9 @@ export function Sidebar({
   };
 
   const getCategoryAbbreviation = (group: { id: string; label: string }) => {
-    if (group.id === FAVORITES_GROUP_ID) return '★';
-    if (group.id === RECENT_GROUP_ID) return 'Z';
-    if (group.id === UNCATEGORIZED_GROUP_ID) return '•';
+    if (group.id === FAVORITES_GROUP_ID) return <Star className="h-3 w-3" />;
+    if (group.id === RECENT_GROUP_ID) return <Clock className="h-3 w-3" />;
+    if (group.id === UNCATEGORIZED_GROUP_ID) return <Folder className="h-3 w-3" />;
     const label = group.label;
     const initials = label
       .trim()
@@ -900,12 +903,19 @@ export function Sidebar({
                 <Loader2 className="h-4 w-4 animate-spin" />
               </span>
             )}
-            {isCollapsed && unreadCount > 0 && (
-              <span className="sidebar-session-unread is-collapsed" aria-hidden="true">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            )}
           </span>
+          {/* Outside the icon: it clips to its round shape. */}
+          {isCollapsed && unreadCount > 0 && (
+            <span className="sidebar-session-unread is-collapsed" aria-hidden="true">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+          {isCollapsed && COLLAPSED_RUN_TONES.has(sessionRunState.tone) && (
+            <span
+              className={cn('sidebar-session-run-dot is-collapsed', `is-${sessionRunState.tone}`)}
+              aria-hidden="true"
+            />
+          )}
           {!isCollapsed && (
             <span className="flex min-w-0 flex-1 items-center text-xs">
               <span className="sidebar-session-name min-w-0 flex-1 font-medium">
@@ -1229,8 +1239,8 @@ export function Sidebar({
                   <>
                     <span className="sidebar-session-group-bubble">
                       {getCategoryAbbreviation(group)}
+                      <span className="sidebar-session-group-count">{group.sessions.length}</span>
                     </span>
-                    <span className="sidebar-session-group-count">{group.sessions.length}</span>
                   </>
                 ) : (
                   <>

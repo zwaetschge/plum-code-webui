@@ -4,25 +4,43 @@
  * One-shot text completion for internal WebUI features (commit messages,
  * summaries, etc.) — NOT the user's interactive session.
  *
- * Codex is the primary admin provider going forward. Anthropic is restricting
- * `claude -p` and moving to a credit system, so Claude is treated as a fallback.
+ * Claude Code is the primary admin provider again (2026-11-09: Codex is no
+ * longer used and its account is on the free plan). Claude runs Sonnet by
+ * default (`ADMIN_LLM_CLAUDE_MODEL`): these are housekeeping calls, and on
+ * memory work Sonnet 5.5 matches Opus 5.5 (Anthropic, "components of agent
+ * memory"). The prompt goes in on stdin, so long inputs never hit the argv
+ * limit, and runs are not persisted as sessions.
  *
- * Order of preference: codex → claude. Pi is not a candidate: its provider
+ * Order of preference: claude → codex. Pi is not a candidate: its provider
  * connections are per user, and these helper calls have no user context.
  * Override via env `ADMIN_LLM_PROVIDER=codex|claude`.
  */
 
 import { spawn } from 'child_process';
-import { isProviderAvailable, type CLIProvider } from '../services/cli-providers.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  codexTransportArgs,
+  isProviderAvailable,
+  type CLIProvider,
+} from '../services/cli-providers.js';
 import { getCodexWebuiApprovalPolicy, getCodexWebuiSandboxMode } from './codexDefaults.js';
 
-const DEFAULT_ORDER: CLIProvider[] = ['codex', 'claude'];
+const DEFAULT_ORDER: CLIProvider[] = ['claude', 'codex'];
+const DEFAULT_CLAUDE_ADMIN_MODEL = 'claude-sonnet-5-5';
 
 interface RunOpts {
   cwd?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
   model?: string;
+  /**
+   * The call works with files (reads anywhere, edits in `cwd`) instead of only
+   * answering. Claude then runs without permission prompts, which print mode
+   * cannot answer; callers keep a backup of what it may change.
+   */
+  agentic?: boolean;
 }
 
 interface ProviderRunner {
@@ -43,26 +61,75 @@ function buildRunner(provider: CLIProvider): ProviderRunner {
       // (commit messages, summaries, etc.) don't pollute the resume picker.
       return {
         command: 'codex',
-        args: (prompt, opts) => [
-          'exec',
-          '--skip-git-repo-check',
-          '--ephemeral',
-          ...(opts.model ? ['-m', opts.model] : []),
-          '--sandbox',
-          getCodexWebuiSandboxMode(),
-          '-c',
-          `approval_policy="${getCodexWebuiApprovalPolicy()}"`,
-          prompt,
-        ],
+        args: (prompt, opts) => {
+          const model = opts.model ?? codexAdminModel();
+          return [
+            'exec',
+            '--skip-git-repo-check',
+            '--ephemeral',
+            // Same transport as the sessions: on the default provider the
+            // ChatGPT account rejects the configured model and every admin call
+            // (memory optimizer, dreaming, summaries) failed.
+            ...codexTransportArgs(),
+            ...(model ? ['-m', model] : []),
+            '--sandbox',
+            getCodexWebuiSandboxMode(),
+            '-c',
+            `approval_policy="${getCodexWebuiApprovalPolicy()}"`,
+            prompt,
+          ];
+        },
       };
     case 'claude':
     default:
       return {
         command: 'claude',
-        args: (prompt) => ['--print', '-p', prompt],
-        pipeOnStdin: false,
+        args: (_prompt, opts) => [
+          '--print',
+          '--no-session-persistence',
+          '--model',
+          opts.model ?? process.env.ADMIN_LLM_CLAUDE_MODEL ?? DEFAULT_CLAUDE_ADMIN_MODEL,
+          ...(opts.agentic ? ['--dangerously-skip-permissions'] : []),
+        ],
+        pipeOnStdin: true,
       };
   }
+}
+
+/**
+ * A model the Codex account actually offers. The configured default can be
+ * one the plan no longer includes (2026-11-09: `gpt-6.1-sol` after a switch to
+ * a smaller plan, rejected with "not supported when using Codex with a ChatGPT
+ * account"); Codex lists what the account may use in `models_cache.json`.
+ * Returns undefined to keep Codex's own default when nothing better is known.
+ */
+export function codexAdminModel(codexHome = path.join(os.homedir(), '.codex')): string | undefined {
+  if (process.env.ADMIN_LLM_CODEX_MODEL) return process.env.ADMIN_LLM_CODEX_MODEL;
+  let available: string[];
+  try {
+    const cache = JSON.parse(fs.readFileSync(path.join(codexHome, 'models_cache.json'), 'utf8'));
+    const models: Array<{ slug?: unknown; visibility?: unknown }> = Array.isArray(cache?.models)
+      ? cache.models
+      : [];
+    available = models
+      // `hide` marks internal entries (reserve, auto-review), not chat models.
+      .filter((model) => model?.visibility !== 'hide')
+      .map((model) => model?.slug)
+      .filter((slug): slug is string => typeof slug === 'string');
+  } catch {
+    return undefined;
+  }
+  if (available.length === 0) return undefined;
+  let configured: string | undefined;
+  try {
+    configured = /^model\s*=\s*"([^"]+)"/m.exec(
+      fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8')
+    )?.[1];
+  } catch {
+    configured = undefined;
+  }
+  if (configured && available.includes(configured)) return undefined;
+  return available.find((slug) => /terra/i.test(slug)) ?? available[0];
 }
 
 async function pickProvider(): Promise<CLIProvider | null> {

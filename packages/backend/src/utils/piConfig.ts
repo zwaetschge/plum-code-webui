@@ -15,6 +15,7 @@ import {
 import { lookupContextWindow } from './contextWindow.js';
 import { writeFileAtomicSync } from './atomicWrite.js';
 import { refreshProviderModelsInBackground } from './providerModelDiscovery.js';
+import { get as pgGet } from '../db/pg.js';
 
 const CLAUDE_AGENTS_DIR = path.join(os.homedir(), '.claude', 'agents');
 const CLAUDE_SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json');
@@ -45,9 +46,27 @@ export const PI_HTTP_IDLE_TIMEOUT_MS = 150_000;
  * its window. On a 32k model the global value put the threshold below zero,
  * so Pi compacted before every request.
  */
-export function piCompactionReserveFor(contextWindow: number): number {
+export function piCompactionReserveFor(contextWindow: number, modelKey = ''): number {
+  const cap = PI_COMPACTION_CONTEXT_CAPS.find((entry) => entry.match.test(modelKey));
+  if (cap && contextWindow > cap.tokens + PI_COMPACTION_RESERVE_TOKENS) {
+    return contextWindow - cap.tokens;
+  }
   return Math.min(PI_COMPACTION_RESERVE_TOKENS, Math.floor(contextWindow / 4));
 }
+
+/**
+ * Models whose requests get slow long before their window is full; Pi compacts
+ * them at `tokens` instead of just below the window. Pi's reserve only moves
+ * the threshold (summaries use the model's output limit), so a large reserve
+ * is safe.
+ *
+ * DeepSeek's 1M window let sessions sit at 400-700k for hours: every tool
+ * round then took 4-6 s instead of 2, a single image result at 694k broke the
+ * request limit (413), and compaction at ~1M never came.
+ */
+export const PI_COMPACTION_CONTEXT_CAPS: ReadonlyArray<{ match: RegExp; tokens: number }> = [
+  { match: /deepseek/i, tokens: 256_000 },
+];
 
 interface ClaudeMcpServer {
   type?: string;
@@ -217,23 +236,29 @@ export function buildPiProviderConfig(
  * Pi's catalog lists every Mistral model, dated snapshots, legacy and audio
  * ones included, so the picker gets the current chat and code models only.
  */
-const PI_NATIVE_PROVIDERS: Record<string, { catalogFile: string; api: string; models: string[] }> =
-  {
-    mistral: {
-      catalogFile: 'mistral.json',
-      api: 'mistral-conversations',
-      models: [
-        'mistral-medium-3.5',
-        'mistral-large-latest',
-        'devstral-latest',
-        'devstral-medium-latest',
-        'codestral-latest',
-        'magistral-medium-latest',
-        'mistral-small-latest',
-        'zai-glm-5-3',
-      ],
-    },
-  };
+const PI_NATIVE_PROVIDERS: Record<
+  string,
+  { catalogFile: string; api: string; models: string[]; hosted?: RegExp[] }
+> = {
+  mistral: {
+    catalogFile: 'mistral.json',
+    api: 'mistral-conversations',
+    models: [
+      'mistral-medium-3.5',
+      'mistral-large-latest',
+      'devstral-latest',
+      'devstral-medium-latest',
+      'codestral-latest',
+      'magistral-medium-latest',
+      'mistral-small-latest',
+      'zai-glm-5-3',
+    ],
+    // Third-party models Mistral hosts under dated ids
+    // (`deepseek-v4-1-flash-1017`): offered so the Mistral route can be picked
+    // on purpose, next to the vendor's own API (`deepseek/deepseek-flash`).
+    hosted: [/^deepseek-/],
+  },
+};
 
 /** The curated models of a native provider that Pi's installed catalog knows. */
 export function readPiNativeModelIds(providerId: string): string[] {
@@ -270,7 +295,95 @@ export function readPiNativeModelIds(providerId: string): string[] {
     knownIds.add(key.includes(':') ? key.slice(key.indexOf(':') + 1) : key);
     if (isRecord(value) && typeof value.id === 'string') knownIds.add(value.id);
   }
-  return native.models.filter((id) => knownIds.has(id));
+  const curated = native.models.filter((id) => knownIds.has(id));
+  const hosted = [...knownIds]
+    .filter((id) => !id.includes(':') && (native.hosted ?? []).some((re) => re.test(id)))
+    .sort();
+  return [...new Set([...curated, ...hosted])];
+}
+
+/**
+ * Which API a Pi model id actually bills. The same model family can be reached
+ * twice: on its vendor's own API (`deepseek/deepseek-flash`, the DeepSeek key)
+ * or hosted by another provider (`mistral/deepseek-v4-1-flash-1017`, the
+ * Mistral/Vibe budget). A session that only saw the model name picked the
+ * Mistral one for "DeepSeek Flash" and emptied the budget meant for GLM 5.3.
+ */
+export interface PiModelRoute {
+  id: string;
+  provider: string;
+  model: string;
+  /** `direct`: the provider is the model's vendor. `hosted`: someone else serves it. */
+  route: 'direct' | 'hosted';
+  /** One line for lists and prompts, e.g. "DeepSeek direct (deepseek API key)". */
+  description: string;
+}
+
+const PI_VENDORS: Array<{ match: RegExp; vendor: string; providers: string[] }> = [
+  { match: /^deepseek[-_]/i, vendor: 'DeepSeek', providers: ['deepseek'] },
+  { match: /^(zai[-_])?glm[-_]/i, vendor: 'Z.AI GLM', providers: ['z-ai', 'zai'] },
+  { match: /^qwen/i, vendor: 'Qwen', providers: [] },
+];
+
+export function describePiModelRoute(id: string): PiModelRoute {
+  const slash = id.indexOf('/');
+  const provider = slash > 0 ? id.slice(0, slash) : '';
+  const model = slash > 0 ? id.slice(slash + 1) : id;
+  const vendor = PI_VENDORS.find((entry) => entry.match.test(model));
+  const hosted = !!vendor && vendor.providers.length > 0 && !vendor.providers.includes(provider);
+  return {
+    id,
+    provider,
+    model,
+    route: hosted ? 'hosted' : 'direct',
+    description: hosted
+      ? `${vendor!.vendor} hosted by ${provider} (bills the ${provider} account)`
+      : vendor && vendor.providers.includes(provider)
+        ? `${vendor.vendor} direct (own ${provider} API key)`
+        : `${provider} API`,
+  };
+}
+
+/**
+ * Name of a model without spelling differences between APIs: dots and dashes
+ * alike, and without the vendor prefix a host adds (`zai-glm-5-3` on Mistral is
+ * `glm-5.3` on Z.AI).
+ */
+const normalizeModelName = (value: string): string =>
+  value.toLowerCase().replace(/[._]/g, '-').replace(/^zai-/, '');
+
+/**
+ * Resolves what a caller asked for to exactly one available Pi model id.
+ * A full `provider/model` id must exist. A bare name matches the model part
+ * exactly (dots and dashes alike), then as a prefix; several matches are an
+ * error that lists them, because Pi's own fuzzy `--model` silently picks one
+ * (`deepseek` became `deepseek-v4-pro`, `glm-5.3` failed as ambiguous).
+ */
+export function resolvePiModel(
+  requested: string,
+  available: string[]
+): { id: string } | { error: string; candidates: string[] } {
+  const wanted = requested.trim();
+  if (!wanted) return { error: 'No model given', candidates: [] };
+  if (wanted.includes('/')) {
+    if (available.includes(wanted)) return { id: wanted };
+    const sameName = available.filter(
+      (id) =>
+        normalizeModelName(id.slice(id.indexOf('/') + 1)) ===
+        normalizeModelName(wanted.slice(wanted.indexOf('/') + 1))
+    );
+    return { error: `Pi model "${wanted}" is not available`, candidates: sameName };
+  }
+  const name = normalizeModelName(wanted);
+  const part = (id: string) => normalizeModelName(id.slice(id.indexOf('/') + 1));
+  const exact = available.filter((id) => part(id) === name);
+  const matches = exact.length > 0 ? exact : available.filter((id) => part(id).includes(name));
+  if (matches.length === 1) return { id: matches[0]! };
+  if (matches.length === 0) return { error: `No Pi model matches "${wanted}"`, candidates: [] };
+  return {
+    error: `"${wanted}" is ambiguous in Pi; name the provider`,
+    candidates: matches,
+  };
 }
 
 /**
@@ -356,6 +469,33 @@ export function selectVisiblePiModels(available: string[], stored: string[]): st
   return visible.length > 0 ? visible : available;
 }
 
+/** The user's picked Pi menu (`cliProviderModelLists.pi`), in their order. */
+async function readStoredPiMenu(userId: string): Promise<string[]> {
+  try {
+    const row = (await pgGet(
+      'SELECT settings_json FROM user_settings WHERE user_id = ?',
+      userId
+    )) as unknown as { settings_json: string | null } | undefined;
+    const parsed = JSON.parse(row?.settings_json || '{}') as {
+      cliProviderModelLists?: { pi?: unknown };
+    };
+    const list = parsed.cliProviderModelLists?.pi;
+    return Array.isArray(list) ? list.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Available Pi models with the user's menu first: the order in which a bare
+ * model name is resolved, so the route the user put first wins.
+ */
+export async function getPreferredPiModelsForUser(userId: string): Promise<string[]> {
+  const available = (await buildPiProvidersForUser(userId)).models;
+  const menu = (await readStoredPiMenu(userId)).filter((id) => available.includes(id));
+  return [...new Set([...menu, ...available])];
+}
+
 export async function getPiModelsForUser(userId: string): Promise<string[]> {
   // Keeps the registry's lists current; the result shows on the next read.
   refreshProviderModelsInBackground(userId);
@@ -425,20 +565,44 @@ const PI_TOOL_MAP: Record<string, string> = {
   ls: 'ls',
 };
 
-function convertAgentForPi(source: string): string {
-  return source.replace(/^tools:\s*(.+)$/m, (_line, raw: string) => {
-    const tools = raw
-      .split(',')
-      .map((value) => value.trim().replace(/^['"]|['"]$/g, ''))
-      .map((value) => PI_TOOL_MAP[value.toLowerCase()])
-      .filter((value): value is string => !!value);
-    return tools.length > 0
-      ? `tools: ${[...new Set(tools)].join(', ')}`
-      : 'tools: read, grep, find, ls';
+/**
+ * Claude agent definitions pin models the Claude way. Pi's subagent tool passes
+ * the value straight to `pi --model`, where `inherit` is "not found" and a bare
+ * `glm-5.3` is "ambiguous across providers" — every converted agent failed.
+ * `inherit` (and the Claude aliases) drop the line, so the subagent runs on the
+ * session's own model; a bare name becomes the first matching model of the
+ * user's Pi menu, which is the route the user put first.
+ */
+export function convertAgentModelForPi(source: string, preferredModels: string[]): string {
+  return source.replace(/^model:[ \t]*(.*)\r?\n/m, (line, raw: string) => {
+    const value = raw.trim().replace(/^['"]|['"]$/g, '');
+    if (!value || /^(inherit|default|opus|sonnet|haiku|fable)$/i.test(value)) return '';
+    if (/^claude-/i.test(value)) return '';
+    if (value.includes('/')) return preferredModels.includes(value) ? line : '';
+    const resolved = resolvePiModel(value, preferredModels);
+    if ('id' in resolved) return `model: ${resolved.id}\n`;
+    // Several APIs carry it: the user's menu order decides.
+    return resolved.candidates[0] ? `model: ${resolved.candidates[0]}\n` : '';
   });
 }
 
-function syncPiAgents(agentDir: string): number {
+function convertAgentForPi(source: string, preferredModels: string[] = []): string {
+  return convertAgentModelForPi(source, preferredModels).replace(
+    /^tools:\s*(.+)$/m,
+    (_line, raw: string) => {
+      const tools = raw
+        .split(',')
+        .map((value) => value.trim().replace(/^['"]|['"]$/g, ''))
+        .map((value) => PI_TOOL_MAP[value.toLowerCase()])
+        .filter((value): value is string => !!value);
+      return tools.length > 0
+        ? `tools: ${[...new Set(tools)].join(', ')}`
+        : 'tools: read, grep, find, ls';
+    }
+  );
+}
+
+function syncPiAgents(agentDir: string, preferredModels: string[] = []): number {
   const targetDir = path.join(agentDir, 'agents');
   fs.mkdirSync(targetDir, { recursive: true });
   const sourceFiles = fs.existsSync(CLAUDE_AGENTS_DIR)
@@ -448,7 +612,7 @@ function syncPiAgents(agentDir: string): number {
 
   for (const name of sourceFiles) {
     const source = fs.readFileSync(path.join(CLAUDE_AGENTS_DIR, name), 'utf8');
-    writeTextIfChanged(path.join(targetDir, name), convertAgentForPi(source));
+    writeTextIfChanged(path.join(targetDir, name), convertAgentForPi(source, preferredModels));
   }
 
   for (const name of fs.readdirSync(targetDir)) {
@@ -572,21 +736,35 @@ export function buildPiAgentSettings(
   const compaction = isRecord(current.compaction) ? current.compaction : {};
   const retry = isRecord(current.retry) ? current.retry : {};
 
-  // Small windows get a reserve that fits them; the global one stays for the rest.
+  // Small windows get a reserve that fits them, capped models one that moves
+  // the threshold down; the global one stays for the rest.
   const generatedOverrides: Record<string, { reserveTokens: number }> = {};
+  const cappedKeys = new Set<string>();
   for (const [providerId, entry] of Object.entries(piProviders)) {
     const models = isRecord(entry) && Array.isArray(entry.models) ? entry.models : [];
     for (const model of models) {
       if (!isRecord(model) || typeof model.id !== 'string') continue;
       const window = typeof model.contextWindow === 'number' ? model.contextWindow : 0;
-      if (window <= 0 || piCompactionReserveFor(window) >= PI_COMPACTION_RESERVE_TOKENS) continue;
-      generatedOverrides[`${providerId}/${model.id}`] = {
-        reserveTokens: piCompactionReserveFor(window),
-      };
+      const key = `${providerId}/${model.id}`;
+      const reserve = window > 0 ? piCompactionReserveFor(window, key) : 0;
+      if (window <= 0 || reserve === PI_COMPACTION_RESERVE_TOKENS) continue;
+      generatedOverrides[key] = { reserveTokens: reserve };
+      if (reserve > PI_COMPACTION_RESERVE_TOKENS) cappedKeys.add(key);
     }
   }
   const userOverrides = isRecord(compaction.modelOverrides) ? compaction.modelOverrides : {};
+  // The file holds earlier generated values too, so it normally wins. A capped
+  // model wins the other way: its old entry (e.g. 32k from a 128k window) would
+  // otherwise keep compaction at ~1M for good.
   const modelOverrides = { ...generatedOverrides, ...userOverrides };
+  for (const key of cappedKeys) {
+    const current = modelOverrides[key];
+    const currentReserve =
+      isRecord(current) && typeof current.reserveTokens === 'number' ? current.reserveTokens : 0;
+    if (currentReserve < generatedOverrides[key]!.reserveTokens) {
+      modelOverrides[key] = generatedOverrides[key]!;
+    }
+  }
 
   return {
     ...current,
@@ -633,7 +811,8 @@ export async function syncPiConfig(userId: string): Promise<PiConfigSyncResult> 
     buildPiAgentSettings(currentSettings, piProviders, extensions)
   );
 
-  const agentCount = syncPiAgents(agentDir);
+  const menu = (await readStoredPiMenu(userId)).filter((id) => models.includes(id));
+  const agentCount = syncPiAgents(agentDir, [...new Set([...menu, ...models])]);
   return {
     agentDir,
     modelCount: models.length,

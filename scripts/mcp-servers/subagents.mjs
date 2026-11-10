@@ -109,7 +109,7 @@ const FALLBACK_ENTRIES = KNOWN_PROVIDERS.map((provider) => ({
 }));
 
 async function fetchConfig() {
-  if (!HOOK_SECRET || !SESSION_ID) return { entries: FALLBACK_ENTRIES, env: {} };
+  if (!HOOK_SECRET || !SESSION_ID) return { entries: FALLBACK_ENTRIES, env: {}, piModels: [] };
   try {
     const response = await fetch(`${BACKEND}/api/settings/internal/cli-subagents`, {
       headers: {
@@ -122,10 +122,11 @@ async function fetchConfig() {
     const body = await response.json();
     const entries = Array.isArray(body?.data?.entries) ? body.data.entries : [];
     const env = body?.data?.env && typeof body.data.env === 'object' ? body.data.env : {};
-    return { entries, env };
+    const piModels = Array.isArray(body?.data?.piModels) ? body.data.piModels : [];
+    return { entries, env, piModels };
   } catch (error) {
     log('config fetch failed, using bare providers:', String(error));
-    return { entries: FALLBACK_ENTRIES, env: {} };
+    return { entries: FALLBACK_ENTRIES, env: {}, piModels: [] };
   }
 }
 
@@ -392,7 +393,11 @@ function parseVibeJson(stdout) {
   if (start < 0) return { text: stdout.trim(), usage: null };
   try {
     const parsed = JSON.parse(stdout.slice(start));
-    const entries = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.history) ? parsed.history : [];
+    const entries = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.history)
+        ? parsed.history
+        : [];
     let text = '';
     for (const entry of entries) {
       if (entry?.type !== 'message' || entry?.role !== 'assistant') continue;
@@ -469,6 +474,54 @@ function truncate(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Pi model routes
+//
+// Pi reaches several APIs, and one model family can sit on two of them: the
+// vendor's own API (`deepseek/deepseek-flash`, the DeepSeek key) or hosted by
+// another provider (`mistral/deepseek-v4-1-flash-1017`, the Mistral budget).
+// A bare name is resolved here against the user's available models; Pi's own
+// fuzzy `--model` silently picks one, which is how runs meant for DeepSeek
+// ended up on the Mistral budget.
+
+// Dots and dashes alike, and without the vendor prefix a host adds
+// (`zai-glm-5-3` on Mistral is `glm-5.3` on Z.AI).
+const normalizeModelName = (value) =>
+  String(value).toLowerCase().replace(/[._]/g, '-').replace(/^zai-/, '');
+
+function resolvePiModel(requested, piModels) {
+  const wanted = String(requested || '').trim();
+  if (!wanted || piModels.length === 0) return { id: wanted };
+  const ids = piModels.map((entry) => entry.id);
+  const part = (id) => normalizeModelName(id.slice(id.indexOf('/') + 1));
+  if (wanted.includes('/')) {
+    if (ids.includes(wanted)) return { id: wanted };
+    const sameName = ids.filter((id) => part(id) === part(wanted));
+    return { error: `Pi model "${wanted}" is not available.`, candidates: sameName };
+  }
+  const name = normalizeModelName(wanted);
+  const exact = ids.filter((id) => part(id) === name);
+  const matches = exact.length > 0 ? exact : ids.filter((id) => part(id).includes(name));
+  if (matches.length === 1) return { id: matches[0] };
+  if (matches.length === 0) return { error: `No Pi model matches "${wanted}".`, candidates: [] };
+  return {
+    error: `"${wanted}" is ambiguous in Pi: it exists on more than one API. Name the provider.`,
+    candidates: matches,
+  };
+}
+
+function describePiCandidates(candidates, piModels) {
+  if (!candidates.length) {
+    return piModels.map((entry) => `  ${entry.id} — ${entry.description}`).join('\n');
+  }
+  return candidates
+    .map((id) => {
+      const entry = piModels.find((item) => item.id === id);
+      return `  ${id} — ${entry ? entry.description : ''}`;
+    })
+    .join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Tools
 
 const TOOLS = [
@@ -481,7 +534,7 @@ const TOOLS = [
   {
     name: 'run_subagent',
     description:
-      'Delegate a task to another provider CLI as a headless one-shot subagent (e.g. Codex, Claude Code, the Z.AI/GLM harness, or Pi). The subagent runs in the given working directory with full tool access and returns its final answer. Use this instead of the built-in subagent when the task should run on a different provider or subscription. For GLM work prefer the "zai" subagent: it is the Claude harness pointed at Z.AI.',
+      'Delegate a task to another provider CLI as a headless one-shot subagent (e.g. Codex, Claude Code, the Z.AI/GLM harness, or Pi). The subagent runs in the given working directory with full tool access and returns its final answer. Use this instead of the built-in subagent when the task should run on a different provider or subscription. For GLM work prefer the "zai" subagent: it is the Claude harness pointed at Z.AI. Pi models are reached only through this tool: a `pi` started from the shell has none of the user\'s provider keys.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -498,7 +551,7 @@ const TOOLS = [
         model: {
           type: 'string',
           description:
-            'Optional model override (pi expects provider/model ids like z-ai/glm-5.2).',
+            'Optional model override. For pi give the full provider/model id from list_subagents (pi_models), e.g. deepseek/deepseek-flash for DeepSeek on its own API or mistral/zai-glm-5-3 for GLM hosted by Mistral: the provider part decides which account is billed.',
         },
         working_directory: {
           type: 'string',
@@ -515,14 +568,30 @@ const TOOLS = [
 ];
 
 async function handleListSubagents() {
-  const { entries } = await fetchConfig();
+  const { entries, piModels } = await fetchConfig();
+  const hasPi = entries.some((entry) => entry.provider === 'pi');
+  const routeOf = (id) => piModels.find((item) => item.id === id)?.description;
   return asText({
     subagents: entries.map((entry) => ({
       subagent: entry.label,
       provider: entry.provider,
-      model: entry.model || '(provider default)',
+      model:
+        entry.model ||
+        (entry.provider === 'pi' && piModels[0]
+          ? `${piModels[0].id} (Pi default)`
+          : '(provider default)'),
+      ...(entry.provider === 'pi' && routeOf(entry.model || piModels[0]?.id)
+        ? { route: routeOf(entry.model || piModels[0]?.id) }
+        : {}),
       installed: cliAvailable(binaryFor(entry.provider)),
     })),
+    ...(hasPi && piModels.length
+      ? {
+          pi_models: piModels.map((entry) => ({ model: entry.id, route: entry.description })),
+          pi_note:
+            'Any pi subagent accepts model=<provider/model> from pi_models. The provider part decides which account is billed: the same model family can be available directly and hosted by another provider.',
+        }
+      : {}),
     note: 'Call run_subagent with the subagent label (or bare provider name) and a self-contained prompt.',
   });
 }
@@ -540,7 +609,7 @@ async function handleRunSubagent(args) {
     return asText('Both "subagent" and "prompt" are required.', true);
   }
 
-  const { entries, env: providerEnv } = await fetchConfig();
+  const { entries, env: providerEnv, piModels } = await fetchConfig();
   const entry =
     entries.find((e) => e.label.toLowerCase() === requested.toLowerCase()) ||
     entries.find((e) => e.provider === requested.toLowerCase());
@@ -558,7 +627,19 @@ async function handleRunSubagent(args) {
     );
   }
 
-  const model = String(args.model || '').trim() || entry.model || '';
+  let model = String(args.model || '').trim() || entry.model || '';
+  if (entry.provider === 'pi') {
+    // Without a model Pi would take its own default; name it, so the run and
+    // its usage row say which API was used.
+    const resolved = resolvePiModel(model || piModels[0]?.id || '', piModels);
+    if (resolved.error) {
+      return asText(
+        `${resolved.error}\n${resolved.candidates.length ? 'Choose one of:' : 'Available Pi models:'}\n${describePiCandidates(resolved.candidates, piModels)}`,
+        true
+      );
+    }
+    model = resolved.id;
+  }
   const invocation = buildInvocation(entry.provider, prompt, model);
   if (!invocation) return asText(`Unsupported provider "${entry.provider}".`, true);
   if (!cliAvailable(invocation.command)) {

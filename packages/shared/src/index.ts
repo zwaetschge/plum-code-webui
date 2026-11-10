@@ -42,5 +42,6 @@ export * from './types/assistant-personal-workspace.js';
 export * from './types/assistant-personalization.js';
 
 export * from './utils/dynamicUiCatalog.js';
+export * from './utils/dynamicUiLive.js';
 
-export { orderChatApiProviders } from './utils/chatApiProviders.js';
+export { orderChatApiProviders, selectChatModels } from './utils/chatApiProviders.js';

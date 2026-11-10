@@ -89,7 +89,7 @@ export const ASSISTANT_SCHEMA = [
   `CREATE INDEX IF NOT EXISTS assistant_source_watches_due ON assistant_source_watches(enabled,next_check_at)`,
   `CREATE TABLE IF NOT EXISTS assistant_api_turns (
     id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
-    workbench_json TEXT NOT NULL DEFAULT '{}',
+    workbench_json TEXT NOT NULL DEFAULT '{}', ui_results_json TEXT NOT NULL DEFAULT '{}',
     seq BIGINT NOT NULL, payload_hash TEXT NOT NULL, prompt TEXT NOT NULL, response TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL, error TEXT, model TEXT NOT NULL, profile_json TEXT NOT NULL,
     source_versions TEXT NOT NULL DEFAULT '[]', image_asset_ids TEXT NOT NULL DEFAULT '[]', usage_json TEXT,

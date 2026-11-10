@@ -8577,8 +8577,10 @@ html.dark .chat-composer-form.glass-chrome {
 }
 .sidebar-session-group-bubble {
   display: inline-flex;
-  width: 32px;
+  min-width: 32px;
   height: 24px;
+  gap: 3px;
+  padding: 0 7px;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
@@ -8593,14 +8595,15 @@ html.dark .chat-composer-form.glass-chrome {
     inset 0 1px 0 hsl(var(--foreground) / 0.08),
     0 0 0 1px hsl(var(--foreground) / 0.08);
 }
+/* Collapsed: the count sits inside the bubble, next to the category icon. */
 .sidebar-session-group-trigger.is-collapsed .sidebar-session-group-count {
-  position: absolute;
-  right: 3px;
-  bottom: 1px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 4px;
-  font-size: 8px;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: 650 9px/1 var(--font-ui);
+  font-variant-numeric: tabular-nums;
 }
 /* Library popup: docked right of the left sidebar, over the chat. */
 .library-popup {
@@ -8895,10 +8898,22 @@ html.dark .chat-composer-form.glass-chrome {
   box-shadow: none;
 }
 .sidebar-session-row.is-collapsed > a {
+  position: relative;
   width: 44px;
   height: 44px;
   flex: 0 0 44px;
   padding: 0;
+}
+/* Run state in the collapsed rail: a dot on the icon's corner, as in the list. */
+.sidebar-session-row.is-collapsed .sidebar-session-run-dot.is-collapsed {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  z-index: 2;
+  width: 9px;
+  height: 9px;
+  margin: 0;
+  box-shadow: 0 0 0 2px hsl(var(--background));
 }
 .sidebar-session-run-dot {
   width: 6px;
@@ -12677,10 +12692,16 @@ html.eink ::selection {
 
 .sidebar-session-unread.is-collapsed {
   position: absolute;
-  top: -7px;
-  right: -10px;
+  top: 0;
+  right: -3px;
   z-index: 2;
+  min-width: 16px;
+  height: 16px;
   margin: 0;
+  padding-inline: 4px;
+  border: 0;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
   box-shadow: 0 0 0 2px hsl(var(--background));
 }
 
@@ -13289,8 +13310,12 @@ html.eink ::selection {
   background: hsl(var(--primary) / 0.14);
   border-radius: 8px;
 }
-.app-sidebar-refined .sidebar-session-row.is-collapsed.is-working .sidebar-session-provider-icon {
-  outline: 1px solid hsl(var(--primary) / 0.5);
+/* Working shows as the run dot; a framed icon read as a second selection. */
+.app-sidebar-refined
+  .sidebar-session-row.is-collapsed.is-working:not(.is-active)
+  .sidebar-session-provider-icon {
+  background: transparent;
+  box-shadow: none;
 }
 .app-sidebar-refined .sidebar-session-options {
   width: 28px;

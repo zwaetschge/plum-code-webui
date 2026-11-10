@@ -118,7 +118,7 @@ import {
 import { matrixImportStatus } from '../services/assistant/matrixArchive.js';
 import { ingestSource } from '../services/assistant/ingestion.js';
 import { officeArtifact } from '../services/assistant/office.js';
-import { apiChatProviders } from '../services/assistant/apiTransport.js';
+import { allApiChatProviders, apiChatProviders } from '../services/assistant/apiTransport.js';
 import { apiUsage } from '../services/assistant/apiUsage.js';
 import { uploadApiImage, apiChatImages, apiChatImage } from '../services/assistant/apiFiles.js';
 import {
@@ -136,7 +136,10 @@ import {
   updateApiChatMeta,
   materializeApiAnswer,
   applyApiSelection,
+  refreshApiTurnUiResult,
 } from '../services/assistant/apiChats.js';
+import { uiImageProxy } from '../services/assistant/dynamicUiImageProxy.js';
+import { uiLiveResolver } from '../services/assistant/dynamicUiLive.js';
 import { createAppFrame, consumeAppFrame, APP_FRAME_CSP } from '../services/assistant/frames.js';
 import { exportArtifact } from '../services/assistant/exports.js';
 import { runNotebook, createNotebook, importDataset } from '../services/assistant/notebooks.js';
@@ -1113,7 +1116,16 @@ router.get(
 );
 router.get(
   '/api-chat-providers',
-  handle(async (req, res) => res.json({ success: true, data: await apiChatProviders(owner(req)) }))
+  handle(async (req, res) =>
+    res.json({
+      success: true,
+      // ?all=1: every model, for the settings' chat model picker.
+      data:
+        req.query.all === '1'
+          ? await allApiChatProviders(owner(req))
+          : await apiChatProviders(owner(req)),
+    })
+  )
 );
 router.post(
   '/api-chats',
@@ -1162,6 +1174,61 @@ router.post(
   handle(async (req, res) => {
     await activateApiTurnVersion(owner(req), String(req.params.id), String(req.params.turn));
     res.json({ success: true });
+  })
+);
+// Dynamic UI v2: „Erneut versuchen“ for a live widget (also pushes assistant:ui-result).
+router.post(
+  ['/chats/:id/turns/:turn/ui/:node/refresh', '/api-chats/:id/turns/:turn/ui/:node/refresh'],
+  handle(async (req, res) => {
+    res.json({
+      success: true,
+      data: await refreshApiTurnUiResult(
+        owner(req),
+        String(req.params.id),
+        String(req.params.turn),
+        String(req.params.node)
+      ),
+    });
+  })
+);
+// Same-origin image proxy for Dynamic UI views (public https raster images only).
+router.get(
+  '/ui/image',
+  handle(async (req, res) => {
+    const { url } = parse(z.object({ url: z.string().min(9).max(2000) }), req.query);
+    const image = await uiImageProxy.load(url);
+    res.setHeader('Content-Type', image.mimeType);
+    res.setHeader('Content-Length', String(image.bytes.length));
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.end(image.bytes);
+  })
+);
+// Wikipedia summary for inline entity:Title links and openEntity actions.
+router.get(
+  '/ui/entity',
+  handle(async (req, res) => {
+    const input = parse(
+      z.object({
+        title: z.string().trim().min(1).max(200),
+        lang: z
+          .string()
+          .regex(/^[a-z]{2,3}$/)
+          .optional(),
+      }),
+      req.query
+    );
+    const result = await uiLiveResolver.resolve({
+      type: 'entity',
+      id: 'entity',
+      title: input.title,
+      ...(input.lang ? { lang: input.lang } : {}),
+    });
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.json({ success: true, data: result });
   })
 );
 router.post(

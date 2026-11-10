@@ -27,7 +27,12 @@ import { DEFAULT_ANALYTICS_HIDDEN_LIMIT_METRICS, estimateModelCost } from '@plum
 import { parseOracleBrowserSettings } from '../utils/oracleSettings.js';
 import { buildModelProviderCredentialEnv } from '../utils/modelProviderKeys.js';
 import { mergeUserSettings, removeUserSettings } from '../utils/userSettings.js';
-import { syncPiConfig } from '../utils/piConfig.js';
+import {
+  describePiModelRoute,
+  getPreferredPiModelsForUser,
+  syncPiConfig,
+  type PiModelRoute,
+} from '../utils/piConfig.js';
 import { buildVibeEnv, isProviderAvailable } from '../services/cli-providers.js';
 
 const router = Router();
@@ -1283,7 +1288,21 @@ router.get('/internal/cli-subagents', requireHookSecret, async (req, res) => {
     }
   }
 
+  // Pi serves several APIs, and one model family can sit on two of them
+  // (`deepseek/deepseek-flash` on the DeepSeek key, a DeepSeek model hosted by
+  // Mistral on the Mistral budget). The bridge gets the available models with
+  // their route so a caller picks one on purpose and a bare name is resolved
+  // here, not by Pi's fuzzy matching.
+  let piModels: PiModelRoute[] = [];
   if (entries.some((entry) => entry.provider === 'pi')) {
+    try {
+      const available = await getPreferredPiModelsForUser(resolved.userId);
+      // A configured model that no longer exists stays in the entry: the
+      // bridge refuses it by name instead of running on some other API.
+      piModels = available.map(describePiModelRoute);
+    } catch (error) {
+      console.warn('[cli-subagents] pi model list failed:', String(error));
+    }
     try {
       // Same provisioning a Pi session gets: per-user agent dir with providers
       // (models.json), MCP config and extensions. PI_CODING_AGENT_DIR is how
@@ -1318,7 +1337,14 @@ router.get('/internal/cli-subagents', requireHookSecret, async (req, res) => {
     }
   }
 
-  res.json({ success: true, data: { entries, env } });
+  res.json({ success: true, data: { entries, env, piModels } });
+});
+
+/** Pi models with their route, for the subagent settings (model dropdown). */
+router.get('/cli-subagents/pi-models', requireAuth, async (req, res) => {
+  const userId = (req as AuthenticatedRequest).userId;
+  const available = await getPreferredPiModelsForUser(userId).catch((): string[] => []);
+  res.json({ success: true, data: available.map(describePiModelRoute) });
 });
 
 const cliSubagentUsageSchema = z.object({

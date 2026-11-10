@@ -45,6 +45,33 @@ interface ErrorLogContext extends Record<string, unknown> {
   statusCode: number;
 }
 
+interface ClientError {
+  statusCode: number;
+  code: string;
+  message: string;
+}
+
+/**
+ * body-parser turns a request down before any route runs (body over the limit,
+ * malformed JSON, unsupported encoding). Those are the client's mistake; they
+ * used to surface as a 500 with a stack trace in the error log. Only errors
+ * that carry body-parser's `type` and a 4xx status are taken at their word.
+ */
+export function clientErrorOf(err: unknown): ClientError | null {
+  if (!err || typeof err !== 'object') return null;
+  const candidate = err as { type?: unknown; status?: unknown; statusCode?: unknown };
+  if (typeof candidate.type !== 'string') return null;
+  const status = Number(candidate.status ?? candidate.statusCode);
+  if (!Number.isInteger(status) || status < 400 || status > 499) return null;
+  if (candidate.type === 'entity.too.large') {
+    return { statusCode: 413, code: 'PAYLOAD_TOO_LARGE', message: 'Request body too large' };
+  }
+  if (candidate.type === 'entity.parse.failed') {
+    return { statusCode: 400, code: 'INVALID_JSON', message: 'Request body is not valid JSON' };
+  }
+  return { statusCode: status, code: 'BAD_REQUEST', message: 'Request could not be read' };
+}
+
 export function errorHandler(
   err: Error | AppError,
   req: Request,
@@ -52,7 +79,8 @@ export function errorHandler(
   _next: NextFunction
 ): void {
   const isAppError = err instanceof AppError;
-  const statusCode = isAppError ? err.statusCode : 500;
+  const clientError = isAppError ? null : clientErrorOf(err);
+  const statusCode = isAppError ? err.statusCode : (clientError?.statusCode ?? 500);
   const requestId = req.id || randomUUID();
   const userId = (req.user as { id?: string } | undefined)?.id || 'anonymous';
 
@@ -71,8 +99,8 @@ export function errorHandler(
   }
 
   const errorResponse: ApiError & { requestId: string } = {
-    code: isAppError ? err.code : 'INTERNAL_ERROR',
-    message: isAppError ? err.message : 'An unexpected error occurred',
+    code: isAppError ? err.code : (clientError?.code ?? 'INTERNAL_ERROR'),
+    message: isAppError ? err.message : (clientError?.message ?? 'An unexpected error occurred'),
     requestId,
   };
   res.status(statusCode).json({ success: false, error: errorResponse });

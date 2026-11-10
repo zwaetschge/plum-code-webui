@@ -11,7 +11,11 @@ import {
   validateDynamicUi,
   type DynamicUiSpec,
 } from '@plum-code-webui/shared';
-import { DYNAMIC_UI_INSTRUCTIONS } from '../src/services/assistant/dynamicUiPrompt.js';
+import {
+  DYNAMIC_UI_INSTRUCTIONS,
+  DYNAMIC_UI_SIMPLE_INSTRUCTIONS,
+} from '../src/services/assistant/dynamicUiPrompt.js';
+import { registerDynamicUiV2Tests } from './dynamic-ui-v2-tests.js';
 import {
   COMPOUND_INTEREST,
   PRODUCT_COMPARISON,
@@ -20,10 +24,9 @@ import {
 import { UiRuntime } from '../../frontend/src/components/assistant/dynamic-ui/runtime.js';
 
 let passed = 0;
-function test(name: string, run: () => void) {
-  run();
-  passed++;
-  console.log(`ok - ${name}`);
+const queue: Array<[string, () => void | Promise<void>]> = [];
+function test(name: string, run: () => void | Promise<void>) {
+  queue.push([name, run]);
 }
 const scope = (values: Record<string, number | string | boolean> = {}) => ({
   lookup: (name: string) => (Object.hasOwn(values, name) ? values[name] : undefined),
@@ -77,7 +80,7 @@ test('invalid descriptions are rejected with a reason', () => {
   const base = { version: 1, state: { a: 1 }, root: { type: 'text', text: 'Hallo' } };
   const cases: Array<[string, unknown]> = [
     ['unknown component', { ...base, root: { type: 'html', html: '<script>alert(1)</script>' } }],
-    ['wrong version', { ...base, version: 2 }],
+    ['wrong version', { ...base, version: 3 }],
     [
       'bind to missing state',
       { ...base, root: { type: 'slider', bind: 'b', label: 'B', min: 0, max: 1 } },
@@ -188,10 +191,22 @@ test('values format for Swiss German', () => {
 
 test('model instructions describe the block and the restraint rule', () => {
   assert.match(DYNAMIC_UI_INSTRUCTIONS, /```plum-ui/);
-  assert.match(DYNAMIC_UI_INSTRUCTIONS, /Do NOT use it for simple factual questions/);
-  const example = /```plum-ui\n([\s\S]+?)\n```/.exec(DYNAMIC_UI_INSTRUCTIONS)?.[1] ?? '';
-  const result = validateDynamicUi(JSON.parse(example));
-  assert.ok(result.ok, result.ok ? '' : result.error);
+  assert.match(DYNAMIC_UI_INSTRUCTIONS, /text alone stays right for simple facts/);
+  const examples = [...DYNAMIC_UI_INSTRUCTIONS.matchAll(/```plum-ui\n([\s\S]+?)\n```/g)];
+  assert.ok(examples.length >= 3, 'examples for calculator, recipe and live widget');
+  // Custom tile examples come as a ```plum-widget block plus the view that places it.
+  const tiles = [...DYNAMIC_UI_INSTRUCTIONS.matchAll(/```plum-widget[^\n]*\n[\s\S]+?\n```/g)]
+    .map(([block]) => block)
+    .join('\n');
+  assert.ok(tiles, 'an example teaches custom tiles');
+  for (const [, example] of examples) {
+    const extracted = extractDynamicUi('Antwort.\n' + tiles + '\n```plum-ui\n' + example + '\n```');
+    assert.ok(extracted.ui, extracted.error ?? 'example must validate');
+    assert.equal(extracted.error, null);
+    assert.ok(extracted.followups.length >= 2, 'examples teach follow-up chips');
+  }
+  assert.match(DYNAMIC_UI_SIMPLE_INSTRUCTIONS, /never attach interactive views/);
+  assert.match(DYNAMIC_UI_SIMPLE_INSTRUCTIONS, /"followups"/);
 });
 
 test('streaming renders completed children before the fence ends and every preview validates', () => {
@@ -331,9 +346,19 @@ test('targeted changes preserve identity, unchanged components and dirty compati
 });
 
 test('catalog supplies every component contract to the model exactly once', () => {
-  assert.equal(new Set(UI_COMPONENT_CATALOG.map((c) => c.type)).size, 20);
-  for (const component of UI_COMPONENT_CATALOG)
-    assert.ok(DYNAMIC_UI_INSTRUCTIONS.includes(component.signature));
+  assert.equal(new Set(UI_COMPONENT_CATALOG.map((c) => c.type)).size, UI_COMPONENT_CATALOG.length);
+  assert.equal(UI_COMPONENT_CATALOG.length, 46, '20 v1 components, 25 from v2, the custom tile');
+  for (const component of UI_COMPONENT_CATALOG) {
+    assert.ok(DYNAMIC_UI_INSTRUCTIONS.includes(component.signature), component.type);
+    assert.equal(DYNAMIC_UI_INSTRUCTIONS.split(component.signature).length, 2, component.type);
+  }
 });
 
+registerDynamicUiV2Tests(test);
+
+for (const [name, run] of queue) {
+  await run();
+  passed++;
+  console.log(`ok - ${name}`);
+}
 console.log(`\n${passed} Dynamic UI tests passed`);

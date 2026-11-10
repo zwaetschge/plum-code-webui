@@ -18,8 +18,26 @@ import { Switch } from '../ui/switch';
  * above — the backend injects that endpoint at spawn time.
  */
 
-const PROVIDERS = ['codex', 'claude', 'zai', 'pi'] as const;
+const PROVIDERS = ['codex', 'claude', 'zai', 'pi', 'vibe'] as const;
 type CliProvider = (typeof PROVIDERS)[number];
+
+/**
+ * A Pi model with the API it bills. Pi reaches several APIs and one model
+ * family can sit on two of them (DeepSeek on its own key, or hosted by
+ * Mistral on the Mistral budget), so the picker names the route.
+ */
+interface PiModelRoute {
+  id: string;
+  provider: string;
+  model: string;
+  route: 'direct' | 'hosted';
+}
+
+function piRouteLabel(entry: PiModelRoute): string {
+  return entry.route === 'hosted'
+    ? `${entry.id} · über ${entry.provider} (dessen Budget)`
+    : `${entry.id} · direkt`;
+}
 
 interface CliSubagentEntry {
   id?: string;
@@ -47,6 +65,17 @@ export function CliSubagentsSection() {
       );
       return response.data.data;
     },
+  });
+
+  const { data: piModels = [] } = useQuery({
+    queryKey: ['cli-subagents', 'pi-models'],
+    queryFn: async () => {
+      const response = await api.get<ApiEnvelope<PiModelRoute[]>>(
+        '/api/settings/cli-subagents/pi-models'
+      );
+      return response.data.data;
+    },
+    staleTime: 60_000,
   });
 
   const edited = rows ?? stored ?? [];
@@ -92,7 +121,13 @@ export function CliSubagentsSection() {
           <code>run_subagent</code> einen dieser CLIs als Einmal-Worker starten — z.&nbsp;B. Codex
           delegiert an Claude, oder Claude delegiert an Codex. Der Worker arbeitet im selben
           Verzeichnis und nutzt das jeweilige eigene Abo/Login. Modell leer lassen für den
-          Provider-Default; Pi erwartet <code>anbieter/modell</code>-IDs.
+          Provider-Default.
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Bei <code>pi</code> entscheidet der Anbieter vor dem Schrägstrich, welches Konto zahlt:{' '}
+          <code>deepseek/…</code> läuft direkt über deinen DeepSeek-Schlüssel, ein von Mistral
+          gehostetes Modell (<code>mistral/…</code>) über das Mistral-Budget. Lege für jeden Weg
+          einen eigenen Eintrag an, dann können Sessions gezielt wählen.
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
           <code>zai</code> ist kein eigenes CLI: Es startet das Claude-CLI gegen deinen
@@ -128,12 +163,31 @@ export function CliSubagentsSection() {
               </option>
             ))}
           </select>
-          <Input
-            value={row.model}
-            onChange={(e) => update(index, { model: e.target.value })}
-            placeholder="Modell (leer = Default)"
-            className="h-9 min-w-48 flex-1"
-          />
+          {row.provider === 'pi' && piModels.length > 0 ? (
+            <select
+              value={row.model}
+              onChange={(e) => update(index, { model: e.target.value })}
+              aria-label="Pi-Modell"
+              className="h-9 min-w-48 flex-1 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              <option value="">Standard (erstes Modell im Pi-Menü)</option>
+              {row.model && !piModels.some((entry) => entry.id === row.model) && (
+                <option value={row.model}>{row.model} · nicht mehr verfügbar</option>
+              )}
+              {piModels.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {piRouteLabel(entry)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <Input
+              value={row.model}
+              onChange={(e) => update(index, { model: e.target.value })}
+              placeholder="Modell (leer = Default)"
+              className="h-9 min-w-48 flex-1"
+            />
+          )}
           <Button
             variant="ghost"
             size="icon"

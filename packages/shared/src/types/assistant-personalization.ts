@@ -28,6 +28,23 @@ export interface AssistantPersonalization {
   voiceHistory: boolean;
   webSearch: boolean;
   voiceChat: boolean;
+  /**
+   * „Darstellung“ of model-chat answers: `standard` allows interactive views
+   * (Dynamic UI); `simple` keeps answers as text with suggestion chips only.
+   */
+  answerDisplay: 'standard' | 'simple';
+  /**
+   * Models offered by the chat model menu, `providerId/model`, default first.
+   * Empty offers every model of every connected provider (also ones added later).
+   */
+  chatModels: string[];
+  /**
+   * Speech recognition in voice mode: `device` uses the browser's or phone's own
+   * recognizer (live captions, no upload wait; Chrome sends audio to Google),
+   * falling back to the server where none exists (Firefox); `server` always
+   * transcribes on Plum's Vocarium (Whisper).
+   */
+  speechRecognition: 'device' | 'server';
   /** Chosen read-aloud voice: an OmniVoice name or `mistral:<voice_id>`; empty keeps the profile's voice. */
   voiceName: string;
   projectSearch: boolean;
@@ -74,6 +91,9 @@ export const DEFAULT_PERSONALIZATION: AssistantPersonalization = {
   voiceHistory: false,
   webSearch: true,
   voiceChat: true,
+  answerDisplay: 'standard',
+  chatModels: [],
+  speechRecognition: 'device',
   voiceName: '',
   projectSearch: false,
   connectorSearch: false,

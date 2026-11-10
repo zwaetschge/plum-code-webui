@@ -26,10 +26,17 @@ assert.match(
   /activeGeneralTab === 'pi'/,
   'opening Pi settings must load the user-specific provider diagnostics'
 );
+// The model card counts the discovered runnable models against the curated
+// menu (PiModelMenuPicker): all of them, or "n von m" once a pick is stored.
 assert.match(
   settingsPage,
-  /piDiagnostic\.modelCount[\s\S]*runnable models/,
+  /Model menu<\/p>[\s\S]*?piMenuCount !== null\s*\?\s*`\$\{piMenuCount\} von \$\{piDiagnostic\.modelCount\} im Menü`\s*:\s*`Alle \$\{piDiagnostic\.modelCount\} Modelle im Menü`/,
   'Pi settings must surface the discovered runnable model count'
+);
+assert.match(
+  settingsPage,
+  /piDiagnostic && piDiagnostic\.modelCount > 0 \? \(\s*<PiModelMenuPicker\s+models=\{piDiagnostic\.models\}[\s\S]*?cliProviderModelLists: \{[\s\S]*?pi: list,/,
+  'the discovered models must feed the Pi model menu picker, which saves the Pi menu list'
 );
 assert.match(
   settingsPage,

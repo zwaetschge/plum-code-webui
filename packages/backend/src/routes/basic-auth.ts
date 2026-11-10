@@ -12,6 +12,7 @@ import { generateUserToken } from '../utils/authTokens.js';
 import { findUserForBasicAuth } from '../utils/cliUser.js';
 import { stampLogin, auditFromRequest } from '../utils/auditLog.js';
 import { isEmailAllowed } from '../auth/passport.js';
+import { basicLoginThrottle } from '../utils/loginThrottle.js';
 
 const router = Router();
 
@@ -65,17 +66,32 @@ router.post('/login', rateLimiters.strict, async (req, res) => {
   // Multi-user lookup: match by email OR name, then verify password.
   // When the user doesn't exist, still run bcrypt against a dummy hash so the
   // response time doesn't reveal whether the username was valid.
+  // Per-account brake on top of the per-IP rate limit; checked before the
+  // password so a locked account costs no bcrypt work and leaks nothing.
+  const retryAfterMs = basicLoginThrottle.retryAfterMs(username);
+  if (retryAfterMs > 0) {
+    res.setHeader('Retry-After', String(Math.ceil(retryAfterMs / 1000)));
+    await auditFromRequest(req, 'auth.login.failure', {
+      metadata: { method: 'basic', username, reason: 'locked' },
+    });
+    throw new AppError('Too many failed attempts. Try again later.', 429, 'LOGIN_LOCKED');
+  }
+
+  // bcrypt runs async: the sync variant blocked the event loop for ~100 ms per
+  // attempt, which let a login flood stall every other request.
   const lookup = await findUserForBasicAuth(username);
   if (!lookup) {
-    bcrypt.compareSync(password, TIMING_SAFE_DUMMY_HASH);
+    await bcrypt.compare(password, TIMING_SAFE_DUMMY_HASH);
+    basicLoginThrottle.fail(username);
     await auditFromRequest(req, 'auth.login.failure', {
       metadata: { method: 'basic', username, reason: 'user_not_found' },
     });
     throw new AppError('Invalid credentials', 401, 'INVALID_CREDENTIALS');
   }
 
-  const passwordValid = bcrypt.compareSync(password, lookup.passwordHash);
+  const passwordValid = await bcrypt.compare(password, lookup.passwordHash);
   if (!passwordValid) {
+    basicLoginThrottle.fail(username);
     await auditFromRequest(req, 'auth.login.failure', {
       resourceType: 'user',
       resourceId: lookup.user.id,
@@ -97,6 +113,7 @@ router.post('/login', rateLimiters.strict, async (req, res) => {
     throw new AppError('Account not permitted on this instance', 403, 'EMAIL_NOT_ALLOWED');
   }
 
+  basicLoginThrottle.succeed(username);
   await stampLogin(user.id, 'basic', req);
   const token = generateUserToken(user.id, { basicAuth: true, expiresIn: '30d' });
 
@@ -189,7 +206,7 @@ router.put('/credentials', requireAuth, async (req, res) => {
     throw new AppError('User has no password set', 500, 'AUTH_NOT_CONFIGURED');
   }
 
-  const passwordValid = bcrypt.compareSync(currentPassword, userRow.password_hash);
+  const passwordValid = await bcrypt.compare(currentPassword, userRow.password_hash);
   if (!passwordValid) {
     throw new AppError('Current password is incorrect', 401, 'INVALID_PASSWORD');
   }
@@ -207,7 +224,7 @@ router.put('/credentials', requireAuth, async (req, res) => {
   }
 
   if (newPassword) {
-    const hashedPassword = bcrypt.hashSync(newPassword, 10);
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
     await pgRun(
       'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       hashedPassword,

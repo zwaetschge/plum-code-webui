@@ -2,6 +2,8 @@
  * Mistral plan usage: our own ledger of `mistral/*` turns in the billing month,
  * measured against a declared budget (Mistral has no quota API for Pro plans).
  */
+// The ledger and 402-probe fallback is under test, not Mistral's billing API.
+process.env.PLUM_MISTRAL_BILLING = 'off';
 import assert from 'node:assert/strict';
 import { createTestSchema, dropTestSchema, useTestSchema } from '../src/db/testing.js';
 

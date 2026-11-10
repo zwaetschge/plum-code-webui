@@ -17,6 +17,7 @@ import { rateLimiters } from '../middleware/rateLimiter.js';
 import type { User } from '@plum-code-webui/shared';
 import { isProviderAvailable } from '../services/cli-providers.js';
 import { generateUserToken } from '../utils/authTokens.js';
+import { WEB_LOGIN_NONCE_COOKIE, webLoginCodes } from '../services/webLoginCodes.js';
 import { upsertProxyUser } from '../utils/proxyUser.js';
 import { isTrustedAddress } from '../utils/ipTrust.js';
 import { stampLogin } from '../utils/auditLog.js';
@@ -40,9 +41,35 @@ const mobileExchangeSchema = z.object({
   codeVerifier: z.string().regex(/^[A-Za-z0-9_-]{43,128}$/),
 });
 
+const webExchangeSchema = z.object({
+  code: z.string().regex(/^[A-Za-z0-9_-]{43,128}$/),
+});
+
+/**
+ * Finishes a browser login: the redirect carries a one-time code instead of
+ * the JWT, and the nonce cookie binds it to this browser. The callback page
+ * trades both for the token at POST /auth/web/exchange.
+ */
+function redirectWithLoginCode(res: Response, userId: string): void {
+  const { code, nonce } = webLoginCodes.issue(userId);
+  res.cookie(WEB_LOGIN_NONCE_COOKIE, nonce, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: config.isProduction,
+    maxAge: 2 * 60 * 1000,
+    path: '/auth',
+  });
+  res.redirect(`${config.frontendUrl}/auth/callback?code=${code}`);
+}
+
 async function getAuthenticatedCliLinkUser(req: Request): Promise<User | null> {
   const userId = await resolveAuthenticatedUserId(req);
   if (!userId) return null;
+  // A gateway token (mobile, browser, watch; possibly read-only) must not be
+  // traded for a full user JWT through the provider link redirects: the JWT
+  // would have write scope and outlive the token's revocation. /auth/refresh
+  // refuses the same exchange.
+  if ((req as { viaGateway?: boolean }).viaGateway) return null;
 
   const user = (await pgGet(
     `SELECT id, email, name, avatar_url as avatarUrl, provider,
@@ -88,8 +115,7 @@ function oauthCallbackHandler(
       req.logIn(user, async (loginErr) => {
         if (loginErr) return next(loginErr);
         await stampLogin(user.id, strategy, req);
-        const token = generateUserToken(user.id);
-        res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
+        redirectWithLoginCode(res, user.id);
       });
     })(req, res, next);
   };
@@ -243,6 +269,28 @@ router.get('/proxy/mobile', rateLimiters.strict, async (req, res, next) => {
   }
 });
 
+router.post('/web/exchange', rateLimiters.strict, async (req, res) => {
+  const parsed = webExchangeSchema.safeParse(req.body);
+  const nonce = (req.cookies as Record<string, unknown> | undefined)?.[WEB_LOGIN_NONCE_COOKIE];
+  res.clearCookie(WEB_LOGIN_NONCE_COOKIE, { path: '/auth' });
+  const userId =
+    parsed.success && typeof nonce === 'string'
+      ? webLoginCodes.exchange(parsed.data.code, nonce)
+      : null;
+  const user = userId
+    ? ((await pgGet('SELECT id, email, status FROM users WHERE id = ?', userId)) as unknown as
+        | { id: string; email: string; status: string }
+        | undefined)
+    : undefined;
+  if (!user || user.status === 'suspended' || !isEmailAllowed(user.email)) {
+    return res.status(401).json({
+      success: false,
+      error: { code: 'INVALID_LOGIN_CODE', message: 'Login code expired or invalid' },
+    });
+  }
+  return res.json({ success: true, data: { token: generateUserToken(user.id) } });
+});
+
 router.post('/mobile/exchange', rateLimiters.strict, async (req, res) => {
   const parsed = mobileExchangeSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -383,8 +431,7 @@ if (config.claude.oauthEnabled) {
       }
 
       await stampLogin(user.id, 'claude', req);
-      const token = generateUserToken(user.id);
-      res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
+      redirectWithLoginCode(res, user.id);
     } catch (error) {
       console.error('Claude CLI auth error:', error);
       res.redirect(`${config.frontendUrl}/connect?error=claude`);
@@ -408,8 +455,7 @@ router.get('/codex', async (req, res) => {
     }
 
     await stampLogin(user.id, 'codex', req);
-    const token = generateUserToken(user.id);
-    res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
+    redirectWithLoginCode(res, user.id);
   } catch (error) {
     console.error('Codex CLI auth error:', error);
     res.redirect(`${config.frontendUrl}/connect?error=codex`);
@@ -428,8 +474,7 @@ router.get('/pi', async (req, res) => {
     }
 
     await stampLogin(user.id, 'pi', req);
-    const token = generateUserToken(user.id);
-    res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
+    redirectWithLoginCode(res, user.id);
   } catch (error) {
     console.error('Pi auth error:', error);
     res.redirect(`${config.frontendUrl}/connect?error=pi`);
@@ -448,8 +493,7 @@ router.get('/vibe', async (req, res) => {
     }
 
     await stampLogin(user.id, 'vibe', req);
-    const token = generateUserToken(user.id);
-    res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
+    redirectWithLoginCode(res, user.id);
   } catch (error) {
     console.error('Vibe auth error:', error);
     res.redirect(`${config.frontendUrl}/connect?error=vibe`);
@@ -533,8 +577,7 @@ if (config.isDevelopment) {
     }
 
     await stampLogin(user.id, 'dev', req);
-    const token = generateUserToken(user.id);
-    res.redirect(`${config.frontendUrl}/auth/callback?token=${token}`);
+    redirectWithLoginCode(res, user.id);
   });
 }
 

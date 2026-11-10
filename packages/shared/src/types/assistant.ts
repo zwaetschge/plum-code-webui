@@ -83,12 +83,24 @@ export interface AssistantApiTurn {
   }>;
   /** All versions of this turn (regenerated or edited in place), oldest first. */
   versions?: string[];
-  /** Validated interactive view the model attached to this answer (Dynamic UI v1). */
+  /** Validated interactive view the model attached to this answer (Dynamic UI v1/v2). */
   ui?: import('../utils/dynamicUi.js').DynamicUiSpec | null;
   /** Why an attached view was rejected; the text answer is shown instead. */
   uiError?: string | null;
   /** The answer is still streaming its interactive view. */
   uiPending?: boolean;
+  /**
+   * 0–3 suggestion chips for under the answer (Dynamic UI v2). Clicking one
+   * sends it as the next message; never part of the copied answer text. Empty
+   * while the answer streams.
+   */
+  followups?: string[];
+  /**
+   * Server-fetched data of the view's live widgets (weather, currency, stock,
+   * entity, news, gallery), keyed by node ID. Updated by the
+   * `assistant:ui-result` socket event.
+   */
+  uiResults?: import('../utils/dynamicUiLive.js').UiResults;
   usage: {
     input: number;
     output: number;
@@ -104,6 +116,11 @@ export interface AssistantApiProvider {
   name: string;
   protocol: 'openai' | 'anthropic' | 'gemini';
   models: string[];
+  /**
+   * Holds the user's default chat model (first entry of the personalisation's
+   * chatModels list, listed first in `models`). Only set while that list is in use.
+   */
+  default?: boolean;
 }
 export interface AssistantDocumentAccess {
   resource: AssistantResource;

@@ -1237,7 +1237,13 @@ export function SessionPage() {
     sessionProvider === 'pi' ||
     // ACP harnesses queue follow-ups in the backend (queueAcpTurn).
     sessionProvider === 'vibe';
-  const supportsSteeredFollowups = sessionProvider === 'codex';
+  // Codex preempts the exec, Pi takes `streamingBehavior: 'steer'`, Claude Code
+  // folds a mid-turn message into the running turn.
+  const supportsSteeredFollowups =
+    sessionProvider === 'codex' ||
+    sessionProvider === 'claude' ||
+    sessionProvider === 'zai' ||
+    sessionProvider === 'pi';
   const composerActiveFollowupMode: ActiveFollowupMode | undefined = supportsActiveFollowups
     ? supportsSteeredFollowups
       ? activeFollowupMode
@@ -1246,11 +1252,7 @@ export function SessionPage() {
   const activeSendFollowupMode: ActiveFollowupMode | undefined =
     supportsActiveFollowups && isActive ? composerActiveFollowupMode : undefined;
   const composerQueuesWhileActive =
-    sessionProvider === 'claude' ||
-    sessionProvider === 'zai' ||
-    sessionProvider === 'pi' ||
-    sessionProvider === 'vibe' ||
-    (supportsSteeredFollowups && activeFollowupMode === 'queue');
+    sessionProvider === 'vibe' || (supportsSteeredFollowups && activeFollowupMode === 'queue');
   const composerSteersWhileActive = supportsSteeredFollowups && activeFollowupMode === 'steer';
   const canInterruptActiveRun =
     hasLiveRunActivity ||

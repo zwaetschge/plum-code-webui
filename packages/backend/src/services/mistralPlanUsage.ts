@@ -1,3 +1,4 @@
+import { mistralAllowanceWindow, readMistralBilling } from './mistralBilling.js';
 import { all as pgAll, get as pgGet, run as pgRun } from '../db/pg.js';
 import { estimateModelCost } from '@plum-code-webui/shared';
 import { readModelProvidersForUser } from '../utils/modelProviderKeys.js';
@@ -227,14 +228,32 @@ export async function buildMistralLimitResponse(
   const routedAllowance: MistralAllowance = sharedKey ? 'vibe' : 'api';
   // Pi and model chat traffic counts on the allowance their key draws on.
   const countsRouted = allowance === routedAllowance;
+  // Mistral's own figures, the ones the console shows (GET /v1/billing/budget,
+  // like Vibe 3's footer gauge): the Vibe card reads them with the Vibe login,
+  // the API card with the registered Mistral key (with a shared key both are
+  // the same organisation, and each card picks its own allowance).
+  const billingKey = wantsVibe ? vibeKey : registryKey;
+  const billing = billingKey
+    ? await readMistralBilling(
+        billingKey,
+        wantsVibe ? undefined : mistralProvider?.baseUrl || undefined
+      ).catch(() => null)
+    : null;
+  const official = billing ? (wantsVibe ? billing.vibe : billing.api) : null;
   // With a shared key the probe answers for Vibe; the API card has no key of its own.
   const probeKey = wantsVibe ? vibeKey : sharedKey ? null : registryKey;
-  const upstream: MistralBudgetProbe | null = probeKey
-    ? await probeMistralBudget(
-        probeKey,
-        wantsVibe ? undefined : mistralProvider?.baseUrl || undefined
-      )
-    : null;
+  const upstream: MistralBudgetProbe | null = official
+    ? {
+        state: official.usagePercentage >= 100 && !official.paygEnabled ? 'exhausted' : 'available',
+        errorType: null,
+        checkedAt: billing!.checkedAt,
+      }
+    : probeKey
+      ? await probeMistralBudget(
+          probeKey,
+          wantsVibe ? undefined : mistralProvider?.baseUrl || undefined
+        )
+      : null;
   const exhausted = upstream?.state === 'exhausted';
   const { start, end } = mistralBillingWindow(config.billingDay);
   // Vibe turns are booked with provider 'vibe' and a bare Mistral model id, so
@@ -312,7 +331,7 @@ export async function buildMistralLimitResponse(
 
   const providerLabel = wantsVibe ? ('vibe' as const) : ('mistral' as const);
 
-  if (!configured && requests === 0) {
+  if (!configured && !official && requests === 0) {
     return {
       success: true,
       supported: false,
@@ -327,9 +346,50 @@ export async function buildMistralLimitResponse(
     };
   }
 
+  const windowSeconds = Math.round((end.getTime() - start.getTime()) / 1000);
+  if (official) {
+    return {
+      success: true,
+      supported: true,
+      provider: providerLabel,
+      data: {
+        subscriptionType: wantsVibe ? 'Vibe Code allowance' : 'API/Studio allowance',
+        rateLimitTier: billing?.planName
+          ? `Mistral ${billing.planName.charAt(0)}${billing.planName.slice(1).toLowerCase()}`
+          : 'Monthly allowance',
+        fiveHour: null,
+        sevenDay: mistralAllowanceWindow(official, end.toISOString(), windowSeconds),
+        sevenDaySonnet: null,
+        additional: [],
+        source: 'upstream' as const,
+        planUsage: {
+          periodStart: start.toISOString(),
+          periodEnd: official.resetAt ?? end.toISOString(),
+          // Plum's own ledger stays for the analytics breakdown.
+          spend: Math.round(spendUsd * 100) / 100,
+          tokens,
+          requests,
+          budget: official.initialBudget,
+          currency: official.currency,
+          allowance: wantsVibe ? ('vibe' as const) : ('api' as const),
+          billingDay: config.billingDay,
+          upstream,
+          official: { ...official, planName: billing?.planName ?? null },
+        },
+      },
+      error:
+        sharedKey && !wantsVibe
+          ? {
+              code: 'SHARED_VIBE_KEY',
+              message:
+                'Der Mistral-Schlüssel ist derselbe wie bei Vibe: Chat und Pi zählen aufs Vibe-Guthaben, dieses API-Guthaben nutzt Plum nicht.',
+            }
+          : undefined,
+    };
+  }
+
   const budget = config.monthlyBudget;
   const unit = config.currency === 'EUR' ? 'eur' : 'usd';
-  const windowSeconds = Math.round((end.getTime() - start.getTime()) / 1000);
   // Mistral's own answer beats the ledger both ways: used up means 100 % even
   // when our estimate is lower, and budget left caps a high estimate below 100.
   const estimate = budget ? Math.round((spendUsd / budget) * 100) : null;

@@ -264,6 +264,14 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE browser_tokens ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'browser'`,
     ],
   },
+  {
+    // Dynamic UI v2: server-fetched data of live widgets (weather, stock …),
+    // node ID → result envelope, kept with the turn so reloads show it again.
+    id: '027-api-turn-ui-results',
+    statements: [
+      `ALTER TABLE assistant_api_turns ADD COLUMN IF NOT EXISTS ui_results_json TEXT NOT NULL DEFAULT '{}'`,
+    ],
+  },
 ];
 
 /** Per-provider settings maps that may still carry an `opencode` entry. */

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { startTestServer, type TestServer } from './harness.js';
 
@@ -19,7 +20,11 @@ test('folder download streams a ZIP without node_modules and .git', async (t) =>
   }
 
   try {
-    const root = path.join(server.dataDir, 'download-me');
+    // A workspace folder, not the backend's data directory: that one holds
+    // dumps and credentials and is refused by the file API (checked below).
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'plum-it-ws-'));
+    t.after(() => fs.rm(workspace, { recursive: true, force: true }));
+    const root = path.join(workspace, 'download-me');
     await fs.mkdir(path.join(root, 'src'), { recursive: true });
     await fs.mkdir(path.join(root, 'node_modules', 'dep'), { recursive: true });
     await fs.mkdir(path.join(root, '.git'), { recursive: true });
@@ -29,6 +34,14 @@ test('folder download streams a ZIP without node_modules and .git', async (t) =>
     await fs.writeFile(path.join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n');
 
     const headers = { Authorization: `Bearer ${server.token}` };
+    const insideData = path.join(server.dataDir, 'backups');
+    await fs.mkdir(insideData, { recursive: true });
+    const refused = await fetch(
+      `${server.url}/api/files/download-folder?path=${encodeURIComponent(insideData)}`,
+      { headers }
+    );
+    assert.equal(refused.status, 403, 'the data directory is not downloadable');
+
     const response = await fetch(
       `${server.url}/api/files/download-folder?path=${encodeURIComponent(root)}`,
       { headers }

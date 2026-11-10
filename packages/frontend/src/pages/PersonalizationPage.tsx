@@ -2,9 +2,15 @@ import { VoicePicker } from '@/components/assistant/VoicePicker';
 import { MemoryManagement, MemoryModelChoice } from '@/components/assistant/MemoryManagement';
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
-import type { AssistantPersonalization, ReferencePhotoSlot } from '@plum-code-webui/shared';
+import {
+  orderChatApiProviders,
+  type AssistantApiProvider,
+  type AssistantPersonalization,
+  type ReferencePhotoSlot,
+} from '@plum-code-webui/shared';
+import { PiModelMenuPicker } from '@/components/settings/PiModelMenuPicker';
 import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 import { usePersonalization } from '@/components/assistant/usePersonalization';
@@ -36,6 +42,15 @@ function PersonalizationAccount({ owner }: { owner?: string }) {
     [area, setArea] = useState<'chat' | 'task' | 'code'>('chat');
   const [designPicker, setDesignPicker] = useState(false);
   const styleLibrary = useStyleLibrary();
+  // Every model of every connected provider, for the chat model menu.
+  const allProviders = useQuery({
+    queryKey: ['assistant', 'api-chat-providers', 'all', owner],
+    queryFn: async () =>
+      orderChatApiProviders(
+        (await api.get<{ data: AssistantApiProvider[] }>('/api/assistant/api-chat-providers?all=1'))
+          .data.data
+      ),
+  });
   useEffect(() => {
     if (new URLSearchParams(location.search).get('view') === 'memory') setDialog('memory');
   }, []);
@@ -54,6 +69,9 @@ function PersonalizationAccount({ owner }: { owner?: string }) {
   const accept = (next: AssistantPersonalization) => {
     if (useAuthStore.getState().user?.id !== owner) return;
     cache.setQueryData(['assistant', 'personalization', owner], next);
+    // The chat model menus follow the saved choice.
+    void cache.invalidateQueries({ queryKey: ['assistant', 'api-chat-providers'] });
+    void cache.invalidateQueries({ queryKey: ['api-chat-providers'] });
     setDraft(null);
     setNotice('Gespeichert. Gilt ab der nächsten Antwort.');
   };
@@ -151,6 +169,9 @@ function PersonalizationAccount({ owner }: { owner?: string }) {
         <Button onClick={() => query.refetch()}>Erneut laden</Button>
       </div>
     );
+  // Older servers omit the field; it then behaves like „Standard“.
+  const answerDisplay = value.answerDisplay === 'simple' ? 'simple' : 'standard';
+  const speechRecognition = value.speechRecognition === 'server' ? 'server' : 'device';
   const instructionsKey =
     area === 'chat'
       ? 'chatInstructions'
@@ -486,10 +507,108 @@ function PersonalizationAccount({ owner }: { owner?: string }) {
             onChange={(voiceName) => set('voiceName', voiceName)}
           />
         </div>
+        <div className="personalization-group">
+          <div className="personalization-row is-choice">
+            <div>
+              <span id="personal-speechRecognition">Spracherkennung</span>
+              <p>
+                {speechRecognition === 'server'
+                  ? 'Server: Whisper auf deinem Vocarium. Der Text kommt nach der Aufnahme.'
+                  : 'Gerät: schnell, mit Live-Text. Chrome nutzt dafür Google; Firefox fällt auf den Server zurück.'}
+              </p>
+            </div>
+            <div
+              className="personalization-segmented"
+              role="radiogroup"
+              aria-labelledby="personal-speechRecognition"
+            >
+              {(
+                [
+                  ['device', 'Gerät'],
+                  ['server', 'Server'],
+                ] as const
+              ).map(([option, label]) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={speechRecognition === option}
+                  disabled={busy}
+                  className={speechRecognition === option ? 'is-active' : undefined}
+                  onClick={() => set('speechRecognition', option)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+      <section aria-labelledby="personal-models">
+        <h2 id="personal-models">Modelle im Chat</h2>
+        <div className="personalization-group p-3">
+          {allProviders.isPending ? (
+            <p className="text-sm text-muted-foreground" role="status">
+              Modelle laden …
+            </p>
+          ) : !allProviders.data?.length ? (
+            <p className="text-sm text-muted-foreground">
+              Noch keine Modellanbieter verbunden. Lege sie unter Einstellungen → Modellanbieter an.
+            </p>
+          ) : (
+            <PiModelMenuPicker
+              models={allProviders.data.flatMap((provider) =>
+                provider.models.map((model) => `${provider.id}/${model}`)
+              )}
+              groupLabels={Object.fromEntries(
+                allProviders.data.map((provider) => [provider.id, provider.name])
+              )}
+              searchLabel="Chat-Modell suchen"
+              stored={value.chatModels ?? []}
+              providerDefault={null}
+              saving={busy}
+              onSave={(list) => set('chatModels', list)}
+            />
+          )}
+        </div>
       </section>
       <section aria-labelledby="personal-extra">
         <h2 id="personal-extra">Weitere Chat-Einstellungen</h2>
         <div className="personalization-group">
+          <div className="personalization-row is-choice">
+            <div>
+              <span id="personal-answerDisplay">Darstellung</span>
+              <p>
+                {answerDisplay === 'simple'
+                  ? 'Einfach: Antworten bleiben Text, nur mit Vorschlägen für Folgefragen.'
+                  : 'Standard: Antworten dürfen interaktive Ansichten wie Wetter, Kurse, Tabellen oder Quiz zeigen.'}
+              </p>
+            </div>
+            <div
+              className="personalization-segmented"
+              role="radiogroup"
+              aria-labelledby="personal-answerDisplay"
+            >
+              {(
+                [
+                  ['standard', 'Standard'],
+                  ['simple', 'Einfach'],
+                ] as const
+              ).map(([option, label]) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="radio"
+                  aria-checked={answerDisplay === option}
+                  disabled={busy}
+                  className={answerDisplay === option ? 'is-active' : undefined}
+                  onClick={() => set('answerDisplay', option)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           {toggle(
             'conciseAnswers',
             'Kurze Antworten',

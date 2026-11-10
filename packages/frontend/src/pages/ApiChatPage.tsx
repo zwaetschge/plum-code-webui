@@ -5,6 +5,7 @@ import { ChatRichText } from '@/components/assistant/ChatRichText';
 import { ChatWebActivity } from '@/components/assistant/ChatWebSources';
 import { webToolRunning } from '@/components/assistant/webSources';
 import { DynamicUiStateStore } from '@/components/assistant/dynamic-ui/state';
+import { Followups } from '@/components/assistant/dynamic-ui/Followups';
 import { orderChatApiProviders } from '@/lib/chatApiProviders';
 import { ComposerPlusMenu } from '@/components/presets/ComposerPlusMenu';
 import {
@@ -52,12 +53,15 @@ import {
 import '@/components/assistant/dynamic-ui/dynamic-ui.css';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type {
-  AssistantApiProvider,
-  AssistantApiTurn,
-  AssistantResource,
+import {
+  uiResultRefreshPath,
+  type AnyUiResult,
+  type AssistantApiProvider,
+  type AssistantApiTurn,
+  type AssistantResource,
 } from '@plum-code-webui/shared';
 import { api } from '@/services/api';
+import { socketService } from '@/services/socket';
 import { deliverAssistant } from '@/services/assistantOutbox';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/button';
@@ -210,8 +214,39 @@ export function ApiChatPage() {
     ].sort((a, b) => a.seq - b.seq),
     running = turns.find((turn) => turn.status === 'running' || turn.status === 'queued');
   // The store lifetime follows the conversation, independent of its revisions.
+  // Edited inputs of each view also survive reloads (localStorage, per view).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const dynamicUiState = useMemo(() => new DynamicUiStateStore(), [chat?.id]);
+  const dynamicUiState = useMemo(() => new DynamicUiStateStore(true), [chat?.id]);
+  // Live widget results (weather, rates …) arrive by socket and by refresh;
+  // both merge into the cached turn so the widget updates without a poll.
+  const mergeUiResult = useCallback(
+    (turnId: string, nodeId: string, result: AnyUiResult) => {
+      const patch = (turn: AssistantApiTurn) =>
+        turn.id === turnId ? { ...turn, uiResults: { ...turn.uiResults, [nodeId]: result } } : turn;
+      cache.setQueryData<{ chat: AssistantResource; turns: AssistantApiTurn[] }>(
+        ['assistant', 'api-chat', id, owner],
+        (data) => data && { ...data, turns: data.turns.map(patch) }
+      );
+      setOlder((previous) =>
+        previous.some((turn) => turn.id === turnId) ? previous.map(patch) : previous
+      );
+    },
+    [cache, id, owner]
+  );
+  useEffect(
+    () =>
+      socketService.onUiResult((event) => {
+        if (event.chatId === id) mergeUiResult(event.turnId, event.id, event.result);
+      }),
+    [id, mergeUiResult]
+  );
+  const refreshUiResult = (turnId: string) => async (nodeId: string) => {
+    if (!chat) return;
+    const response = await api.post<{ data: AnyUiResult }>(
+      uiResultRefreshPath(chat.id, turnId, nodeId)
+    );
+    mergeUiResult(turnId, nodeId, response.data.data);
+  };
   // Turns already there when a conversation opens stay still; later ones rise in.
   // After the start-page handoff the first turn rises too.
   const baseline = useRef<{ scope: string; ids: Set<string> } | null>(null);
@@ -415,6 +450,17 @@ export function ApiChatPage() {
       await transmit(text);
       if (scopeRef.current === captured)
         setDraft((current) => (current.trim() === text ? '' : current));
+    });
+  };
+  /** A Dynamic UI `prefill` action: the text goes into the composer, unsent. */
+  const prefill = (text: string) => {
+    setDraft(text);
+    window.requestAnimationFrame(() => {
+      const field = scroll.current
+        ?.closest('.plum-api-conversation')
+        ?.querySelector<HTMLTextAreaElement>('.plum-message-composer textarea');
+      field?.focus();
+      field?.setSelectionRange(field.value.length, field.value.length);
     });
   };
   /** A Dynamic UI button asking a follow-up: sent like a typed message. */
@@ -839,8 +885,14 @@ export function ApiChatPage() {
                         spec={item.ui}
                         stateStore={dynamicUiState}
                         stateKey={item.id}
+                        turnId={item.id}
+                        results={item.uiResults}
+                        streaming={item.status === 'running' || item.status === 'queued'}
                         busy={busy || !!running}
                         onSendMessage={sendText}
+                        onPrefill={prefill}
+                        onRefreshResult={refreshUiResult(item.id)}
+                        latest={item.id === turns.at(-1)?.id}
                       />
                     </Suspense>
                   )}
@@ -1030,6 +1082,16 @@ export function ApiChatPage() {
                       )}
                     </div>
                   )}
+                  {/* Suggestion chips only under the latest finished answer. */}
+                  {item.status === 'completed' &&
+                    item.id === turns.at(-1)?.id &&
+                    !!item.followups?.length && (
+                      <Followups
+                        items={item.followups}
+                        disabled={busy || !!running}
+                        onSelect={sendText}
+                      />
+                    )}
                 </div>
               </article>
             ))}

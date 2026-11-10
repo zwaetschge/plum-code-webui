@@ -242,6 +242,12 @@ export interface ServerToClientEvents {
     body: string | null;
     createdAt: string;
   }) => void;
+  /**
+   * A live widget of a model-chat answer resolved, failed or was refreshed
+   * (Dynamic UI v2). Sent to the owner's `user:<id>` room; merge `result` into
+   * the turn's `uiResults[id]`.
+   */
+  'assistant:ui-result': (data: import('../utils/dynamicUiLive.js').UiResultEvent) => void;
   'session:output': (data: StreamingMessage) => void;
   'session:message': (data: Message) => void;
   'session:status': (data: { sessionId: string; status: SessionStatus }) => void;

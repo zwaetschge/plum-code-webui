@@ -3,6 +3,7 @@ import { estimateModelCost } from '@plum-code-webui/shared';
 import type { AssistantWebSource, ChatCompaction } from '@plum-code-webui/shared';
 import {
   apiChatEndpoint,
+  chatOutputTokens,
   streamApiChat,
   type ApiMessage,
   type ApiStreamResult,
@@ -76,6 +77,9 @@ export async function generateChat(options: {
     const endpoint = await apiChatEndpoint(userId, options.providerId, options.model);
     const history = [...options.messages];
     const primary = async () => {
+      // Last character already streamed, so text of the next tool round starts
+      // its own paragraph ("…an.Ich verifiziere…" otherwise).
+      let streamedTail = '';
       for (let round = 0; round <= 6; round++) {
         let text = '';
         const key = round ? `round:${round}` : '';
@@ -89,14 +93,21 @@ export async function generateChat(options: {
             history,
             signal,
             async (delta) => {
+              if (!delta) return;
+              if (!text && streamedTail && !/\s/.test(streamedTail)) await options.onText('\n\n');
               text += delta;
+              streamedTail = delta.slice(-1);
               await options.onText(delta);
             },
             options.effort,
             {
               tools: round < 6 ? tools.tools : [],
               temperature: settings.temperature,
-              maxOutputTokens: settings.maxOutputTokens,
+              maxOutputTokens: chatOutputTokens(
+                options.providerId,
+                options.model,
+                settings.maxOutputTokens
+              ),
             }
           );
         } catch (error) {
@@ -206,7 +217,14 @@ export async function generateChat(options: {
               }
             },
             options.effort,
-            { temperature: settings.temperature, maxOutputTokens: settings.maxOutputTokens }
+            {
+              temperature: settings.temperature,
+              maxOutputTokens: chatOutputTokens(
+                candidate.providerId,
+                candidate.model,
+                settings.maxOutputTokens
+              ),
+            }
           );
           await options.onUsage?.(
             key,

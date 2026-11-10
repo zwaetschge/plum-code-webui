@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import multer from 'multer';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
+import { AppError } from '../middleware/errorHandler.js';
 import { isValidGitHubRepo, isValidGitUrl, sanitizeShellArg } from '../utils/sanitize.js';
 import { resolveConfigHome } from '../utils/configPaths.js';
 import { importSkillIntoCatalog } from '../utils/skillImport.js';
@@ -29,6 +30,23 @@ import {
 } from '../utils/skillFiles.js';
 
 const router = Router();
+
+// Every `:name` here ends up in a path under the config home (agents, skills,
+// commands, plugins). Express decodes `%2F`, so without this a name such as
+// `..%2F..%2Fsomewhere%2Ffile` walked out of the directory. One segment only.
+router.param('name', (_req, _res, next, value: string) => {
+  if (
+    typeof value !== 'string' ||
+    !value ||
+    value.length > 200 ||
+    /[\\/\0]/.test(value) ||
+    value === '.' ||
+    value === '..'
+  ) {
+    return next(new AppError('Invalid name', 400, 'VALIDATION_ERROR'));
+  }
+  next();
+});
 router.get('/skill/:name/files', requireAuth, requireAdmin, async (req, res) => {
   res.json({
     success: true,

@@ -40,6 +40,7 @@ const {
   createChatUpload,
   getChatUpload,
   markChatUploadsConsumed,
+  MAX_CHAT_UPLOAD_FILES,
   putChatUploadChunk,
   releaseChatUploadReservations,
   resolveChatUploads,
@@ -459,14 +460,28 @@ await assert.rejects(
   /25 MB/
 );
 
+// 20 since 2026-10-16 so a recorded browser demonstration fits one message.
+// The count is checked before any id is looked up, so unknown ids must not
+// surface as UPLOAD_NOT_FOUND.
+assert.equal(MAX_CHAT_UPLOAD_FILES, 20);
 await assert.rejects(
   resolveChatUploads(
     'owner',
     'delivery-session',
-    Array.from({ length: 11 }, () => randomUUID()),
+    Array.from({ length: MAX_CHAT_UPLOAD_FILES + 1 }, () => randomUUID()),
     'delivery-too-many'
   ),
   (error) => error instanceof ChatUploadError && error.code === 'TOO_MANY_UPLOADS'
+);
+await assert.rejects(
+  resolveChatUploads(
+    'owner',
+    'delivery-session',
+    Array.from({ length: MAX_CHAT_UPLOAD_FILES }, () => randomUUID()),
+    'delivery-at-limit'
+  ),
+  (error) => error instanceof ChatUploadError && error.code === 'UPLOAD_NOT_FOUND',
+  'exactly the limit passes the count check and reaches the lookup'
 );
 
 // Aggregate size is validated from metadata before any completed file is read.

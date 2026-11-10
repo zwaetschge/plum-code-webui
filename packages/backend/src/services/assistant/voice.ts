@@ -9,9 +9,27 @@ import { safeDecrypt } from '../../utils/encryption.js';
 /** Voices from the Mistral API are addressed as `mistral:<voice_id>`; everything else is OmniVoice. */
 export const MISTRAL_VOICE_PREFIX = 'mistral:';
 const MISTRAL_API = 'https://api.mistral.ai';
-const MISTRAL_TTS_MODEL = 'voxtral-mini-tts-2603';
-/** Always offered, even when the voice list endpoint is unavailable. */
-const MISTRAL_PRESET_VOICES = [{ id: 'gb_jane_neutral', name: 'Jane (Neutral)' }];
+/**
+ * Voxtral TTS 3: the voice catalogue's presets (Heidi for German and 65 more)
+ * only work with this model; `voxtral-mini-tts-2603` ("speech v1") answers
+ * 400 "voice is not supported for speech v1" for them.
+ */
+const MISTRAL_TTS_MODEL = 'voxtral-mini-tts-3';
+/** Heidi, Mistral's German preset; offered even when the voice list is unavailable. */
+const MISTRAL_GERMAN_VOICE = {
+  id: '01a0f318-4ae8-7446-a3e4-45aa092940b2',
+  name: 'Heidi',
+  language: 'de',
+};
+const MISTRAL_PRESET_VOICES = [MISTRAL_GERMAN_VOICE];
+/** Languages offered in the pickers (Swiss national languages and English), in this order. */
+const MISTRAL_VOICE_LANGUAGES = ['de', 'fr', 'it', 'en'] as const;
+const LANGUAGE_NAMES: Record<string, string> = {
+  de: 'Deutsch',
+  fr: 'Französisch',
+  it: 'Italienisch',
+  en: 'Englisch',
+};
 
 async function mistralKey(userId: string): Promise<string | null> {
   const providers = await readModelProvidersForUser(userId);
@@ -20,7 +38,14 @@ async function mistralKey(userId: string): Promise<string | null> {
   return safeDecrypt(mistral.apiKey) || null;
 }
 
-export function parseMistralVoices(payload: unknown): Array<{ id: string; name: string }> {
+export interface MistralVoice {
+  id: string;
+  name: string;
+  /** Primary language, lower-case base code ("de" for de/de_de, "en" for en_GB). */
+  language: string;
+}
+
+export function parseMistralVoices(payload: unknown): MistralVoice[] {
   const list = Array.isArray(payload)
     ? payload
     : (((payload as { data?: unknown; voices?: unknown; items?: unknown } | null)?.data ??
@@ -29,36 +54,70 @@ export function parseMistralVoices(payload: unknown): Array<{ id: string; name: 
         []) as unknown[]);
   if (!Array.isArray(list)) return [];
   return list.flatMap((item) => {
-    const voice = item as { id?: unknown; slug?: unknown; name?: unknown };
+    const voice = item as { id?: unknown; slug?: unknown; name?: unknown; languages?: unknown };
     const id =
       typeof voice.id === 'string' ? voice.id : typeof voice.slug === 'string' ? voice.slug : '';
     if (!id || id.length > 100) return [];
-    return [{ id, name: typeof voice.name === 'string' && voice.name ? voice.name : id }];
+    const first = Array.isArray(voice.languages) ? voice.languages[0] : undefined;
+    const language = typeof first === 'string' ? first.toLowerCase().split(/[_-]/)[0]! : '';
+    return [{ id, name: typeof voice.name === 'string' && voice.name ? voice.name : id, language }];
   });
+}
+
+/**
+ * The picker's Mistral voices: German first, then French, Italian and English
+ * (the list has 66 presets in 20 languages), each labelled with its language.
+ */
+export function pickMistralVoices(voices: MistralVoice[]) {
+  const rank = (voice: MistralVoice) =>
+    MISTRAL_VOICE_LANGUAGES.indexOf(voice.language as (typeof MISTRAL_VOICE_LANGUAGES)[number]);
+  return voices
+    .filter((voice) => rank(voice) >= 0)
+    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'de'))
+    .map((voice) => ({
+      id: `${MISTRAL_VOICE_PREFIX}${voice.id}`,
+      name: `${voice.name} · ${LANGUAGE_NAMES[voice.language]}`,
+      engine: 'mistral',
+      language: voice.language,
+    }));
+}
+
+const VOICE_LIST_TTL_MS = 6 * 60 * 60_000;
+let voiceListCache: { key: string; at: number; voices: MistralVoice[] } | null = null;
+
+/** Every page of `/v1/audio/voices` (10 per page, `offset`), cached six hours. */
+async function mistralVoiceCatalogue(key: string): Promise<MistralVoice[]> {
+  const cacheKey = createHash('sha256').update(key).digest('hex');
+  if (voiceListCache?.key === cacheKey && Date.now() - voiceListCache.at < VOICE_LIST_TTL_MS)
+    return voiceListCache.voices;
+  const voices: MistralVoice[] = [];
+  for (let offset = 0; offset < 300; ) {
+    const response = await fetch(`${MISTRAL_API}/v1/audio/voices?offset=${offset}`, {
+      headers: { Authorization: `Bearer ${key}` },
+      redirect: 'error',
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      break;
+    }
+    const body = (await response.json()) as { total?: unknown };
+    const page = parseMistralVoices(body);
+    if (!page.length) break;
+    voices.push(...page.filter((voice) => !voices.some((known) => known.id === voice.id)));
+    offset += page.length;
+    if (typeof body.total === 'number' && voices.length >= body.total) break;
+  }
+  if (voices.length) voiceListCache = { key: cacheKey, at: Date.now(), voices };
+  return voices;
 }
 
 async function mistralVoices(userId: string) {
   const key = await mistralKey(userId);
   if (!key) return [];
-  let voices = MISTRAL_PRESET_VOICES;
-  try {
-    const response = await fetch(`${MISTRAL_API}/v1/audio/voices`, {
-      headers: { Authorization: `Bearer ${key}` },
-      redirect: 'error',
-      signal: AbortSignal.timeout(15000),
-    });
-    if (response.ok) {
-      const parsed = parseMistralVoices(await response.json());
-      if (parsed.length) voices = parsed;
-    } else await response.body?.cancel();
-  } catch {
-    /* the preset voice keeps the engine usable */
-  }
-  return voices.map((voice) => ({
-    id: `${MISTRAL_VOICE_PREFIX}${voice.id}`,
-    name: voice.name,
-    engine: 'mistral',
-  }));
+  const catalogue = await mistralVoiceCatalogue(key).catch(() => [] as MistralVoice[]);
+  // The German preset keeps the engine usable when the list is unavailable.
+  return pickMistralVoices(catalogue.length ? catalogue : MISTRAL_PRESET_VOICES);
 }
 
 async function mistralSpeech(userId: string, voiceId: string, text: string) {
@@ -69,20 +128,28 @@ async function mistralSpeech(userId: string, voiceId: string, text: string) {
       409,
       'VOICE_NOT_CONFIGURED'
     );
-  const response = await fetch(`${MISTRAL_API}/v1/audio/speech`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: MISTRAL_TTS_MODEL,
-      input: text,
-      voice_id: voiceId,
-      response_format: 'wav',
-    }),
-    redirect: 'error',
-    signal: AbortSignal.timeout(120000),
-  }).catch(() => {
-    throw new AppError('Mistral ist nicht erreichbar', 503, 'VOICE_UNAVAILABLE');
-  });
+  const request = (voice: string) =>
+    fetch(`${MISTRAL_API}/v1/audio/speech`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MISTRAL_TTS_MODEL,
+        input: text,
+        voice_id: voice,
+        response_format: 'wav',
+      }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(120000),
+    }).catch(() => {
+      throw new AppError('Mistral ist nicht erreichbar', 503, 'VOICE_UNAVAILABLE');
+    });
+  let response = await request(voiceId);
+  // A stored voice from the retired v1 list (e.g. "gb_jane_neutral") no longer
+  // exists: speak with Heidi instead of failing the whole voice conversation.
+  if (response.status === 400 && voiceId !== MISTRAL_GERMAN_VOICE.id) {
+    await response.body?.cancel();
+    response = await request(MISTRAL_GERMAN_VOICE.id);
+  }
   if (!response.ok) {
     await response.body?.cancel();
     throw new AppError(

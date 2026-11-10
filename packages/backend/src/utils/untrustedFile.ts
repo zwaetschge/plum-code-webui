@@ -1,7 +1,25 @@
 import path from 'node:path';
 import type { Response } from 'express';
 
-const ACTIVE_DOCUMENT_EXTENSIONS = new Set(['.html', '.htm', '.svg', '.xml', '.xhtml']);
+// Everything a browser may render as a document or run as script when it is
+// served inline from the WebUI origin.
+const ACTIVE_DOCUMENT_EXTENSIONS = new Set([
+  '.html',
+  '.htm',
+  '.xhtml',
+  '.xht',
+  '.shtml',
+  '.svg',
+  '.svgz',
+  '.xml',
+  '.xsl',
+  '.xslt',
+  '.mht',
+  '.mhtml',
+  '.js',
+  '.mjs',
+  '.cjs',
+]);
 
 export function isActiveDocument(filePath: string): boolean {
   return ACTIVE_DOCUMENT_EXTENSIONS.has(path.extname(filePath).toLowerCase());

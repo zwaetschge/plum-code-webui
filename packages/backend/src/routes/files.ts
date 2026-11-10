@@ -11,7 +11,7 @@ import { AppError } from '../middleware/errorHandler.js';
 import { config } from '../config.js';
 import { sanitizeFilename, ALLOWED_UPLOAD_MIME_TYPES } from '../utils/sanitize.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
-import { isAllowedBasePath } from '../utils/allowedPaths.js';
+import { isAllowedBasePath, isSensitivePath } from '../utils/allowedPaths.js';
 import type { FileInfo, DirectoryContents } from '@plum-code-webui/shared';
 import { applyUntrustedFileHeaders } from '../utils/untrustedFile.js';
 
@@ -102,7 +102,7 @@ const storage = multer.diskStorage({
     }
     try {
       const resolvedPath = path.resolve(targetDir);
-      if (!isAllowedBasePath(resolvedPath)) {
+      if (!isAllowedBasePath(resolvedPath) || isSensitivePath(resolvedPath)) {
         return cb(new Error('Path not allowed'), '');
       }
       // Ensure directory exists
@@ -201,7 +201,9 @@ function validatePath(filePath: string): string {
   if (!isAllowedBasePath(resolvedPath)) {
     throw new AppError('Path not allowed', 403, 'FORBIDDEN_PATH');
   }
-
+  if (isSensitivePath(resolvedPath)) {
+    throw new AppError('Path not allowed', 403, 'FORBIDDEN_PATH');
+  }
   return resolvedPath;
 }
 

@@ -531,6 +531,16 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'desktop_workspace',
+    description:
+      "Plum's own workspace: a separate desktop in a window on the left half of the user's largest screen, with its own pointer, keyboard focus and clipboard. start opens it; while it runs every desktop_* tool acts inside it (desktop_open starts apps there, coordinates are pixels of its desktop_screenshot) and the user keeps working undisturbed on the rest. stop closes it with its apps; status reports it.",
+    inputSchema: {
+      type: 'object',
+      properties: { action: { type: 'string', enum: ['start', 'stop', 'status'] } },
+      required: ['action'],
+    },
+  },
+  {
     name: 'desktop_task',
     description:
       'Show a desktop task plan and real progress. Call before starting, at step changes, and on completion with a verified result and optional file/URL target. Never invent percentages or declare success before checking the result.',
@@ -724,7 +734,7 @@ const TOOLS = [
   {
     name: 'desktop_type',
     description:
-      'Type text into the focused field (pasted, so every character works). Optional ref or x, y clicks the field first; submit presses Enter.',
+      'Type text into a field. With a ref the text goes straight into that field in the background (no pointer, focus or clipboard; replace swaps the whole content). Without one it is pasted into the focused field, x, y clicking it first. submit presses Enter.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -733,6 +743,10 @@ const TOOLS = [
         x: DX,
         y: DY,
         submit: { type: 'boolean' },
+        replace: {
+          type: 'boolean',
+          description: 'With ref: replace the field content instead of inserting at the caret.',
+        },
       },
       required: ['text'],
     },
@@ -862,7 +876,7 @@ const INSTRUCTIONS = [
   '- Several browsers can be connected; Plum uses the one the user used most recently. If the user says you are in the wrong browser, call browsers and select_browser.',
   '- Tutorials: in guide mode use guide_step for one step at a time; the user clicking the mark (or "Erledigt") sends you "✓ Schritt n erledigt" – then show the next step.',
   '- Saved macros (macros, macro_run) replay demonstrations deterministically; prefer them for recurring tasks and continue by hand where one stops.',
-  '- Native desktop apps (Blender, GIMP, file manager …) through the Plum desktop companion: desktop_status first. Publish the task steps with desktop_task before acting, update the zero-based current step and working/waiting/needs_input state, then report completed only after verification with a concise result and optional local file/HTTP target. desktop_layout places the separate chat on primary, secondary or a named screen; never change monitor layouts without the user asking. Use desktop_read_ui/desktop_find for refs (most KDE, Qt and GTK apps) or desktop_screenshot (zoom a region for small text); act with desktop_click/type/press_key/scroll/drag/open/activate_window, wait with desktop_wait_for, show with desktop_point/annotate/guide_step. desktop_ocr / click text for apps without accessibility data, desktop_wait_change for renders. Saved demonstrations: desktop_macros/desktop_macro_run. Blocked apps (rules) refuse input and are blacked out; ask-apps wait for the user. If the user presses Escape or uses their mouse/keyboard, Plum Desktop pauses: stop acting until they explicitly resume. Never auto-resume or repeat a rejected input. Prefer refs; otherwise coordinates are pixels of the latest desktop_screenshot; check the result after each change. In guide mode (status) input is blocked: show, the user operates. The same confirmation rules as in the browser apply.',
+  '- Native desktop apps (Blender, GIMP, file manager …) through the Plum desktop companion: desktop_status first. Publish the task steps with desktop_task before acting, update the zero-based current step and working/waiting/needs_input state, then report completed only after verification with a concise result and optional local file/HTTP target. desktop_layout places the separate chat on primary, secondary or a named screen; never change monitor layouts without the user asking. Use desktop_read_ui/desktop_find for refs (most KDE, Qt and GTK apps) or desktop_screenshot (zoom a region for small text); act with desktop_click/type/press_key/scroll/drag/open/activate_window, wait with desktop_wait_for, show with desktop_point/annotate/guide_step. desktop_ocr / click text for apps without accessibility data, desktop_wait_change for renders. Saved demonstrations: desktop_macros/desktop_macro_run. Blocked apps (rules) refuse input and are blacked out; ask-apps wait for the user. For longer or independent desktop work, start the Plum workspace (desktop_workspace start): its own pointer and keyboard in a window on the left half of the large screen, so nothing you do reaches the pointer or focus of the user; open the apps you need in it with desktop_open. Element refs are not available inside it yet (use desktop_screenshot coordinates, text clicks and desktop_ocr). Without it, the user may keep working on the same PC in parallel (default): prefer refs from desktop_read_ui/desktop_find, because desktop_click and desktop_type on a ref run in the background through accessibility without moving their pointer or focus. Coordinate clicks, keys, scrolling and drags share the real pointer/keyboard: Plum waits until the user pauses briefly and gives pointer and focus back; if a call reports that the user is busy, retry later or switch to refs. Escape (or the tray) pauses Plum Desktop: then stop acting until they explicitly resume. Never auto-resume or repeat a rejected input. Prefer refs; otherwise coordinates are pixels of the latest desktop_screenshot; check the result after each change. In guide mode (status) input is blocked: show, the user operates. The same confirmation rules as in the browser apply.',
   '- Guide mode (status shows mode "guide"): the user is learning in their own tab and does the work. Watch with screenshot/read_page, show with point, annotate and draw, explain in chat; clicking, typing, scrolling and navigating are blocked. Clear old marks before the next step.',
   '- A message titled "Vorführung aus dem Browser" is a demonstration the user recorded: numbered steps with element names, CSS paths and screenshots (red circle = click). Learn the task from it and replay it with the browser tools when asked.',
   '- Prefer read_page/find refs over coordinates; take a screenshot to check visual state. Use extract_table for tabular data and wait_for with gone/url after actions that load.',
@@ -878,6 +892,7 @@ function toolTimeoutMs(name, args) {
   if (name === 'desktop_wait_change')
     return (Math.min(Number(args?.seconds) || 20, 120) + 30) * 1000;
   if (name === 'desktop_macro_run') return 240_000;
+  if (name === 'desktop_workspace') return 60_000;
   if (name === 'desktop_ocr' || name === 'desktop_click') return 120_000;
   if (name === 'desktop_type' || name === 'desktop_press_key') return 150_000;
   if (name === 'desktop_wait_for') return (Math.min(Number(args?.seconds) || 10, 60) + 15) * 1000;

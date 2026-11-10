@@ -19,8 +19,16 @@ import {
   type AssistantResource,
   type AssistantWebSource,
   extractDynamicUi,
+  collectUiLiveNodes,
+  type DynamicUiSpec,
 } from '@plum-code-webui/shared';
-import { DYNAMIC_UI_INSTRUCTIONS } from './dynamicUiPrompt.js';
+import { dynamicUiInstructions } from './dynamicUiPrompt.js';
+import {
+  dynamicUiBlockComplete,
+  refreshTurnUiNode,
+  startTurnUiResolution,
+  turnUiResults,
+} from './dynamicUiLive.js';
 import { z } from 'zod';
 import { all, get, run, transaction } from '../../db/pg.js';
 import { AppError } from '../../middleware/errorHandler.js';
@@ -177,14 +185,24 @@ function turn(row: Record<string, unknown>): AssistantApiTurn {
     viewId: String(row.id),
     streaming: row.status === 'running',
   });
+  // „Darstellung: Einfach“ keeps only the suggestion chips, even if a model
+  // ignored the instruction.
+  const simple = context.answerDisplay === 'simple';
+  const ui = simple ? null : dynamic.ui;
   return {
     id: String(row.id),
     seq: Number(row.seq),
     prompt: String(row.prompt),
     response: dynamic.text,
-    ui: dynamic.ui,
-    uiError: dynamic.error,
-    uiPending: dynamic.pending && row.status === 'running',
+    ui,
+    uiError: simple ? null : dynamic.error,
+    uiPending: !simple && dynamic.pending && row.status === 'running',
+    followups: dynamic.followups,
+    uiResults: turnUiResults(ui, JSON.parse(String(row.ui_results_json ?? '{}')), {
+      id: String(row.id),
+      status: String(row.status),
+      updatedAt: String(row.updated_at),
+    }),
     status: (row.status === 'preparing' ? 'queued' : row.status) as AssistantApiTurn['status'],
     error: row.error ? String(row.error) : null,
     createdAt: String(row.created_at),
@@ -352,7 +370,7 @@ export async function systemContext(
   // bare replacement passage.
   if (options.voice) parts.push(VOICE_INSTRUCTIONS);
   else if (chat.body.workflow !== 'research' && !chat.body.artifactEdit)
-    parts.push(DYNAMIC_UI_INSTRUCTIONS);
+    parts.push(dynamicUiInstructions(personal.answerDisplay));
   if (
     chatOptions(chat.body).webSearch &&
     chat.body.workflow !== 'research' &&
@@ -418,6 +436,8 @@ export async function systemContext(
     profileRevision: profile ? chat.body.profileRevision : null,
     projectId,
     personalizationRevision: personal.revision,
+    /** Pinned with the turn so later setting changes do not rewrite history. */
+    answerDisplay: personal.answerDisplay,
     memoryRead: memoryOn,
     memoryLearn: !chat.body.temporary && chat.body.memoryLearn !== false,
     memoryContext: {
@@ -897,6 +917,23 @@ export async function executeApiTurn(
   if (!claimed.created) return turn(claimed.row);
   const controller = new AbortController();
   active.set(input.commandId, controller);
+  // Live widgets resolve as soon as the view's block is complete (or at the end).
+  let liveStarted = false;
+  const startLive = (final: boolean, answer: string) => {
+    if (liveStarted || input.voice || (!final && !dynamicUiBlockComplete(answer))) return;
+    liveStarted = true;
+    const pinned = JSON.parse(String(claimed.row.profile_json));
+    if (pinned.answerDisplay === 'simple') return;
+    const ui: DynamicUiSpec | null = extractDynamicUi(answer, {
+      base: pinned.dynamicUiBase,
+      viewId: input.commandId,
+      streaming: !final,
+    }).ui;
+    if (collectUiLiveNodes(ui).length)
+      void startTurnUiResolution({ userId, chatId: id, turnId: input.commandId }, ui).catch(
+        () => {}
+      );
+  };
   const execute = async () => {
     let text = '',
       lastWrite = 0;
@@ -1039,7 +1076,12 @@ export async function executeApiTurn(
           role: 'assistant',
           content:
             'Latest interactive view (use its ids for a targeted update):\n```plum-ui\n' +
-            JSON.stringify(dynamicUiBase) +
+            // A tile's code is in the earlier answer's plum-widget block; not twice in context.
+            JSON.stringify(dynamicUiBase, (key, value) =>
+              key === 'html' && typeof value === 'string'
+                ? '(code: the plum-widget block with this id in your earlier answer)'
+                : value
+            ) +
             '\n```',
         });
       }
@@ -1116,6 +1158,7 @@ export async function executeApiTurn(
               'API_RESPONSE_LIMIT'
             );
           text += delta;
+          if (!liveStarted && delta.includes('`')) startLive(false, text);
           if (Date.now() - lastWrite >= 500) {
             lastWrite = Date.now();
             const update = await run(
@@ -1151,6 +1194,7 @@ export async function executeApiTurn(
         );
         void updated;
       });
+      startLive(true, text);
       await enqueueMemory(userId, 'api', id, input.commandId).catch(() => undefined);
     } catch (failure) {
       const message =
@@ -1183,6 +1227,24 @@ export async function executeApiTurn(
   };
   void execute();
   return turn(claimed.row);
+}
+/** „Erneut versuchen“ for one live widget of an owned turn; returns the new envelope. */
+export async function refreshApiTurnUiResult(
+  userId: string,
+  chatId: string,
+  turnId: string,
+  nodeId: string
+) {
+  await ownedChat(userId, chatId);
+  const row = await get(
+    'SELECT * FROM assistant_api_turns WHERE id=? AND chat_id=?',
+    turnId,
+    chatId
+  );
+  if (!row) throw new AppError('Antwort nicht gefunden', 404, 'NOT_FOUND');
+  const node = collectUiLiveNodes(turn(row).ui).find((item) => item.id === nodeId);
+  if (!node) throw new AppError('Live-Baustein nicht gefunden', 404, 'NOT_FOUND');
+  return refreshTurnUiNode({ userId, chatId, turnId }, node);
 }
 export async function stopApiTurn(userId: string, id: string, turnId: string) {
   await ownedChat(userId, id);
@@ -1260,7 +1322,7 @@ export async function branchApiChat(
     );
     for (const row of rows)
       await tx.run(
-        'INSERT INTO assistant_api_turns(id,chat_id,seq,payload_hash,prompt,response,status,error,model,profile_json,source_versions,image_asset_ids,usage_json,created_at,updated_at,expires_at,workbench_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO assistant_api_turns(id,chat_id,seq,payload_hash,prompt,response,status,error,model,profile_json,source_versions,image_asset_ids,usage_json,created_at,updated_at,expires_at,workbench_json,ui_results_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         randomUUID(),
         branch.id,
         row.seq,
@@ -1277,7 +1339,8 @@ export async function branchApiChat(
         row.created_at,
         row.updated_at,
         row.expires_at,
-        row.workbench_json ?? '{}'
+        row.workbench_json ?? '{}',
+        row.ui_results_json ?? '{}'
       );
     const imageAssetIds = [
       ...new Set(

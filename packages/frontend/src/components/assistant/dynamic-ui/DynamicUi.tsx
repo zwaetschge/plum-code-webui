@@ -1,612 +1,176 @@
 import {
   Component,
-  useId,
+  lazy,
+  Suspense,
   useMemo,
+  useState,
   useSyncExternalStore,
-  type ReactElement,
+  type ComponentType,
   type ReactNode,
 } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { ArrowDownRight, ArrowUpRight, Check } from 'lucide-react';
 import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import {
-  formatUiValue,
+  uiLiveKey,
   validateDynamicUi,
   mergeDynamicUiState,
   type DynamicUiSpec,
+  type UiAction,
+  type UiLiveNodeType,
   type UiNode,
+  type UiNodeOf,
   type UiNodeType,
-  type UiValue,
+  type UiResults,
 } from '@plum-code-webui/shared';
 import { cn } from '@/lib/utils';
-import { isTruthy, UiRuntime } from './runtime';
-import './dynamic-ui.css';
+import { UiRuntime } from './runtime';
 import { DynamicUiStateStore } from './state';
+import type { Ctx, Renderer } from './context';
+import { copyText, openExternal } from './actions';
+import * as basic from './basic';
+import { Accordion, Card, Tabs } from './layout';
+import * as content from './content';
+import { Carousel } from './Carousel';
+import { Table } from './table';
+import { Checklist, Flashcards, Quiz } from './learning';
+import { LiveSkeleton } from './live/LiveFrame';
+import { EntitySheet } from './EntityCard';
+import { WidgetTile } from './WidgetTile';
+import './dynamic-ui.css';
+import './dynamic-ui-v2.css';
 
 export interface DynamicUiProps {
   spec: DynamicUiSpec;
   stateStore?: DynamicUiStateStore;
+  /** View identity without a server `viewId` (fixtures). */
   stateKey?: string;
-  /** Runs a `sendMessage` action as a new chat message; omitted = button disabled. */
+  /** Runs a `sendMessage` action as a new chat message; omitted = disabled. */
   onSendMessage?: (text: string) => void;
-  /** Disables actions while an answer runs. */
+  /** Runs a `prefill` action: puts the text into the composer. */
+  onPrefill?: (text: string) => void;
+  /** A request runs in this chat: inputs and chat actions are locked. */
   busy?: boolean;
+  /** This view is still streaming: everything is locked. */
+  streaming?: boolean;
+  /** The message's turn; keys the per-message state in localStorage. */
+  turnId?: string;
+  /** Server data of live widgets (`turn.uiResults`). */
+  results?: UiResults;
+  /** „Erneut versuchen“ for a failed live widget. */
+  onRefreshResult?: (nodeId: string) => Promise<void>;
+  /** Newest turn of the chat: custom tiles may send messages only from there. */
+  latest?: boolean;
 }
 
-interface Ctx {
-  rt: UiRuntime;
-  set: (key: string, value: UiValue) => void;
-  reset: () => void;
-  send?: (text: string) => void;
-  busy?: boolean;
-}
-
-type Renderer<T extends UiNodeType> = (props: {
-  node: Extract<UiNode, { type: T }>;
-  ctx: Ctx;
-}) => ReactNode;
-
-/* Chart colours come from the theme tokens; SVG attributes cannot read var(). */
-function useThemePalette() {
-  return useMemo(() => {
-    const styles = getComputedStyle(document.documentElement);
-    const primary = styles.getPropertyValue('--primary').trim() || '174 72% 46%';
-    return [
-      `hsl(${primary})`,
-      'hsl(262 83% 66%)',
-      'hsl(38 92% 56%)',
-      'hsl(199 89% 56%)',
-      'hsl(340 82% 62%)',
-      'hsl(142 66% 48%)',
-    ];
-  }, []);
-}
-
-function Children({ nodes, ctx }: { nodes: UiNode[]; ctx: Ctx }) {
-  return (
-    <>
-      {nodes.map((node, index) => (
-        <Node key={node.id ?? `${node.type}-${index}`} node={node} ctx={ctx} />
-      ))}
-    </>
-  );
-}
-
-const Stack: Renderer<'stack'> = ({ node, ctx }) => (
-  <div className={cn('dui-stack', `dui-gap-${node.gap ?? 'md'}`)}>
-    <Children nodes={node.children} ctx={ctx} />
-  </div>
-);
-const Row: Renderer<'row'> = ({ node, ctx }) => (
-  <div className={cn('dui-row', `dui-gap-${node.gap ?? 'md'}`, node.wrap !== false && 'is-wrap')}>
-    <Children nodes={node.children} ctx={ctx} />
-  </div>
-);
-const Grid: Renderer<'grid'> = ({ node, ctx }) => (
-  <div className="dui-grid" style={{ ['--dui-columns' as string]: node.columns }}>
-    <Children nodes={node.children} ctx={ctx} />
-  </div>
-);
-const Card: Renderer<'card'> = ({ node, ctx }) => {
-  const highlighted = node.highlight ? isTruthy(ctx.rt.safe(node.highlight)) : false;
-  return (
-    <section className={cn('dui-card', highlighted && 'is-highlighted')}>
-      {(node.title || node.subtitle) && (
-        <header className="dui-card-head">
-          {node.title && <h4>{ctx.rt.template(node.title)}</h4>}
-          {node.subtitle && <p>{ctx.rt.template(node.subtitle)}</p>}
-        </header>
-      )}
-      <div className="dui-stack dui-gap-md">
-        <Children nodes={node.children} ctx={ctx} />
-      </div>
-    </section>
-  );
+/* Heavy parts load on first use: Recharts for charts, the live widget chunk. */
+const ChartLazy = lazy(() => import('./chart'));
+const live = () => import('./live');
+const LIVE: {
+  [T in UiLiveNodeType]: ComponentType<{ node: Extract<UiNode, { type: T }>; ctx: Ctx }>;
+} = {
+  weather: lazy(() => live().then((m) => ({ default: m.WeatherNode }))),
+  currency: lazy(() => live().then((m) => ({ default: m.CurrencyNode }))),
+  stock: lazy(() => live().then((m) => ({ default: m.StockNode }))),
+  entity: lazy(() => live().then((m) => ({ default: m.EntityNode }))),
+  news: lazy(() => live().then((m) => ({ default: m.NewsNode }))),
+  gallery: lazy(() => live().then((m) => ({ default: m.GalleryNode }))),
 };
-const Calculator: Renderer<'calculator'> = ({ node, ctx }) => (
-  <section className="dui-card dui-calculator">
-    {node.title && (
-      <header className="dui-card-head">
-        <h4>{node.title}</h4>
-      </header>
-    )}
-    <div className="dui-calculator-body">
-      <div className="dui-stack dui-gap-md">
-        <Children nodes={node.inputs} ctx={ctx} />
-      </div>
-      <div className="dui-calculator-outputs">
-        <Children nodes={node.outputs} ctx={ctx} />
-      </div>
-    </div>
-    {node.chart && <Node node={node.chart} ctx={ctx} />}
-  </section>
-);
-const Heading: Renderer<'heading'> = ({ node, ctx }) =>
-  node.level === 3 ? (
-    <h4 className="dui-heading is-3">{ctx.rt.template(node.text)}</h4>
-  ) : (
-    <h3 className="dui-heading">{ctx.rt.template(node.text)}</h3>
-  );
-const Text: Renderer<'text'> = ({ node, ctx }) => (
-  <p className={cn('dui-text', node.tone && `is-${node.tone}`)}>{ctx.rt.template(node.text)}</p>
-);
-const Markdown: Renderer<'markdown'> = ({ node, ctx }) => (
-  <div className="dui-markdown prose prose-sm max-w-none dark:prose-invert">
-    <ReactMarkdown remarkPlugins={[remarkGfm]}>{ctx.rt.template(node.text)}</ReactMarkdown>
-  </div>
-);
-const Badge: Renderer<'badge'> = ({ node, ctx }) => (
-  <span className={cn('dui-badge', `is-${node.tone ?? 'neutral'}`)}>
-    {ctx.rt.template(node.text)}
-  </span>
-);
-const Divider: Renderer<'divider'> = () => <hr className="dui-divider" />;
-
-const Kpi: Renderer<'kpi'> = ({ node, ctx }) => {
-  const value = ctx.rt.safe(node.value);
-  const trend = node.trend ? Number(ctx.rt.safe(node.trend)) : Number.NaN;
-  return (
-    <div className="dui-kpi" role="group" aria-label={node.label}>
-      <span className="dui-kpi-label">{node.label}</span>
-      {/* Keyed by the shown text so a change replays the short settle animation. */}
-      <strong key={formatUiValue(value, node.format)} className="dui-kpi-value" aria-live="polite">
-        {formatUiValue(value, node.format)}
-      </strong>
-      {(node.hint || Number.isFinite(trend)) && (
-        <span className="dui-kpi-hint">
-          {Number.isFinite(trend) && trend !== 0 && (
-            <span className={cn('dui-trend', trend > 0 ? 'is-up' : 'is-down')}>
-              {trend > 0 ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
-            </span>
-          )}
-          {node.hint && ctx.rt.template(node.hint)}
-        </span>
-      )}
-    </div>
-  );
-};
-
-const Slider: Renderer<'slider'> = ({ node, ctx }) => {
-  const id = useId();
-  const value = Number(ctx.rt.state[node.bind] ?? node.min);
-  const shown = formatUiValue(value, node.format);
-  const fill = ((value - node.min) / (node.max - node.min)) * 100;
-  return (
-    <div className="dui-field">
-      <div className="dui-field-head">
-        <label htmlFor={id}>{node.label}</label>
-        <output htmlFor={id}>{shown}</output>
-      </div>
-      <input
-        id={id}
-        type="range"
-        className="dui-slider"
-        min={node.min}
-        max={node.max}
-        step={node.step ?? 1}
-        value={value}
-        aria-valuetext={shown}
-        style={{ ['--dui-fill' as string]: `${Math.min(100, Math.max(0, fill))}%` }}
-        onChange={(event) => ctx.set(node.bind, Number(event.target.value))}
-      />
-    </div>
-  );
-};
-
-const Input: Renderer<'input'> = ({ node, ctx }) => {
-  const id = useId();
-  const numeric = node.kind !== 'text';
-  const value = ctx.rt.state[node.bind];
-  return (
-    <div className="dui-field">
-      <label htmlFor={id}>{node.label}</label>
-      <input
-        id={id}
-        className="dui-input"
-        type={numeric ? 'number' : 'text'}
-        inputMode={numeric ? 'decimal' : undefined}
-        min={node.min}
-        max={node.max}
-        step={node.step}
-        placeholder={node.placeholder}
-        value={value === null || value === undefined ? '' : String(value)}
-        onChange={(event) => {
-          const raw = event.target.value;
-          ctx.set(node.bind, numeric ? (raw === '' ? null : Number(raw)) : raw);
-        }}
-      />
-    </div>
-  );
-};
-
-/** Options keep their declared type: numeric option values stay numbers in state. */
-const optionValue = (raw: string, options: Array<{ value: string | number }>) =>
-  options.find((option) => String(option.value) === raw)?.value ?? raw;
-
-const Select: Renderer<'select'> = ({ node, ctx }) => {
-  const id = useId();
-  return (
-    <div className="dui-field">
-      <label htmlFor={id}>{node.label}</label>
-      <select
-        id={id}
-        className="dui-input"
-        value={String(ctx.rt.state[node.bind] ?? '')}
-        onChange={(event) => ctx.set(node.bind, optionValue(event.target.value, node.options))}
-      >
-        {node.options.map((option) => (
-          <option key={String(option.value)} value={String(option.value)}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-};
-
-const Segmented: Renderer<'segmented'> = ({ node, ctx }) => {
-  const current = String(ctx.rt.state[node.bind] ?? '');
-  return (
-    <div className="dui-field">
-      <span className="dui-field-label">{node.label}</span>
-      <div className="dui-segmented" role="radiogroup" aria-label={node.label}>
-        {node.options.map((option) => {
-          const active = String(option.value) === current;
-          return (
-            <button
-              key={String(option.value)}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              className={cn(active && 'is-active')}
-              onClick={() => ctx.set(node.bind, option.value)}
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
-const Checkbox: Renderer<'checkbox'> = ({ node, ctx }) => {
-  const id = useId();
-  return (
-    <label className="dui-check" htmlFor={id}>
-      <input
-        id={id}
-        type="checkbox"
-        checked={isTruthy(ctx.rt.state[node.bind] ?? false)}
-        onChange={(event) => ctx.set(node.bind, event.target.checked)}
-      />
-      <span>{node.label}</span>
-    </label>
-  );
-};
-
-const Button: Renderer<'button'> = ({ node, ctx }) => {
-  const { action } = node;
-  const disabled = action.type === 'sendMessage' && (!ctx.send || ctx.busy);
-  return (
-    <button
-      type="button"
-      className={cn('dui-button', node.variant === 'secondary' ? 'is-secondary' : 'is-primary')}
-      disabled={disabled}
-      onClick={() => {
-        if (action.type === 'sendMessage') ctx.send?.(ctx.rt.template(action.text));
-        else if (action.type === 'set') ctx.set(action.key, ctx.rt.safe(action.value));
-        else ctx.reset();
-      }}
-    >
-      {node.label}
-    </button>
-  );
-};
-
-const Table: Renderer<'table'> = ({ node, ctx }) => {
-  const rows = ctx.rt.source(node.data);
-  return (
-    <div className="dui-table-wrap" role="region" aria-label="Tabelle" tabIndex={0}>
-      <table className="dui-table">
-        <thead>
-          <tr>
-            {node.columns.map((column) => (
-              <th
-                key={column.key}
-                className={cn(
-                  (column.align
-                    ? column.align === 'right'
-                    : typeof rows[0]?.[column.key] === 'number') && 'is-right'
-                )}
-              >
-                {column.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr
-              key={index}
-              className={cn(
-                node.highlight &&
-                  isTruthy(ctx.rt.with(row).safe(node.highlight)) &&
-                  'is-highlighted'
-              )}
-            >
-              {node.columns.map((column) => {
-                const value = row[column.key];
-                const right = column.align ? column.align === 'right' : typeof value === 'number';
-                return (
-                  <td key={column.key} className={cn(right && 'is-right')}>
-                    {formatUiValue(value, column.format)}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-          {!rows.length && (
-            <tr>
-              <td colSpan={node.columns.length} className="dui-empty">
-                Keine Einträge für diese Auswahl.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-};
-
-const Chart: Renderer<'chart'> = ({ node, ctx }) => {
-  const palette = useThemePalette();
-  const rows = ctx.rt.source(node.data);
-  const format = (value: unknown) => formatUiValue(value as UiValue, node.format);
-  const axisFormat = (value: unknown) =>
-    typeof value === 'number' && node.format?.startsWith('currency')
-      ? formatUiValue(value, 'compact')
-      : formatUiValue(value as UiValue, node.format === 'percent' ? 'percent' : undefined);
-  const height = node.height ?? 240;
-  const axis = { stroke: 'currentColor', fontSize: 11, tickLine: false, axisLine: false } as const;
-  const grid = <CartesianGrid strokeOpacity={0.12} vertical={false} />;
-  const tooltip = (
-    <Tooltip
-      formatter={(value) => format(value)}
-      contentStyle={{
-        background: 'hsl(var(--popover) / 0.92)',
-        border: '1px solid hsl(var(--foreground) / 0.12)',
-        borderRadius: 10,
-        backdropFilter: 'blur(12px)',
-      }}
-    />
-  );
-  const legend = node.series.length > 1 ? <Legend wrapperStyle={{ fontSize: 12 }} /> : null;
-  let chart: ReactNode;
-  if (node.kind === 'pie') {
-    const series = node.series[0]!;
-    chart = (
-      <PieChart>
-        <Pie
-          data={rows}
-          dataKey={series.key}
-          nameKey={node.x}
-          innerRadius="55%"
-          outerRadius="85%"
-          paddingAngle={2}
-        >
-          {rows.map((_, index) => (
-            <Cell key={index} fill={palette[index % palette.length]} stroke="none" />
-          ))}
-        </Pie>
-        {tooltip}
-        <Legend wrapperStyle={{ fontSize: 12 }} />
-      </PieChart>
-    );
-  } else if (node.kind === 'bar') {
-    chart = (
-      <BarChart data={rows}>
-        {grid}
-        <XAxis dataKey={node.x} {...axis} />
-        <YAxis {...axis} width={56} tickFormatter={axisFormat} />
-        {tooltip}
-        {legend}
-        {node.series.map((series, index) => (
-          <Bar
-            key={series.key}
-            dataKey={series.key}
-            name={series.label}
-            fill={palette[index % palette.length]}
-            radius={[6, 6, 0, 0]}
-            stackId={node.stacked ? 'stack' : undefined}
-            isAnimationActive={false}
-          />
-        ))}
-      </BarChart>
-    );
-  } else {
-    const Lines = node.kind === 'line' ? LineChart : AreaChart;
-    chart = (
-      <Lines data={rows}>
-        <defs>
-          {node.series.map((series, index) => (
-            <linearGradient
-              key={series.key}
-              id={`dui-fill-${series.key}`}
-              x1="0"
-              y1="0"
-              x2="0"
-              y2="1"
-            >
-              <stop offset="0%" stopColor={palette[index % palette.length]} stopOpacity={0.35} />
-              <stop offset="100%" stopColor={palette[index % palette.length]} stopOpacity={0} />
-            </linearGradient>
-          ))}
-        </defs>
-        {grid}
-        <XAxis dataKey={node.x} {...axis} />
-        <YAxis {...axis} width={56} tickFormatter={axisFormat} />
-        {tooltip}
-        {legend}
-        {node.series.map((series, index) =>
-          node.kind === 'line' ? (
-            <Line
-              key={series.key}
-              dataKey={series.key}
-              name={series.label}
-              stroke={palette[index % palette.length]}
-              strokeWidth={2.4}
-              dot={false}
-              isAnimationActive={false}
-            />
-          ) : (
-            <Area
-              key={series.key}
-              dataKey={series.key}
-              name={series.label}
-              stroke={palette[index % palette.length]}
-              strokeWidth={2.4}
-              fill={`url(#dui-fill-${series.key})`}
-              stackId={node.stacked ? 'stack' : undefined}
-              isAnimationActive={false}
-            />
-          )
-        )}
-      </Lines>
+function liveRenderer<T extends UiLiveNodeType>(type: T): Renderer<T> {
+  const Widget = LIVE[type] as ComponentType<{ node: UiNodeOf<T>; ctx: Ctx }>;
+  function LiveWidget({ node, ctx }: { node: UiNodeOf<T>; ctx: Ctx }) {
+    return (
+      <Suspense fallback={<LiveSkeleton type={type} />}>
+        <Widget node={node} ctx={ctx} />
+      </Suspense>
     );
   }
-  return (
-    <figure className="dui-chart" aria-label={node.series.map((series) => series.label).join(', ')}>
-      <ResponsiveContainer width="100%" height={height}>
-        {chart as ReactElement}
-      </ResponsiveContainer>
-    </figure>
-  );
-};
-
-const Compare: Renderer<'compare'> = ({ node, ctx }) => {
-  const selected = node.bind ? String(ctx.rt.state[node.bind] ?? '') : '';
-  // Best value per spec, for the subtle "best" marker.
-  const best = new Map<string, number>();
-  for (const spec of node.specs) {
-    if (!spec.better) continue;
-    const values = node.items
-      .map((item) => item.values[spec.key])
-      .filter((v): v is number => typeof v === 'number');
-    if (values.length)
-      best.set(spec.key, spec.better === 'higher' ? Math.max(...values) : Math.min(...values));
-  }
-  return (
-    <div className="dui-compare" role={node.bind ? 'radiogroup' : undefined}>
-      {node.items.map((item) => {
-        const active = item.id === selected;
-        const body = (
-          <>
-            <header className="dui-compare-head">
-              <div>
-                <h4>{item.title}</h4>
-                {item.subtitle && <p>{item.subtitle}</p>}
-              </div>
-              {item.badge && <span className="dui-badge is-accent">{item.badge}</span>}
-              {active && (
-                <span className="dui-compare-check" aria-hidden>
-                  <Check size={14} />
-                </span>
-              )}
-            </header>
-            <dl>
-              {node.specs.map((spec) => {
-                const value = item.values[spec.key];
-                const isBest = typeof value === 'number' && best.get(spec.key) === value;
-                return (
-                  <div key={spec.key} className={cn(isBest && 'is-best')}>
-                    <dt>{spec.label}</dt>
-                    <dd>{formatUiValue(value, spec.format)}</dd>
-                  </div>
-                );
-              })}
-            </dl>
-          </>
-        );
-        return node.bind ? (
-          <button
-            key={item.id}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            className={cn('dui-compare-item', active && 'is-active')}
-            onClick={() => ctx.set(node.bind!, item.id)}
-          >
-            {body}
-          </button>
-        ) : (
-          <div key={item.id} className="dui-compare-item">
-            {body}
-          </div>
-        );
-      })}
-    </div>
-  );
-};
+  return LiveWidget;
+}
+const Chart: Renderer<'chart'> = ({ node, ctx }) => (
+  <Suspense
+    fallback={
+      <div className="dui-chart dui-sk is-block" style={{ height: (node.height ?? 240) + 44 }} />
+    }
+  >
+    <ChartLazy node={node} ctx={ctx} />
+  </Suspense>
+);
 
 /** The component registry: the only UI a model can reach. */
 const REGISTRY: { [T in UiNodeType]: Renderer<T> } = {
-  stack: Stack,
-  row: Row,
-  grid: Grid,
+  stack: basic.Stack,
+  row: basic.Row,
+  grid: basic.Grid,
   card: Card,
-  calculator: Calculator,
-  heading: Heading,
-  text: Text,
-  markdown: Markdown,
-  badge: Badge,
-  divider: Divider,
-  kpi: Kpi,
-  slider: Slider,
-  input: Input,
-  select: Select,
-  segmented: Segmented,
-  checkbox: Checkbox,
-  button: Button,
+  calculator: basic.Calculator,
+  heading: basic.Heading,
+  text: basic.Text,
+  markdown: basic.Markdown,
+  badge: basic.Badge,
+  divider: basic.Divider,
+  kpi: basic.Kpi,
+  slider: basic.Slider,
+  input: basic.Input,
+  select: basic.Select,
+  segmented: basic.Segmented,
+  checkbox: basic.Checkbox,
+  button: basic.Button,
   table: Table,
   chart: Chart,
-  compare: Compare,
+  compare: basic.Compare,
+  tabs: Tabs,
+  accordion: Accordion,
+  carousel: Carousel,
+  list: content.List,
+  timeline: content.Timeline,
+  callout: content.Callout,
+  progress: content.Progress,
+  rating: content.Rating,
+  image: content.ImageNode,
+  code: content.CodeBlock,
+  math: content.MathNode,
+  stepper: basic.Stepper,
+  radio: basic.Radio,
+  textarea: basic.Textarea,
+  date: basic.DateInput,
+  form: basic.Form,
+  checklist: Checklist,
+  quiz: Quiz,
+  flashcards: Flashcards,
+  weather: liveRenderer('weather'),
+  currency: liveRenderer('currency'),
+  stock: liveRenderer('stock'),
+  entity: liveRenderer('entity'),
+  news: liveRenderer('news'),
+  gallery: liveRenderer('gallery'),
+  widget: WidgetTile,
 };
 
-function Node({ node, ctx }: { node: UiNode; ctx: Ctx }) {
-  const Render = REGISTRY[node.type] as unknown as (props: { node: UiNode; ctx: Ctx }) => ReactNode;
-  return <Render node={node} ctx={ctx} />;
-}
-
-class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+/** A broken component never takes its neighbours or the answer down. */
+class NodeBoundary extends Component<{ children: ReactNode; type: string }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
   }
   render() {
     return this.state.failed ? (
-      <p className="dui-note">Die interaktive Ansicht konnte nicht dargestellt werden.</p>
+      <p className="dui-note">
+        Dieser Baustein ({this.props.type}) konnte nicht dargestellt werden.
+      </p>
     ) : (
       this.props.children
     );
   }
+}
+
+function Node({ node, ctx }: { node: UiNode; ctx: Ctx }) {
+  const Render = REGISTRY[node.type] as unknown as
+    | ((props: { node: UiNode; ctx: Ctx }) => ReactNode)
+    | undefined;
+  if (!Render) return null;
+  return (
+    <NodeBoundary type={node.type}>
+      <Render node={node} ctx={ctx} />
+    </NodeBoundary>
+  );
 }
 
 /**
@@ -617,39 +181,119 @@ class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
 export default function DynamicUi({
   spec,
   onSendMessage,
-  busy,
+  onPrefill,
+  busy = false,
+  streaming = false,
   stateStore,
   stateKey,
+  turnId,
+  results,
+  onRefreshResult,
+  latest = true,
 }: DynamicUiProps) {
   // Client-side validation: the server already checked, but stored history or
   // fixtures must pass the same gate before anything renders.
   const checked = useMemo(() => validateDynamicUi(spec), [spec]);
   const localStore = useMemo(() => new DynamicUiStateStore(), []);
   const store = stateStore ?? localStore;
-  const edits = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
+  useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
+  const [entity, setEntity] = useState<{ title: string; lang?: string } | null>(null);
   const view = spec.viewId ?? stateKey ?? 'local';
-  const state = mergeDynamicUiState(spec.state ?? {}, edits[view] ?? {});
   if (!checked.ok)
     return <p className="dui-note">Interaktive Ansicht verworfen ({checked.error}).</p>;
+  const state = mergeDynamicUiState(checked.spec.state ?? {}, store.view(view));
+  const rt = new UiRuntime(checked.spec, state);
+  const owner = turnId ?? stateKey;
+  const canRun = (action: UiAction) => {
+    if (streaming) return false;
+    switch (action.type) {
+      case 'sendMessage':
+        return !!onSendMessage && !busy;
+      case 'set':
+      case 'reset':
+        return !busy;
+      case 'prefill':
+        return !!onPrefill;
+      case 'copy':
+      case 'openUrl':
+      case 'openEntity':
+        return true;
+      default:
+        return false;
+    }
+  };
+  /** `template` fills {{formulas}} of catalog texts; custom tiles pass literal text. */
+  const execute = async (
+    action: UiAction,
+    template: (text: string) => string
+  ): Promise<'done' | 'copied' | 'blocked'> => {
+    if (!canRun(action)) return 'blocked';
+    switch (action.type) {
+      case 'sendMessage':
+        onSendMessage?.(template(action.text));
+        return 'done';
+      case 'set':
+        store.set(view, action.key, rt.safe(action.value));
+        return 'done';
+      case 'reset':
+        store.reset(view);
+        return 'done';
+      case 'copy':
+        return (await copyText(template(action.text))) ? 'copied' : 'blocked';
+      case 'openUrl':
+        return openExternal(action.url) ? 'done' : 'blocked';
+      case 'prefill':
+        onPrefill?.(template(action.text));
+        return 'done';
+      case 'openEntity':
+        setEntity({ title: action.title, lang: action.lang });
+        return 'done';
+      default:
+        // Unknown actions from a newer schema do nothing.
+        return 'blocked';
+    }
+  };
   const ctx: Ctx = {
-    rt: new UiRuntime(checked.spec, state),
+    rt,
+    busy: busy || streaming,
+    streaming,
+    latest,
     set: (key, value) => {
-      if (!busy) store.set(view, key, value);
+      if (!streaming) store.set(view, key, value);
     },
     reset: () => {
-      if (!busy) store.reset(view);
+      if (!streaming) store.reset(view);
     },
-    send: onSendMessage,
-    busy,
+    canRun,
+    run: (action) => execute(action, (text) => rt.template(text)),
+    runLiteral: (action) => execute(action, (text) => text),
+    live: (node) => {
+      const result = results?.[node.id];
+      return result && result.type === node.type && result.key === uiLiveKey(node)
+        ? result
+        : undefined;
+    },
+    refresh: onRefreshResult,
+    storageKey: (nodeId) => (owner ? `${owner}:${nodeId}` : null),
+    openEntity: (title, lang) => setEntity({ title, lang }),
+    renderNodes: (nodes) =>
+      nodes.map((node, index) => (
+        <Node key={node.id ?? `${node.type}-${index}`} node={node} ctx={ctx} />
+      )),
   };
   return (
-    <Boundary>
-      <div className={cn('dui-root', checked.spec.layout === 'dashboard' && 'is-dashboard')}>
-        {checked.spec.title && <h3 className="dui-title">{checked.spec.title}</h3>}
-        <fieldset disabled={busy} className="dui-interactive-body">
-          <Node node={checked.spec.root} ctx={ctx} />
-        </fieldset>
-      </div>
-    </Boundary>
+    <div
+      className={cn(
+        'dui-root',
+        checked.spec.layout === 'dashboard' && 'is-dashboard',
+        streaming && 'is-streaming'
+      )}
+    >
+      {checked.spec.title && <h3 className="dui-title">{checked.spec.title}</h3>}
+      <fieldset disabled={streaming} className="dui-interactive-body">
+        <Node node={checked.spec.root} ctx={ctx} />
+      </fieldset>
+      <EntitySheet entity={entity} onClose={() => setEntity(null)} />
+    </div>
   );
 }

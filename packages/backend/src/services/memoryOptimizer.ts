@@ -30,6 +30,7 @@ import path from 'node:path';
 import { getDataDirectory } from '../db/index.js';
 import { runAdminLLM } from '../utils/adminLLM.js';
 import { resolveConfigHome } from '../utils/configPaths.js';
+import { projectMemoryDir } from '../utils/projectMemory.js';
 
 const ARCHIVE_AFTER_DAYS = 14;
 const DEBOUNCE_MS = 6 * 60 * 60 * 1000; // one pass per workspace per 6h
@@ -51,6 +52,20 @@ function managedPlaceholder(index: number): string {
 }
 
 const runningWorkdirs = new Set<string>();
+
+/**
+ * Shared lock so the compaction optimizer and the nightly dreaming pass never
+ * rewrite the same project's memory directory at once (both move/delete files).
+ */
+export function tryLockMemoryWorkdir(workdir: string): boolean {
+  if (runningWorkdirs.has(workdir)) return false;
+  runningWorkdirs.add(workdir);
+  return true;
+}
+
+export function releaseMemoryWorkdir(workdir: string): void {
+  runningWorkdirs.delete(workdir);
+}
 
 interface OptimizerState {
   lastRunByWorkdir: Record<string, string>;
@@ -80,15 +95,12 @@ async function saveState(state: OptimizerState): Promise<void> {
 }
 
 /** Claude CLI project slug: path separators and dots become dashes. */
-function claudeProjectSlug(workingDirectory: string): string {
-  return workingDirectory.replace(/[/.]/g, '-');
-}
-
+/** Same directory Claude Code uses (its slug turns spaces and umlauts into '-' too). */
 export function resolveMemoryOptimizerMemoryDir(
   workingDirectory: string,
   configHome = resolveConfigHome()
 ): string {
-  return path.join(configHome, 'projects', claudeProjectSlug(workingDirectory), 'memory');
+  return projectMemoryDir(workingDirectory, configHome);
 }
 
 export function hasExactManagedPlaceholderSequence(result: string, blockCount: number): boolean {

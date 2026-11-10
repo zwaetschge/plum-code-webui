@@ -1,9 +1,51 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/button';
-import { splitSpeech, voiceLanguageCode } from './voiceSegments';
+import { PlumFace, type FacePhase } from './PlumFace';
+import { playbackSegments, recognitionLocale, voiceLanguageCode } from './voiceSegments';
+import { usePersonalization } from './usePersonalization';
 
-/** All recognition and synthesis use the user's Vocarium service. */
+/** The Web Speech API's recognizer (Chrome, Edge, Safari; not Firefox), minimally typed. */
+interface DeviceRecognition {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult:
+    | ((event: {
+        resultIndex: number;
+        results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+      }) => void)
+    | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+}
+type RecognitionConstructor = new () => DeviceRecognition;
+function deviceRecognizer(): RecognitionConstructor | null {
+  if (typeof window === 'undefined') return null;
+  const scope = window as unknown as {
+    SpeechRecognition?: RecognitionConstructor;
+    webkitSpeechRecognition?: RecognitionConstructor;
+  };
+  return scope.SpeechRecognition ?? scope.webkitSpeechRecognition ?? null;
+}
+/** Errors after which this browser's recognizer is not used again in this conversation. */
+const DEVICE_RECOGNITION_FAILURES = new Set([
+  'service-not-allowed',
+  'network',
+  'language-not-supported',
+  'bad-grammar',
+]);
+
+/**
+ * Voice input and spoken answers. Recognition uses the browser's own recognizer
+ * when the personalisation allows it (live captions, no upload wait) and
+ * Vocarium's Whisper otherwise or as a fallback; answers are spoken with the
+ * chosen OmniVoice or Mistral voice.
+ */
 export function VoiceComposer({
   text,
   voice = 'Rufus Beck',
@@ -32,7 +74,9 @@ export function VoiceComposer({
     [reading, setReading] = useState(false),
     [live, setLive] = useState(false),
     [awaiting, setAwaiting] = useState(false),
-    [piece, setPiece] = useState(0);
+    [piece, setPiece] = useState(0),
+    /** Microphone loudness, 0–1: the face breathes with your voice. */
+    [level, setLevel] = useState(0);
   const mounted = useRef(true),
     liveRef = useRef(false),
     starting = useRef(false),
@@ -49,6 +93,15 @@ export function VoiceComposer({
     transcriptionRequest = useRef<AbortController | null>(null);
   const speechChunks = useRef<string[]>([]),
     audioPlayer = useRef<HTMLAudioElement | null>(null);
+  /** The next spoken piece, requested while the current one plays. */
+  const prefetched = useRef<{ text: string; blob: Promise<Blob> } | null>(null);
+  const recognizer = useRef<DeviceRecognition | null>(null),
+    deviceFailed = useRef(false),
+    /** Runs that ended at once without words; three in a row switch to the server. */
+    emptyRuns = useRef(0),
+    [caption, setCaption] = useState('');
+  const { preferences } = usePersonalization();
+  const preferDevice = preferences.speechRecognition !== 'server';
   const closeVad = () => {
     if (vadTimer.current) clearInterval(vadTimer.current);
     vadTimer.current = null;
@@ -59,6 +112,8 @@ export function VoiceComposer({
   const stopSpeech = () => {
     speechGeneration.current++;
     speechRequest.current?.abort();
+    speechRequest.current = null;
+    prefetched.current = null;
     speechChunks.current = [];
     audioPlayer.current?.pause();
     setReading(false);
@@ -66,6 +121,7 @@ export function VoiceComposer({
   };
   const discardRecording = () => {
     discarded.current = true;
+    recognizer.current?.abort();
     if (recorder.current?.state === 'recording') recorder.current.stop();
     stream.current?.getTracks().forEach((track) => track.stop());
     closeVad();
@@ -76,6 +132,19 @@ export function VoiceComposer({
     setAwaiting(false);
     stopSpeech();
     discardRecording();
+  };
+  /** A recognized utterance: sent in a voice conversation, otherwise put into the composer. */
+  const deliver = async (spoken: string, automatic: boolean) => {
+    if (!automatic) {
+      onTranscription(spoken);
+      return;
+    }
+    if (!liveRef.current || !spoken.trim() || !onSend) return;
+    awaitAnswerKey.current = answerKey;
+    setAwaiting(true);
+    const ack = (await onSend(spoken.trim())) as { status?: string; error?: string } | undefined;
+    if (ack?.status === 'rejected')
+      throw new Error(ack.error || 'Die Sprachnachricht wurde abgelehnt');
   };
   const transcribe = async (file: File, automatic = false) => {
     const epoch = operation.current;
@@ -98,16 +167,7 @@ export function VoiceComposer({
         })
       ).data.data;
       if (!mounted.current || epoch !== operation.current || controller.signal.aborted) return;
-      if (automatic) {
-        if (!liveRef.current || !result.text.trim() || !onSend) return;
-        awaitAnswerKey.current = answerKey;
-        setAwaiting(true);
-        const ack = (await onSend(result.text.trim())) as
-          | { status?: string; error?: string }
-          | undefined;
-        if (ack?.status === 'rejected')
-          throw new Error(ack.error || 'Die Sprachnachricht wurde abgelehnt');
-      } else onTranscription(result.text);
+      await deliver(result.text, automatic);
     } catch (failure) {
       if (mounted.current && epoch === operation.current && !controller.signal.aborted) {
         setError(failure instanceof Error ? failure.message : 'Transkription fehlgeschlagen');
@@ -121,13 +181,102 @@ export function VoiceComposer({
       }
     }
   };
-  const startRecording = async (automatic = false) => {
-    if (starting.current || recorder.current?.state === 'recording' || transcribing.current) return;
-    starting.current = true;
+  /**
+   * The browser's recognizer: words appear while speaking and the utterance is
+   * ready at the pause, without an upload. In a voice conversation one
+   * utterance per run (the recognizer ends at the pause); dictation listens
+   * until stopped.
+   */
+  const startDeviceRecognition = (Recognition: RecognitionConstructor, automatic: boolean) => {
     const epoch = operation.current;
+    const recognition = new Recognition();
+    recognition.lang = recognitionLocale(language);
+    recognition.continuous = !automatic;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    let heard = '',
+      failure = '';
+    const startedAt = Date.now();
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let index = event.resultIndex; index < event.results.length; index++) {
+        const result = event.results[index]!;
+        if (result.isFinal) heard += result[0].transcript;
+        else interim += result[0].transcript;
+      }
+      if (mounted.current) setCaption(`${heard} ${interim}`.trim());
+    };
+    recognition.onerror = (event) => {
+      failure = event.error;
+    };
+    recognition.onend = () => {
+      if (recognizer.current === recognition) recognizer.current = null;
+      if (!mounted.current || epoch !== operation.current) return;
+      setRecording(false);
+      setCaption('');
+      if (discarded.current) return;
+      if (failure === 'not-allowed' || failure === 'audio-capture') {
+        endLive();
+        setError('Mikrofonzugriff ist nicht verfügbar. Du kannst eine Audiodatei auswählen.');
+        return;
+      }
+      if (DEVICE_RECOGNITION_FAILURES.has(failure)) {
+        // This browser cannot recognize here: Whisper on Vocarium takes over.
+        deviceFailed.current = true;
+        setError('Die Spracherkennung des Browsers ist nicht verfügbar. Plum nutzt den Server.');
+        if (!automatic) void latest.current.startRecording(false);
+        return;
+      }
+      const spoken = heard.trim();
+      // Nothing heard: a voice conversation simply listens again, unless the
+      // recognizer keeps ending at once (then Whisper on Vocarium takes over).
+      if (!spoken) {
+        emptyRuns.current = Date.now() - startedAt < 700 ? emptyRuns.current + 1 : 0;
+        if (emptyRuns.current >= 3) deviceFailed.current = true;
+        return;
+      }
+      emptyRuns.current = 0;
+      setBusy(true);
+      void deliver(spoken, automatic)
+        .catch((problem) => {
+          if (mounted.current && epoch === operation.current) {
+            setError(problem instanceof Error ? problem.message : 'Senden fehlgeschlagen');
+            endLive();
+          }
+        })
+        .finally(() => {
+          if (mounted.current) setBusy(false);
+        });
+    };
+    recognizer.current = recognition;
+    recognition.start();
+    setRecording(true);
+  };
+  const startRecording = async (automatic = false) => {
+    if (
+      starting.current ||
+      recorder.current?.state === 'recording' ||
+      recognizer.current ||
+      transcribing.current
+    )
+      return;
+    starting.current = true;
     setError('');
     stopSpeech();
     discarded.current = false;
+    const Recognition = preferDevice && !deviceFailed.current ? deviceRecognizer() : null;
+    if (Recognition) {
+      try {
+        startDeviceRecognition(Recognition, automatic);
+      } catch {
+        deviceFailed.current = true;
+      } finally {
+        starting.current = false;
+      }
+      if (recognizer.current) return;
+      starting.current = true;
+    }
+    const epoch = operation.current;
     try {
       const media = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!mounted.current || epoch !== operation.current || (automatic && !liveRef.current)) {
@@ -146,6 +295,7 @@ export function VoiceComposer({
         media.getTracks().forEach((track) => track.stop());
         if (stream.current === media) stream.current = null;
         if (recorder.current === next) recorder.current = null;
+        setLevel(0);
         if (!mounted.current || epoch !== operation.current) return;
         setRecording(false);
         if (!discarded.current)
@@ -169,6 +319,7 @@ export function VoiceComposer({
           const energy = Math.sqrt(
             samples.reduce((sum, value) => sum + value * value, 0) / samples.length
           );
+          setLevel(Math.min(1, energy * 6));
           if (energy > 0.025) {
             heard = true;
             lastVoice = Date.now();
@@ -198,16 +349,26 @@ export function VoiceComposer({
     }
     setBusy(true);
     setError('');
-    const controller = new AbortController();
+    const controller = speechRequest.current ?? new AbortController();
     speechRequest.current = controller;
+    const request = (piece: string) => {
+      const blob = api
+        .download('/api/assistant/voice/speech', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: piece, voice, language }),
+          signal: controller.signal,
+        })
+        .then((response) => response.blob());
+      blob.catch(() => {});
+      return blob;
+    };
+    const pending = prefetched.current?.text === next ? prefetched.current.blob : request(next);
+    // The following piece renders while this one plays: no pause between them.
+    const following = speechChunks.current[0];
+    prefetched.current = following ? { text: following, blob: request(following) } : null;
     try {
-      const response = await api.download('/api/assistant/voice/speech', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: next, voice, language }),
-        signal: controller.signal,
-      });
-      const blob = await response.blob();
+      const blob = await pending;
       if (!mounted.current || generation !== speechGeneration.current) return;
       setAudio(URL.createObjectURL(blob));
       setPiece((old) => old + 1);
@@ -229,7 +390,7 @@ export function VoiceComposer({
     const generation = speechGeneration.current;
     setPiece(0);
     setAudio('');
-    speechChunks.current = splitSpeech(text);
+    speechChunks.current = playbackSegments(text);
     setReading(true);
     await nextSpeech(generation);
   };
@@ -287,6 +448,22 @@ export function VoiceComposer({
     [audio]
   );
 
+  /**
+   * The face's state, derived from the same flags the status line uses: the
+   * voice conversation, the recording, the transcription and the spoken
+   * answer are one visible act.
+   */
+  const facePhase: FacePhase = error
+    ? 'failed'
+    : reading
+      ? 'speaking'
+      : awaiting
+        ? 'thinking'
+        : busy
+          ? 'transcribing'
+          : recording
+            ? 'listening'
+            : 'idle';
   useEffect(() => {
     mounted.current = true;
     const counters = { operation, speechGeneration };
@@ -297,6 +474,7 @@ export function VoiceComposer({
       transcriptionRequest.current?.abort();
       counters.speechGeneration.current++;
       speechRequest.current?.abort();
+      recognizer.current?.abort();
 
       discarded.current = true;
       if (recorder.current?.state === 'recording') recorder.current.stop();
@@ -305,7 +483,7 @@ export function VoiceComposer({
     };
   }, []);
   return (
-    <section className="space-y-2" aria-label="Sprache mit Vocarium">
+    <section className="space-y-2" aria-label="Sprache">
       <div className="flex flex-wrap gap-2">
         {onSend && (
           <Button
@@ -326,25 +504,19 @@ export function VoiceComposer({
             {live ? 'Sprachgespräch beenden' : 'Sprachgespräch starten'}
           </Button>
         )}
-        {live && (
-          <p role="status" className="text-xs text-muted-foreground">
-            Erkannte Beiträge werden automatisch im aktuellen Chat gesendet.{' '}
-            {awaiting
-              ? 'Wartet auf die Antwort.'
-              : reading
-                ? 'OmniVoice antwortet.'
-                : 'Sprich nach dem Mikrofonhinweis.'}
-          </p>
-        )}
         {typeof MediaRecorder !== 'undefined' && (
           <Button
             type="button"
             variant="outline"
             size="sm"
             disabled={busy || live || modelBusy}
-            onClick={() => (recording ? recorder.current?.stop() : void startRecording())}
+            onClick={() => {
+              if (!recording) void startRecording();
+              else if (recognizer.current) recognizer.current.stop();
+              else recorder.current?.stop();
+            }}
           >
-            {recording ? 'Aufnahme beenden und transkribieren' : 'Nachricht einsprechen'}
+            {recording ? 'Aufnahme beenden' : 'Nachricht einsprechen'}
           </Button>
         )}
         {recording && (
@@ -395,20 +567,34 @@ export function VoiceComposer({
             disabled={busy || recording || modelBusy || live}
             onClick={() => void speak()}
           >
-            Mit OmniVoice vorlesen
+            Vorlesen
           </Button>
         )}
       </div>
+      {(live || recording || reading) && (
+        <div className="plum-voice-presence">
+          <PlumFace phase={facePhase} level={level} size={96} title="Plum" />
+          <p role="status" className="text-sm">
+            {awaiting
+              ? 'Wartet auf die Antwort.'
+              : reading
+                ? 'Plum antwortet.'
+                : recording
+                  ? 'Plum hört zu.'
+                  : 'Sprich nach dem Mikrofonhinweis.'}
+          </p>
+        </div>
+      )}
       {recording && (
         <p role="status" className="text-sm">
-          Das Mikrofon nimmt auf.
+          {caption ? `„${caption}“` : 'Das Mikrofon nimmt auf.'}
         </p>
       )}
       {busy && (
         <p role="status" className="text-sm">
           {reading
-            ? `OmniVoice bereitet Abschnitt ${piece + 1} vor …`
-            : 'Vocarium verarbeitet die Aufnahme …'}
+            ? `Sprachausgabe bereitet Abschnitt ${piece + 1} vor …`
+            : 'Die Aufnahme wird erkannt …'}
         </p>
       )}
       {error && (
@@ -419,7 +605,7 @@ export function VoiceComposer({
       {audio && (
         <audio
           ref={audioPlayer}
-          aria-label="OmniVoice-Ausgabe"
+          aria-label="Sprachausgabe"
           controls
           src={audio}
           className="max-w-full"

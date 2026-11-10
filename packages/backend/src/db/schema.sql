@@ -1100,3 +1100,254 @@ CREATE TABLE IF NOT EXISTS session_connections (
  PRIMARY KEY (session_id, connection_id)
 );
 CREATE INDEX IF NOT EXISTS idx_session_connections_connection ON session_connections(connection_id);
+
+-- Assistant resources, model chat (/chat) and memory: migrations 010-014 and
+-- 018-024, 027, copied in migration order so this baseline is the old baseline
+-- plus every migration. Columns that a later migration added to an existing
+-- table stay ALTER TABLE ... ADD COLUMN IF NOT EXISTS ahead of the indexes that
+-- use them: on a database restored from before that migration the table is
+-- already there without the column, CREATE TABLE IF NOT EXISTS skips it, and an
+-- index on the missing column would fail the boot. Data-only migrations (004,
+-- 005's backfill, 008, 017, 025) have nothing to add to an empty schema.
+
+-- 010-assistant-resources
+CREATE TABLE IF NOT EXISTS assistant_branches (
+    chat_id TEXT PRIMARY KEY REFERENCES session_chats(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    source_chat_id TEXT, source_message_id TEXT NOT NULL, seed_message_ids TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+CREATE TABLE IF NOT EXISTS assistant_matrix_sync (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    native_user_id TEXT NOT NULL, cursor TEXT, updated_at TEXT NOT NULL
+  );
+CREATE TABLE IF NOT EXISTS assistant_assets (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL, mime_type TEXT NOT NULL, sha256 TEXT NOT NULL,
+    bytes BYTEA NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE(user_id, sha256)
+  );
+CREATE TABLE IF NOT EXISTS assistant_matrix_events (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, room_id TEXT NOT NULL,
+    event_id TEXT NOT NULL, event_json TEXT NOT NULL, native_user_id TEXT NOT NULL DEFAULT '', origin_ts BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY(user_id, room_id, event_id)
+  );
+CREATE INDEX IF NOT EXISTS assistant_matrix_events_timeline ON assistant_matrix_events(user_id, room_id, origin_ts);
+CREATE TABLE IF NOT EXISTS assistant_matrix_rooms (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, room_id TEXT NOT NULL,
+    native_user_id TEXT NOT NULL DEFAULT '', state_json TEXT NOT NULL DEFAULT '[]', history_cursor TEXT, history_complete BIGINT NOT NULL DEFAULT 0,
+    imported_count BIGINT NOT NULL DEFAULT 0, updated_at TEXT NOT NULL,
+    PRIMARY KEY(user_id, room_id)
+  );
+CREATE TABLE IF NOT EXISTS assistant_executor_leases (
+    name TEXT PRIMARY KEY, owner_id TEXT NOT NULL, epoch BIGINT NOT NULL DEFAULT 1,
+    expires_at TEXT NOT NULL
+  );
+CREATE TABLE IF NOT EXISTS assistant_credentials (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    service TEXT NOT NULL, public_json TEXT NOT NULL, secret_encrypted TEXT NOT NULL,
+    updated_at TEXT NOT NULL, PRIMARY KEY(user_id, service)
+  );
+CREATE TABLE IF NOT EXISTS assistant_matrix_commands (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, command_id TEXT NOT NULL,
+    payload_hash TEXT NOT NULL, native_user_id TEXT NOT NULL DEFAULT '', identity_epoch TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, result_json TEXT,
+    PRIMARY KEY(user_id, command_id)
+  );
+CREATE TABLE IF NOT EXISTS assistant_resources (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL, title TEXT NOT NULL, body_json TEXT NOT NULL,
+    revision BIGINT NOT NULL DEFAULT 1, archived BIGINT NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  );
+CREATE INDEX IF NOT EXISTS assistant_resources_owner_kind ON assistant_resources(user_id, kind, archived, updated_at);
+CREATE TABLE IF NOT EXISTS assistant_resource_revisions (
+    resource_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    revision BIGINT NOT NULL, title TEXT NOT NULL, body_json TEXT NOT NULL, created_at TEXT NOT NULL,
+    PRIMARY KEY(resource_id, revision)
+  );
+CREATE TABLE IF NOT EXISTS assistant_source_chunks (
+    resource_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    revision BIGINT NOT NULL, chunk_index BIGINT NOT NULL, start_offset BIGINT NOT NULL,
+    end_offset BIGINT NOT NULL, page BIGINT, text TEXT NOT NULL,
+    embedding DOUBLE PRECISION[], embedding_model TEXT,
+    PRIMARY KEY(resource_id,revision,chunk_index),
+    FOREIGN KEY(resource_id,revision) REFERENCES assistant_resource_revisions(resource_id,revision) ON DELETE CASCADE
+  );
+CREATE TABLE IF NOT EXISTS assistant_source_watches (
+    source_id TEXT PRIMARY KEY REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    revision BIGINT NOT NULL DEFAULT 1, enabled BIGINT NOT NULL DEFAULT 0,
+    interval_minutes BIGINT NOT NULL DEFAULT 60, next_check_at TEXT NOT NULL,
+    checked_at TEXT, error TEXT, updated_at TEXT NOT NULL
+  );
+CREATE INDEX IF NOT EXISTS assistant_source_watches_due ON assistant_source_watches(enabled,next_check_at);
+CREATE TABLE IF NOT EXISTS assistant_api_turns (
+    id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    workbench_json TEXT NOT NULL DEFAULT '{}', ui_results_json TEXT NOT NULL DEFAULT '{}',
+    seq BIGINT NOT NULL, payload_hash TEXT NOT NULL, prompt TEXT NOT NULL, response TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL, error TEXT, model TEXT NOT NULL, profile_json TEXT NOT NULL,
+    source_versions TEXT NOT NULL DEFAULT '[]', image_asset_ids TEXT NOT NULL DEFAULT '[]', usage_json TEXT,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+    UNIQUE(chat_id,seq)
+  );
+CREATE TABLE IF NOT EXISTS assistant_api_usage (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    chat_id TEXT, provider_id TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL,
+    usage_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  );
+CREATE INDEX IF NOT EXISTS assistant_api_usage_owner_time ON assistant_api_usage(user_id,created_at);
+CREATE TABLE IF NOT EXISTS assistant_api_files (
+    chat_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    asset_id TEXT NOT NULL REFERENCES assistant_assets(id), created_at TEXT NOT NULL,
+    PRIMARY KEY(chat_id,asset_id)
+  );
+CREATE TABLE IF NOT EXISTS assistant_session_bindings (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+    profile_id TEXT REFERENCES assistant_resources(id), profile_revision BIGINT,
+    project_id TEXT REFERENCES assistant_resources(id), runtime_id TEXT,
+    temporary BIGINT NOT NULL DEFAULT 0, temporary_expires_at TEXT, temporary_purged_at TEXT
+  );
+CREATE TABLE IF NOT EXISTS assistant_commands (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, command_id TEXT NOT NULL,
+    resource_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    payload_hash TEXT NOT NULL, action TEXT NOT NULL, status TEXT NOT NULL,
+    result_json TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY(user_id, command_id)
+  );
+CREATE TABLE IF NOT EXISTS assistant_attempts (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    command_id TEXT NOT NULL, status TEXT NOT NULL, session_id TEXT REFERENCES sessions(id),
+    native_id TEXT, started_at TEXT NOT NULL, finished_at TEXT, result_json TEXT
+  );
+CREATE TABLE IF NOT EXISTS assistant_source_mappings (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, source TEXT NOT NULL,
+    native_id TEXT NOT NULL, resource_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    source_revision TEXT, PRIMARY KEY(user_id, source, native_id)
+  );
+CREATE TABLE IF NOT EXISTS assistant_app_state (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    resource_id TEXT NOT NULL, revision BIGINT NOT NULL, version BIGINT NOT NULL,
+    state_json TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY(user_id,resource_id,revision),
+    FOREIGN KEY(resource_id,revision) REFERENCES assistant_resource_revisions(resource_id,revision) ON DELETE CASCADE
+  );
+CREATE TABLE IF NOT EXISTS assistant_shares (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    resource_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    revision BIGINT NOT NULL, token_hash TEXT UNIQUE NOT NULL, expires_at TEXT NOT NULL,
+    revoked BIGINT NOT NULL DEFAULT 0, created_at TEXT NOT NULL, snapshot_json TEXT
+  );
+
+-- 011-assistant-document-members
+CREATE TABLE IF NOT EXISTS assistant_document_members (
+    resource_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK(role IN ('viewer','editor')), granted_revision BIGINT NOT NULL,
+    updated_at TEXT NOT NULL, PRIMARY KEY(resource_id,user_id)
+  );
+
+-- 012-assistant-publications
+CREATE TABLE IF NOT EXISTS assistant_publications (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    resource_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    revision BIGINT NOT NULL, token_hash TEXT UNIQUE NOT NULL, token_encrypted TEXT NOT NULL,
+    title TEXT NOT NULL, html TEXT NOT NULL, content_sha256 TEXT NOT NULL,
+    expires_at TEXT NOT NULL, revoked BIGINT NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+  );
+
+-- 013-assistant-long-term-memory
+CREATE TABLE IF NOT EXISTS assistant_memory_jobs (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, id TEXT NOT NULL,
+    source_type TEXT NOT NULL, source_id TEXT NOT NULL, turn_id TEXT NOT NULL,
+    preference_revision BIGINT NOT NULL, source_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
+    attempts BIGINT NOT NULL DEFAULT 0, lease_until TEXT, error TEXT, usage_json TEXT,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(user_id,id)
+  );
+CREATE INDEX IF NOT EXISTS assistant_memory_jobs_pending ON assistant_memory_jobs(status,updated_at);
+CREATE TABLE IF NOT EXISTS assistant_memory_history (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, id TEXT NOT NULL,
+    source_type TEXT NOT NULL, source_id TEXT NOT NULL, turn_id TEXT NOT NULL,
+    project_id TEXT, source_hash TEXT NOT NULL, summary TEXT NOT NULL, writing_style TEXT NOT NULL,
+    created_at TEXT NOT NULL, PRIMARY KEY(user_id,id)
+  );
+CREATE INDEX IF NOT EXISTS assistant_memory_history_search ON assistant_memory_history USING GIN(to_tsvector('simple',summary));
+CREATE TABLE IF NOT EXISTS assistant_memory_forgotten (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL,
+    PRIMARY KEY(user_id,fingerprint)
+  );
+CREATE INDEX IF NOT EXISTS assistant_memory_text_search ON assistant_resources USING GIN(to_tsvector('simple',title || ' ' || COALESCE(body_json::jsonb->>'text','') || ' ' || COALESCE(body_json::jsonb->>'keywords',''))) WHERE kind='memory';
+
+-- 014-assistant-semantic-memory
+ALTER TABLE assistant_memory_jobs ADD COLUMN IF NOT EXISTS backfill INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS assistant_memory_vectors (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, id TEXT NOT NULL, kind TEXT NOT NULL,
+    version TEXT NOT NULL, model TEXT NOT NULL, part INTEGER NOT NULL DEFAULT 0, vector DOUBLE PRECISION[] NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY(user_id,id,kind,part)
+  );
+CREATE TABLE IF NOT EXISTS assistant_memory_backfills (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, preference_revision BIGINT NOT NULL,
+    status TEXT NOT NULL, boundary TEXT NOT NULL, cursor_time TEXT, cursor_key TEXT,
+    considered BIGINT NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  );
+
+-- 018-api-turn-versions
+ALTER TABLE assistant_api_turns ADD COLUMN IF NOT EXISTS version_of TEXT DEFAULT NULL;
+ALTER TABLE assistant_api_turns ADD COLUMN IF NOT EXISTS hidden_by TEXT DEFAULT NULL;
+CREATE INDEX IF NOT EXISTS assistant_api_turns_versions ON assistant_api_turns(chat_id,version_of);
+
+-- 019-api-chat-workbench
+ALTER TABLE assistant_shares ADD COLUMN IF NOT EXISTS snapshot_json TEXT;
+ALTER TABLE assistant_api_turns ADD COLUMN IF NOT EXISTS workbench_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE assistant_source_chunks ADD COLUMN IF NOT EXISTS embedding DOUBLE PRECISION[];
+ALTER TABLE assistant_source_chunks ADD COLUMN IF NOT EXISTS embedding_model TEXT;
+
+-- 020-api-chat-capabilities
+CREATE TABLE IF NOT EXISTS assistant_api_tool_approvals (
+    turn_id TEXT NOT NULL REFERENCES assistant_api_turns(id) ON DELETE CASCADE,
+    call_id TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    function_name TEXT NOT NULL, arguments_hash TEXT NOT NULL,
+    decision TEXT NOT NULL DEFAULT 'pending' CHECK(decision IN ('pending','allow','deny')),
+    created_at TEXT NOT NULL, decided_at TEXT, PRIMARY KEY(turn_id,call_id)
+  );
+
+-- 021-api-chat-queue
+CREATE INDEX IF NOT EXISTS assistant_api_turns_queue ON assistant_api_turns(chat_id,status,seq) WHERE status IN ('queued','preparing','running');
+
+-- 022-api-chat-compaction
+CREATE TABLE IF NOT EXISTS assistant_api_compactions (
+    id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    through_seq BIGINT NOT NULL, turn_count BIGINT NOT NULL, source_hash TEXT NOT NULL,
+    summary TEXT NOT NULL, truncated_ids_json TEXT NOT NULL DEFAULT '[]',
+    provider_id TEXT NOT NULL, model TEXT NOT NULL, usage_json TEXT, created_at TEXT NOT NULL,
+    UNIQUE(chat_id,source_hash)
+  );
+CREATE INDEX IF NOT EXISTS assistant_api_compactions_latest ON assistant_api_compactions(chat_id,through_seq DESC);
+CREATE INDEX IF NOT EXISTS assistant_api_compactions_owner ON assistant_api_compactions(user_id);
+
+-- 023-library-access
+CREATE TABLE IF NOT EXISTS assistant_library_members (
+    resource_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK(role IN ('viewer','editor')), granted_revision BIGINT NOT NULL,
+    updated_at TEXT NOT NULL, PRIMARY KEY(resource_id,user_id)
+  );
+CREATE INDEX IF NOT EXISTS assistant_library_members_user ON assistant_library_members(user_id);
+
+-- 024-chat-schedules
+CREATE TABLE IF NOT EXISTS assistant_chat_schedules (
+    routine_id TEXT PRIMARY KEY REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    chat_id TEXT NOT NULL REFERENCES assistant_resources(id) ON DELETE CASCADE,
+    next_at TEXT, paused BIGINT NOT NULL DEFAULT 0, last_error TEXT, updated_at TEXT NOT NULL
+  );
+CREATE INDEX IF NOT EXISTS assistant_chat_schedules_due ON assistant_chat_schedules(paused,next_at);
+CREATE TABLE IF NOT EXISTS assistant_chat_schedule_runs (
+    id TEXT PRIMARY KEY, routine_id TEXT NOT NULL REFERENCES assistant_chat_schedules(routine_id) ON DELETE CASCADE,
+    slot_at TEXT NOT NULL, status TEXT NOT NULL, input_json TEXT NOT NULL,
+    lease_until TEXT, attempts BIGINT NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL,
+    UNIQUE(routine_id,slot_at)
+  );
+
+-- 027-api-turn-ui-results
+ALTER TABLE assistant_api_turns ADD COLUMN IF NOT EXISTS ui_results_json TEXT NOT NULL DEFAULT '{}';

@@ -24,6 +24,7 @@ export function useGlideMarker(
     let stop: (() => void) | null = null;
     let scheduled = 0;
     let observed: Element | null = null;
+    let hostSize = '';
 
     const paint = (b: Box) => {
       mark.style.transform = `translate(${b.left}px, ${b.top}px)`;
@@ -46,6 +47,12 @@ export function useGlideMarker(
       }
       const base = host.getBoundingClientRect();
       const rect = active.getBoundingClientRect();
+      // The container itself changed shape (the sidebar collapsing, a window
+      // resize): that is layout, not navigation, so land without gliding. A
+      // spring from the wide layout left the marker sticking out of the rail.
+      const size = `${Math.round(base.width)}x${Math.round(base.height)}`;
+      const relayout = hostSize !== '' && size !== hostSize;
+      hostSize = size;
       const target: Box = {
         left: rect.left - base.left,
         top: rect.top - base.top,
@@ -53,7 +60,9 @@ export function useGlideMarker(
         bottom: rect.bottom - base.top,
       };
       // First appearance (or after hiding) lands without travelling in from 0,0.
-      if (!box || !visible || prefersReducedMotion()) {
+      if (!box || !visible || relayout || prefersReducedMotion()) {
+        stop?.();
+        stop = null;
         box = box ?? new SpringBox(target);
         box.jump(target);
         paint(target);

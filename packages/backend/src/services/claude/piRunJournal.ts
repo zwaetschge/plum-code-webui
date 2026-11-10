@@ -4,9 +4,10 @@ import { getDataDirectory } from '../../db/index.js';
 import { writeFileAtomicSync } from '../../utils/atomicWrite.js';
 
 /**
- * Pi runs that were still going when they were last written down.
+ * Pi and Claude-transport (Claude Code, Z.AI Code) runs that were still going
+ * when they were last written down.
  *
- * A Pi run lives in one child process. When that process dies, or the whole
+ * A run lives in one child process. When that process dies, or the whole
  * backend restarts (a rebuild, a crash), the run is gone and an overnight task
  * simply stopped. The journal is what survives: Plum writes a record when a
  * run starts, keeps the running tool and the queued messages current, and
@@ -19,6 +20,8 @@ import { writeFileAtomicSync } from '../../utils/atomicWrite.js';
 export interface PiRunRecord {
   sessionId: string;
   userId: string;
+  /** CLI provider of the run; records written before this field are Pi runs. */
+  provider?: 'pi' | 'claude' | 'zai';
   chatId: string | null;
   startedAt: string;
   lastActivityAt: string;

@@ -40,10 +40,22 @@ async function main(): Promise<void> {
     /screenshot\.png/,
     'the Android panel must render the emulator instead of trusting a relative noVNC URL'
   );
+  // The handler routes per build engine since several engines exist: a single
+  // engine keeps the direct call, several pick a target engine first. Both
+  // paths must translate the MCP `avd` parameter to the builder's `avdName`.
+  const emulatorStart = /\n {2}emulator_start: async \(a\) => \{\n([\s\S]*?)\n {2}\},\n/.exec(
+    mcpSource
+  )?.[1];
+  assert.ok(emulatorStart, 'the MCP server must implement emulator_start');
   assert.match(
-    mcpSource,
-    /emulator_start:\s*\(a\)\s*=>\s*http\([^\n]+\{\s*avdName:\s*a\.avd/s,
-    'the MCP avd parameter must be translated to the builder avdName contract'
+    emulatorStart,
+    /if \(!MULTI\) return http\(\s*'POST',\s*'\/api\/emulator\/start',\s*\{\s*avdName:\s*a\.avd\s*\}\s*\)/,
+    'with one engine the MCP avd parameter must be translated to the builder avdName contract'
+  );
+  assert.match(
+    emulatorStart,
+    /engineHttp\(\s*target,\s*'POST',\s*'\/api\/emulator\/start',\s*\{\s*avdName:\s*a\.avd\s*\}\s*\)/,
+    'with several engines the chosen engine must get the same avdName contract'
   );
 
   console.log('android emulator regression tests passed');

@@ -251,7 +251,11 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
 
   // Anthropic, USD per 1M tokens. Cache write uses the 5 minute write rate.
   // Claude Code's bare aliases resolve to the current generation.
-  if (/^claude-fable-5-1(?:\b|-|$)/.test(id) || id === 'fable') {
+  if (/^claude-fable-5-2(?:\b|-|$)/.test(id) || id === 'fable') {
+    // No published rate seen yet; estimated at Fable 5.1's until there is one.
+    return price(10, 50, 0.25, 12.5, 'Assumed equal to Fable 5.1, 2026-11-09', 'Claude Fable 5.2');
+  }
+  if (/^claude-fable-5-1(?:\b|-|$)/.test(id)) {
     return price(10, 50, 0.25, 12.5, 'Anthropic API pricing, 2026-10-06', 'Claude Fable 5.1');
   }
   if (/^claude-opus-5-5(?:\b|-|$)/.test(id) || id === 'opus') {

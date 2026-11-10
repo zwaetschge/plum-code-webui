@@ -22,6 +22,7 @@ import type {
   SessionMode,
 } from '@plum-code-webui/shared';
 import { getCodexWebuiApprovalPolicy, getCodexWebuiSandboxMode } from '../utils/codexDefaults.js';
+import { resolveConfigHome } from '../utils/configPaths.js';
 
 const execFileAsync = promisify(execFile);
 const CODEX_UNRAID_DEFAULT_ALLOWED_DIRS = ['/mnt/user', '/mnt/cache'];
@@ -126,7 +127,7 @@ export function claudeContextWindowEnv(
 
 const CLI_PROVIDER_MODELS: Record<CLIProvider, string[]> = {
   claude: withClaude1mVariants([
-    'claude-fable-5-1',
+    'claude-fable-5-2',
     'claude-opus-5-5',
     'claude-sonnet-5-5',
     'claude-haiku-5-5',
@@ -173,6 +174,7 @@ const CLI_PROVIDER_MODELS: Record<CLIProvider, string[]> = {
 const MODEL_DISPLAY_LABELS: Record<string, string> = {
   // Claude Code fallback labels, used when CLI discovery fails. The previous
   // generation stays labelled for existing sessions.
+  'claude-fable-5-2': 'Fable 5.2',
   'claude-fable-5-1': 'Fable 5.1',
   'claude-opus-5-5': 'Opus 5.5',
   'claude-sonnet-5-5': 'Sonnet 5.5',
@@ -182,6 +184,7 @@ const MODEL_DISPLAY_LABELS: Record<string, string> = {
   'claude-sonnet-5': 'Sonnet 5',
   'claude-haiku-4-5': 'Haiku 4.5',
   ...claude1mLabels({
+    'claude-fable-5-2': 'Fable 5.2',
     'claude-fable-5-1': 'Fable 5.1',
     'claude-opus-5-5': 'Opus 5.5',
     'claude-sonnet-5-5': 'Sonnet 5.5',
@@ -190,7 +193,7 @@ const MODEL_DISPLAY_LABELS: Record<string, string> = {
     'claude-sonnet-5': 'Sonnet 5',
   }),
   // Aliases remain labelled for existing sessions and Z.AI mappings.
-  fable: 'Fable 5.1',
+  fable: 'Fable 5.2',
   opus: 'Opus 5.5',
   sonnet: 'Sonnet 5.5',
   haiku: 'Haiku 5.5',
@@ -458,6 +461,120 @@ function claude1mLabels(labels: Record<string, string>): Record<string, string> 
   return result;
 }
 
+/** Per family the newer entry of the two catalogs; the CLI wins a tie. */
+export function mergeClaudeCatalogs(
+  cli: ClaudeCliModelCatalog | null,
+  api: ClaudeCliModelCatalog | null
+): ClaudeCliModelCatalog {
+  const byFamily = new Map<ClaudeModelFamily, { modelId: string; label: string }>();
+  for (const catalog of [cli, api]) {
+    for (const modelId of catalog?.models ?? []) {
+      const family = /^claude-(fable|opus|sonnet|haiku)-/.exec(modelId)?.[1] as
+        | ClaudeModelFamily
+        | undefined;
+      if (!family) continue;
+      const version = versionFromClaudeModelId(modelId, family);
+      const current = byFamily.get(family);
+      const currentVersion = current ? versionFromClaudeModelId(current.modelId, family) : null;
+      if (
+        current &&
+        (!version || (currentVersion && compareClaudeVersions(version, currentVersion) <= 0))
+      ) {
+        continue;
+      }
+      byFamily.set(family, { modelId, label: catalog!.labels[modelId] ?? modelId });
+    }
+  }
+  const models: string[] = [];
+  const labels: Record<string, string> = {};
+  for (const family of CLAUDE_MODEL_FAMILIES) {
+    const entry = byFamily.get(family);
+    if (!entry) continue;
+    models.push(entry.modelId);
+    labels[entry.modelId] = entry.label;
+    labels[family] = entry.label;
+  }
+  return { models, labels };
+}
+
+/**
+ * The models the Claude login can use, as the Anthropic models API reports
+ * them. A model ships there before the installed Claude Code knows its name
+ * (2026-11-09: Fable 5.2 under CLI 2.1.319, which still runs it with an
+ * "unrecognized_model" note), so the CLI catalog alone hid it from the picker.
+ */
+let claudeCliCatalog: ClaudeCliModelCatalog | null = null;
+let claudeApiCatalog: ClaudeCliModelCatalog | null = null;
+let claudeApiCheckedAt = 0;
+let claudeApiInFlight: Promise<void> | null = null;
+const CLAUDE_API_REFRESH_MS = 6 * 60 * 60 * 1000;
+
+function applyClaudeCatalog(): void {
+  const merged = mergeClaudeCatalogs(claudeCliCatalog, claudeApiCatalog);
+  if (merged.models.length === 0) return;
+  discoveredModels.claude = withClaude1mVariants(merged.models);
+  Object.assign(MODEL_DISPLAY_LABELS, merged.labels, claude1mLabels(merged.labels));
+}
+
+/** Builds the catalog from a `/v1/models` answer: display names plus IDs. */
+export function claudeCatalogFromApiModels(
+  data: Array<{ id?: unknown; display_name?: unknown }>
+): ClaudeCliModelCatalog {
+  const lines: string[] = [];
+  for (const model of data) {
+    if (typeof model.display_name === 'string') lines.push(model.display_name);
+    if (typeof model.id === 'string') lines.push(model.id);
+  }
+  return parseClaudeCliModelCatalog(lines.join('\n'));
+}
+
+async function refreshClaudeApiCatalog(): Promise<void> {
+  try {
+    const credentials = JSON.parse(
+      await fs.promises.readFile(path.join(resolveConfigHome(), '.credentials.json'), 'utf-8')
+    ) as { claudeAiOauth?: { accessToken?: string; expiresAt?: number } };
+    const oauth = credentials.claudeAiOauth;
+    if (!oauth?.accessToken || (oauth.expiresAt && oauth.expiresAt < Date.now())) return;
+    const response = await fetch('https://api.anthropic.com/v1/models?limit=100', {
+      headers: {
+        Authorization: `Bearer ${oauth.accessToken}`,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'oauth-2025-04-20',
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return;
+    const body = (await response.json()) as {
+      data?: Array<{ id?: unknown; display_name?: unknown }>;
+    };
+    const catalog = claudeCatalogFromApiModels(body.data ?? []);
+    if (catalog.models.length === 0) return;
+    const before = discoveredModels.claude?.join(',');
+    claudeApiCatalog = catalog;
+    applyClaudeCatalog();
+    if (discoveredModels.claude?.join(',') !== before) {
+      console.log(
+        '[CLI-PROVIDERS] claude: models from the Anthropic API:',
+        discoveredModels.claude
+      );
+    }
+  } catch (error) {
+    console.warn(
+      '[CLI-PROVIDERS] claude: Anthropic models API unavailable:',
+      error instanceof Error ? error.message : error
+    );
+  } finally {
+    claudeApiCheckedAt = Date.now();
+  }
+}
+
+function scheduleClaudeApiRefresh(): void {
+  if (claudeApiInFlight || Date.now() - claudeApiCheckedAt < CLAUDE_API_REFRESH_MS) return;
+  claudeApiInFlight = refreshClaudeApiCatalog().finally(() => {
+    claudeApiInFlight = null;
+  });
+}
+
 /**
  * Claude: read the current model catalog from the installed CLI. Claude Code
  * moved from cli.js to a native executable in 2.1.x, so both formats are
@@ -490,11 +607,11 @@ function discoverClaude(): void {
       console.warn('[CLI-PROVIDERS] claude: no models found in the CLI, keeping the fallback list');
       return;
     }
-    discoveredModels.claude = withClaude1mVariants(catalog.models);
-    Object.assign(MODEL_DISPLAY_LABELS, catalog.labels, claude1mLabels(catalog.labels));
+    claudeCliCatalog = catalog;
+    applyClaudeCatalog();
     console.log(
       `[CLI-PROVIDERS] claude: discovered ${catalog.models.length} models:`,
-      catalog.models
+      discoveredModels.claude
     );
   } catch (error) {
     console.warn(
@@ -735,6 +852,7 @@ function discoverVibe(): void {
 }
 
 function ensureDiscovery(): void {
+  scheduleClaudeApiRefresh();
   if (discoveryDone) return;
   discoveryDone = true;
   discoverClaude();
@@ -748,6 +866,8 @@ function ensureDiscovery(): void {
  */
 export function resetDiscovery(): void {
   discoveryDone = false;
+  claudeCliCatalog = null;
+  claudeApiCheckedAt = 0;
   codexModelsCacheFingerprint = null;
   delete discoveredModels.claude;
   delete discoveredModels.codex;

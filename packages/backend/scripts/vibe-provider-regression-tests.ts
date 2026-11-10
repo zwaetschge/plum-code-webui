@@ -14,6 +14,8 @@
  * so `pnpm test` at the repository root runs it too). The ledger half needs
  * Postgres, like every other suite that uses src/db/testing.ts.
  */
+// The ledger and 402-probe fallback is under test, not Mistral's billing API.
+process.env.PLUM_MISTRAL_BILLING = 'off';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -455,7 +457,52 @@ async function insertUsageRow(row: {
   );
 }
 
+/**
+ * The ledger test reads the Vibe key like production does. The container
+ * exports a real `MISTRAL_API_KEY` and has a real `~/.vibe/.env`, and with a
+ * key in reach the 402 probe (`mistralBudgetProbe.ts`) asks Mistral itself; an
+ * exhausted real allowance then turned every Vibe card into `source: 'upstream'`.
+ * So the ledger runs with no key and a fetch that fails the test if called, and
+ * the probe override runs against a stubbed 402 for an obviously fake key.
+ */
 async function testMistralAllowanceSplit() {
+  const restoreKey = overrideProcessApiKey(undefined);
+  const realFetch = globalThis.fetch;
+  const fetched: string[] = [];
+  let answer: { status: number; body: unknown } | null = null;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    fetched.push(url);
+    if (!answer) throw new Error(`unexpected network call in the ledger test: ${url}`);
+    return new Response(JSON.stringify(answer.body), {
+      status: answer.status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+  try {
+    await withTempVibeHome(async () => {
+      await testMistralLedger();
+      assert.deepEqual(fetched, [], 'without a key the ledger never calls Mistral');
+
+      // With a key in reach Mistral's 402 overrides the estimate both ways.
+      process.env.MISTRAL_API_KEY = FAKE_KEY;
+      answer = { status: 402, body: { type: 'billing_vibe_budget_exhausted' } };
+      const exhausted = await buildMistralLimitResponse(VIBE_USER, 'vibe');
+      assert.equal(fetched.length, 1, 'one probe call for the Vibe key');
+      assert.match(fetched[0], /^https:\/\/api\.mistral\.ai\/v1\/chat\/completions$/);
+      assert.equal(exhausted.data?.source, 'upstream');
+      assert.equal(exhausted.data?.planUsage.upstream?.state, 'exhausted');
+      assert.equal(exhausted.data?.planUsage.upstream?.errorType, 'billing_vibe_budget_exhausted');
+      assert.equal(exhausted.data?.sevenDay?.utilization, 100, 'used up reads 100 %');
+      assert.equal(exhausted.data?.sevenDay?.remaining, 0);
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+    restoreKey();
+  }
+}
+
+async function testMistralLedger() {
   assert.deepEqual(MISTRAL_PRO_ALLOWANCES, { api: 25.5, vibe: 255 });
 
   for (const id of [VIBE_USER, OTHER_USER]) {

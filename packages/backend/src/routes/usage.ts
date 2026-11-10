@@ -994,7 +994,31 @@ type FetchUsageResult = {
 // upstream calls for one number that only changes every few minutes.
 const claudeUsageCache = new Map<string, { expiresAt: number; value: FetchUsageResult }>();
 const claudeUsageRequests = new Map<string, Promise<FetchUsageResult>>();
-const CLAUDE_USAGE_CACHE_TTL_MS = 60_000;
+const CLAUDE_USAGE_CACHE_TTL_MS = 120_000;
+/**
+ * api.anthropic.com/api/oauth/usage answers 429 in bursts (Retry-After: 0) when
+ * the same OAuth token is polled by several clients. A failed read used to drop
+ * Claude from the watch, widget and limit cards until the next success, so the
+ * last good reading (up to 6 h old) stands in, and after a 429 nobody asks
+ * upstream again for a few minutes, which only prolonged the limit.
+ */
+const CLAUDE_USAGE_STALE_MAX_MS = 6 * 60 * 60_000;
+const CLAUDE_USAGE_BACKOFF_MS = 3 * 60_000;
+let claudeUsageLastGood: { at: number; value: FetchUsageResult } | null = null;
+let claudeUsageBackoffUntil = 0;
+
+/** The last good reading for transient failures (429, 5xx, network), else the failure. */
+function claudeUsageFallback(failure: FetchUsageResult): FetchUsageResult {
+  const transient = failure.status === 429 || failure.status >= 500;
+  if (failure.status === 429) claudeUsageBackoffUntil = Date.now() + CLAUDE_USAGE_BACKOFF_MS;
+  if (
+    transient &&
+    claudeUsageLastGood &&
+    Date.now() - claudeUsageLastGood.at < CLAUDE_USAGE_STALE_MAX_MS
+  )
+    return claudeUsageLastGood.value;
+  return failure;
+}
 
 function claudeUsageCacheKey(accessToken: string): string {
   return crypto.createHash('sha256').update(accessToken).digest('hex').slice(0, 24);
@@ -1008,6 +1032,7 @@ async function fetchUsage(accessToken: string): Promise<FetchUsageResult> {
 
   const inFlight = claudeUsageRequests.get(cacheKey);
   if (inFlight) return inFlight;
+  if (Date.now() < claudeUsageBackoffUntil && claudeUsageLastGood) return claudeUsageLastGood.value;
 
   const request = (async (): Promise<FetchUsageResult> => {
     // Without a deadline a hung upstream connection holds the Express handler
@@ -1031,7 +1056,7 @@ async function fetchUsage(accessToken: string): Promise<FetchUsageResult> {
 
       if (!response.ok) {
         const errorText = await response.text();
-        return { ok: false, status: response.status, error: errorText };
+        return claudeUsageFallback({ ok: false, status: response.status, error: errorText });
       }
 
       const data = (await response.json()) as UsageLimitResponse;
@@ -1039,10 +1064,12 @@ async function fetchUsage(accessToken: string): Promise<FetchUsageResult> {
       // Only successful reads are cached. A 401 has to reach the caller so the
       // token refresh path still runs on the very next request.
       claudeUsageCache.set(cacheKey, { expiresAt: Date.now() + CLAUDE_USAGE_CACHE_TTL_MS, value });
+      claudeUsageLastGood = { at: Date.now(), value };
+      claudeUsageBackoffUntil = 0;
       return value;
     } catch (err) {
       console.error('Fetch usage error:', err);
-      return { ok: false, status: 500, error: String(err) };
+      return claudeUsageFallback({ ok: false, status: 500, error: String(err) });
     } finally {
       clearTimeout(timeout);
     }
@@ -1282,12 +1309,22 @@ router.get('/limits', requireAuth, rateLimiters.usageLimits, async (req, res) =>
         },
       });
 
+      // Without a paid ChatGPT plan Codex reports a "free" plan with an empty
+      // monthly window: no subscription, so every limit display hides it (watch,
+      // widget, session bar) until a plan returns.
+      const codexResult = (usage: Parameters<typeof mapCodexUsage>[0]) => {
+        const mapped = mapCodexUsage(usage);
+        if (mapped.plan === 'free')
+          return { success: true, supported: false, provider: 'codex' as const, data: null };
+        return persistUsageLimitResult(userId, buildCodexResponse(mapped));
+      };
+
       try {
         const usage = await fetchCodexUsage(codexAuth);
         if (!usage) {
           return res.json({ success: true, supported: false, provider: 'codex', data: null });
         }
-        return res.json(persistUsageLimitResult(userId, buildCodexResponse(mapCodexUsage(usage))));
+        return res.json(codexResult(usage));
       } catch (err) {
         const errorText = String(err);
         const isAuthError = isCodexUsageAuthError(err);
@@ -1296,9 +1333,7 @@ router.get('/limits', requireAuth, rateLimiters.usageLimits, async (req, res) =>
           if (refreshed?.tokens?.access_token) {
             try {
               const usage = await fetchCodexUsage(refreshed);
-              return res.json(
-                persistUsageLimitResult(userId, buildCodexResponse(mapCodexUsage(usage)))
-              );
+              return res.json(codexResult(usage));
             } catch (retryErr) {
               console.error('Codex usage retry error:', retryErr);
             }

@@ -35,3 +35,49 @@ export function voiceLanguageCode(language: string): string {
   };
   return codes[normalized] ?? (/^[a-z]{2}$/.test(normalized) ? normalized : '');
 }
+
+/**
+ * Pieces for spoken playback, cut at sentence ends: a short first piece so
+ * the voice starts quickly, then longer ones (fetched while the previous one
+ * plays). Lossless like splitSpeech: the pieces joined are the text.
+ */
+export function playbackSegments(text: string, first = 220, rest = 900): string[] {
+  const cuts = [...text.matchAll(/[.!?…]+["“”»')\]]*\s+|\n+/g)].map(
+    (match) => match.index! + match[0].length
+  );
+  const pieces: string[] = [];
+  let start = 0,
+    limit = first,
+    candidate = -1;
+  for (const cut of cuts) {
+    if (cut - start <= limit) {
+      candidate = cut;
+      continue;
+    }
+    const end = candidate > start ? candidate : cut;
+    pieces.push(text.slice(start, end));
+    start = end;
+    limit = rest;
+    candidate = cut > end && cut - start <= limit ? cut : -1;
+  }
+  pieces.push(text.slice(start));
+  return pieces
+    .flatMap((piece) => (piece.length > 4500 ? splitSpeech(piece) : [piece]))
+    .filter((piece) => piece.trim());
+}
+
+/** BCP 47 locale for the device's speech recognizer (Swiss variants where they exist). */
+export function recognitionLocale(language: string): string {
+  const code = voiceLanguageCode(language);
+  const locales: Record<string, string> = {
+    de: 'de-CH',
+    fr: 'fr-CH',
+    it: 'it-CH',
+    en: 'en-US',
+    es: 'es-ES',
+    pt: 'pt-PT',
+    ja: 'ja-JP',
+    zh: 'zh-CN',
+  };
+  return locales[code] ?? (typeof navigator === 'undefined' ? 'de-CH' : navigator.language);
+}

@@ -25,10 +25,13 @@ assert.match(
   /@media \(max-width: 640px\)[\s\S]*?\.dashboard-composer-mobile-toggle\s*{\s*display: flex;/,
   'the previous compact mobile composer launcher should remain visible'
 );
+// The dashboard-only navigation rail gave way to one unified sidebar on
+// 2026-10-14 (mode pill + per-mode lists): the overview gets the same desktop
+// sidebar as every other page, without route-specific props.
 assert.match(
   layoutSource,
-  /navigationOnly={location\.pathname === '\/'}/,
-  'the wide dashboard should use the sidebar as a navigation rail instead of duplicating sessions'
+  /\{isDesktopLayout && \(\s*<div className="hidden md:block relative z-10">\s*<Sidebar\s+contextUsage=\{isFullBleed \? headerUsage : undefined\}\s+contextStats=\{headerContextStats\}\s+contextSession=\{activeSession\}\s*\/>/,
+  'the wide dashboard should share the unified sidebar instead of a dashboard-only rail'
 );
 assert.match(
   dashboardSource,

@@ -1,4 +1,10 @@
-import { orderChatApiProviders, type AssistantApiProvider } from '@plum-code-webui/shared';
+import {
+  lookupContextWindow,
+  orderChatApiProviders,
+  selectChatModels,
+  type AssistantApiProvider,
+} from '@plum-code-webui/shared';
+import { readPersonalization } from './personalization.js';
 import { readModelProvidersForUser } from '../../utils/modelProviderKeys.js';
 import { getModelProviderCatalog } from '../../utils/modelCatalog.js';
 import { safeDecrypt } from '../../utils/encryption.js';
@@ -74,7 +80,31 @@ async function endpoints(userId: string): Promise<Endpoint[]> {
     ];
   });
 }
-export async function apiChatProviders(userId: string): Promise<AssistantApiProvider[]> {
+/** The stored default of chat options (older clients save it explicitly). */
+export const DEFAULT_CHAT_OUTPUT_TOKENS = 8192;
+const AUTO_CHAT_OUTPUT_CAP = 32768;
+/**
+ * Output budget of a chat turn. The default (8192) becomes the model's own
+ * budget, as for Pi: the catalog's output limit, else a quarter of a known
+ * context window (at least the default), each capped at 32k. 8192 cut custom
+ * tiles (several KB of code plus reasoning) off mid-block. Another explicit
+ * value stays; unknown models (local) keep the default.
+ */
+export function chatOutputTokens(providerId: string, model: string, configured?: number): number {
+  if (configured !== undefined && configured !== DEFAULT_CHAT_OUTPUT_TOKENS) return configured;
+  const limit = getModelProviderCatalog()[providerId]?.modelLimits?.[model];
+  if (limit?.output) return Math.min(AUTO_CHAT_OUTPUT_CAP, limit.output);
+  const context = limit?.context ?? lookupContextWindow(`${providerId}/${model}`);
+  if (context)
+    return Math.min(
+      AUTO_CHAT_OUTPUT_CAP,
+      Math.max(DEFAULT_CHAT_OUTPUT_TOKENS, Math.floor(context / 4))
+    );
+  return DEFAULT_CHAT_OUTPUT_TOKENS;
+}
+
+/** Every connected provider with all its models (the settings' model picker). */
+export async function allApiChatProviders(userId: string): Promise<AssistantApiProvider[]> {
   return orderChatApiProviders(
     (await endpoints(userId)).map(({ id, name, protocol, models }) => ({
       id,
@@ -83,6 +113,18 @@ export async function apiChatProviders(userId: string): Promise<AssistantApiProv
       models,
     }))
   );
+}
+/**
+ * The chat model menu: the models chosen in the personalisation (default
+ * first), otherwise every model. Running chats keep a hidden model, because
+ * apiChatEndpoint checks the full list.
+ */
+export async function apiChatProviders(userId: string): Promise<AssistantApiProvider[]> {
+  const [providers, personal] = await Promise.all([
+    allApiChatProviders(userId),
+    readPersonalization(userId),
+  ]);
+  return selectChatModels(providers, personal.chatModels);
 }
 export async function apiChatEndpoint(userId: string, providerId: string, model: string) {
   const endpoint = (await endpoints(userId)).find((item) => item.id === providerId);

@@ -1716,6 +1716,64 @@ async function testPiRunIsJournalledUntilItSettles() {
   assert.equal(getPiRun(sessionId), null, 'a settled run leaves nothing to resume');
 }
 
+/**
+ * Claude turns use the same journal as Pi runs, so a Plum restart resumes them:
+ * written at dispatch with the provider, the running tool and the queue kept
+ * current, gone when the user stops the turn.
+ */
+async function testClaudeTurnIsJournalledForResume() {
+  const sessionId = 'session-claude-journal';
+  const { managerPrivate, proc } = makePiManagerFixture(sessionId, {
+    cliProvider: 'claude',
+    piTurnInFlight: false,
+    claudeIdle: true,
+    outputBuffer: { push: () => undefined },
+  });
+  const claudePrivate = managerPrivate as unknown as {
+    dispatchClaudeTurn: (sessionId: string, proc: unknown, turn: unknown) => void;
+    processStreamMessage: (sessionId: string, msg: unknown) => Promise<void>;
+    emitQueueState: (id: string, p: unknown) => void;
+    interrupt: (sessionId: string, userId: string) => Promise<void>;
+  };
+  claudePrivate.dispatchClaudeTurn(sessionId, proc, {
+    queueId: 'c1',
+    chatId: 'chat-c',
+    queuedAt: new Date().toISOString(),
+    originalMessage: 'refactor das modul',
+    messageForClaude: 'refactor das modul',
+    updateLastMessage: true,
+  });
+  assert.equal(getPiRun(sessionId)?.provider, 'claude');
+  assert.equal(getPiRun(sessionId)?.chatId, 'chat-c');
+
+  Object.assign(proc, {
+    currentToolName: 'Bash',
+    currentToolId: 'tool-1',
+    currentToolInput: JSON.stringify({ command: 'pnpm   build' }),
+  });
+  await claudePrivate.processStreamMessage(sessionId, {
+    type: 'stream_event',
+    event: { type: 'content_block_stop', index: 0 },
+  });
+  assert.deepEqual(getPiRun(sessionId)?.tool, { name: 'Bash', input: 'pnpm build' });
+
+  proc.claudeQueuedTurns = [
+    {
+      queueId: 'c2',
+      chatId: 'chat-c',
+      queuedAt: '',
+      originalMessage: 'danach tests',
+      messageForClaude: '',
+    },
+  ];
+  claudePrivate.emitQueueState(sessionId, proc);
+  assert.deepEqual(getPiRun(sessionId)?.queued, [{ message: 'danach tests', chatId: 'chat-c' }]);
+
+  proc.process = { stdin: { write: () => true, writable: true }, kill: () => true };
+  await claudePrivate.interrupt(sessionId, 'user-1');
+  assert.equal(getPiRun(sessionId), null, 'a stopped turn leaves nothing to resume');
+}
+
 /** A manual /compact between turns must not inject a continuation. */
 async function testPiManualCompactWithoutTurnDoesNotResume() {
   const sessionId = 'session-pi-compact-manual';
@@ -3014,7 +3072,11 @@ function testPiUsesNativeMistralProvider() {
   if (shipped.length > 0) {
     assert.ok(shipped.includes('devstral-latest'), 'Pi offers Devstral 2');
     assert.ok(shipped.includes('zai-glm-5-3'), 'Mistral serves GLM-5.3; Pi offers it');
-    assert.ok(shipped.length <= 8, 'curated, not the whole Mistral catalog');
+    // Curated models plus the DeepSeek models Mistral hosts, which are offered
+    // so that route can be chosen on purpose next to DeepSeek's own API.
+    const hosted = shipped.filter((id) => /^deepseek-/.test(id));
+    assert.ok(shipped.length - hosted.length <= 8, 'curated, not the whole Mistral catalog');
+    assert.ok(hosted.length >= 1, 'the DeepSeek model hosted by Mistral is selectable');
     assert.equal(
       shipped.some((id) => /^(voxtral|open-|ministral)/.test(id)),
       false
@@ -4887,6 +4949,7 @@ await testPiRecoveredOrAbortedRunStaysQuiet();
 await testPiNoContinueAfterCleanStop();
 await testPiRejectedPromptIsRequeued();
 await testPiRunIsJournalledUntilItSettles();
+await testClaudeTurnIsJournalledForResume();
 await testCodexContextFallbackUsesThreadState();
 await testCodexContextFallbackCapsThreadStateAtWindow();
 await testCodexCompactEventRetainsCompactedContext();
