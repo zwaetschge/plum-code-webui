@@ -637,8 +637,12 @@ internal fun VoiceModeLayout(
     Box(
         Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(palette.background, lerp(palette.background, palette.accentDeep, .35f)))),
     ) {
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 24.dp, vertical = 16.dp)) {
+        // A landscape tablet has less height than a phone: the 260dp orb left
+        // the pause/end buttons squeezed to thin pills. Phones keep 260dp.
+        val orbSize = if (com.claudewebui.app.ui.components.common.isTabletWidth() && maxHeight < 760.dp) 180.dp else 260.dp
         Column(
-            Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 24.dp, vertical = 16.dp),
+            Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -652,7 +656,7 @@ internal fun VoiceModeLayout(
             val orbLabel = stringResource(R.string.voice_mode_orb)
             VoiceOrb(
                 phase, level, reduce, failed = prepareError != null || message != null,
-                Modifier.size(260.dp).semantics { contentDescription = orbLabel }.clickable(orbSource, indication = null, onClick = onOrb),
+                Modifier.size(orbSize).semantics { contentDescription = orbLabel }.clickable(orbSource, indication = null, onClick = onOrb),
             )
             Spacer(Modifier.height(36.dp))
             val status = when (phase) {
@@ -712,6 +716,7 @@ internal fun VoiceModeLayout(
                     modifier = Modifier.size(64.dp).pressScale(closeSource), interactionSource = closeSource,
                 ) { Icon(Icons.Outlined.Close, stringResource(R.string.voice_mode_end), Modifier.size(28.dp)) }
             }
+        }
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.claudewebui.app.ui.screens.auth
 
+import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.layout.heightIn
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
@@ -194,7 +196,7 @@ fun LoginScreen(
 @Composable
 private fun BrandHeader(
     modifier: Modifier = Modifier,
-    subtitle: String = "Sign in to your workspace",
+    subtitle: String? = null,
 ) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
 
@@ -231,7 +233,7 @@ private fun BrandHeader(
         )
 
         Text(
-            text = subtitle,
+            text = subtitle ?: stringResource(R.string.auth_sign_in_subtitle),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -363,7 +365,7 @@ private fun AuthMethodSelectionView(
                         onClick = { showBasicAuth = true },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp),
+                            .heightIn(min = 48.dp),
                         shape = RoundedCornerShape(screenTokens.radius.chip),
                         border = androidx.compose.foundation.BorderStroke(
                             1.dp,
@@ -376,7 +378,10 @@ private fun AuthMethodSelectionView(
                             modifier = Modifier.size(screenTokens.sizing.iconInline),
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text(screenResources.getString(R.string.auth_use_username_password_ab851))
+                        Text(
+                            screenResources.getString(R.string.auth_use_username_password_ab851),
+                            textAlign = TextAlign.Center,
+                        )
                     }
                 }
 
@@ -560,7 +565,7 @@ private fun BasicAuthForm(
 
             Button(
                 onClick = { viewModel.loginBasicAuth(username, password) },
-                modifier = Modifier.weight(2f).height(48.dp),
+                modifier = Modifier.weight(2f).heightIn(min = 48.dp),
                 enabled = username.isNotBlank() && password.isNotBlank() && !isLoading,
                 shape = RoundedCornerShape(screenTokens.radius.chip),
                 colors = ButtonDefaults.buttonColors(
@@ -602,7 +607,7 @@ private fun OAuthButton(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp),
+            .heightIn(min = 48.dp),
         shape = RoundedCornerShape(screenTokens.radius.chip),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
@@ -616,6 +621,7 @@ private fun OAuthButton(
             label,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
         )
     }
 }
@@ -815,7 +821,7 @@ private fun ErrorView(
             ) {
                 Button(
                     onClick = onRetry,
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                     shape = RoundedCornerShape(screenTokens.radius.md),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 ) {
@@ -825,7 +831,7 @@ private fun ErrorView(
                 if (!isConnectionError) {
                     OutlinedButton(
                         onClick = onBack,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                         shape = RoundedCornerShape(screenTokens.radius.md),
                     ) {
                         Icon(

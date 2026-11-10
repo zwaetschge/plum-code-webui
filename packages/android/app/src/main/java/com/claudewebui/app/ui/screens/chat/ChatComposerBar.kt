@@ -164,7 +164,8 @@ internal fun ChatComposerBar(
     ) {
         Column(
             modifier = Modifier
-                .widthIn(max = 960.dp)
+                // Same measure as the transcript above it (ChatMessageList).
+                .widthIn(max = 840.dp)
                 .fillMaxWidth()
                 .padding(horizontal = t.spacing.sm, vertical = t.spacing.xs)
                 .shadow(8.dp, composerShape, ambientColor = palette.glassShadow, spotColor = palette.glassShadow)

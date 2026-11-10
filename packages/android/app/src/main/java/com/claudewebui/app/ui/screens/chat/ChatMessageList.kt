@@ -346,8 +346,11 @@ internal fun ChatMessageList(
                     state = listState,
                     // Bubbles dissolve into the header and the composer
                     // rather than disappearing at the scrim's edge.
+                    // Wide windows: one readable column, centred like the composer.
                     modifier = Modifier
                         .fillMaxSize()
+                        .wrapContentWidth(Alignment.CenterHorizontally)
+                        .widthIn(max = 840.dp)
                         .padding(top = systemTop, bottom = systemBottom)
                         // The lazy list's own clip is not enough here: items were
                         // still drawn into the status bar above its bounds.

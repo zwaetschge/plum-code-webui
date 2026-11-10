@@ -614,7 +614,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                     if (shownTemporary) Text(stringResource(R.string.assistant_temporary_detail, shown.body["expiresAt"]?.jsonPrimitive?.content.orEmpty()), color = palette.muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 4.dp))
                     val parentUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
                     val entityLinks = remember(parentUriHandler) { DynamicUiUriHandler(parentUriHandler) { title -> entityRequest = UiEntityRequest(title) } }
-                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+                    LazyColumn(Modifier.weight(1f).align(androidx.compose.ui.Alignment.CenterHorizontally).widthIn(max = 840.dp).fillMaxWidth(), state = listState, contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
                         if ((shownTurns.firstOrNull()?.seq ?: 0) > 1) item(key = "older") { TextButton(enabled = !busy && live, onClick = { scope.launch {
                             busy = true
                             try {
@@ -797,7 +797,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                 key(owner, chatId) { AssistantDictation(owner, api, voiceEnabled && !busy && !running, { text -> prompt = (prompt + (if (prompt.isBlank()) "" else "\n") + text).take(20000) }, { voiceBusy = it }) }
             }
         }
-        Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp), color = palette.controlSurface.copy(alpha = 1f), border = androidx.compose.foundation.BorderStroke(1.dp, palette.border.copy(alpha = .8f)), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp, top = 4.dp)) {
+        Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp), color = palette.controlSurface.copy(alpha = 1f), border = androidx.compose.foundation.BorderStroke(1.dp, palette.border.copy(alpha = .8f)), modifier = Modifier.align(androidx.compose.ui.Alignment.CenterHorizontally).widthIn(max = 840.dp).fillMaxWidth().padding(bottom = 8.dp, top = 4.dp)) {
             Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 8.dp)) {
                 TextField(
                     value = prompt, onValueChange = { prompt = it.take(20000) },

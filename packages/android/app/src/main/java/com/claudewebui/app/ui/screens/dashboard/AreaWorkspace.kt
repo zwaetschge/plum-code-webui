@@ -620,7 +620,9 @@ private fun SplitPane(
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // Use the workspace width, including multi-window and the navigation rail.
-        val listWidth = (maxWidth * .32f).coerceIn(240.dp, 300.dp)
+        // A portrait tablet (~800dp) got 256dp, which clipped the last area
+        // tab ("Hermes"); from there on the column keeps its full 300dp.
+        val listWidth = if (maxWidth >= 760.dp) 300.dp else (maxWidth * .32f).coerceIn(240.dp, 300.dp)
         val density = LocalDensity.current
         val listPx = with(density) { listWidth.toPx() }
         val target = if (listTarget) 1f else 0f

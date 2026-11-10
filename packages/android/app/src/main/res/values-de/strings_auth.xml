@@ -35,4 +35,15 @@
     <string name="auth_use_your_biometric_credential_to_continue_41c3b">Verwende deine biometrische Anmeldung, um fortzufahren</string>
     <string name="auth_username_84c29">Benutzername</string>
     <string name="auth_verify_your_identity_to_continue_e15de">Bestätige deine Identität, um fortzufahren</string>
+    <string name="auth_sign_in_subtitle">Melde dich bei deinem Arbeitsbereich an</string>
+    <string name="auth_error_enter_server_url">Bitte gib eine Server-URL ein</string>
+    <string name="auth_error_server_status">Der Server antwortete mit %1$s. Ist das die richtige URL?</string>
+    <string name="auth_error_server_unreachable">Server unter %1$s nicht erreichbar. Prüfe die URL und deine Netzwerkverbindung.</string>
+    <string name="auth_error_credentials_required">Benutzername und Passwort sind erforderlich</string>
+    <string name="auth_error_invalid_credentials">Benutzername oder Passwort ist falsch</string>
+    <string name="auth_error_dev_login_failed">Entwickler-Anmeldung fehlgeschlagen</string>
+    <string name="auth_error_authelia_failed">Anmeldung über Authelia fehlgeschlagen: %1$s</string>
+    <string name="auth_error_authelia_invalid">Die Antwort der Authelia-Anmeldung ist ungültig oder abgelaufen</string>
+    <string name="auth_error_authelia_expired">Die Antwort der Authelia-Anmeldung ist abgelaufen</string>
+    <string name="auth_error_profile_failed">Benutzerprofil konnte nicht geladen werden</string>
 </resources>

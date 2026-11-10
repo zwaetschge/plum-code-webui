@@ -15,7 +15,8 @@ import java.io.File
  *
  * Ein Bild liest die Activity gleich hier, solange die Leseberechtigung der teilenden App gilt, und
  * legt es als private Datei in den Cache. Weitergereicht wird nur diese Datei: Eine fremde Berechtigung
- * darf die App nicht an sich selbst weitergeben.
+ * darf die App nicht an sich selbst weitergeben. Gelesen werden nur `content://`-URIs fremder Apps:
+ * `file://` oder ein eigener Provider würde sonst Plums eigene Dateien in den Chat kopieren.
  */
 class TeilenActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -28,7 +29,7 @@ class TeilenActivity : Activity() {
                 quelle.getStringExtra(Intent.EXTRA_SUBJECT)?.let { putExtra(Intent.EXTRA_SUBJECT, it.take(500)) }
                 if (quelle.type?.startsWith("image/") == true) {
                     val bild = IntentCompat.getParcelableExtra(quelle, Intent.EXTRA_STREAM, Uri::class.java)
-                    val datei = bild?.let { runCatching { kopieren(it, quelle.type) }.getOrNull() }
+                    val datei = bild?.takeIf { erlaubt(it) }?.let { runCatching { kopieren(it, quelle.type) }.getOrNull() }
                     if (datei != null) putExtra(MainActivity.BILD_DATEI, datei.absolutePath)
                     else putExtra(MainActivity.BILD_FEHLER, true)
                 }
@@ -37,6 +38,14 @@ class TeilenActivity : Activity() {
             startActivity(ziel)
         }
         finish()
+    }
+
+    /** Nur `content://` fremder Apps; siehe [geteiltesBildErlaubt]. */
+    private fun erlaubt(uri: Uri): Boolean {
+        val providerPaket = uri.authority?.let { auth ->
+            runCatching { packageManager.resolveContentProvider(auth, 0)?.packageName }.getOrNull()
+        }
+        return geteiltesBildErlaubt(uri.scheme, uri.authority, providerPaket, packageName)
     }
 
     /** Höchstens 25 MB; ältere geteilte Bilder fliegen vorher raus. */

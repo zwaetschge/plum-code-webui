@@ -1,5 +1,6 @@
 package com.claudewebui.app.ui.screens.auth
 
+import com.claudewebui.app.R
 import com.claudewebui.app.ui.screens.screenErrorMessage
 import com.claudewebui.app.core.network.apiCall
 import android.content.Context
@@ -66,7 +67,7 @@ class LoginViewModel(
         val url = normalizeUrl(rawUrl)
         if (url.isBlank()) {
             _authState.value = AuthState.Error(
-                message = "Please enter a server URL",
+                message = context.getString(R.string.auth_error_enter_server_url),
                 isConnectionError = true,
             )
             return
@@ -94,8 +95,8 @@ class LoginViewModel(
                 val connectedUrl = selectedUrl
                 if (connectedUrl == null) {
                     _authState.value = AuthState.Error(
-                        message = lastStatus?.let { "Server returned $it. Is this the right URL?" }
-                            ?: "Cannot reach server at $url. Check the URL and your network connection.",
+                        message = lastStatus?.let { context.getString(R.string.auth_error_server_status, it.toString()) }
+                            ?: context.getString(R.string.auth_error_server_unreachable, url),
                         isConnectionError = true,
                     )
                     return@launch
@@ -131,7 +132,7 @@ class LoginViewModel(
                 throw cancelled
             } catch (e: Exception) {
                 _authState.value = AuthState.Error(
-                    message = "Cannot reach server at $url. Check the URL and your network connection.",
+                    message = context.getString(R.string.auth_error_server_unreachable, url),
                     isConnectionError = true,
                 )
             }
@@ -142,7 +143,7 @@ class LoginViewModel(
 
     fun loginBasicAuth(username: String, password: String) {
         if (username.isBlank() || password.isBlank()) {
-            _authState.value = AuthState.Error("Username and password are required")
+            _authState.value = AuthState.Error(context.getString(R.string.auth_error_credentials_required))
             return
         }
 
@@ -159,7 +160,7 @@ class LoginViewModel(
                 } else {
                     _authState.value = AuthState.Error(
                         message = response.error?.message
-                            ?: "Invalid username or password"
+                            ?: context.getString(R.string.auth_error_invalid_credentials)
                     )
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -185,7 +186,7 @@ class LoginViewModel(
                     _authState.value = AuthState.Authenticated(response.data.user)
                 } else {
                     _authState.value = AuthState.Error(
-                        message = response.error?.message ?: "Dev login failed"
+                        message = response.error?.message ?: context.getString(R.string.auth_error_dev_login_failed)
                     )
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -226,7 +227,7 @@ class LoginViewModel(
         if (uri.scheme != "claudewebui" || uri.host != "auth" || uri.path != "/callback") return
 
         uri.getQueryParameter("error")?.let { error ->
-            _authState.value = AuthState.Error("Authelia login failed: $error")
+            _authState.value = AuthState.Error(context.getString(R.string.auth_error_authelia_failed, error))
             return
         }
 
@@ -235,7 +236,7 @@ class LoginViewModel(
         val expectedState = TokenStore.getPendingMobileAuthState()
         val verifier = TokenStore.getPendingMobileAuthVerifier()
         if (code.isNullOrBlank() || state.isNullOrBlank() || verifier.isNullOrBlank() || state != expectedState) {
-            _authState.value = AuthState.Error("Authelia login response is invalid or expired")
+            _authState.value = AuthState.Error(context.getString(R.string.auth_error_authelia_invalid))
             return
         }
 
@@ -251,7 +252,7 @@ class LoginViewModel(
                     _authState.value = AuthState.Authenticated(response.data.user)
                 } else {
                     _authState.value = AuthState.Error(
-                        response.error?.message ?: "Authelia login response expired"
+                        response.error?.message ?: context.getString(R.string.auth_error_authelia_expired)
                     )
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -286,7 +287,7 @@ class LoginViewModel(
                 } else {
                     TokenStore.clearToken()
                     _authState.value = AuthState.Error(
-                        message = response.error?.message ?: "Could not fetch user profile"
+                        message = response.error?.message ?: context.getString(R.string.auth_error_profile_failed)
                     )
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {

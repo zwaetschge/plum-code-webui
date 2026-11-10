@@ -416,7 +416,10 @@ fun AppNavigation(
             // Wide window (unfolded while this session was open full-screen, or
             // a deep link on a tablet): open it inside the workspace instead,
             // in its own area and selected in the right column.
-            if (rememberTwoPane()) {
+            // The debug fixture chat has no server session to hand over, so it
+            // stays full-screen and its transcript can be checked on a tablet.
+            val fixtureChat = BuildConfig.DEBUG && sessionId == "preview"
+            if (rememberTwoPane() && !fixtureChat) {
                 val messageId = backStackEntry.arguments?.getString(Routes.Chat.ARG_MESSAGE_ID)
                 val chatId = backStackEntry.arguments?.getString(Routes.Chat.ARG_CHAT_ID)
                 LaunchedEffect(sessionId) {

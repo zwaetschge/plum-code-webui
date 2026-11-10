@@ -35,4 +35,15 @@
     <string name="auth_use_your_biometric_credential_to_continue_41c3b">Use your biometric credential to continue</string>
     <string name="auth_username_84c29">Username</string>
     <string name="auth_verify_your_identity_to_continue_e15de">Verify your identity to continue</string>
+    <string name="auth_sign_in_subtitle">Sign in to your workspace</string>
+    <string name="auth_error_enter_server_url">Please enter a server URL</string>
+    <string name="auth_error_server_status">Server returned %1$s. Is this the right URL?</string>
+    <string name="auth_error_server_unreachable">Cannot reach server at %1$s. Check the URL and your network connection.</string>
+    <string name="auth_error_credentials_required">Username and password are required</string>
+    <string name="auth_error_invalid_credentials">Invalid username or password</string>
+    <string name="auth_error_dev_login_failed">Dev login failed</string>
+    <string name="auth_error_authelia_failed">Authelia login failed: %1$s</string>
+    <string name="auth_error_authelia_invalid">Authelia login response is invalid or expired</string>
+    <string name="auth_error_authelia_expired">Authelia login response expired</string>
+    <string name="auth_error_profile_failed">Could not fetch user profile</string>
 </resources>
