@@ -287,6 +287,8 @@ export function setupWebSocket(httpServer: HttpServer): Server {
   };
 
   // Authentication middleware
+  /** Handshake answer for a failure that is ours; clients treat it as "try again". */
+  const HANDSHAKE_RETRY_LATER = 'Service unavailable';
   io.use(async (socket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
@@ -313,17 +315,26 @@ export function setupWebSocket(httpServer: HttpServer): Server {
       }
     }
 
+    let decoded: { userId: string };
     try {
-      const decoded = jwt.verify(token, config.jwtSecret) as { userId: string };
-      if (!(await isActiveUser(decoded.userId))) {
-        return next(new Error('Account unavailable'));
-      }
-      socket.data.userId = decoded.userId;
-      socket.data.subscribedSessions = new Set();
-      next();
+      decoded = jwt.verify(token, config.jwtSecret) as { userId: string };
     } catch {
-      next(new Error('Invalid token'));
+      return next(new Error('Invalid token'));
     }
+    // A database hiccup is not a bad login. Reported as one, it made the
+    // Android app stop reconnecting and the web app check its session; both
+    // retry on any other answer.
+    let active: boolean;
+    try {
+      active = await isActiveUser(decoded.userId);
+    } catch (error) {
+      console.warn('[WS] Account lookup failed during handshake:', error);
+      return next(new Error(HANDSHAKE_RETRY_LATER));
+    }
+    if (!active) return next(new Error('Account unavailable'));
+    socket.data.userId = decoded.userId;
+    socket.data.subscribedSessions = new Set();
+    next();
   });
 
   io.on('connection', async (socket) => {

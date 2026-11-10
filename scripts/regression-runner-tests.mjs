@@ -37,6 +37,7 @@ const expectedSuites = [
   'docker',
   'appearance themes',
   'session storage keys',
+  'socket reconnect',
   'ambient motion',
   'chat timeline',
   'operations view state',

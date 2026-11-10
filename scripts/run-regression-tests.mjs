@@ -197,6 +197,17 @@ export const REGRESSION_SUITES = [
     ],
   },
   {
+    name: 'socket reconnect',
+    command: 'pnpm',
+    args: [
+      '--filter',
+      '@plum-code-webui/backend',
+      'exec',
+      'tsx',
+      '../frontend/scripts/socket-reconnect-tests.ts',
+    ],
+  },
+  {
     name: 'ambient motion',
     command: 'pnpm',
     args: [

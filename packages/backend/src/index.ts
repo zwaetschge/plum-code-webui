@@ -22,6 +22,7 @@ import { config } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 import { initDatabase } from './db/index.js';
+import { stopServingRealtime } from './utils/realtimeDrain.js';
 import { refreshModelsCache } from './utils/modelCatalog.js';
 import { setupPassport } from './auth/passport.js';
 import { getProcessManager, setupWebSocket } from './websocket/index.js';
@@ -181,21 +182,20 @@ function registerGracefulShutdown(
     forceExit.unref();
 
     try {
-      // Disconnect WebSocket clients first so their long-lived connections do
-      // not keep httpServer.close() pending past the grace period. They
-      // reconnect to the new instance.
-      io.disconnectSockets(true);
-      // Book mid-turn usage and leave the Pi/Claude run journals for resume
-      // before the sockets and HTTP server go away.
+      // Stop listening and drop the live sockets so that their clients come
+      // back on their own, on the next instance (see realtimeDrain.ts for why
+      // this is not io.disconnectSockets).
+      const closed = stopServingRealtime(httpServer, io);
+      // Book mid-turn usage and leave the Pi/Claude run journals for resume.
       const { getProcessManager } = await import('./websocket/index.js');
       try {
         await getProcessManager().shutdownAll();
       } catch (err) {
         console.warn('[SHUTDOWN] processManager shutdown skipped:', err);
       }
-      // Now stop accepting connections and force any lingering sockets closed.
-      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-      (httpServer as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
+      // Requests still open would keep the server from closing.
+      httpServer.closeAllConnections();
+      await closed;
     } catch (err) {
       console.error('[SHUTDOWN] Drain error:', err);
     } finally {

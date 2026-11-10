@@ -1,4 +1,10 @@
 import { nativeShell } from '@/lib/nativeShell';
+import {
+  LOGIN_REFUSAL_RETRIES,
+  isLoginRefusal,
+  manualReconnectDelay,
+  needsManualReconnect,
+} from '@/lib/socketReconnect';
 import { io, Socket } from 'socket.io-client';
 import type {
   ActiveFollowupMode,
@@ -219,6 +225,8 @@ class SocketService {
     { state: 'active' | 'idle'; lastReadMessageId?: string | null }
   >();
   private deviceId: string | null = null;
+  private manualReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private manualReconnectAttempt = 0;
 
   constructor() {
     if (typeof window === 'undefined') return;
@@ -234,8 +242,13 @@ class SocketService {
     // An existing socket may be mid-reconnect (connected === false). Creating a
     // second one over it duplicated every handler: both sockets received the
     // stream and every delta rendered twice. socket.io reconnects the existing
-    // instance on its own.
+    // instance on its own — unless it has given up on it (the server ended the
+    // socket or refused the handshake); that one is brought back here, so
+    // opening a chat or signing in again is enough to be live.
     if (this.socket) {
+      if (!this.socket.connected && !this.socket.active && useAuthStore.getState().token) {
+        this.socket.connect();
+      }
       return this.socket;
     }
 
@@ -262,6 +275,7 @@ class SocketService {
     if (!this.socket) return;
     this.socket.on('connect', () => {
       console.log('Socket connected');
+      this.clearManualReconnect();
       // A transport reconnect needs the missed transcript and current thread,
       // not only membership in the session room.
       this.subscribedSessions.forEach((sessionId) => {
@@ -279,14 +293,28 @@ class SocketService {
 
     this.socket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason);
+      // A restart ends the socket from the server side; socket.io stays away
+      // after that (see socketReconnect.ts).
+      if (needsManualReconnect({ active: !!this.socket?.active, reason })) {
+        this.scheduleManualReconnect();
+      }
     });
 
-    // The server refuses the handshake when the login is gone. Without this the
-    // socket retried forever with the same token while the UI looked signed in.
     this.socket.on('connect_error', (error) => {
-      if (/Invalid token|Authentication required|Account unavailable/i.test(error.message)) {
-        void useAuthStore.getState().checkAuth();
+      // A lost connection is retried by socket.io itself.
+      if (!this.socket || this.socket.active) return;
+      if (!isLoginRefusal(error.message)) {
+        this.scheduleManualReconnect();
+        return;
       }
+      // The server refuses the handshake when the login is gone, and the UI must
+      // not go on looking signed in. It may also just have failed to check it:
+      // ask over REST, and come back as long as that still knows the account.
+      if (this.manualReconnectAttempt >= LOGIN_REFUSAL_RETRIES) return;
+      void useAuthStore
+        .getState()
+        .checkAuth()
+        .finally(() => this.scheduleManualReconnect());
     });
 
     this.socket.on('assistant:ui-result', (event) => {
@@ -1209,10 +1237,31 @@ class SocketService {
     }
   }
 
+  /** Brings back a socket that socket.io has given up on, with a growing pause. */
+  private scheduleManualReconnect(): void {
+    const socket = this.socket;
+    if (!socket || socket.active || this.manualReconnectTimer) return;
+    const delay = manualReconnectDelay(this.manualReconnectAttempt++);
+    this.manualReconnectTimer = setTimeout(() => {
+      this.manualReconnectTimer = null;
+      // Signed out or replaced in the meantime: nothing to bring back.
+      if (this.socket !== socket || socket.active) return;
+      if (!useAuthStore.getState().token) return;
+      socket.connect();
+    }, delay);
+  }
+
+  private clearManualReconnect(): void {
+    if (this.manualReconnectTimer) clearTimeout(this.manualReconnectTimer);
+    this.manualReconnectTimer = null;
+    this.manualReconnectAttempt = 0;
+  }
+
   disconnect(): void {
     // The throttled cursor writes have no other chance to land once the socket
     // and its bookkeeping are gone.
     this.flushCursors();
+    this.clearManualReconnect();
     this.socket?.disconnect();
     this.socket = null;
     this.subscribedSessions.clear();
