@@ -14,6 +14,7 @@ import com.claudewebui.app.data.model.CliLoginSession
 import com.claudewebui.app.data.model.VibeApiKeyInput
 import com.claudewebui.app.data.model.VibeAuthStatus
 import com.claudewebui.app.data.model.CliSubagentEntry
+import com.claudewebui.app.data.model.PiModelRoute
 import com.claudewebui.app.data.model.ConfigAgent
 import com.claudewebui.app.data.model.ConfigDocument
 import com.claudewebui.app.data.model.ConfigItemKind
@@ -180,6 +181,12 @@ class SettingsRepository(
     ): Result<List<CliSubagentEntry>> = apiCall {
         val response = api.saveCliSubagents(input)
         if (!response.success) error(response.error?.message ?: "Failed to save subagents")
+        response.data.orEmpty()
+    }
+
+    suspend fun getCliSubagentPiModels(): Result<List<PiModelRoute>> = apiCall {
+        val response = api.getCliSubagentPiModels()
+        if (!response.success) error(response.error?.message ?: "Failed to fetch Pi models")
         response.data.orEmpty()
     }
 

@@ -2,6 +2,25 @@ package com.claudewebui.app.ui.screens.settings
 
 import com.claudewebui.app.R
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.claudewebui.app.data.model.CliSubagentEntry
+import com.claudewebui.app.data.model.PiModelRoute
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -42,22 +61,61 @@ import com.claudewebui.app.ui.components.common.PlumText
  * means a failing spawn).
  */
 
-/** Providers the `subagents` MCP bridge knows how to spawn. */
-private val CLI_SUBAGENT_PROVIDERS = listOf("codex", "claude", "zai", "pi")
-
 @Composable
 fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
+    LaunchedEffect(Unit) { viewModel.loadSubagents() }
+    CliSubagentsContent(
+        entries = state.cliSubagents,
+        piRoutes = state.piModelRoutes,
+        busy = state.subagentBusy,
+        onEnabled = viewModel::setCliSubagentEnabled,
+        onModel = viewModel::setCliSubagentModel,
+        onRemove = viewModel::removeCliSubagent,
+        onAdd = viewModel::addCliSubagent,
+    )
+}
+
+/** The labels of the Pi model picker in the current locale. */
+@Composable
+internal fun rememberPiModelLabels(): PiModelLabels {
+    val resources = androidx.compose.ui.platform.LocalContext.current.resources
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    return remember(configuration) {
+        PiModelLabels(
+            default = resources.getString(R.string.settings_pi_model_default),
+            direct = resources.getString(R.string.settings_pi_model_direct),
+            hosted = resources.getString(R.string.settings_pi_model_hosted),
+            unavailable = resources.getString(R.string.settings_pi_model_unavailable),
+        )
+    }
+}
+
+/**
+ * Stateless body of [CliSubagentsPanel], so the debug preview can render it
+ * with fixtures and no server.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun CliSubagentsContent(
+    entries: List<CliSubagentEntry>,
+    piRoutes: List<PiModelRoute>,
+    busy: Boolean,
+    onEnabled: (id: String, enabled: Boolean) -> Unit,
+    onModel: (id: String, model: String) -> Unit,
+    onRemove: (id: String) -> Unit,
+    onAdd: (provider: String, label: String, model: String) -> Unit,
+) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
 
     val screenResources = androidx.compose.ui.platform.LocalContext.current.resources
     androidx.compose.ui.platform.LocalConfiguration.current
+    val piLabels = rememberPiModelLabels()
 
     // `zai` first: it is the entry most people want and the one whose meaning
     // is least obvious from its name.
     var provider by remember { mutableStateOf("zai") }
     var label by remember { mutableStateOf("") }
     var model by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) { viewModel.loadSubagents() }
 
     GlassPanel(Modifier.fillMaxWidth(), radius = 18.dp) {
         Column(
@@ -72,6 +130,11 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                 fontSize = 12.sp,
             )
             Text(
+                screenResources.getString(R.string.settings_cli_subagents_pi_route_hint),
+                color = PlumMuted,
+                fontSize = 12.sp,
+            )
+            Text(
                 screenResources.getString(R.string.settings_z_ai_is_the_exception_it_runs_the_claude_cli_against_your_z_ai_en_3e163) +
                     screenResources.getString(R.string.settings_the_same_second_claude_transport_a_z_ai_session_uses_6e1d4) +
                     screenResources.getString(R.string.settings_disappears_server_side_while_no_z_ai_endpoint_is_configured_f649f),
@@ -79,10 +142,12 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                 fontSize = 12.sp,
             )
 
-            if (state.cliSubagents.isEmpty()) {
+            if (entries.isEmpty()) {
                 Text(screenResources.getString(R.string.settings_no_subagents_configured_e075f), color = PlumMuted, fontSize = 12.sp)
             } else {
-                state.cliSubagents.forEach { entry ->
+                entries.forEach { entry ->
+                    val piPicker = usesPiModelPicker(entry.provider, piRoutes)
+                    val piOptions = if (piPicker) piModelOptions(piRoutes, entry.model, piLabels) else emptyList()
                     var draftModel by remember(entry.id, entry.model) { mutableStateOf(entry.model) }
                     Column(verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.xs)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -97,7 +162,8 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                                 Text(
                                     listOfNotNull(
                                         entry.provider,
-                                        entry.model.takeIf { it.isNotBlank() } ?: screenResources.getString(R.string.settings_default_model_f13dd),
+                                        if (piPicker) piModelSelectedLabel(piOptions, entry.model)
+                                        else entry.model.takeIf { it.isNotBlank() } ?: screenResources.getString(R.string.settings_default_model_f13dd),
                                     ).joinToString(" · "),
                                     color = PlumMuted,
                                     fontSize = 11.sp,
@@ -107,23 +173,34 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                             }
                             Switch(
                                 checked = entry.enabled,
-                                enabled = !state.subagentBusy,
-                                onCheckedChange = { viewModel.setCliSubagentEnabled(entry.id, it) },
+                                enabled = !busy,
+                                onCheckedChange = { onEnabled(entry.id, it) },
                             )
-                            SubagentAction(screenResources.getString(R.string.settings_remove_e9639), state.subagentBusy, destructive = true) {
-                                viewModel.removeCliSubagent(entry.id)
+                            SubagentAction(screenResources.getString(R.string.settings_remove_e9639), busy, destructive = true) {
+                                onRemove(entry.id)
                             }
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                value = draftModel,
-                                onValueChange = { draftModel = it },
-                                label = { Text(screenResources.getString(R.string.settings_model_override_optional_d1e28)) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f),
+                        if (piPicker) {
+                            // A pick is the edit: it saves at once, like every
+                            // other menu row in the settings.
+                            PiModelPickerField(
+                                options = piOptions,
+                                selected = entry.model,
+                                enabled = !busy,
+                                onSelect = { onModel(entry.id, it) },
                             )
-                            SubagentAction(screenResources.getString(R.string.settings_save_efc00), state.subagentBusy || draftModel == entry.model) {
-                                viewModel.setCliSubagentModel(entry.id, draftModel)
+                        } else {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = draftModel,
+                                    onValueChange = { draftModel = it },
+                                    label = { Text(screenResources.getString(R.string.settings_model_override_optional_d1e28)) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                SubagentAction(screenResources.getString(R.string.settings_save_efc00), busy || draftModel == entry.model) {
+                                    onModel(entry.id, draftModel)
+                                }
                             }
                         }
                     }
@@ -131,7 +208,10 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
             }
 
             Text(screenResources.getString(R.string.settings_add_61cc5), color = PlumText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline),
+                verticalArrangement = Arrangement.spacedBy(screenTokens.spacing.inline),
+            ) {
                 CLI_SUBAGENT_PROVIDERS.forEach { candidate ->
                     ProviderChip(candidate, candidate == provider) { provider = candidate }
                 }
@@ -145,19 +225,102 @@ fun CliSubagentsPanel(state: SettingsUiState, viewModel: SettingsViewModel) {
                     modifier = Modifier.weight(1f),
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it },
-                    label = { Text(screenResources.getString(R.string.settings_model_optional_1cde0)) },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-                SubagentAction(screenResources.getString(R.string.settings_add_61cc5), state.subagentBusy) {
-                    viewModel.addCliSubagent(provider, label, model)
-                    label = ""
-                    model = ""
+            val addAction: () -> Unit = {
+                onAdd(provider, label, model)
+                label = ""
+                model = ""
+            }
+            if (usesPiModelPicker(provider, piRoutes)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) {
+                        PiModelPickerField(
+                            options = piModelOptions(piRoutes, model, piLabels),
+                            selected = model,
+                            enabled = true,
+                            onSelect = { model = it },
+                        )
+                    }
+                    SubagentAction(screenResources.getString(R.string.settings_add_61cc5), busy, onClick = addAction)
                 }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = model,
+                        onValueChange = { model = it },
+                        label = { Text(screenResources.getString(R.string.settings_model_optional_1cde0)) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    SubagentAction(screenResources.getString(R.string.settings_add_61cc5), busy, onClick = addAction)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The Pi model choice: a field-shaped row that opens the same anchored menu
+ * [SettingsMenuRow] uses, with a check on the stored model. Labels can be long
+ * ("mistral/devstral · über mistral (dessen Budget)"), so the menu rows wrap
+ * to two lines instead of truncating the route.
+ */
+@Composable
+private fun PiModelPickerField(
+    options: List<PiModelOption>,
+    selected: String,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+    var open by remember { mutableStateOf(false) }
+    val caption = stringResource(R.string.settings_pi_model_label)
+    val current = piModelSelectedLabel(options, selected)
+    Box(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .clip(RoundedCornerShape(screenTokens.radius.chip))
+                .border(1.dp, PlumBorder, RoundedCornerShape(screenTokens.radius.chip))
+                .clickable(enabled = enabled, role = Role.Button, onClick = { open = true })
+                .semantics { contentDescription = "$caption: $current" }
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(caption, color = PlumMuted, fontSize = 11.sp)
+                Text(
+                    current,
+                    color = if (options.firstOrNull { it.value == selected.trim() }?.unavailable == true) PlumRed else PlumText,
+                    fontSize = 14.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                Icons.Outlined.ArrowDropDown,
+                null,
+                tint = PlumMuted.copy(alpha = if (enabled) 1f else .5f),
+                modifier = Modifier.size(24.dp),
+            )
+        }
+        DropdownMenu(open, { open = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            option.label,
+                            color = if (option.unavailable) PlumRed else PlumText,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    trailingIcon = if (option.value == selected.trim()) ({ Icon(Icons.Outlined.Check, null, tint = PlumAccent) }) else null,
+                    onClick = {
+                        open = false
+                        if (option.value != selected.trim()) onSelect(option.value)
+                    },
+                )
             }
         }
     }

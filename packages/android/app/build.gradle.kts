@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,6 +7,12 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.baselineprofile)
+}
+
+// Optional, git-ignored release signing file in the Android project root.
+val keystoreProperties = Properties().also { props ->
+    val source = rootProject.file("keystore.properties")
+    if (source.isFile) source.inputStream().use { stream -> props.load(stream) }
 }
 
 android {
@@ -23,28 +31,34 @@ android {
     //     PLUM_RELEASE_KEY_ALIAS       — key alias inside the keystore
     //     PLUM_RELEASE_KEY_PASSWORD    — key password
     //   or the matching environment variables KEYSTORE_PATH / KEYSTORE_PASS /
-    //   KEY_ALIAS / KEY_PASS.
+    //   KEY_ALIAS / KEY_PASS,
+    //   or a git-ignored keystore.properties in the Android project root
+    //   (storeFile, storePassword, keyAlias, keyPassword; a relative storeFile
+    //   resolves against that root).
     // When none of these are set the release buildType falls back to the debug
     // signing key so the build still succeeds (useful for CI / local smoke
     // builds). TODO: set the PLUM_RELEASE_* gradle.properties keys above (or the
     // KEYSTORE_* env vars) on the publishing host so shipped updates are signed
     // with the production release key instead of the debug key.
     // ---------------------------------------------------------------------------
-    fun releaseSecret(propKey: String, envKey: String): String? =
+    fun releaseSecret(propKey: String, envKey: String, fileKey: String): String? =
         (project.findProperty(propKey) as? String)?.takeIf { it.isNotBlank() }
             ?: System.getenv(envKey)?.takeIf { it.isNotBlank() }
+            ?: keystoreProperties.getProperty(fileKey)?.trim()?.takeIf { it.isNotBlank() }
 
-    val releaseStorePath = releaseSecret("PLUM_RELEASE_STORE_FILE", "KEYSTORE_PATH")
-    val releaseStoreFile = releaseStorePath?.let { file(it) }
+    // A property/env path keeps resolving against this module as before; the
+    // keystore.properties path resolves against the file's own directory.
+    val releaseStoreFile = releaseSecret("PLUM_RELEASE_STORE_FILE", "KEYSTORE_PATH", "")?.let { file(it) }
+        ?: keystoreProperties.getProperty("storeFile")?.trim()?.takeIf { it.isNotBlank() }?.let { rootProject.file(it) }
     val hasReleaseKeystore = releaseStoreFile?.exists() == true
 
     signingConfigs {
         create("release") {
             if (hasReleaseKeystore) {
                 storeFile = releaseStoreFile
-                storePassword = releaseSecret("PLUM_RELEASE_STORE_PASSWORD", "KEYSTORE_PASS")
-                keyAlias = releaseSecret("PLUM_RELEASE_KEY_ALIAS", "KEY_ALIAS")
-                keyPassword = releaseSecret("PLUM_RELEASE_KEY_PASSWORD", "KEY_PASS")
+                storePassword = releaseSecret("PLUM_RELEASE_STORE_PASSWORD", "KEYSTORE_PASS", "storePassword")
+                keyAlias = releaseSecret("PLUM_RELEASE_KEY_ALIAS", "KEY_ALIAS", "keyAlias")
+                keyPassword = releaseSecret("PLUM_RELEASE_KEY_PASSWORD", "KEY_PASS", "keyPassword")
             }
         }
 
@@ -65,8 +79,8 @@ android {
         applicationId = "com.claudewebui.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 71
-        versionName = "1.9.19"
+        versionCode = 72
+        versionName = "1.9.20"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

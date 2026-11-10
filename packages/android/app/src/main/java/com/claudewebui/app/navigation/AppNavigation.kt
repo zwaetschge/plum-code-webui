@@ -162,7 +162,9 @@ fun AppNavigation(
         val isChatModelsPreview = BuildConfig.DEBUG && deepLinkUri == "claudewebui://preview-chatmodels"
         val isVoicePreview = BuildConfig.DEBUG && deepLinkUri?.startsWith("claudewebui://preview-voice") == true
         val isWidgetPreview = BuildConfig.DEBUG && deepLinkUri?.startsWith("claudewebui://preview-widgets") == true
+        val isSubagentsPreview = BuildConfig.DEBUG && deepLinkUri?.startsWith("claudewebui://preview-subagents") == true
         when {
+            isSubagentsPreview -> SUBAGENTS_PREVIEW_ROUTE
             isWidgetPreview -> WIDGET_PREVIEW_ROUTE
             isVoicePreview -> VOICE_PREVIEW_ROUTE
             isDynamicUiPreview -> DYNAMIC_UI_PREVIEW_ROUTE
@@ -346,6 +348,13 @@ fun AppNavigation(
                     empty = link?.getQueryParameter("empty") == "1",
                     provider = link?.getQueryParameter("provider"),
                     period = link?.getQueryParameter("period"),
+                )
+            }
+            // CLI subagents with the Pi route picker (claudewebui://preview-subagents?routes=0 for the free-text fallback).
+            composable(route = SUBAGENTS_PREVIEW_ROUTE) {
+                val link = remember(deepLinkUri) { deepLinkUri?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() } }
+                com.claudewebui.app.ui.screens.settings.SubagentsPreviewScreen(
+                    withRoutes = link?.getQueryParameter("routes") != "0",
                 )
             }
             composable(route = MONITOR_PREVIEW_ROUTE) {
@@ -761,6 +770,7 @@ private const val DYNAMIC_UI_PREVIEW_ROUTE = "dynamic_ui_preview"
 private const val CHAT_MODELS_PREVIEW_ROUTE = "chat_models_preview"
 private const val VOICE_PREVIEW_ROUTE = "voice_preview"
 private const val WIDGET_PREVIEW_ROUTE = "widget_preview"
+private const val SUBAGENTS_PREVIEW_ROUTE = "subagents_preview"
 private const val ASSISTANT_WEB_PREFIX = "settings_assistant_web"
 
 private fun NavHostController.navigateMain(destination: MainDestination) {

@@ -20,11 +20,27 @@ import kotlinx.serialization.Serializable
 data class CliSubagentEntry(
     val id: String = "",
     val label: String = "",
-    /** One of codex, claude, zai, pi. */
+    /** One of codex, claude, zai, pi, vibe. */
     val provider: String = "codex",
     /** Optional override; Pi wants `provider/model`, zai a bare GLM id. */
     val model: String = "",
     val enabled: Boolean = true,
+)
+
+/**
+ * A Pi model with the API it bills, from
+ * GET /api/settings/cli-subagents/pi-models. One model family can sit on two
+ * APIs (DeepSeek on its own key, or hosted by Mistral on the Mistral budget),
+ * so the picker names the route.
+ */
+@Serializable
+data class PiModelRoute(
+    /** `provider/model`, the value stored as the entry's model. */
+    val id: String = "",
+    val provider: String = "",
+    val model: String = "",
+    /** `direct` or `hosted`. */
+    val route: String = "direct",
 )
 
 @Serializable

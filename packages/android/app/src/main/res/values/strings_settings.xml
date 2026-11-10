@@ -309,4 +309,10 @@
         <item quantity="one">%d model</item>
         <item quantity="other">%d models</item>
     </plurals>
+    <string name="settings_cli_subagents_pi_route_hint">With pi the provider before the slash decides which account pays: deepseek/… runs directly on your DeepSeek key, a model hosted by Mistral (mistral/…) on the Mistral budget. Add one entry per route so sessions can pick deliberately.</string>
+    <string name="settings_pi_model_label">Pi model</string>
+    <string name="settings_pi_model_default">Default (first model in the Pi menu)</string>
+    <string name="settings_pi_model_direct">%1$s · direct</string>
+    <string name="settings_pi_model_hosted">%1$s · via %2$s (its budget)</string>
+    <string name="settings_pi_model_unavailable">%1$s · no longer available</string>
 </resources>

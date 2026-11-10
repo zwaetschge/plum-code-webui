@@ -1,0 +1,5 @@
+# Release signing material lives outside the repo; never commit it.
+keystore.properties
+*.jks
+*.keystore
+*.p12

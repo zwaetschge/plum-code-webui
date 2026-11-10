@@ -17,6 +17,7 @@ import com.claudewebui.app.data.model.CreateCustomAgentInput
 import com.claudewebui.app.data.model.CLIProviderConfig
 import com.claudewebui.app.data.model.CliLoginSession
 import com.claudewebui.app.data.model.CliSubagentEntry
+import com.claudewebui.app.data.model.PiModelRoute
 import com.claudewebui.app.data.model.ConfigAgent
 import com.claudewebui.app.data.model.ConfigDocument
 import com.claudewebui.app.data.model.ConfigItemKind
@@ -151,6 +152,8 @@ data class SettingsUiState(
     val subagentUpstreams: List<SubagentUpstream> = emptyList(),
     val subagentModelGroups: List<SubagentModelGroup> = emptyList(),
     val cliSubagents: List<CliSubagentEntry> = emptyList(),
+    /** Pi models with their billing route; empty falls back to free text. */
+    val piModelRoutes: List<PiModelRoute> = emptyList(),
     val subagentBusy: Boolean = false,
 
     // MCP
@@ -879,11 +882,13 @@ class SettingsViewModel(
             val upstreams = settingsRepository.getSubagentUpstreams().getOrNull()
             val groups = settingsRepository.getSubagentModels().getOrNull()
             val entries = settingsRepository.getCliSubagents().getOrNull()
+            val piRoutes = settingsRepository.getCliSubagentPiModels().getOrNull()
             _uiState.update {
                 it.copy(
                     subagentUpstreams = upstreams ?: it.subagentUpstreams,
                     subagentModelGroups = groups ?: it.subagentModelGroups,
                     cliSubagents = entries ?: it.cliSubagents,
+                    piModelRoutes = piRoutes ?: it.piModelRoutes,
                     subagentBusy = false,
                 )
             }

@@ -43,6 +43,9 @@ interface SettingsApi {
         input: List<CliSubagentEntry>,
     ): ApiResponse<List<CliSubagentEntry>>
 
+    /** GET /api/settings/cli-subagents/pi-models — Pi models with their billing route. */
+    suspend fun getCliSubagentPiModels(): ApiResponse<List<PiModelRoute>>
+
     /** PUT /api/basic-auth/credentials — rotate the local login. */
     suspend fun updateBasicAuthCredentials(
         currentPassword: String,
@@ -86,6 +89,9 @@ class SettingsApiImpl(private val http: ApiHttp) : SettingsApi {
         input: List<CliSubagentEntry>,
     ): ApiResponse<List<CliSubagentEntry>> =
         http.put("/api/settings/cli-subagents") { setBody(input) }
+
+    override suspend fun getCliSubagentPiModels(): ApiResponse<List<PiModelRoute>> =
+        http.get("/api/settings/cli-subagents/pi-models")
 
     override suspend fun updateBasicAuthCredentials(
         currentPassword: String,
