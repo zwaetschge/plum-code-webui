@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="auth_authenticate_94a01">Authentifizieren</string>
+    <string name="auth_cleartext_warning">Unverschlüsselte HTTP-Verbindung. Nur in einem vertrauenswürdigen lokalen Netzwerk verwenden.</string>
     <string name="auth_back_to_login_b5cd3">Zurück zur Anmeldung</string>
     <string name="auth_cancel_77dfd">Abbrechen</string>
     <string name="auth_change_64fbd">Ändern</string>

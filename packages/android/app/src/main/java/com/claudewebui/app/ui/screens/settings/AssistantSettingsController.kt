@@ -29,6 +29,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -79,6 +80,10 @@ class AssistantSettingsController internal constructor(
         private set
     var styleLibrary by mutableStateOf(StyleLibrary())
         private set
+    /** Every chat model of every connected provider (`?all=1`); null until loaded. */
+    var allChatProviders by mutableStateOf<List<AssistantApiProvider>?>(null)
+        private set
+    private var chatProvidersJob: Job? = null
     var loading by mutableStateOf(false)
         private set
     var saving by mutableStateOf(false)
@@ -122,6 +127,26 @@ class AssistantSettingsController internal constructor(
     fun setBoolean(field: String, checked: Boolean) = set(field, JsonPrimitive(checked), immediate = true)
     fun setChoice(field: String, choice: String) = set(field, JsonPrimitive(choice), immediate = true)
     fun setText(field: String, text: String) = set(field, JsonPrimitive(text), immediate = false)
+    fun setList(field: String, values: List<String>) = set(field, JsonArray(values.map(::JsonPrimitive)), immediate = true)
+
+    /** Loads the full chat model catalog once per controller (the menu picker needs every model). */
+    fun loadAllChatProviders() {
+        if (allChatProviders != null || chatProvidersJob?.isActive == true) return
+        chatProvidersJob = scope.launch {
+            try {
+                val response = api.getAllAssistantApiProviders(); checkOwner()
+                check(response.success) { response.error?.message ?: context.getString(R.string.assistant_load_failed) }
+                allChatProviders = response.data.orEmpty().filter { it.models.isNotEmpty() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                if (owns()) {
+                    allChatProviders = emptyList()
+                    error = failure.message ?: context.getString(R.string.assistant_load_failed)
+                }
+            }
+        }
+    }
 
     /** Several fields that belong together (provider + model) in one revision. */
     fun setChoices(vararg fields: Pair<String, String>) {

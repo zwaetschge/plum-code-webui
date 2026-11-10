@@ -10,10 +10,10 @@
     android:maxResizeWidth="500dp"
     android:maxResizeHeight="500dp"
     android:updatePeriodMillis="1800000"
-    android:initialLayout="@layout/widget_list"
+    android:initialLayout="@layout/widget_dashboard"
     android:configure="com.claudewebui.app.widget.WidgetConfigActivity"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:description="@string/widget_desc_limits"
-    android:previewLayout="@layout/widget_list"
+    android:previewLayout="@layout/widget_dashboard"
     android:previewImage="@mipmap/ic_launcher" />

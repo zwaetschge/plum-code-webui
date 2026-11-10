@@ -93,6 +93,11 @@ import com.claudewebui.app.ui.components.dynamicui.DynamicUi
 import com.claudewebui.app.ui.components.dynamicui.DynamicUiStateStore
 import com.claudewebui.app.ui.components.dynamicui.DynamicUiNote
 import com.claudewebui.app.ui.components.dynamicui.DynamicUiPending
+import com.claudewebui.app.ui.components.dynamicui.DynamicUiEntitySheet
+import com.claudewebui.app.ui.components.dynamicui.DynamicUiFollowups
+import com.claudewebui.app.ui.components.dynamicui.DynamicUiHost
+import com.claudewebui.app.ui.components.dynamicui.DynamicUiUriHandler
+import com.claudewebui.app.ui.components.dynamicui.UiEntityRequest
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -158,6 +163,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var openedCode by remember { mutableStateOf<Triple<String, String, List<AssistantChatSource>>?>(null) }
     var openedSource by remember { mutableStateOf<AssistantChatSource?>(null) }
     var openedWebSources by remember { mutableStateOf<List<AssistantWebSource>>(emptyList()) }
+    // Dynamic UI v2: Wikipedia sheet for entity: links and openEntity actions.
+    var entityRequest by remember { mutableStateOf<UiEntityRequest?>(null) }
     var sourceDownload by remember { mutableStateOf<ByteArray?>(null) }
     val sourceSave = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         val bytes = sourceDownload; sourceDownload = null
@@ -273,7 +280,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             pending = outbox.pending()
             val catalog = api.getAssistantApiProviders(); checkOwner()
             providers = catalog.data.orEmpty()
-            val selectedProvider = providers.firstOrNull { it.id == providerId } ?: providers.firstOrNull()
+            // Server order: the user's default model (provider flagged `default`) comes first.
+            val selectedProvider = providers.firstOrNull { it.id == providerId } ?: providers.firstOrNull { it.default } ?: providers.firstOrNull()
             providerId = selectedProvider?.id.orEmpty()
             if (model !in selectedProvider?.models.orEmpty()) model = selectedProvider?.models?.firstOrNull().orEmpty()
             val profileResult = api.getAssistantResources("profiles"); checkOwner(); profiles = profileResult.data.orEmpty()
@@ -282,6 +290,27 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
             runCatching { api.getStyleLibrary() }.getOrNull()?.data?.let { checkOwner(); writingStyles = it.writingStyles }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { checkOwner(); error = failure.message }
+    }
+    // „Modelle im Chat“ changed (settings, or another device): reload the server-filtered
+    // menu; a new chat starts on the new default, an open chat keeps its model.
+    val chatModels = personalization?.chatModels
+    var menuModels by remember(owner) { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(owner, chatModels) {
+        if (chatModels == null) return@LaunchedEffect
+        val previous = menuModels
+        menuModels = chatModels
+        if (previous == null || previous == chatModels) return@LaunchedEffect
+        try {
+            val catalog = api.getAssistantApiProviders(); checkOwner()
+            if (!catalog.success) return@LaunchedEffect
+            providers = catalog.data.orEmpty()
+            if (chat == null) {
+                val first = providers.firstOrNull { it.default } ?: providers.firstOrNull()
+                providerId = first?.id.orEmpty()
+                model = first?.models?.firstOrNull().orEmpty()
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { checkOwner() }
     }
     LaunchedEffect(owner, chatId, refresh) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -306,7 +335,12 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                     pending = outbox.pending()
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (failure: Exception) { checkOwner(); error = failure.message }
-                delay(if (turns.any { it.status == "running" || it.status == "queued" }) 500 else 5_000)
+                delay(
+                    if (turns.any { it.status == "running" || it.status == "queued" }) 500
+                    // Live widgets resolve after the answer: look again soon (the socket usually wins).
+                    else if (turns.any { turn -> turn.uiResults?.values?.any { ((it as? JsonObject)?.get("status") as? JsonPrimitive)?.contentOrNull == "pending" } == true }) 1_500
+                    else 5_000,
+                )
             }
         }
     }
@@ -464,6 +498,31 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val researchChat = chat?.body?.get("workflow")?.jsonPrimitive?.contentOrNull == "research"
     val activeWritingStyle = chat?.let { it.body["writingStyleSkill"]?.jsonPrimitive?.contentOrNull }
         ?: if (chat != null) null else if (newChatStyleSet) newChatStyle else personalization?.defaultWritingStyle?.ifBlank { null }
+    // Dynamic UI v2 live widgets: results arrive on the user room as assistant:ui-result.
+    val socketManager: com.claudewebui.app.core.network.SocketManager = koinInject()
+    fun mergeUiResult(turnId: String, nodeId: String, result: JsonObject) {
+        turns = turns.map { if (it.id == turnId) it.copy(uiResults = JsonObject((it.uiResults ?: JsonObject(emptyMap())) + (nodeId to result))) else it }
+    }
+    LaunchedEffect(owner, chatId) {
+        val target = chatId ?: return@LaunchedEffect
+        socketManager.assistantUiResults.collect { event ->
+            if (event.chatId == target && TokenStore.assistantOwnerKey() == owner) mergeUiResult(event.turnId, event.id, event.result)
+        }
+    }
+    fun refreshUiResult(turnId: String, nodeId: String) {
+        val current = chat ?: return
+        scope.launch {
+            try {
+                val response = api.refreshAssistantUiResult(current.id, turnId, nodeId); checkOwner()
+                val result = response.data
+                if (response.success && result != null && chat?.id == current.id) mergeUiResult(turnId, nodeId, result)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { checkOwner(); error = failure.message }
+        }
+    }
+    entityRequest?.let { request ->
+        DynamicUiEntitySheet(request, load = { api.getAssistantUiEntity(it.title, it.lang).data }) { entityRequest = null }
+    }
     openedCode?.let { (code, language, sources) -> ChatCodeSheet(code, language, sources, api) { openedCode = null } }
     openedSource?.let { source ->
         AlertDialog(onDismissRequest = { openedSource = null }, title = { Text(source.title) }, text = {
@@ -553,6 +612,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                         }
                     }
                     if (shownTemporary) Text(stringResource(R.string.assistant_temporary_detail, shown.body["expiresAt"]?.jsonPrimitive?.content.orEmpty()), color = palette.muted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 4.dp))
+                    val parentUriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                    val entityLinks = remember(parentUriHandler) { DynamicUiUriHandler(parentUriHandler) { title -> entityRequest = UiEntityRequest(title) } }
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState, contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
                         if ((shownTurns.firstOrNull()?.seq ?: 0) > 1) item(key = "older") { TextButton(enabled = !busy && live, onClick = { scope.launch {
                             busy = true
@@ -604,11 +665,26 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                         val thinkingLabel = stringResource(R.string.component_thinking)
                                         ThinkingDots(palette.accent, Modifier.padding(vertical = 8.dp).semantics { contentDescription = thinkingLabel })
                                     } else if (turn.response.isNotEmpty() || (turn.ui == null && !turn.uiPending)) {
-                                        MarkdownContent(turn.response, Modifier.fillMaxWidth(), isStreaming = streaming, onRunCode = { code, language -> openedCode = Triple(code, language, turn.sources) }, webSources = turn.webSources, onCitation = { openedWebSources = it })
+                                        CompositionLocalProvider(androidx.compose.ui.platform.LocalUriHandler provides entityLinks) {
+                                            MarkdownContent(turn.response, Modifier.fillMaxWidth(), isStreaming = streaming, onRunCode = { code, language -> openedCode = Triple(code, language, turn.sources) }, webSources = turn.webSources, onCitation = { openedWebSources = it })
+                                        }
                                     }
                                     // Dynamic UI: an interactive view below the text, rendered natively.
                                     if (turn.uiPending && turn.ui == null) DynamicUiPending()
-                                    turn.ui?.let { spec -> DynamicUi(spec, stateStore = dynamicUiState, stateKey = turn.id, busy = busy || running || !live, onSendMessage = if (live) ({ text: String -> send(text) }) else null) }
+                                    turn.ui?.let { spec ->
+                                        val uiResults = remember(turn.uiResults) { turn.uiResults?.entries?.mapNotNull { (id, value) -> (value as? JsonObject)?.let { id to it } }?.toMap().orEmpty() }
+                                        // Custom tiles may send messages only from the newest answer.
+                                        val latest = turn.id == shownTurns.lastOrNull()?.id
+                                        val uiHost = remember(turn.id, live, latest) {
+                                            DynamicUiHost(
+                                                onPrefill = if (live) ({ text: String -> prompt = text.take(20000) }) else null,
+                                                onOpenEntity = { title, lang -> entityRequest = UiEntityRequest(title, lang) },
+                                                onRefresh = if (live) ({ nodeId: String -> refreshUiResult(turn.id, nodeId) }) else null,
+                                                latest = latest,
+                                            )
+                                        }
+                                        DynamicUi(spec, stateStore = dynamicUiState, stateKey = turn.id, busy = busy || running || !live, onSendMessage = if (live) ({ text: String -> send(text) }) else null, results = uiResults, host = uiHost, memoryKey = turn.id, animate = rise)
+                                    }
                                     turn.uiError?.let { note -> if (turn.status != "running") DynamicUiNote(note) }
                                     ChatWebSourcesRow(turn.webSources, turn.response) { openedWebSources = it }
                                 }
@@ -685,6 +761,10 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                             }
                                         }
                                     }
+                                }
+                                // Dynamic UI v2: suggestion chips under the latest answer (never part of the copied text).
+                                if (live && turn.status == "completed" && turn.followups.isNotEmpty() && turn.id == shownTurns.lastOrNull()?.id) {
+                                    DynamicUiFollowups(turn.followups, enabled = !busy && !running, onSelect = { text -> send(text) }, animate = rise || !reduce)
                                 }
                             }
                         }
@@ -874,6 +954,7 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         send = { text -> if (busy || turns.any { it.status == "running" } || (chat == null && (providerId.isBlank() || model.isBlank()))) false else { send(text, voice = true); true } },
         stopTurn = { turns.lastOrNull { it.status == "running" }?.let { turn -> command("/api/assistant/api-chats/$chatId/turns/${turn.id}/stop", buildJsonObject {}, context.getString(R.string.assistant_stop)) } },
         onClose = { reason -> voiceMode = false; reason?.let { notice = it } },
+        speechRecognition = personalization?.speechRecognition ?: "device",
     )
     if (showMemory) key(chat?.id, chat?.revision) {
         var read by remember { mutableStateOf(if (chat == null) memoryRead else chat?.body?.get("memoryRead")?.jsonPrimitive?.booleanOrNull != false) }

@@ -42,8 +42,11 @@ object WidgetHub {
     }
 
     /**
-     * Full and compact variants on Android 12+ so a widget squeezed to 2×1
-     * still reads; older releases get the full layout only.
+     * One variant per size bucket on Android 12+: the launcher shows the
+     * largest bucket that fits, and each variant is laid out for its bucket's
+     * lower bound, so tiles and rows never clip — a bigger cell only adds
+     * slack, the next bucket up adds tiles or rows. Older releases get one
+     * variant for the size the launcher reported.
      */
     private fun buildViews(
         context: Context,
@@ -52,18 +55,52 @@ object WidgetHub {
         snapshot: WidgetSnapshot?,
     ): RemoteViews {
         val config = WidgetConfigStore.load(context, appWidgetId)
-        val full = WidgetRenderer.render(context, kind, snapshot, config, compact = false)
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return full
-        // The chart scales itself; a second variant would only re-draw the
-        // same bitmap at extra cost.
-        if (kind == WidgetKind.CHART) return full
-        val compact = WidgetRenderer.render(context, kind, snapshot, config, compact = true)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            val options = AppWidgetManager.getInstance(context).getAppWidgetOptions(appWidgetId)
+            // Portrait: the narrow width and the tall height.
+            val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
+            val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
+            val size = if (width > 0 && height > 0) bucketFor(kind, width, height) else WidgetSize.DEFAULT
+            return WidgetRenderer.render(context, kind, snapshot, config, size = size)
+        }
         return RemoteViews(
-            mapOf(
-                SizeF(100f, 60f) to compact,
-                SizeF(220f, 130f) to full,
-            )
+            buckets(kind).associate { size ->
+                SizeF(size.widthDp.toFloat(), size.heightDp.toFloat()) to
+                    WidgetRenderer.render(context, kind, snapshot, config, size = size)
+            }
         )
+    }
+
+    // At most 16 variants per widget (the RemoteViews limit). Dashboards
+    // spend them where their tiles change: narrow cells only show the hero.
+    private val DASHBOARD_NARROW_HEIGHTS = intArrayOf(60, 110, 145, 170, 230)
+    private val DASHBOARD_WIDTHS = intArrayOf(220, 300)
+    private val DASHBOARD_HEIGHTS = intArrayOf(60, 110, 145, 170, 190)
+    private val LIST_WIDTHS = intArrayOf(100, 300)
+    private val LIST_HEIGHTS = intArrayOf(60, 110, 140, 165, 190, 220, 260, 330)
+    private val CHART_WIDTHS = intArrayOf(100, 220)
+    private val CHART_HEIGHTS = intArrayOf(60, 150, 210)
+
+    /** The sizes a widget kind is laid out for. */
+    fun buckets(kind: WidgetKind): List<WidgetSize> {
+        fun grid(widths: IntArray, heights: IntArray) = widths.flatMap { w -> heights.map { h -> WidgetSize(w, h) } }
+        return when (kind) {
+            WidgetKind.LIMITS, WidgetKind.QUICK, WidgetKind.TOKENS, WidgetKind.COST ->
+                grid(intArrayOf(100), DASHBOARD_NARROW_HEIGHTS) + grid(DASHBOARD_WIDTHS, DASHBOARD_HEIGHTS)
+            WidgetKind.CHART -> grid(CHART_WIDTHS, CHART_HEIGHTS)
+            else -> grid(LIST_WIDTHS, LIST_HEIGHTS)
+        }
+    }
+
+    /**
+     * The variant a launcher shows at [widthDp]×[heightDp]: the largest bucket
+     * that fits, or the smallest when none does.
+     */
+    fun bucketFor(kind: WidgetKind, widthDp: Int, heightDp: Int): WidgetSize {
+        val all = buckets(kind)
+        return all.filter { it.widthDp <= widthDp && it.heightDp <= heightDp }
+            .maxByOrNull { it.widthDp * it.heightDp }
+            ?: all.minBy { it.widthDp * it.heightDp }
     }
 
     fun hasAnyWidgets(context: Context): Boolean {

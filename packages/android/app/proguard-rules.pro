@@ -44,3 +44,8 @@
 -keep class coil.** { *; }
 -dontwarn coil.**
 -keep interface coil.** { *; }
+
+# Dynamic UI custom tiles: the WebView bridge (DynamicUiWidget.kt) is called by name from JS.
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}

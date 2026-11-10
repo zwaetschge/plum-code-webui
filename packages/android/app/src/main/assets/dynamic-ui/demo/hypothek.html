@@ -1,0 +1,181 @@
+<div class="loan" id="app">
+  <div class="inputs">
+    <label class="field"><span>Kreditbetrag <output id="o-amount"></output></span>
+      <input type="range" id="amount" min="50000" max="1500000" step="10000" aria-describedby="o-amount" /></label>
+    <label class="field"><span>Zinssatz <output id="o-rate"></output></span>
+      <input type="range" id="rate" min="0.5" max="7" step="0.05" aria-describedby="o-rate" /></label>
+    <label class="field"><span>Laufzeit <output id="o-years"></output></span>
+      <input type="range" id="years" min="5" max="35" step="1" aria-describedby="o-years" /></label>
+    <label class="field"><span>Zusätzlich pro Monat <output id="o-extra"></output></span>
+      <input type="range" id="extra" min="0" max="3000" step="50" aria-describedby="o-extra" /></label>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><span>Monatliche Rate</span><strong id="k-rate"></strong><small id="k-rate-sub"></small></div>
+    <div class="kpi"><span>Zinskosten total</span><strong id="k-interest"></strong><small id="k-interest-sub"></small></div>
+    <div class="kpi"><span>Schuldenfrei nach</span><strong id="k-free"></strong><small id="k-free-sub"></small></div>
+  </div>
+  <div class="chart" id="chart">
+    <div class="legend">
+      <span><i style="background:var(--plum-accent)"></i>Restschuld</span>
+      <span><i style="background:var(--plum-chart-4)"></i>Bezahlte Zinsen</span>
+      <span id="lg-base" hidden><i class="dash"></i>ohne Zusatz</span>
+    </div>
+    <svg id="svg" role="img" aria-label="Restschuld und bezahlte Zinsen pro Jahr"></svg>
+    <div class="tip" id="tip" hidden></div>
+  </div>
+  <details id="plan">
+    <summary>Tilgungsplan nach Jahren</summary>
+    <div class="scroll"><table><thead><tr><th>Jahr</th><th>Zinsen</th><th>Tilgung</th><th>Restschuld</th></tr></thead><tbody id="rows"></tbody></table></div>
+  </details>
+</div>
+<style>
+  .loan { display: grid; gap: 18px; }
+  .inputs { display: grid; gap: 14px 28px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .field { display: grid; gap: 6px; font-size: 13px; color: var(--plum-muted); }
+  .field span { display: flex; justify-content: space-between; gap: 8px; }
+  .field output { color: var(--plum-text); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .field input { height: 24px; cursor: pointer; }
+  .kpis { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 520px) { .kpis { grid-template-columns: 1fr 1fr; } .kpi:first-child { grid-column: 1 / -1; } }
+  .kpi { display: grid; gap: 2px; padding: 12px 14px; border-radius: var(--plum-radius); background: var(--plum-surface); border: 1px solid var(--plum-border); min-width: 0; }
+  .kpi span { font-size: 12px; color: var(--plum-muted); }
+  .kpi strong { font-size: 20px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi small { font-size: 12px; color: var(--plum-muted); min-height: 1.4em; }
+  .kpi small.good { color: var(--plum-good); font-weight: 600; }
+  .chart { position: relative; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--plum-muted); margin-bottom: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .legend i.dash { height: 0; border-top: 2px dashed var(--plum-muted); border-radius: 0; vertical-align: 3px; }
+  svg { display: block; width: 100%; height: 220px; overflow: visible; touch-action: pan-y; }
+  .grid line { stroke: var(--plum-border); }
+  .axis text { fill: var(--plum-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .area { fill: url(#fill); }
+  .line { fill: none; stroke: var(--plum-accent); stroke-width: 2.25; stroke-linejoin: round; }
+  .interest { fill: none; stroke: var(--plum-chart-4); stroke-width: 2.25; stroke-linejoin: round; }
+  .base { fill: none; stroke: var(--plum-muted); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: 0.8; }
+  .cursor { stroke: var(--plum-text); stroke-opacity: 0.35; }
+  .dot { stroke: var(--plum-bg, transparent); stroke-width: 2; }
+  .tip { position: absolute; top: 28px; pointer-events: none; min-width: 168px; padding: 9px 11px; border-radius: 12px; font-size: 12px; line-height: 1.5; background: var(--plum-text); color: #111318; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); font-variant-numeric: tabular-nums; }
+  :root[data-theme='light'] .tip { color: #fff; }
+  .tip b { display: block; margin-bottom: 2px; }
+  .tip em { font-style: normal; font-weight: 600; }
+  .tip span { display: flex; justify-content: space-between; gap: 12px; }
+  details { border-top: 1px solid var(--plum-border); padding-top: 12px; }
+  summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--plum-accent); min-height: 32px; display: flex; align-items: center; }
+  .scroll { max-height: 260px; overflow: auto; margin-top: 8px; }
+  td, th { text-align: right; font-size: 12.5px; white-space: nowrap; }
+  td:first-child, th:first-child { text-align: left; }
+  thead th { position: sticky; top: 0; background: var(--plum-surface-2); backdrop-filter: blur(8px); }
+</style>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var f = plum.format;
+  var s = Object.assign({ amount: 600000, rate: 2.4, years: 25, extra: 0 }, plum.props, plum.state);
+  var CHF = function (v) { return f.currency(Math.round(v), 'CHF', 0); };
+  var short = function (v) { return v >= 1e6 ? f.number(v / 1e6, 1) + ' Mio.' : f.number(Math.round(v / 1000)) + 'k'; };
+  ['amount', 'rate', 'years', 'extra'].forEach(function (key) {
+    var input = $(key);
+    input.value = s[key];
+    input.addEventListener('input', function () { s[key] = +input.value; draw(); });
+    input.addEventListener('change', function () { var o = {}; o[key] = s[key]; plum.setState(o); });
+  });
+  function payment(p, r, n) { return r === 0 ? p / n : (p * r) / (1 - Math.pow(1 + r, -n)); }
+  // Monthly simulation; one row per year: interest, principal, balance.
+  function schedule(extra) {
+    var r = s.rate / 100 / 12, n = s.years * 12, pay = payment(s.amount, r, n) + extra;
+    var balance = s.amount, paidInterest = 0, rows = [{ year: 0, balance: balance, interest: 0, principal: 0, cum: 0 }];
+    var year = { interest: 0, principal: 0 }, months = 0;
+    while (balance > 0.5 && months < n) {
+      var i = balance * r, p = Math.min(balance, pay - i);
+      balance -= p; paidInterest += i; months++;
+      year.interest += i; year.principal += p;
+      if (months % 12 === 0 || balance <= 0.5) {
+        rows.push({ year: Math.ceil(months / 12), balance: Math.max(0, balance), interest: year.interest, principal: year.principal, cum: paidInterest });
+        year = { interest: 0, principal: 0 };
+      }
+    }
+    return { rows: rows, months: months, interest: paidInterest, pay: pay };
+  }
+  function duration(m) {
+    var y = Math.floor(m / 12), r = m % 12;
+    if (!r) return y + (y === 1 ? ' Jahr' : ' Jahre');
+    return (y ? y + ' J. ' : '') + r + ' Mt.';
+  }
+  var plan, base;
+  function draw() {
+    $('o-amount').textContent = CHF(s.amount);
+    $('o-rate').textContent = f.number(s.rate, 2) + ' %';
+    $('o-years').textContent = s.years + ' Jahre';
+    $('o-extra').textContent = s.extra ? '+ ' + CHF(s.extra) : 'keine';
+    base = schedule(0);
+    plan = s.extra ? schedule(s.extra) : base;
+    $('k-rate').textContent = CHF(plan.pay);
+    $('k-rate-sub').textContent = s.extra ? 'davon ' + CHF(s.extra) + ' zusätzlich' : 'Zins und Tilgung';
+    $('k-interest').textContent = CHF(plan.interest);
+    var saved = base.interest - plan.interest;
+    var sub = $('k-interest-sub');
+    sub.textContent = s.extra && saved > 1 ? CHF(saved) + ' gespart' : f.percent((plan.interest / s.amount) * 100, 0) + ' des Kredits';
+    sub.className = s.extra && saved > 1 ? 'good' : '';
+    $('k-free').textContent = duration(plan.months);
+    var earlier = base.months - plan.months, fs = $('k-free-sub');
+    fs.textContent = earlier > 0 ? duration(earlier) + ' früher' : 'nach Plan';
+    fs.className = earlier > 0 ? 'good' : '';
+    $('lg-base').hidden = !s.extra;
+    chart();
+    $('rows').innerHTML = plan.rows.slice(1).map(function (row) {
+      return '<tr><td>' + row.year + '</td><td>' + CHF(row.interest) + '</td><td>' + CHF(row.principal) + '</td><td>' + CHF(row.balance) + '</td></tr>';
+    }).join('');
+  }
+  var geo;
+  function chart() {
+    var svg = $('svg'), W = Math.max(280, Math.round(svg.getBoundingClientRect().width)), H = 220, L = 46, R = 8, T = 8, B = 24;
+    var years = s.years, max = s.amount;
+    var x = function (y) { return L + (y / years) * (W - L - R); };
+    var y = function (v) { return T + (1 - v / max) * (H - T - B); };
+    var path = function (rows, key) { return rows.map(function (r, i) { return (i ? 'L' : 'M') + x(r.year).toFixed(1) + ' ' + y(r[key]).toFixed(1); }).join(''); };
+    var ticks = '', step = years > 20 ? 5 : years > 10 ? 2 : 1;
+    for (var t = 0; t <= 4; t++) {
+      var v = (max * t) / 4;
+      ticks += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '"/>';
+    }
+    var labels = '';
+    for (t = 0; t <= 4; t += 2) labels += '<text x="' + (L - 8) + '" y="' + (y((max * t) / 4) + 4) + '" text-anchor="end">' + (t ? short((max * t) / 4) : '0') + '</text>';
+    for (var yr = 0; yr <= years; yr += step) labels += '<text x="' + x(yr) + '" y="' + (H - 6) + '" text-anchor="middle">' + yr + '</text>';
+    var rows = plan.rows, last = rows[rows.length - 1];
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.innerHTML =
+      '<defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--plum-accent)" stop-opacity=".32"/><stop offset="1" stop-color="var(--plum-accent)" stop-opacity="0"/></linearGradient></defs>' +
+      '<g class="grid">' + ticks + '</g><g class="axis">' + labels + '</g>' +
+      (s.extra ? '<path class="base" d="' + path(base.rows, 'balance') + '"/>' : '') +
+      '<path class="area" d="' + path(rows, 'balance') + 'L' + x(last.year) + ' ' + y(0) + 'L' + x(0) + ' ' + y(0) + 'Z"/>' +
+      '<path class="line" d="' + path(rows, 'balance') + '"/>' +
+      '<path class="interest" d="' + path(rows, 'cum') + '"/>' +
+      '<g id="cur" visibility="hidden"><line class="cursor" id="cl" y1="' + T + '" y2="' + (H - B) + '"/><circle class="dot" id="c1" r="4.5" fill="var(--plum-accent)"/><circle class="dot" id="c2" r="4.5" fill="var(--plum-chart-4)"/></g>';
+    geo = { x: x, y: y, W: W, L: L, R: R, years: years };
+  }
+  function hover(e) {
+    if (!geo) return;
+    var box = $('svg').getBoundingClientRect(), px = ((e.clientX - box.left) / box.width) * geo.W;
+    var yr = Math.round(((px - geo.L) / (geo.W - geo.L - geo.R)) * geo.years);
+    var row = plan.rows[Math.max(0, Math.min(plan.rows.length - 1, yr))];
+    if (!row) return;
+    var cx = geo.x(row.year);
+    $('cur').setAttribute('visibility', 'visible');
+    $('cl').setAttribute('x1', cx); $('cl').setAttribute('x2', cx);
+    $('c1').setAttribute('cx', cx); $('c1').setAttribute('cy', geo.y(row.balance));
+    $('c2').setAttribute('cx', cx); $('c2').setAttribute('cy', geo.y(row.cum));
+    var tip = $('tip');
+    tip.hidden = false;
+    tip.innerHTML = '<b>Nach ' + row.year + (row.year === 1 ? ' Jahr' : ' Jahren') + '</b><span>Restschuld <em>' + CHF(row.balance) + '</em></span><span>Zinsen bisher <em>' + CHF(row.cum) + '</em></span>';
+    var left = (cx / geo.W) * box.width;
+    tip.style.left = Math.min(box.width - tip.offsetWidth, Math.max(0, left > box.width / 2 ? left - tip.offsetWidth - 12 : left + 12)) + 'px';
+  }
+  var svgEl = $('svg');
+  svgEl.addEventListener('pointermove', hover);
+  svgEl.addEventListener('pointerdown', hover);
+  svgEl.addEventListener('pointerleave', function () { $('tip').hidden = true; var c = $('cur'); if (c) c.setAttribute('visibility', 'hidden'); });
+  new ResizeObserver(function () { if (plan) chart(); }).observe(svgEl);
+  draw();
+})();
+</script>

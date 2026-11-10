@@ -54,10 +54,16 @@ interface AssistantApi {
     suspend fun uploadAssistantTaskImage(owner: String, id: String, revision: Long, filename: String, mimeType: String, bytes: ByteArray): ApiResponse<JsonObject>
     suspend fun removeAssistantTaskImage(owner: String, id: String, imageId: String, revision: Long): ApiResponse<AssistantResource>
     suspend fun getAssistantApiProviders(): ApiResponse<List<AssistantApiProvider>>
+    /** Every model of every connected provider (`?all=1`), for the „Modelle im Chat“ picker. */
+    suspend fun getAllAssistantApiProviders(): ApiResponse<List<AssistantApiProvider>>
     suspend fun getAssistantApiTurns(id: String, beforeSeq: Long? = null): ApiResponse<AssistantApiHistory>
     suspend fun getAssistantApiImages(id: String): ApiResponse<List<AssistantApiImage>>
     /** Show another version of a regenerated/edited turn (with the thread that followed it). */
     suspend fun activateAssistantApiTurn(id: String, turnId: String): ApiResponse<JsonObject>
+    /** Dynamic UI v2 „Erneut versuchen“: refetches one live widget; the result also arrives as `assistant:ui-result`. */
+    suspend fun refreshAssistantUiResult(chatId: String, turnId: String, nodeId: String): ApiResponse<JsonObject>
+    /** Wikipedia summary envelope (`UiResult<'entity'>`) for `entity:` links and openEntity actions. */
+    suspend fun getAssistantUiEntity(title: String, lang: String? = null): ApiResponse<JsonObject>
     /** Rename and/or move a model chat; `projectId` JsonNull removes it from its project. */
     suspend fun updateAssistantApiChatMeta(id: String, meta: JsonObject): ApiResponse<AssistantResource>
     /** Permanently delete a model chat with all versions. */
@@ -172,9 +178,12 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
         }.body()
     }
     override suspend fun getAssistantApiProviders(): ApiResponse<List<AssistantApiProvider>> = http.get("/api/assistant/api-chat-providers")
+    override suspend fun getAllAssistantApiProviders(): ApiResponse<List<AssistantApiProvider>> = http.get("/api/assistant/api-chat-providers?all=1")
     override suspend fun getAssistantApiTurns(id: String, beforeSeq: Long?): ApiResponse<AssistantApiHistory> = http.get("/api/assistant/api-chats/${checked(id)}/turns") { url { beforeSeq?.let { parameters.append("beforeSeq", it.toString()) } } }
     override suspend fun getAssistantApiImages(id: String): ApiResponse<List<AssistantApiImage>> = http.get("/api/assistant/api-chats/${checked(id)}/images")
     override suspend fun activateAssistantApiTurn(id: String, turnId: String): ApiResponse<JsonObject> = http.post("/api/assistant/api-chats/${checked(id)}/turns/${checked(turnId)}/activate") { setBody(kotlinx.serialization.json.buildJsonObject {}) }
+    override suspend fun refreshAssistantUiResult(chatId: String, turnId: String, nodeId: String): ApiResponse<JsonObject> = http.post("/api/assistant/chats/${checked(chatId)}/turns/${checked(turnId)}/ui/${checked(nodeId)}/refresh") { setBody(kotlinx.serialization.json.buildJsonObject {}) }
+    override suspend fun getAssistantUiEntity(title: String, lang: String?): ApiResponse<JsonObject> = http.get("/api/assistant/ui/entity") { url { parameters.append("title", title.take(200)); lang?.takeIf { it.matches(Regex("[a-z]{2,3}")) }?.let { parameters.append("lang", it) } } }
     override suspend fun updateAssistantApiChatMeta(id: String, meta: JsonObject): ApiResponse<AssistantResource> = http.post("/api/assistant/api-chats/${checked(id)}/meta") { setBody(meta) }
     override suspend fun deleteAssistantApiChat(id: String): ApiResponse<JsonObject> = http.post("/api/assistant/api-chats/${checked(id)}/delete") { setBody(kotlinx.serialization.json.buildJsonObject {}) }
     override suspend fun deleteAssistantProject(id: String): ApiResponse<JsonObject> = http.post("/api/assistant/projects/${checked(id)}/delete") { setBody(kotlinx.serialization.json.buildJsonObject {}) }

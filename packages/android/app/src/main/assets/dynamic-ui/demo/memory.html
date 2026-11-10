@@ -1,0 +1,175 @@
+<div class="memory" id="app">
+  <div class="bar">
+    <div class="stats" aria-live="polite">
+      <span><small>Züge</small><b id="moves">0</b></span>
+      <span><small>Zeit</small><b id="time">0:00</b></span>
+      <span><small>Paare</small><b id="pairs">0/8</b></span>
+      <span id="best-wrap" hidden><small>Bestwert</small><b id="best"></b></span>
+    </div>
+    <button id="new">Neu mischen</button>
+  </div>
+  <div class="board-wrap">
+    <div class="board" id="board" role="grid" aria-label="Memory-Karten"></div>
+    <div class="win" id="win" hidden>
+      <div class="win-card" role="status">
+        <svg class="burst" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.4 5.6L20 8.4l-4.3 3.9 1.2 5.9L12 15.3 7.1 18.2l1.2-5.9L4 8.4l5.6-.8Z" fill="currentColor"/></svg>
+        <h3>Geschafft!</h3>
+        <p id="win-text"></p>
+        <div class="win-actions"><button class="primary" id="again">Nochmal spielen</button><button id="share">Ergebnis kopieren</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+<style>
+  .memory { display: grid; gap: 14px; max-width: 440px; margin: 0 auto; }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .stats { display: flex; gap: 18px; }
+  .stats span { display: grid; line-height: 1.2; }
+  .stats span[hidden] { display: none; }
+  .stats small { font-size: 11px; color: var(--plum-muted); }
+  .stats b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .board-wrap { position: relative; }
+  .board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .card { position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; border: 0; background: none; border-radius: 16px; perspective: 900px; }
+  .card:hover { filter: none; }
+  .card:disabled { opacity: 1; cursor: default; }
+  .inner { position: absolute; inset: 0; transform-style: preserve-3d; transition: transform 0.5s cubic-bezier(.2, .8, .2, 1); }
+  .card.open .inner, .card.done .inner { transform: rotateY(180deg); }
+  .face { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 4px; border-radius: 16px; backface-visibility: hidden; -webkit-backface-visibility: hidden; border: 1px solid var(--plum-border); }
+  .back { background: radial-gradient(120% 120% at 20% 0%, color-mix(in srgb, var(--plum-accent) 30%, transparent), transparent 60%), var(--plum-surface-2); }
+  .back svg { width: 36%; height: auto; aspect-ratio: 1; filter: drop-shadow(0 2px 6px color-mix(in srgb, var(--plum-accent) 40%, transparent)); }
+  .back rect { fill: var(--plum-accent); }
+  .back path { fill: var(--plum-accent-text); }
+  .card:hover .back { border-color: color-mix(in srgb, var(--plum-accent) 55%, transparent); }
+  .front { transform: rotateY(180deg); background: var(--plum-surface); color: var(--c); }
+  .front svg { width: 44%; height: auto; aspect-ratio: 1; }
+  .front em { font-style: normal; font-size: 11px; font-weight: 600; color: var(--plum-muted); max-width: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card.done .front { border-color: color-mix(in srgb, var(--c) 60%, transparent); background: color-mix(in srgb, var(--c) 14%, var(--plum-surface)); }
+  .card.done .inner { animation: match 0.5s 0.15s ease-out; }
+  @keyframes match { 50% { transform: rotateY(180deg) scale(1.07); } }
+  .card.miss .inner { animation: miss 0.4s 0.35s ease-in-out; }
+  @keyframes miss { 25% { transform: rotateY(180deg) translateX(-4px); } 75% { transform: rotateY(180deg) translateX(4px); } }
+  .win { position: absolute; inset: -6px; display: grid; place-items: center; border-radius: 20px; background: color-mix(in srgb, var(--plum-surface-2) 60%, transparent); backdrop-filter: blur(6px); animation: fade 0.4s ease; }
+  .win[hidden] { display: none; }
+  @keyframes fade { from { opacity: 0; } }
+  .win-card { text-align: center; padding: 20px; max-width: 320px; }
+  .win-card h3 { font-size: 20px; margin: 6px 0; }
+  .win-card p { color: var(--plum-muted); }
+  .burst { width: 40px; height: 40px; color: var(--plum-warn); animation: rise 0.6s cubic-bezier(.2, .9, .3, 1.4); }
+  @keyframes rise { from { transform: scale(0.3) rotate(-40deg); opacity: 0; } }
+  .win-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .win-actions button { min-height: 42px; }
+</style>
+<script>
+(function () {
+  var ICONS = [
+    ['Matterhorn', 'var(--plum-chart-5)', '<path d="M2 20 9.5 5.5l3.2 5.3 2.1-3.1L22 20Z" fill="currentColor"/><path d="m9.5 5.5 2.4 4-1.3 1-1.1-1.2-1.3 1.1-.9-.8Z" fill="#fff"/>'],
+    ['Käse', 'var(--plum-warn)', '<path d="M3 18.5v-7l13.5-6 4.5 6v7Z" fill="currentColor"/><path d="M3 11.5h18" stroke="rgba(0,0,0,.18)" stroke-width="1.2"/><circle cx="8" cy="15" r="1.6" fill="rgba(0,0,0,.22)"/><circle cx="15.5" cy="14.2" r="2" fill="rgba(0,0,0,.22)"/><circle cx="12" cy="8.8" r="1" fill="rgba(0,0,0,.18)"/>'],
+    ['Schoggi', 'color-mix(in srgb, var(--plum-chart-6) 45%, #4a2a14)', '<rect x="5" y="2.5" width="14" height="19" rx="2.2" fill="currentColor"/><path d="M5 8.8h14M5 15.2h14M12 2.5v19" stroke="rgba(0,0,0,.25)" stroke-width="1.3"/>'],
+    ['Uhr', 'var(--plum-chart-2)', '<rect x="9" y="1.5" width="6" height="5" rx="1.2" fill="currentColor"/><rect x="9" y="17.5" width="6" height="5" rx="1.2" fill="currentColor"/><circle cx="12" cy="12" r="7.2" fill="currentColor"/><circle cx="12" cy="12" r="5.4" fill="#fff"/><path d="M12 8.6V12l2.5 1.6" fill="none" stroke="#1f2430" stroke-width="1.6" stroke-linecap="round"/>'],
+    ['Zahnradbahn', 'var(--plum-bad)', '<rect x="4.5" y="3" width="15" height="14.5" rx="3.2" fill="currentColor"/><rect x="7" y="5.6" width="10" height="5" rx="1.2" fill="#fff" opacity=".92"/><circle cx="8.6" cy="14" r="1.3" fill="#fff"/><circle cx="15.4" cy="14" r="1.3" fill="#fff"/><path d="m8 17.5-2.2 3.6M16 17.5l2.2 3.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>'],
+    ['Kuhglocke', 'var(--plum-chart-6)', '<path d="M12 2.5a2 2 0 0 1 2 2V6h-4V4.5a2 2 0 0 1 2-2Z" fill="currentColor"/><path d="M7.2 6h9.6L19 18.5H5Z" fill="currentColor"/><path d="M6.3 11.5h11.4" stroke="rgba(255,255,255,.55)" stroke-width="1.6"/><circle cx="12" cy="20" r="2" fill="currentColor"/>'],
+    ['Schloss Chillon', 'var(--plum-chart-3)', '<path d="M3 21V9.5h2.2V7H7v2.5h2V7h1.8v2.5H13V7h1.8v2.5h2V7H19v2.5h2V21Z" fill="currentColor"/><path d="M10 21v-4.2a2 2 0 0 1 4 0V21Z" fill="rgba(0,0,0,.28)"/><rect x="5.5" y="12.5" width="2" height="2.6" rx=".6" fill="rgba(0,0,0,.22)"/><rect x="16.5" y="12.5" width="2" height="2.6" rx=".6" fill="rgba(0,0,0,.22)"/>'],
+    ['Edelweiss', 'var(--plum-good)', '<g fill="currentColor"><ellipse cx="12" cy="5.8" rx="2.3" ry="4"/><ellipse cx="12" cy="5.8" rx="2.3" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="5.8" rx="2.3" ry="4" transform="rotate(120 12 12)"/><ellipse cx="12" cy="5.8" rx="2.3" ry="4" transform="rotate(180 12 12)"/><ellipse cx="12" cy="5.8" rx="2.3" ry="4" transform="rotate(240 12 12)"/><ellipse cx="12" cy="5.8" rx="2.3" ry="4" transform="rotate(300 12 12)"/></g><circle cx="12" cy="12" r="2.8" fill="#fde68a"/>']
+  ];
+  var BACK = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6"/><path d="M9.5 5h5v4.5H19v5h-4.5V19h-5v-4.5H5v-5h4.5Z"/></svg>';
+  var $ = function (id) { return document.getElementById(id); };
+  var board = $('board');
+  function shuffled() {
+    var deck = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7];
+    for (var i = deck.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = deck[i]; deck[i] = deck[j]; deck[j] = t; }
+    return deck;
+  }
+  var saved = plum.state;
+  var g = saved.deck && saved.deck.length === 16
+    ? { deck: saved.deck, done: saved.done || [], moves: saved.moves || 0, time: saved.time || 0, best: saved.best || null }
+    : { deck: shuffled(), done: [], moves: 0, time: 0, best: saved.best || null };
+  var open = [], lock = false, clock = 0;
+  function won() { return g.done.length === 8; }
+  function save() { plum.setState({ deck: g.deck, done: g.done, moves: g.moves, time: g.time, best: g.best }); }
+  function fmt(t) { return Math.floor(t / 60) + ':' + (t % 60 < 10 ? '0' : '') + (t % 60); }
+  function startClock() {
+    if (clock || won()) return;
+    clock = setInterval(function () {
+      if (document.hidden) return;
+      g.time++;
+      $('time').textContent = fmt(g.time);
+      if (g.time % 5 === 0) save();
+    }, 1000);
+  }
+  function stopClock() { clearInterval(clock); clock = 0; }
+  function build() {
+    board.innerHTML = g.deck.map(function (icon, i) {
+      var item = ICONS[icon];
+      return '<button class="card" data-i="' + i + '" style="--c:' + item[1] + '" aria-label="Karte ' + (i + 1) + ', verdeckt">' +
+        '<span class="inner"><span class="face back">' + BACK + '</span><span class="face front"><svg viewBox="0 0 24 24" aria-hidden="true">' + item[2] + '</svg><em>' + item[0] + '</em></span></span></button>';
+    }).join('');
+    [].forEach.call(board.children, function (card) { card.onclick = function () { flip(+card.dataset.i); }; });
+    update();
+  }
+  function update() {
+    [].forEach.call(board.children, function (card, i) {
+      var icon = g.deck[i], done = g.done.indexOf(icon) >= 0, isOpen = open.indexOf(i) >= 0;
+      card.classList.toggle('done', done);
+      card.classList.toggle('open', isOpen);
+      card.setAttribute('aria-label', done || isOpen ? ICONS[icon][0] + (done ? ', gefunden' : ', aufgedeckt') : 'Karte ' + (i + 1) + ', verdeckt');
+      card.disabled = done;
+    });
+    $('moves').textContent = g.moves;
+    $('time').textContent = fmt(g.time);
+    $('pairs').textContent = g.done.length + '/8';
+    $('best-wrap').hidden = !g.best;
+    if (g.best) $('best').textContent = g.best.moves + ' Züge';
+    var win = $('win');
+    win.hidden = !won();
+    if (won()) $('win-text').textContent = 'Alle 8 Paare in ' + g.moves + ' Zügen und ' + fmt(g.time) + '.' + (g.best && g.best.moves === g.moves && g.best.fresh ? ' Neuer Bestwert!' : '');
+  }
+  function flip(i) {
+    if (lock || open.indexOf(i) >= 0 || g.done.indexOf(g.deck[i]) >= 0 || won()) return;
+    startClock();
+    open.push(i);
+    update();
+    if (open.length < 2) return;
+    g.moves++;
+    var a = open[0], b = open[1];
+    if (g.deck[a] === g.deck[b]) {
+      g.done.push(g.deck[a]);
+      open = [];
+      if (won()) {
+        stopClock();
+        var fresh = !g.best || g.moves < g.best.moves;
+        if (fresh) g.best = { moves: g.moves, time: g.time, fresh: true };
+        else if (g.best) g.best.fresh = false;
+      }
+      save();
+      update();
+      return;
+    }
+    save();
+    lock = true;
+    [a, b].forEach(function (k) { board.children[k].classList.add('miss'); });
+    setTimeout(function () {
+      [a, b].forEach(function (k) { board.children[k].classList.remove('miss'); });
+      open = [];
+      lock = false;
+      update();
+    }, 950);
+  }
+  function reset() {
+    stopClock();
+    if (g.best) g.best.fresh = false;
+    g = { deck: shuffled(), done: [], moves: 0, time: 0, best: g.best };
+    open = [];
+    save();
+    build();
+  }
+  $('new').onclick = reset;
+  $('again').onclick = reset;
+  $('share').onclick = function () {
+    plum.copy('Schweizer Memory: alle 8 Paare in ' + g.moves + ' Zügen und ' + fmt(g.time) + ' gefunden.');
+  };
+  build();
+  if (!saved.deck) save();
+  if (g.moves > 0 && !won()) startClock();
+})();
+</script>

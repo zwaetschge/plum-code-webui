@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Voice mode speech recognition (personalisation speechRecognition: device | server). -->
+    <string name="voice_recognition_title">Speech recognition</string>
+    <string name="voice_recognition_device">On this device</string>
+    <string name="voice_recognition_device_hint">Fast, live text; depending on the device via Google</string>
+    <string name="voice_recognition_server">Server</string>
+    <string name="voice_recognition_server_hint">Whisper on your Vocarium</string>
+    <string name="voice_recognition_footer">Applies to the voice chat. If the device cannot recognise speech, Plum switches to the server automatically.</string>
+    <string name="voice_mode_engine_device">Speech recognition on this device</string>
+    <string name="voice_mode_preparing_voice">Getting the voice ready …</string>
+    <string name="voice_mode_device_fallback">Speech recognition on this device is unavailable, using Whisper on the server.</string>
+    <string name="voice_mistral_generic">Mistral voice</string>
+</resources>

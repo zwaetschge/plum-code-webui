@@ -5,9 +5,11 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.app.PendingIntent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.claudewebui.app.BuildConfig
@@ -43,6 +45,41 @@ class DeviceControlService : Service() {
     companion object {
         private const val CHANNEL_ID = "device_control"
         private const val NOTIFICATION_ID = 4101
+        private const val TAG = "DeviceControl"
+
+        /** Notification "Stop control" action: disable control and stop the service. */
+        const val ACTION_STOP = "com.claudewebui.app.devicecontrol.STOP"
+
+        // Server close codes from the device-bridge (see backend
+        // services/deviceBridge/bridge.ts): 4401 = invalid token, 4400 =
+        // expected hello. These are permanent rejections — reconnecting cannot
+        // fix them, so the service stops instead of looping forever.
+        private val AUTH_REJECT_CLOSE_CODES = setOf(4401, 4400, 4403)
+
+        /**
+         * Package prefixes device control will NOT open/tap/type into. A small
+         * built-in blocklist of well-known banking and password-manager apps;
+         * the user can extend it with their own sensitive packages.
+         */
+        val SENSITIVE_PACKAGE_PREFIXES = listOf(
+            // Password managers / authenticators
+            "com.bitwarden",
+            "com.x8bit.bitwarden",
+            "com.lastpass",
+            "com.agilebits.onepassword",
+            "com.keepassdroid",
+            "com.kunzisoft.keepass",
+            "org.keepassxc",
+            "com.azure.authenticator",
+            "com.google.android.apps.authenticator2",
+            // Banking / payments (well-known examples; extend as needed)
+            "com.paypal",
+            "ch.postfinance",
+            "com.ubs.swidKXJ.android",
+            "com.wf.wellsfargomobile",
+            "de.dkb.portalapp",
+            "com.google.android.apps.walletnfcrel",
+        )
 
         private val _connectionState = MutableStateFlow(false)
         /** Whether the bridge socket is connected right now. */
@@ -52,6 +89,12 @@ class DeviceControlService : Service() {
 
         fun stop(context: Context) {
             context.stopService(Intent(context, DeviceControlService::class.java))
+        }
+
+        /** True when the package should never be driven by device control. */
+        fun isSensitivePackage(pkg: String?): Boolean {
+            if (pkg.isNullOrBlank()) return false
+            return SENSITIVE_PACKAGE_PREFIXES.any { pkg.startsWith(it) }
         }
     }
 
@@ -76,12 +119,34 @@ class DeviceControlService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // "Stop control" from the ongoing notification: turn control off and
+        // tear the service down so sessions can no longer drive the phone.
+        if (intent?.action == ACTION_STOP) {
+            DeviceControlPrefs.setEnabled(this, false)
+            stopped = true
+            socket?.close(1000, "stopped by user")
+            socket = null
+            _connectionState.value = false
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (!DeviceControlPrefs.isEnabled(this) || !DeviceControlAccessibilityService.isRunning) {
             stopSelf()
             return START_NOT_STICKY
         }
         if (socket == null) connect()
         return START_STICKY
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        // Android 15 caps dataSync foreground service time per day. Let go
+        // cleanly — the accessibility service restarts the bridge on its next
+        // connect. Mirrors AgentWatchService.onTimeout.
+        stopped = true
+        socket?.close(1001, "foreground timeout")
+        socket = null
+        _connectionState.value = false
+        stopSelf()
     }
 
     override fun onDestroy() {
@@ -95,12 +160,19 @@ class DeviceControlService : Service() {
     }
 
     private fun startAsForeground() {
+        val stopIntent = PendingIntent.getService(
+            this,
+            0,
+            Intent(this, DeviceControlService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.device_control_notification_title))
             .setContentText(getString(R.string.device_control_notification_text))
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .addAction(0, getString(R.string.device_control_stop_action), stopIntent)
             .build()
         runCatching {
             ServiceCompat.startForeground(
@@ -164,6 +236,15 @@ class DeviceControlService : Service() {
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (socket === webSocket) socket = null
                 _connectionState.value = false
+                // An auth rejection cannot be fixed by reconnecting: stop rather
+                // than hammer the server until the token is refreshed (a fresh
+                // sign-in / accessibility reconnect brings the bridge back).
+                if (code in AUTH_REJECT_CLOSE_CODES) {
+                    Log.w(TAG, "bridge closed auth-rejected (code=$code reason=$reason); stopping")
+                    stopped = true
+                    stopSelf()
+                    return
+                }
                 scheduleReconnect()
             }
         })
@@ -212,9 +293,22 @@ class DeviceControlService : Service() {
         val svc = DeviceControlAccessibilityService.instance
             ?: return "error: accessibility service is not running"
         val args = frame.optJSONObject("args") ?: JSONObject()
+        val tool = frame.optString("tool")
+        // Sensitive-app guard: refuse to open/tap/type on a blocklisted package
+        // (banking / password managers). tap & type act on whatever is in the
+        // foreground; open_app names its own target.
+        val guardedPackage = when (tool) {
+            "open_app" -> args.optString("package")
+            "tap", "long_press", "type_text" -> svc.foregroundPackage()
+            else -> null
+        }
+        if (isSensitivePackage(guardedPackage)) {
+            Log.w(TAG, "blocked $tool on protected app $guardedPackage")
+            return "error: blocked — \"$guardedPackage\" is a protected app (banking / password manager); device control will not $tool here"
+        }
         return runCatching {
             runBlocking {
-                when (frame.optString("tool")) {
+                when (tool) {
                     "device_status" -> svc.status()
                     "read_screen" -> svc.readScreen(args.optInt("max", 220))
                     "tap" -> svc.tap(

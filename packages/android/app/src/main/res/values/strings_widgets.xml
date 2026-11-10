@@ -109,4 +109,33 @@
     <string name="native_working">%1$d working</string>
     <string name="native_working_detail">Working: %1$s</string>
     <string name="native_working_waiting">%1$d working · %2$d waiting</string>
+    <string name="widget_footer_open">Open in Plum</string>
+    <string name="widget_footer_stale">Updated %1$s · open</string>
+    <string name="widget_limit_current_window">Current window</string>
+    <string name="widget_limit_weekly_usage">Weekly usage</string>
+    <string name="widget_limit_monthly_usage">Monthly usage</string>
+    <string name="widget_limit_all_models">All models</string>
+    <string name="widget_limit_next_reset">Next reset</string>
+    <string name="widget_limit_reset_at">Reset %1$s</string>
+    <string name="widget_limit_not_connected">Not connected</string>
+    <string name="widget_limit_connected">Connected</string>
+    <string name="widget_limit_status">Usage status</string>
+    <string name="widget_limit_left">%1$s left</string>
+    <string name="widget_limit_reset_due">Resetting now</string>
+    <string name="widget_limit_no_data">No data</string>
+    <string name="widget_limit_sonnet_week">Sonnet · week</string>
+    <string name="widget_duration_days_hours">%1$dd %2$dh</string>
+    <string name="widget_duration_hours_minutes">%1$dh %2$dm</string>
+    <string name="widget_duration_minutes">%1$dm</string>
+    <string name="widget_quick_working">Working now</string>
+    <string name="widget_hero_need_you">Need you</string>
+    <string name="widget_hero_working">Working</string>
+    <string name="widget_hero_waiting">Waiting on you</string>
+    <string name="widget_hero_waiting_split">%1$d approvals · %2$d questions</string>
+    <string name="widget_hero_of_sessions">of %1$d sessions</string>
+    <string name="widget_hero_top_session">Top session</string>
+    <string name="widget_hero_top_model">Top model: %1$s</string>
+    <string name="widget_cost_budget">of %1$s budget</string>
+    <string name="widget_footer_arrow" translatable="false">→</string>
+    <string name="widget_title_sessions">Sessions</string>
 </resources>

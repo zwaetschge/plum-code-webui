@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Spracherkennung im Sprachgespräch (Personalisierung speechRecognition: device | server). -->
+    <string name="voice_recognition_title">Spracherkennung</string>
+    <string name="voice_recognition_device">Auf dem Gerät</string>
+    <string name="voice_recognition_device_hint">Schnell, Live-Text; je nach Gerät über Google</string>
+    <string name="voice_recognition_server">Server</string>
+    <string name="voice_recognition_server_hint">Whisper auf deinem Vocarium</string>
+    <string name="voice_recognition_footer">Gilt für das Sprachgespräch. Kann das Gerät keine Sprache erkennen, wechselt Plum automatisch zum Server.</string>
+    <string name="voice_mode_engine_device">Spracherkennung auf dem Gerät</string>
+    <string name="voice_mode_preparing_voice">Stimme wird geladen …</string>
+    <string name="voice_mode_device_fallback">Spracherkennung auf dem Gerät nicht verfügbar, ich nutze Whisper auf dem Server.</string>
+    <string name="voice_mistral_generic">Mistral-Stimme</string>
+</resources>

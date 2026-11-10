@@ -7,7 +7,13 @@ import kotlinx.serialization.json.*
 data class AssistantReferencePhoto(val id: String, val filename: String, val mimeType: String, val byteLength: Long)
 
 @Serializable
-data class AssistantVoiceOption(val id: String? = null, val name: String? = null, val engine: String? = null) {
+data class AssistantVoiceOption(
+    val id: String? = null,
+    val name: String? = null,
+    val engine: String? = null,
+    /** Mistral: base code ("de", "fr", "it", "en"); OmniVoice: usually "Auto". */
+    val language: String? = null,
+) {
     /** What is stored and sent: OmniVoice by name, Mistral as `mistral:<id>`. */
     val key: String get() = if (engine == "mistral") id.orEmpty() else (name ?: id).orEmpty()
     val label: String get() = (name ?: id).orEmpty()
@@ -42,6 +48,10 @@ data class AssistantPersonalization(
     val voiceHistory: Boolean = false,
     val webSearch: Boolean = true,
     val voiceChat: Boolean = true,
+    /** „Darstellung“ of model-chat answers: standard (interactive views) or simple (text + suggestion chips). */
+    val answerDisplay: String = "standard",
+    /** Voice mode recognition: "device" (Android's recognizer, live text) or "server" (Whisper on Vocarium). */
+    val speechRecognition: String = "device",
     val voiceName: String = "",
     val projectSearch: Boolean = false,
     val connectorSearch: Boolean = false,
@@ -49,6 +59,11 @@ data class AssistantPersonalization(
     val defaultWritingStyle: String = "",
     /** Design preset for new Code/Task sessions; empty = none. */
     val defaultDesignStyle: String = "",
+    /**
+     * Models the Plum Chat model menu offers, `providerId/model`, default first;
+     * empty = every model. The server filters `/api/assistant/api-chat-providers` by it.
+     */
+    val chatModels: List<String> = emptyList(),
     val referencePhotos: Map<String, AssistantReferencePhoto?> = mapOf("portrait" to null, "fullBody" to null),
 ) {
     fun updatePayload(): JsonObject {

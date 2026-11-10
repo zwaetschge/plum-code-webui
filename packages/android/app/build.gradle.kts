@@ -15,25 +15,37 @@ android {
     compileSdk = 35
 
     // ---------------------------------------------------------------------------
-    // Signing — replace with real keystore values before publishing to Play Store.
-    // Populate via environment variables or a local.properties file (never commit
-    // keystore passwords to source control).
+    // Signing — a real release keystore produces a properly signed, R8-shrunk
+    // release APK. Supply the keystore out of band (NEVER commit passwords):
+    //   gradle.properties (or ~/.gradle/gradle.properties / -P flags):
+    //     PLUM_RELEASE_STORE_FILE      — path to your .jks / .keystore file
+    //     PLUM_RELEASE_STORE_PASSWORD  — store password
+    //     PLUM_RELEASE_KEY_ALIAS       — key alias inside the keystore
+    //     PLUM_RELEASE_KEY_PASSWORD    — key password
+    //   or the matching environment variables KEYSTORE_PATH / KEYSTORE_PASS /
+    //   KEY_ALIAS / KEY_PASS.
+    // When none of these are set the release buildType falls back to the debug
+    // signing key so the build still succeeds (useful for CI / local smoke
+    // builds). TODO: set the PLUM_RELEASE_* gradle.properties keys above (or the
+    // KEYSTORE_* env vars) on the publishing host so shipped updates are signed
+    // with the production release key instead of the debug key.
     // ---------------------------------------------------------------------------
+    fun releaseSecret(propKey: String, envKey: String): String? =
+        (project.findProperty(propKey) as? String)?.takeIf { it.isNotBlank() }
+            ?: System.getenv(envKey)?.takeIf { it.isNotBlank() }
+
+    val releaseStorePath = releaseSecret("PLUM_RELEASE_STORE_FILE", "KEYSTORE_PATH")
+    val releaseStoreFile = releaseStorePath?.let { file(it) }
+    val hasReleaseKeystore = releaseStoreFile?.exists() == true
+
     signingConfigs {
-        // The "release" config is intentionally left empty here.
-        // To enable signed release builds set these env vars:
-        //   KEYSTORE_PATH   — absolute path to your .jks / .keystore file
-        //   KEYSTORE_PASS   — store password
-        //   KEY_ALIAS       — key alias inside the keystore
-        //   KEY_PASS        — key password
-        //
-        // Example activation (add to the release buildType below):
-        //   signingConfig = signingConfigs.getByName("release")
         create("release") {
-            storeFile = System.getenv("KEYSTORE_PATH")?.let { file(it) }
-            storePassword = System.getenv("KEYSTORE_PASS")
-            keyAlias = System.getenv("KEY_ALIAS")
-            keyPassword = System.getenv("KEY_PASS")
+            if (hasReleaseKeystore) {
+                storeFile = releaseStoreFile
+                storePassword = releaseSecret("PLUM_RELEASE_STORE_PASSWORD", "KEYSTORE_PASS")
+                keyAlias = releaseSecret("PLUM_RELEASE_KEY_ALIAS", "KEY_ALIAS")
+                keyPassword = releaseSecret("PLUM_RELEASE_KEY_PASSWORD", "KEY_PASS")
+            }
         }
 
         // See wear/build.gradle.kts: a container that mounts the ADB identity
@@ -53,8 +65,8 @@ android {
         applicationId = "com.claudewebui.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 67
-        versionName = "1.9.15"
+        versionCode = 71
+        versionName = "1.9.19"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -71,6 +83,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Use the real release key when one is configured; otherwise fall
+            // back to the debug key so the release build still assembles (it is
+            // then NOT upload-ready — see the signingConfigs TODO above).
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         debug {
             isDebuggable = true

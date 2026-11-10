@@ -24,6 +24,7 @@
     <string name="settings_hub_operations">Betrieb</string>
     <string name="settings_hub_logout">Abmelden</string>
     <string name="settings_hub_back">Zurück</string>
+    <string name="settings_hub_select_detail">Wähle links eine Einstellung, um sie hier anzuzeigen.</string>
     <string name="settings_hub_not_set">Nicht festgelegt</string>
     <string name="settings_hub_on">Ein</string>
     <string name="settings_hub_off">Aus</string>

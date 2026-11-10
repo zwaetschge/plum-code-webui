@@ -84,7 +84,7 @@ class DynamicUiTest {
         val base = """"version":1,"state":{"a":1}"""
         val cases = mapOf(
             "unknown component" to """{$base,"root":{"type":"html","html":"<script>alert(1)</script>"}}""",
-            "wrong version" to """{"version":2,"state":{"a":1},"root":{"type":"text","text":"Hallo"}}""",
+            "wrong version" to """{"version":3,"state":{"a":1},"root":{"type":"text","text":"Hallo"}}""",
             "bind to missing state" to """{$base,"root":{"type":"slider","bind":"b","label":"B","min":0,"max":1}}""",
             "bind to computed" to """{$base,"computed":{"c":"a * 2"},"root":{"type":"slider","bind":"c","label":"C","min":0,"max":1}}""",
             "bad formula" to """{$base,"computed":{"x":"eval(\"1\")"},"root":{"type":"divider"}}""",
@@ -105,6 +105,14 @@ class DynamicUiTest {
         assertTrue("too deep", validateDynamicUi(Json.parseToJsonElement("""{"version":1,"root":$deep}""")) is DynamicUiValidation.Invalid)
         val many = (1..260).joinToString(",") { """{"type":"divider"}""" }
         assertTrue("too many", validateDynamicUi(Json.parseToJsonElement("""{"version":1,"root":{"type":"stack","children":[$many]}}""")) is DynamicUiValidation.Invalid)
+    }
+
+    @Test fun componentIdsMayUseHyphensStateNamesMayNot() {
+        val currency = """{"type":"currency","id":"eur-chf","from":"EUR","to":"CHF","amount":100}"""
+        assertEquals("hyphen id", emptyList<String>(), (validateDynamicUi(Json.parseToJsonElement("""{"version":2,"root":$currency}""")) as DynamicUiValidation.Valid).warnings)
+        val checklist = """{"type":"checklist","id":"zutaten-liste","items":[{"id":"reis-1","label":"Reis"}]}"""
+        assertEquals("hyphen entry id", emptyList<String>(), (validateDynamicUi(Json.parseToJsonElement("""{"version":2,"root":$checklist}""")) as DynamicUiValidation.Valid).warnings)
+        assertTrue("hyphen state", validateDynamicUi(Json.parseToJsonElement("""{"version":2,"state":{"eur-chf":1},"root":$currency}""")) is DynamicUiValidation.Invalid)
     }
 
     @Test fun oneSharedStateRecomputesFormulasViewsAndAggregates() {

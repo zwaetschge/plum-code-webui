@@ -1,26 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    List widgets in the nested-tile style: an optional hero tile (wide cells)
+    beside a column of compact dark row tiles; a small-caps header when there
+    is no hero; footer link. WidgetRenderer decides how many rows fit.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="14dp"
-    android:background="@drawable/widget_bg">
+    android:padding="@dimen/widget_pad"
+    android:background="@drawable/widget_container">
 
     <LinearLayout
+        android:id="@+id/list_header"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:paddingStart="6dp"
+        android:paddingEnd="4dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="1dp"
         android:orientation="horizontal"
         android:gravity="center_vertical">
+
+        <ImageView
+            android:id="@+id/list_header_dot"
+            android:layout_width="7dp"
+            android:layout_height="7dp"
+            android:src="@drawable/widget_dot"
+            android:importantForAccessibility="no" />
 
         <TextView
             android:id="@+id/widget_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:textSize="12sp"
+            android:layout_marginStart="8dp"
+            android:textSize="10.5sp"
             android:textStyle="bold"
-            android:textColor="#CC785C"
+            android:textAllCaps="true"
+            android:letterSpacing="0.12"
+            android:textColor="@color/widget_accent_copper"
             android:maxLines="1"
             android:ellipsize="end"
             android:text="Plum" />
@@ -29,8 +49,9 @@
             android:id="@+id/widget_headline"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:paddingStart="8dp"
             android:textSize="11sp"
-            android:textColor="#B7B2C0"
+            android:textColor="@color/widget_text_muted"
             android:maxLines="1"
             android:text="" />
 
@@ -38,815 +59,1106 @@
             android:id="@+id/widget_refresh"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:paddingStart="12dp"
+            android:paddingStart="10dp"
             android:paddingEnd="2dp"
-            android:textSize="14sp"
-            android:textColor="#8A8494"
+            android:textSize="13sp"
+            android:textColor="@color/widget_text_faint"
             android:text="↻" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/widget_empty"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:textSize="12sp"
-        android:textColor="#8A8494"
-        android:visibility="gone"
-        android:text="" />
-
     <LinearLayout
-        android:id="@+id/row1"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
-        android:orientation="vertical"
-        android:visibility="gone">
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
 
+        <!-- Hero tile (wide cells only) -->
         <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:id="@+id/list_hero"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="0.62"
+            android:layout_marginTop="@dimen/widget_row_gap"
+            android:layout_marginEnd="@dimen/widget_gap"
+            android:orientation="vertical"
+            android:paddingStart="13dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="11dp"
+            android:background="@drawable/widget_tile_hero_copper"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <ImageView
+                    android:id="@+id/list_hero_glyph"
+                    android:layout_width="17dp"
+                    android:layout_height="17dp"
+                    android:src="@drawable/widget_glyph_plum"
+                    android:importantForAccessibility="no" />
+
+                <TextView
+                    android:id="@+id/list_hero_title"
+                    android:layout_width="0dp"
+                    android:layout_height="16dp"
+                    android:gravity="center_vertical"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="7sp"
+                    android:autoSizeMaxTextSize="10.5sp"
+                    android:autoSizeStepGranularity="0.5sp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="7dp"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold"
+                    android:textAllCaps="true"
+                    android:letterSpacing="0.06"
+                    android:textColor="@color/widget_text_on_hero"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:text="" />
+
+                <TextView
+                    android:id="@+id/list_hero_refresh"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="6dp"
+                    android:textSize="12sp"
+                    android:textColor="@color/widget_text_on_hero_muted"
+                    android:text="↻" />
+            </LinearLayout>
 
             <TextView
-                android:id="@+id/row1_dot"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:paddingEnd="6dp"
-                android:textColor="#CC785C"
-                android:text="●" />
-
-            <TextView
-                android:id="@+id/row1_label"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:textSize="12sp"
-                android:textColor="#EDEBF0"
+                android:id="@+id/list_hero_label"
+                android:layout_width="match_parent"
+                android:layout_height="14dp"
+                android:gravity="center_vertical"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="7sp"
+                android:autoSizeMaxTextSize="9.5sp"
+                android:autoSizeStepGranularity="0.5sp"
+                android:layout_marginTop="8dp"
+                android:textSize="@dimen/widget_label_size"
+                android:fontFamily="sans-serif-medium"
+                android:textAllCaps="true"
+                android:letterSpacing="0.12"
+                android:textColor="@color/widget_text_on_hero_muted"
                 android:maxLines="1"
                 android:ellipsize="end"
                 android:text="" />
 
             <TextView
-                android:id="@+id/row1_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="8dp"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFF"
-                android:maxLines="1"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row1_approve"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="4dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#22C55E"
-                android:visibility="gone"
-                android:text="✓" />
-
-            <TextView
-                android:id="@+id/row1_deny"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="2dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#EF4444"
-                android:visibility="gone"
-                android:text="✕" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/row1_sub"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="17dp"
-            android:textSize="10sp"
-            android:textColor="#8A8494"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:visibility="gone"
-            android:text="" />
-
-        <ProgressBar
-            android:id="@+id/row1_bar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="4dp"
-            android:layout_marginStart="17dp"
-            android:layout_marginTop="3dp"
-            android:progressTint="#CC785C"
-            android:progressBackgroundTint="#332E3C"
-            android:max="100"
-            android:visibility="gone" />
-    </LinearLayout>
-    <LinearLayout
-        android:id="@+id/row2"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
-        android:orientation="vertical"
-        android:visibility="gone">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/row2_dot"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:paddingEnd="6dp"
-                android:textColor="#CC785C"
-                android:text="●" />
-
-            <TextView
-                android:id="@+id/row2_label"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:id="@+id/list_hero_value"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
                 android:layout_weight="1"
-                android:textSize="12sp"
-                android:textColor="#EDEBF0"
+                android:gravity="center_vertical|start"
+                android:includeFontPadding="false"
+                android:textStyle="bold"
+                android:textColor="@color/widget_text_on_hero"
                 android:maxLines="1"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="16sp"
+                android:autoSizeMaxTextSize="48sp"
+                android:autoSizeStepGranularity="1sp"
+                android:text="—" />
+
+            <TextView
+                android:id="@+id/list_hero_sub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="11.5sp"
+                android:textColor="@color/widget_text_on_hero"
+                android:maxLines="2"
                 android:ellipsize="end"
                 android:text="" />
-
-            <TextView
-                android:id="@+id/row2_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="8dp"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFF"
-                android:maxLines="1"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row2_approve"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="4dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#22C55E"
-                android:visibility="gone"
-                android:text="✓" />
-
-            <TextView
-                android:id="@+id/row2_deny"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="2dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#EF4444"
-                android:visibility="gone"
-                android:text="✕" />
         </LinearLayout>
-
-        <TextView
-            android:id="@+id/row2_sub"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="17dp"
-            android:textSize="10sp"
-            android:textColor="#8A8494"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:visibility="gone"
-            android:text="" />
-
-        <ProgressBar
-            android:id="@+id/row2_bar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="4dp"
-            android:layout_marginStart="17dp"
-            android:layout_marginTop="3dp"
-            android:progressTint="#CC785C"
-            android:progressBackgroundTint="#332E3C"
-            android:max="100"
-            android:visibility="gone" />
-    </LinearLayout>
-    <LinearLayout
-        android:id="@+id/row3"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
-        android:orientation="vertical"
-        android:visibility="gone">
 
         <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:id="@+id/list_rows"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical">
 
             <TextView
-                android:id="@+id/row3_dot"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:paddingEnd="6dp"
-                android:textColor="#CC785C"
-                android:text="●" />
-
-            <TextView
-                android:id="@+id/row3_label"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:textSize="12sp"
-                android:textColor="#EDEBF0"
-                android:maxLines="1"
-                android:ellipsize="end"
+                android:id="@+id/widget_empty"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_marginTop="@dimen/widget_row_gap"
+                android:padding="14dp"
+                android:gravity="center"
+                android:background="@drawable/widget_tile_dark"
+                android:textSize="12.5sp"
+                android:textColor="@color/widget_text_muted"
+                android:visibility="gone"
                 android:text="" />
 
-            <TextView
-                android:id="@+id/row3_value"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:id="@+id/row1"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingStart="8dp"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFF"
-                android:maxLines="1"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row3_approve"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="4dp"
+                android:minHeight="30dp"
+                android:layout_marginTop="@dimen/widget_row_gap"
+                android:paddingStart="11dp"
+                android:paddingEnd="8dp"
                 android:paddingTop="4dp"
                 android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#22C55E"
-                android:visibility="gone"
-                android:text="✓" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/widget_tile_row"
+                android:visibility="gone">
 
-            <TextView
-                android:id="@+id/row3_deny"
-                android:layout_width="wrap_content"
+                <ImageView
+                    android:id="@+id/row1_dot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:src="@drawable/widget_dot"
+                    android:importantForAccessibility="no" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="9dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/row1_label"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textSize="@dimen/widget_row_label_size"
+                            android:fontFamily="sans-serif-medium"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:ellipsize="end"
+                            android:text="" />
+
+                        <TextView
+                            android:id="@+id/row1_value"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="3dp"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:text="" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/row1_sub"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textSize="@dimen/widget_row_sub_size"
+                        android:textColor="@color/widget_text_muted"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone"
+                        android:text="" />
+
+                    <ProgressBar
+                        android:id="@+id/row1_bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="5dp"
+                        android:minHeight="5dp"
+                        android:maxHeight="5dp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginEnd="3dp"
+                        android:max="100"
+                        android:progressDrawable="@drawable/widget_progress_row"
+                        android:progressTint="@color/widget_accent_copper"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/row1_approve"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="6dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_approve"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF4ADE80"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✓" />
+
+                <TextView
+                    android:id="@+id/row1_deny"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="5dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_deny"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFF87171"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✕" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/row2"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="2dp"
+                android:minHeight="30dp"
+                android:layout_marginTop="@dimen/widget_row_gap"
+                android:paddingStart="11dp"
+                android:paddingEnd="8dp"
                 android:paddingTop="4dp"
                 android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#EF4444"
-                android:visibility="gone"
-                android:text="✕" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/widget_tile_row"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/row2_dot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:src="@drawable/widget_dot"
+                    android:importantForAccessibility="no" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="9dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/row2_label"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textSize="@dimen/widget_row_label_size"
+                            android:fontFamily="sans-serif-medium"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:ellipsize="end"
+                            android:text="" />
+
+                        <TextView
+                            android:id="@+id/row2_value"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="3dp"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:text="" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/row2_sub"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textSize="@dimen/widget_row_sub_size"
+                        android:textColor="@color/widget_text_muted"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone"
+                        android:text="" />
+
+                    <ProgressBar
+                        android:id="@+id/row2_bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="5dp"
+                        android:minHeight="5dp"
+                        android:maxHeight="5dp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginEnd="3dp"
+                        android:max="100"
+                        android:progressDrawable="@drawable/widget_progress_row"
+                        android:progressTint="@color/widget_accent_copper"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/row2_approve"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="6dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_approve"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF4ADE80"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✓" />
+
+                <TextView
+                    android:id="@+id/row2_deny"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="5dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_deny"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFF87171"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✕" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/row3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="30dp"
+                android:layout_marginTop="@dimen/widget_row_gap"
+                android:paddingStart="11dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/widget_tile_row"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/row3_dot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:src="@drawable/widget_dot"
+                    android:importantForAccessibility="no" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="9dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/row3_label"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textSize="@dimen/widget_row_label_size"
+                            android:fontFamily="sans-serif-medium"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:ellipsize="end"
+                            android:text="" />
+
+                        <TextView
+                            android:id="@+id/row3_value"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="3dp"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:text="" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/row3_sub"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textSize="@dimen/widget_row_sub_size"
+                        android:textColor="@color/widget_text_muted"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone"
+                        android:text="" />
+
+                    <ProgressBar
+                        android:id="@+id/row3_bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="5dp"
+                        android:minHeight="5dp"
+                        android:maxHeight="5dp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginEnd="3dp"
+                        android:max="100"
+                        android:progressDrawable="@drawable/widget_progress_row"
+                        android:progressTint="@color/widget_accent_copper"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/row3_approve"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="6dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_approve"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF4ADE80"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✓" />
+
+                <TextView
+                    android:id="@+id/row3_deny"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="5dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_deny"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFF87171"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✕" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/row4"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="30dp"
+                android:layout_marginTop="@dimen/widget_row_gap"
+                android:paddingStart="11dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/widget_tile_row"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/row4_dot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:src="@drawable/widget_dot"
+                    android:importantForAccessibility="no" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="9dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/row4_label"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textSize="@dimen/widget_row_label_size"
+                            android:fontFamily="sans-serif-medium"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:ellipsize="end"
+                            android:text="" />
+
+                        <TextView
+                            android:id="@+id/row4_value"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="3dp"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:text="" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/row4_sub"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textSize="@dimen/widget_row_sub_size"
+                        android:textColor="@color/widget_text_muted"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone"
+                        android:text="" />
+
+                    <ProgressBar
+                        android:id="@+id/row4_bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="5dp"
+                        android:minHeight="5dp"
+                        android:maxHeight="5dp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginEnd="3dp"
+                        android:max="100"
+                        android:progressDrawable="@drawable/widget_progress_row"
+                        android:progressTint="@color/widget_accent_copper"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/row4_approve"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="6dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_approve"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF4ADE80"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✓" />
+
+                <TextView
+                    android:id="@+id/row4_deny"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="5dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_deny"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFF87171"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✕" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/row5"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="30dp"
+                android:layout_marginTop="@dimen/widget_row_gap"
+                android:paddingStart="11dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/widget_tile_row"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/row5_dot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:src="@drawable/widget_dot"
+                    android:importantForAccessibility="no" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="9dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/row5_label"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textSize="@dimen/widget_row_label_size"
+                            android:fontFamily="sans-serif-medium"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:ellipsize="end"
+                            android:text="" />
+
+                        <TextView
+                            android:id="@+id/row5_value"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="3dp"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:text="" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/row5_sub"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textSize="@dimen/widget_row_sub_size"
+                        android:textColor="@color/widget_text_muted"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone"
+                        android:text="" />
+
+                    <ProgressBar
+                        android:id="@+id/row5_bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="5dp"
+                        android:minHeight="5dp"
+                        android:maxHeight="5dp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginEnd="3dp"
+                        android:max="100"
+                        android:progressDrawable="@drawable/widget_progress_row"
+                        android:progressTint="@color/widget_accent_copper"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/row5_approve"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="6dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_approve"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF4ADE80"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✓" />
+
+                <TextView
+                    android:id="@+id/row5_deny"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="5dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_deny"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFF87171"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✕" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/row6"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="30dp"
+                android:layout_marginTop="@dimen/widget_row_gap"
+                android:paddingStart="11dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/widget_tile_row"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/row6_dot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:src="@drawable/widget_dot"
+                    android:importantForAccessibility="no" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="9dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/row6_label"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textSize="@dimen/widget_row_label_size"
+                            android:fontFamily="sans-serif-medium"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:ellipsize="end"
+                            android:text="" />
+
+                        <TextView
+                            android:id="@+id/row6_value"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="3dp"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:text="" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/row6_sub"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textSize="@dimen/widget_row_sub_size"
+                        android:textColor="@color/widget_text_muted"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone"
+                        android:text="" />
+
+                    <ProgressBar
+                        android:id="@+id/row6_bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="5dp"
+                        android:minHeight="5dp"
+                        android:maxHeight="5dp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginEnd="3dp"
+                        android:max="100"
+                        android:progressDrawable="@drawable/widget_progress_row"
+                        android:progressTint="@color/widget_accent_copper"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/row6_approve"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="6dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_approve"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF4ADE80"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✓" />
+
+                <TextView
+                    android:id="@+id/row6_deny"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="5dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_deny"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFF87171"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✕" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/row7"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="30dp"
+                android:layout_marginTop="@dimen/widget_row_gap"
+                android:paddingStart="11dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/widget_tile_row"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/row7_dot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:src="@drawable/widget_dot"
+                    android:importantForAccessibility="no" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="9dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/row7_label"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textSize="@dimen/widget_row_label_size"
+                            android:fontFamily="sans-serif-medium"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:ellipsize="end"
+                            android:text="" />
+
+                        <TextView
+                            android:id="@+id/row7_value"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="3dp"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:text="" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/row7_sub"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textSize="@dimen/widget_row_sub_size"
+                        android:textColor="@color/widget_text_muted"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone"
+                        android:text="" />
+
+                    <ProgressBar
+                        android:id="@+id/row7_bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="5dp"
+                        android:minHeight="5dp"
+                        android:maxHeight="5dp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginEnd="3dp"
+                        android:max="100"
+                        android:progressDrawable="@drawable/widget_progress_row"
+                        android:progressTint="@color/widget_accent_copper"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/row7_approve"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="6dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_approve"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF4ADE80"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✓" />
+
+                <TextView
+                    android:id="@+id/row7_deny"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="5dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_deny"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFF87171"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✕" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/row8"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="30dp"
+                android:layout_marginTop="@dimen/widget_row_gap"
+                android:paddingStart="11dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/widget_tile_row"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/row8_dot"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:src="@drawable/widget_dot"
+                    android:importantForAccessibility="no" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="9dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/row8_label"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textSize="@dimen/widget_row_label_size"
+                            android:fontFamily="sans-serif-medium"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:ellipsize="end"
+                            android:text="" />
+
+                        <TextView
+                            android:id="@+id/row8_value"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="3dp"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="@color/widget_text_on_dark"
+                            android:maxLines="1"
+                            android:text="" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/row8_sub"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textSize="@dimen/widget_row_sub_size"
+                        android:textColor="@color/widget_text_muted"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone"
+                        android:text="" />
+
+                    <ProgressBar
+                        android:id="@+id/row8_bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="5dp"
+                        android:minHeight="5dp"
+                        android:maxHeight="5dp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginEnd="3dp"
+                        android:max="100"
+                        android:progressDrawable="@drawable/widget_progress_row"
+                        android:progressTint="@color/widget_accent_copper"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/row8_approve"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="6dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_approve"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF4ADE80"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✓" />
+
+                <TextView
+                    android:id="@+id/row8_deny"
+                    android:layout_width="wrap_content"
+                    android:layout_height="26dp"
+                    android:minWidth="34dp"
+                    android:layout_marginStart="5dp"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:gravity="center"
+                    android:background="@drawable/widget_pill_deny"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFF87171"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:text="✕" />
+            </LinearLayout>
         </LinearLayout>
-
-        <TextView
-            android:id="@+id/row3_sub"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="17dp"
-            android:textSize="10sp"
-            android:textColor="#8A8494"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:visibility="gone"
-            android:text="" />
-
-        <ProgressBar
-            android:id="@+id/row3_bar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="4dp"
-            android:layout_marginStart="17dp"
-            android:layout_marginTop="3dp"
-            android:progressTint="#CC785C"
-            android:progressBackgroundTint="#332E3C"
-            android:max="100"
-            android:visibility="gone" />
-    </LinearLayout>
-    <LinearLayout
-        android:id="@+id/row4"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
-        android:orientation="vertical"
-        android:visibility="gone">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/row4_dot"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:paddingEnd="6dp"
-                android:textColor="#CC785C"
-                android:text="●" />
-
-            <TextView
-                android:id="@+id/row4_label"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:textSize="12sp"
-                android:textColor="#EDEBF0"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row4_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="8dp"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFF"
-                android:maxLines="1"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row4_approve"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="4dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#22C55E"
-                android:visibility="gone"
-                android:text="✓" />
-
-            <TextView
-                android:id="@+id/row4_deny"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="2dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#EF4444"
-                android:visibility="gone"
-                android:text="✕" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/row4_sub"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="17dp"
-            android:textSize="10sp"
-            android:textColor="#8A8494"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:visibility="gone"
-            android:text="" />
-
-        <ProgressBar
-            android:id="@+id/row4_bar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="4dp"
-            android:layout_marginStart="17dp"
-            android:layout_marginTop="3dp"
-            android:progressTint="#CC785C"
-            android:progressBackgroundTint="#332E3C"
-            android:max="100"
-            android:visibility="gone" />
-    </LinearLayout>
-    <LinearLayout
-        android:id="@+id/row5"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
-        android:orientation="vertical"
-        android:visibility="gone">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/row5_dot"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:paddingEnd="6dp"
-                android:textColor="#CC785C"
-                android:text="●" />
-
-            <TextView
-                android:id="@+id/row5_label"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:textSize="12sp"
-                android:textColor="#EDEBF0"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row5_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="8dp"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFF"
-                android:maxLines="1"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row5_approve"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="4dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#22C55E"
-                android:visibility="gone"
-                android:text="✓" />
-
-            <TextView
-                android:id="@+id/row5_deny"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="2dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#EF4444"
-                android:visibility="gone"
-                android:text="✕" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/row5_sub"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="17dp"
-            android:textSize="10sp"
-            android:textColor="#8A8494"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:visibility="gone"
-            android:text="" />
-
-        <ProgressBar
-            android:id="@+id/row5_bar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="4dp"
-            android:layout_marginStart="17dp"
-            android:layout_marginTop="3dp"
-            android:progressTint="#CC785C"
-            android:progressBackgroundTint="#332E3C"
-            android:max="100"
-            android:visibility="gone" />
-    </LinearLayout>
-    <LinearLayout
-        android:id="@+id/row6"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
-        android:orientation="vertical"
-        android:visibility="gone">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/row6_dot"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:paddingEnd="6dp"
-                android:textColor="#CC785C"
-                android:text="●" />
-
-            <TextView
-                android:id="@+id/row6_label"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:textSize="12sp"
-                android:textColor="#EDEBF0"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row6_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="8dp"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFF"
-                android:maxLines="1"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row6_approve"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="4dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#22C55E"
-                android:visibility="gone"
-                android:text="✓" />
-
-            <TextView
-                android:id="@+id/row6_deny"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="2dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#EF4444"
-                android:visibility="gone"
-                android:text="✕" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/row6_sub"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="17dp"
-            android:textSize="10sp"
-            android:textColor="#8A8494"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:visibility="gone"
-            android:text="" />
-
-        <ProgressBar
-            android:id="@+id/row6_bar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="4dp"
-            android:layout_marginStart="17dp"
-            android:layout_marginTop="3dp"
-            android:progressTint="#CC785C"
-            android:progressBackgroundTint="#332E3C"
-            android:max="100"
-            android:visibility="gone" />
-    </LinearLayout>
-    <LinearLayout
-        android:id="@+id/row7"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
-        android:orientation="vertical"
-        android:visibility="gone">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/row7_dot"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:paddingEnd="6dp"
-                android:textColor="#CC785C"
-                android:text="●" />
-
-            <TextView
-                android:id="@+id/row7_label"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:textSize="12sp"
-                android:textColor="#EDEBF0"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row7_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="8dp"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFF"
-                android:maxLines="1"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row7_approve"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="4dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#22C55E"
-                android:visibility="gone"
-                android:text="✓" />
-
-            <TextView
-                android:id="@+id/row7_deny"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="2dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#EF4444"
-                android:visibility="gone"
-                android:text="✕" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/row7_sub"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="17dp"
-            android:textSize="10sp"
-            android:textColor="#8A8494"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:visibility="gone"
-            android:text="" />
-
-        <ProgressBar
-            android:id="@+id/row7_bar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="4dp"
-            android:layout_marginStart="17dp"
-            android:layout_marginTop="3dp"
-            android:progressTint="#CC785C"
-            android:progressBackgroundTint="#332E3C"
-            android:max="100"
-            android:visibility="gone" />
-    </LinearLayout>
-    <LinearLayout
-        android:id="@+id/row8"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
-        android:orientation="vertical"
-        android:visibility="gone">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/row8_dot"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="11sp"
-                android:paddingEnd="6dp"
-                android:textColor="#CC785C"
-                android:text="●" />
-
-            <TextView
-                android:id="@+id/row8_label"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:textSize="12sp"
-                android:textColor="#EDEBF0"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row8_value"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="8dp"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:textColor="#FFFFFF"
-                android:maxLines="1"
-                android:text="" />
-
-            <TextView
-                android:id="@+id/row8_approve"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="4dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#22C55E"
-                android:visibility="gone"
-                android:text="✓" />
-
-            <TextView
-                android:id="@+id/row8_deny"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="2dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:textColor="#EF4444"
-                android:visibility="gone"
-                android:text="✕" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/row8_sub"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="17dp"
-            android:textSize="10sp"
-            android:textColor="#8A8494"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:visibility="gone"
-            android:text="" />
-
-        <ProgressBar
-            android:id="@+id/row8_bar"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="4dp"
-            android:layout_marginStart="17dp"
-            android:layout_marginTop="3dp"
-            android:progressTint="#CC785C"
-            android:progressBackgroundTint="#332E3C"
-            android:max="100"
-            android:visibility="gone" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/widget_updated"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:textSize="9sp"
-        android:textColor="#6B6577"
-        android:maxLines="1"
-        android:text="" />
+    <include layout="@layout/widget_footer" />
 </LinearLayout>

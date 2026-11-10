@@ -67,6 +67,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import com.claudewebui.app.ui.components.common.PlumBackdrop
+import com.claudewebui.app.ui.components.common.PlumContentWidth
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -88,6 +89,7 @@ fun ServerSetupScreen(
 
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val recentServers by viewModel.recentServers.collectAsStateWithLifecycle()
+    val cleartextWarning by viewModel.cleartextWarning.collectAsStateWithLifecycle()
 
     var serverUrl by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
@@ -106,6 +108,9 @@ fun ServerSetupScreen(
         modifier = Modifier.fillMaxSize(),
         color = Color.Transparent,
     ) {
+        // Cap and centre the form so it reads as a focused card on tablets and
+        // foldables instead of one field stretched across the whole width.
+        PlumContentWidth(Modifier.fillMaxSize(), max = 560.dp) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -157,6 +162,7 @@ fun ServerSetupScreen(
                         value = serverUrl,
                         onValueChange = {
                             serverUrl = it
+                            viewModel.notePotentialCleartext(it)
                             if (authState is AuthState.Error) viewModel.resetToIdle()
                         },
                         modifier = Modifier
@@ -229,6 +235,30 @@ fun ServerSetupScreen(
                         }
                     }
 
+                    // Cleartext (http://) warning — non-blocking, shown live.
+                    AnimatedVisibility(
+                        visible = cleartextWarning,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut(),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(screenTokens.spacing.sm),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Default.Language,
+                                contentDescription = null,
+                                tint = PlumAccent,
+                                modifier = Modifier.size(screenTokens.sizing.iconSm),
+                            )
+                            Text(
+                                text = screenResources.getString(R.string.auth_cleartext_warning),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+
                     // Connect button
                     Button(
                         onClick = { viewModel.testConnection(serverUrl) },
@@ -288,6 +318,7 @@ fun ServerSetupScreen(
                     )
                 }
             }
+        }
         }
     }
     }

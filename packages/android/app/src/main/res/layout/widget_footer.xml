@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared footer: hairline rules either side of a centred "open" link. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_footer"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="5dp"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    android:paddingTop="3dp"
+    android:paddingBottom="1dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical">
+
+    <FrameLayout
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:layout_weight="1"
+        android:background="@drawable/widget_rule" />
+
+    <TextView
+        android:id="@+id/widget_footer_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:paddingStart="12dp"
+        android:textSize="12.5sp"
+        android:fontFamily="sans-serif-medium"
+        android:textColor="@color/widget_text_on_dark"
+        android:maxLines="1"
+        android:text="@string/widget_footer_open" />
+
+    <TextView
+        android:id="@+id/widget_footer_arrow"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:paddingStart="6dp"
+        android:paddingEnd="12dp"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="@color/widget_accent_terracotta"
+        android:maxLines="1"
+        android:text="@string/widget_footer_arrow" />
+
+    <FrameLayout
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:layout_weight="1"
+        android:background="@drawable/widget_rule" />
+</LinearLayout>

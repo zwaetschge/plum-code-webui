@@ -43,6 +43,14 @@ class LoginViewModel(
     private val _biometricEnabled = MutableStateFlow(false)
     val biometricEnabled: StateFlow<Boolean> = _biometricEnabled.asStateFlow()
 
+    /**
+     * True when the currently targeted server URL is plain http:// to a
+     * non-loopback host. The connection is still allowed (local networks often
+     * run without TLS) — this only drives a non-blocking "unencrypted" warning.
+     */
+    private val _cleartextWarning = MutableStateFlow(false)
+    val cleartextWarning: StateFlow<Boolean> = _cleartextWarning.asStateFlow()
+
     init {
         loadRecentServers()
         _biometricEnabled.value = prefs.getBoolean(KEY_BIOMETRIC_ENABLED, false)
@@ -63,6 +71,8 @@ class LoginViewModel(
             )
             return
         }
+        // Warn (do not block) on cleartext http:// to a non-loopback host.
+        _cleartextWarning.value = isInsecureCleartext(url)
 
         viewModelScope.launch {
             _authState.value = AuthState.Connecting
@@ -391,6 +401,23 @@ class LoginViewModel(
         val authorityEnd = if (pathStart < 0) withScheme.length else pathStart
         return withScheme.substring(0, authorityEnd).lowercase() +
             withScheme.substring(authorityEnd)
+    }
+
+    /** Live-update the cleartext warning as the user edits the URL field. */
+    fun notePotentialCleartext(rawUrl: String) {
+        _cleartextWarning.value = isInsecureCleartext(normalizeUrl(rawUrl))
+    }
+
+    /**
+     * A plain-http URL to anything other than loopback is "insecure cleartext".
+     * localhost / 127.0.0.1 / 10.0.2.2 (emulator host) stay silent so local
+     * development keeps working without a warning.
+     */
+    private fun isInsecureCleartext(url: String): Boolean {
+        if (!url.startsWith("http://", ignoreCase = true)) return false
+        val host = runCatching { Uri.parse(url).host }.getOrNull()?.lowercase()
+            ?: return true
+        return host !in setOf("localhost", "127.0.0.1", "10.0.2.2")
     }
 
     private fun mobileGatewayCandidate(url: String): String? {

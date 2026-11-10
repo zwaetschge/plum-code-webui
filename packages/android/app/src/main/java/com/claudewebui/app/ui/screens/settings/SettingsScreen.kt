@@ -11,9 +11,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -56,6 +59,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -92,8 +96,12 @@ import com.claudewebui.app.ui.components.common.PlumAmber
 import com.claudewebui.app.ui.components.common.PlumBackdrop
 import com.claudewebui.app.ui.components.common.PlumGreen
 import com.claudewebui.app.ui.components.common.PlumIconButton
+import com.claudewebui.app.ui.components.common.PlumBorder
 import com.claudewebui.app.ui.components.common.PlumMuted
 import com.claudewebui.app.ui.components.common.PlumNavScaffold
+import com.claudewebui.app.ui.components.common.WindowWidth
+import com.claudewebui.app.ui.components.common.isShortWindow
+import com.claudewebui.app.ui.components.common.rememberWindowWidth
 import com.claudewebui.app.ui.components.common.PlumRed
 import com.claudewebui.app.ui.components.common.PlumText
 import com.claudewebui.app.ui.components.common.providerColor
@@ -189,7 +197,18 @@ fun SettingsScreen(
     PlumBackdrop {
         PlumNavScaffold(MainDestination.SETTINGS, onNavigateMain) { padding ->
             val insets = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())
-            SettingsStack(stack = stack, onPop = ::pop) { id ->
+            // On expanded tablets/foldables keep the hub (master) in a fixed left
+            // column and open each page in the detail pane beside it, instead of
+            // the phone-style push/pop that hides the whole hub on a wide screen.
+            val twoPaneOption by LayoutPrefs.twoPane.collectAsStateWithLifecycle()
+            val masterDetail = LayoutPrefs.shouldUseTwoPane(
+                twoPaneOption,
+                rememberWindowWidth() == WindowWidth.EXPANDED && !isShortWindow(),
+            )
+            // A hub row tapped in the master column replaces the detail page
+            // rather than stacking on top of whatever page is already open.
+            val rootPush: (String) -> Unit = if (masterDetail) { id -> open(id) } else { id -> push(id) }
+            val renderPage: @Composable (String) -> Unit = { id ->
                 when {
                     id == SettingsPages.ROOT -> SettingsRoot(
                         state = state,
@@ -198,7 +217,7 @@ fun SettingsScreen(
                         insets = insets,
                         query = query,
                         onQuery = { query = it },
-                        push = ::push,
+                        push = rootPush,
                         open = { ids -> open(*ids.toTypedArray()) },
                         routes = routes,
                         onLogout = { showLogoutDialog = true },
@@ -214,6 +233,23 @@ fun SettingsScreen(
                     )
                     else -> AppSettingsPage(id, state, viewModel, insets, ::pop, ::push, routes)
                 }
+            }
+            if (masterDetail) {
+                Row(Modifier.fillMaxSize()) {
+                    Box(Modifier.width(360.dp).fillMaxHeight()) { renderPage(SettingsPages.ROOT) }
+                    VerticalDivider(color = PlumBorder)
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        if (stack.size <= 1) {
+                            Box(Modifier.fillMaxSize().padding(insets), contentAlignment = Alignment.Center) {
+                                Text(stringResource(R.string.settings_hub_select_detail), color = PlumMuted)
+                            }
+                        } else {
+                            SettingsStack(stack = stack, onPop = ::pop) { id -> renderPage(id) }
+                        }
+                    }
+                }
+            } else {
+                SettingsStack(stack = stack, onPop = ::pop) { id -> renderPage(id) }
             }
         }
     }

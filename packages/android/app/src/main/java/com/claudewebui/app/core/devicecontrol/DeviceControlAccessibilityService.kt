@@ -71,6 +71,9 @@ class DeviceControlAccessibilityService : AccessibilityService() {
     // Tools — called from DeviceControlService on a worker thread
     // ========================================================================
 
+    /** Package name of the app currently in the foreground, or null if unknown. */
+    fun foregroundPackage(): String? = rootInActiveWindow?.packageName?.toString()
+
     fun status(): String {
         val root = rootInActiveWindow
         val pkg = root?.packageName?.toString() ?: "unknown"

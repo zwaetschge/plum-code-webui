@@ -165,13 +165,19 @@ object WidgetDataFetcher {
                     // the two plan ledgers stay distinguishable in one list.
                     UsageLimitProvider.VIBE -> 0xFFFF7000L
                 }
+                fun reset(iso: String?) = WidgetLimits.parseResetMs(iso)
                 buildList {
-                    data.fiveHour?.let { add(WLimit(provider.label, "5h", it.utilization, color)) }
+                    data.fiveHour?.let { add(WLimit(provider.label, "5h", it.utilization, color, reset(it.resetsAt))) }
                     data.sevenDay?.let {
                         val window = if (provider.isMonthlyPlan) "Month" else "Weekly"
-                        add(WLimit(provider.label, window, it.utilization, color))
+                        // The Mistral ledgers carry their billing month end on
+                        // the plan, not on the window.
+                        val resetsAt = it.resetsAt ?: data.planUsage?.periodEnd?.takeIf { provider.isMonthlyPlan }
+                        add(WLimit(provider.label, window, it.utilization, color, reset(resetsAt)))
                     }
-                    data.sevenDaySonnet?.let { add(WLimit(provider.label, "Weekly Sonnet", it.utilization, color)) }
+                    data.sevenDaySonnet?.let {
+                        add(WLimit(provider.label, "Weekly Sonnet", it.utilization, color, reset(it.resetsAt)))
+                    }
                 }
             }
         }.awaitAll().flatten()

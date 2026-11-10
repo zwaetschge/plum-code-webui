@@ -54,6 +54,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.claudewebui.app.R
+import com.claudewebui.app.ui.components.common.WindowHeight
+import com.claudewebui.app.ui.components.common.rememberWindowHeight
 import com.claudewebui.app.ui.theme.PlumTheme
 
 /** One selectable model, grouped under the connection or provider it belongs to. */
@@ -203,13 +205,18 @@ internal fun ModelEffortSheet(
     extra: @Composable ColumnScope.() -> Unit = {},
 ) {
     val palette = PlumTheme.palette
+    // Only a genuinely tall window (portrait tablet, unfolded foldable) has room
+    // for a longer model list; tied to height so the effort rail never drops
+    // below the fold on a landscape tablet. ModalBottomSheet already caps its
+    // own width at 640dp, so no extra width cap is needed here.
+    val tall = rememberWindowHeight() == WindowHeight.EXPANDED
     // Short (landscape) windows would otherwise park the rail below the fold.
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (showModels) {
                 Text(stringResource(R.string.model_picker_title), style = MaterialTheme.typography.titleMedium)
                 if (models.isEmpty()) Text(stringResource(R.string.model_picker_none), color = palette.muted)
-                LazyColumn(Modifier.heightIn(max = 300.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                LazyColumn(Modifier.heightIn(max = if (tall) 480.dp else 300.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     models.groupBy { it.groupId }.forEach { (_, group) ->
                         item(key = "group-${group.first().groupId}") {
                             Text(group.first().group.uppercase(), style = MaterialTheme.typography.labelSmall, color = palette.muted, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp, start = 4.dp))

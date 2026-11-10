@@ -1,0 +1,141 @@
+<div class="pomo" id="app">
+  <div class="dial" id="dial">
+    <svg viewBox="0 0 200 200" aria-hidden="true">
+      <circle class="track" cx="100" cy="100" r="88"></circle>
+      <circle class="prog" id="prog" cx="100" cy="100" r="88"></circle>
+    </svg>
+    <div class="readout">
+      <span class="phase" id="phase">Fokus</span>
+      <span class="time" id="time" role="timer" aria-live="off">25:00</span>
+      <span class="sub" id="sub">Runde 1</span>
+    </div>
+  </div>
+  <div class="side">
+    <div class="seg" role="radiogroup" aria-label="Rhythmus">
+      <button role="radio" data-preset="25-5">25 / 5</button>
+      <button role="radio" data-preset="50-10">50 / 10</button>
+    </div>
+    <p class="hint" id="hint"></p>
+    <div class="rounds">
+      <span class="dots" id="dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span id="count" class="muted"></span>
+    </div>
+    <div class="actions">
+      <button class="primary go" id="go">Start</button>
+      <button id="skip">Überspringen</button>
+      <button id="reset" class="icon" aria-label="Zurücksetzen" title="Zurücksetzen">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3 4v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <button class="ghost" id="tips">Ideen für die Pause</button>
+  </div>
+</div>
+<style>
+  .pomo { --ring: var(--plum-accent); display: grid; gap: 18px; justify-items: center; }
+  .pomo.is-break { --ring: var(--plum-chart-2); }
+  @media (min-width: 540px) {
+    .pomo { grid-template-columns: 208px minmax(0, 1fr); justify-items: start; align-items: center; gap: 32px; padding: 4px 8px; }
+  }
+  .dial { position: relative; width: 208px; aspect-ratio: 1; border-radius: 50%; }
+  .dial svg { width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+  .track { fill: none; stroke: var(--plum-surface-2); stroke-width: 12; }
+  .prog { fill: none; stroke: var(--ring); stroke-width: 12; stroke-linecap: round; stroke-dasharray: 552.92; transition: stroke-dashoffset 0.3s linear, stroke 0.5s ease; }
+  .dial.is-running .prog { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--ring) 55%, transparent)); }
+  .dial.done { animation: pop 0.7s cubic-bezier(.2, .9, .3, 1.4); }
+  @keyframes pop { 40% { transform: scale(1.05); } }
+  .readout { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 4px; text-align: center; }
+  .phase { font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ring); padding: 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--ring) 15%, transparent); transition: color 0.4s, background-color 0.4s; }
+  .time { font-size: 48px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1.05; }
+  .sub { font-size: 12.5px; color: var(--plum-muted); }
+  .side { display: grid; gap: 14px; justify-items: center; width: 100%; max-width: 360px; }
+  .pomo.is-full { min-height: calc(100vh - 40px); align-content: center; justify-content: center; }
+  @media (min-width: 540px) { .pomo.is-full { grid-template-columns: 300px minmax(0, 360px); gap: 56px; } }
+  .pomo.is-full .dial { width: 300px; }
+  .pomo.is-full .time { font-size: 68px; }
+  @media (min-width: 540px) { .side { justify-items: start; } }
+  .seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 12px; background: var(--plum-surface); border: 1px solid var(--plum-border); }
+  .seg button { min-height: 34px; padding: 6px 14px; border: 0; background: transparent; color: var(--plum-muted); border-radius: 9px; }
+  .seg button[aria-checked='true'] { background: var(--plum-surface-2); color: var(--plum-text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18); }
+  .hint { margin: 0; font-size: 13.5px; color: var(--plum-muted); text-align: center; min-height: 2.9em; }
+  @media (min-width: 540px) { .hint { text-align: left; } }
+  .rounds { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+  .dots { display: inline-flex; gap: 6px; }
+  .dots i { width: 10px; height: 10px; border-radius: 50%; background: var(--plum-surface-2); border: 1px solid var(--plum-border); transition: background-color 0.3s, transform 0.3s; }
+  .dots i.on { background: var(--plum-accent); border-color: transparent; transform: scale(1.1); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .go { min-width: 112px; min-height: 42px; }
+  .actions button { min-height: 42px; }
+  .icon { width: 42px; padding: 0; }
+  .ghost { background: none; border: 0; color: var(--plum-accent); padding: 4px 2px; min-height: 36px; font-size: 13px; }
+  .ghost:hover { text-decoration: underline; text-underline-offset: 3px; filter: none; }
+</style>
+<script>
+(function () {
+  var PRESETS = { '25-5': [25, 5], '50-10': [50, 10] };
+  var C = 2 * Math.PI * 88;
+  var $ = function (id) { return document.getElementById(id); };
+  var app = $('app');
+  var s = Object.assign({ preset: '25-5', phase: 'focus', left: 1500, endsAt: 0, rounds: 0 }, plum.state);
+  if (!PRESETS[s.preset]) s.preset = '25-5';
+  var timer = 0;
+  function len(phase) { return PRESETS[s.preset][phase === 'focus' ? 0 : 1] * 60; }
+  function left() { return s.endsAt ? Math.max(0, Math.ceil((s.endsAt - Date.now()) / 1000)) : Math.min(s.left, len(s.phase)); }
+  function save() { plum.setState({ preset: s.preset, phase: s.phase, left: s.left, endsAt: s.endsAt, rounds: s.rounds }); }
+  function two(n) { return (n < 10 ? '0' : '') + n; }
+  function schedule() { clearInterval(timer); timer = s.endsAt ? setInterval(tick, 250) : 0; }
+  // A finished focus round starts the break by itself; the next round waits for you.
+  function next(counted) {
+    var focus = s.phase === 'focus';
+    if (focus && counted) s.rounds++;
+    s.phase = focus ? 'break' : 'focus';
+    s.left = len(s.phase);
+    s.endsAt = focus && counted ? Date.now() + s.left * 1000 : 0;
+    save();
+    schedule();
+    var dial = $('dial');
+    dial.classList.remove('done');
+    void dial.offsetWidth;
+    dial.classList.add('done');
+  }
+  function tick() { if (s.endsAt && left() <= 0) next(true); render(); }
+  function render() {
+    var t = left(), total = len(s.phase), running = !!s.endsAt, p = PRESETS[s.preset];
+    app.classList.toggle('is-break', s.phase === 'break');
+    $('dial').classList.toggle('is-running', running);
+    $('time').textContent = two(Math.floor(t / 60)) + ':' + two(t % 60);
+    $('phase').textContent = s.phase === 'focus' ? 'Fokus' : 'Pause';
+    $('prog').style.strokeDashoffset = String(C * (1 - t / total));
+    $('sub').textContent = s.phase === 'focus' ? 'Runde ' + (s.rounds + 1) : 'danach Runde ' + (s.rounds + 1);
+    $('hint').textContent = s.phase === 'focus'
+      ? p[0] + ' Minuten konzentriert arbeiten, danach ' + p[1] + ' Minuten Pause. Benachrichtigungen aus, eine Aufgabe.'
+      : 'Kurz aufstehen, etwas trinken, in die Ferne schauen. Danach geht es mit Runde ' + (s.rounds + 1) + ' weiter.';
+    var go = $('go');
+    go.textContent = running ? 'Pause' : t < total ? 'Weiter' : 'Start';
+    var filled = s.rounds % 4 === 0 && s.rounds > 0 ? 4 : s.rounds % 4;
+    [].forEach.call($('dots').children, function (dot, i) { dot.classList.toggle('on', i < filled); });
+    $('count').textContent = s.rounds === 1 ? '1 Fokusrunde geschafft' : s.rounds + ' Fokusrunden geschafft';
+    [].forEach.call(document.querySelectorAll('[data-preset]'), function (b) {
+      b.setAttribute('aria-checked', String(b.dataset.preset === s.preset));
+    });
+  }
+  $('go').onclick = function () {
+    if (s.endsAt) { s.left = left(); s.endsAt = 0; } else { s.left = left(); s.endsAt = Date.now() + s.left * 1000; }
+    save(); schedule(); render();
+  };
+  $('skip').onclick = function () { next(false); render(); };
+  $('reset').onclick = function () { s.phase = 'focus'; s.left = len('focus'); s.endsAt = 0; save(); schedule(); render(); };
+  [].forEach.call(document.querySelectorAll('[data-preset]'), function (b) {
+    b.onclick = function () { s.preset = b.dataset.preset; s.left = len(s.phase); s.endsAt = 0; save(); schedule(); render(); };
+  });
+  $('tips').onclick = function () {
+    plum.sendMessage('Gib mir drei kurze Ideen für eine ' + PRESETS[s.preset][1] + '-Minuten-Pause am Schreibtisch.');
+  };
+  // Fullscreen: centred and larger.
+  var full = function (mode) { app.classList.toggle('is-full', mode === 'fullscreen'); };
+  plum.on('display', full);
+  full(plum.display);
+  if (s.endsAt && left() <= 0) next(true);
+  schedule();
+  render();
+})();
+</script>

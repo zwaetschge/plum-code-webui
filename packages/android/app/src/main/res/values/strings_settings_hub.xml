@@ -24,6 +24,7 @@
     <string name="settings_hub_operations">Operations</string>
     <string name="settings_hub_logout">Log out</string>
     <string name="settings_hub_back">Back</string>
+    <string name="settings_hub_select_detail">Select a setting to view it here.</string>
     <string name="settings_hub_not_set">Not set</string>
     <string name="settings_hub_on">On</string>
     <string name="settings_hub_off">Off</string>

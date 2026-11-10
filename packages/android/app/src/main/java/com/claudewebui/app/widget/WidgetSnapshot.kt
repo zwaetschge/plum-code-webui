@@ -68,6 +68,11 @@ data class WLimit(
     val window: String = "",
     val percent: Int = 0,
     val colorArgb: Long = 0xFF94A3B8,
+    /**
+     * When the window resets, epoch ms; 0 when the provider did not say.
+     * Defaulted so snapshots cached before this field existed still decode.
+     */
+    val resetsAtMs: Long = 0,
 )
 
 @Serializable

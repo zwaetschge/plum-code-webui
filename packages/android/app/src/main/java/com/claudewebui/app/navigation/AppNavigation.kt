@@ -158,7 +158,15 @@ fun AppNavigation(
         val isDesignPreview = BuildConfig.DEBUG && deepLinkUri == "claudewebui://preview"
         val isChatPreview = BuildConfig.DEBUG && deepLinkUri == "claudewebui://preview-chat"
         val isMonitorPreview = BuildConfig.DEBUG && deepLinkUri == "claudewebui://preview-monitor"
+        val isDynamicUiPreview = BuildConfig.DEBUG && deepLinkUri?.startsWith("claudewebui://preview-dynui") == true
+        val isChatModelsPreview = BuildConfig.DEBUG && deepLinkUri == "claudewebui://preview-chatmodels"
+        val isVoicePreview = BuildConfig.DEBUG && deepLinkUri?.startsWith("claudewebui://preview-voice") == true
+        val isWidgetPreview = BuildConfig.DEBUG && deepLinkUri?.startsWith("claudewebui://preview-widgets") == true
         when {
+            isWidgetPreview -> WIDGET_PREVIEW_ROUTE
+            isVoicePreview -> VOICE_PREVIEW_ROUTE
+            isDynamicUiPreview -> DYNAMIC_UI_PREVIEW_ROUTE
+            isChatModelsPreview -> CHAT_MODELS_PREVIEW_ROUTE
             isMonitorPreview -> MONITOR_PREVIEW_ROUTE
             isChatPreview -> Routes.Chat.createRoute("preview")
             isAnalyticsPreview -> Routes.Analytics.route
@@ -310,6 +318,36 @@ fun AppNavigation(
         if (BuildConfig.DEBUG) {
             // Fixture-backed render of the grid, reachable without a login so
             // the layout can be checked on a real device.
+            // Every Dynamic UI v2 element with fixtures (claudewebui://preview-dynui?theme=light&section=live).
+            composable(route = DYNAMIC_UI_PREVIEW_ROUTE) {
+                val link = remember(deepLinkUri) { deepLinkUri?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() } }
+                com.claudewebui.app.ui.components.dynamicui.DynamicUiDemoScreen(
+                    initialTheme = link?.getQueryParameter("theme"),
+                    initialSection = link?.getQueryParameter("section"),
+                )
+            }
+            // „Modelle im Chat“ with sample providers (claudewebui://preview-chatmodels).
+            composable(route = CHAT_MODELS_PREVIEW_ROUTE) {
+                com.claudewebui.app.ui.screens.settings.ChatModelMenuPreviewScreen()
+            }
+            // Voice mode and speech recognition choice (claudewebui://preview-voice?section=settings|voices|heard|live).
+            composable(route = VOICE_PREVIEW_ROUTE) {
+                val link = remember(deepLinkUri) { deepLinkUri?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() } }
+                com.claudewebui.app.ui.screens.dashboard.VoiceModePreviewScreen(link?.getQueryParameter("section"))
+            }
+            // Every home-screen widget through the real renderer
+            // (claudewebui://preview-widgets?kinds=limits,tokens&sizes=2x2,4x2&translucent=1&empty=1).
+            composable(route = WIDGET_PREVIEW_ROUTE) {
+                val link = remember(deepLinkUri) { deepLinkUri?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() } }
+                com.claudewebui.app.widget.WidgetPreviewScreen(
+                    kinds = link?.getQueryParameter("kinds"),
+                    sizes = link?.getQueryParameter("sizes"),
+                    translucent = link?.getQueryParameter("translucent") == "1",
+                    empty = link?.getQueryParameter("empty") == "1",
+                    provider = link?.getQueryParameter("provider"),
+                    period = link?.getQueryParameter("period"),
+                )
+            }
             composable(route = MONITOR_PREVIEW_ROUTE) {
                 MonitorScreen(
                     onNavigateMain = {},
@@ -719,6 +757,10 @@ fun AppNavigation(
 }
 
 private const val MONITOR_PREVIEW_ROUTE = "monitor_preview"
+private const val DYNAMIC_UI_PREVIEW_ROUTE = "dynamic_ui_preview"
+private const val CHAT_MODELS_PREVIEW_ROUTE = "chat_models_preview"
+private const val VOICE_PREVIEW_ROUTE = "voice_preview"
+private const val WIDGET_PREVIEW_ROUTE = "widget_preview"
 private const val ASSISTANT_WEB_PREFIX = "settings_assistant_web"
 
 private fun NavHostController.navigateMain(destination: MainDestination) {

@@ -34,7 +34,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -78,13 +81,16 @@ import kotlin.math.sqrt
  * Voice mode: a spoken conversation in the open model chat.
  *
  * Same loop as the WebUI voice mode (VoiceComposer), built for the phone:
- * the microphone listens until you pause, Whisper (Vocarium) writes it down,
- * the text goes into the chat as the next turn, and OmniVoice reads the answer
- * sentence by sentence while it is still streaming, then the microphone
- * listens again. Turns are sent with `voice: true`, so Plum knows it is being
- * spoken to and answers short and for the ear (fast Haiku, adaptive thinking).
- * Before the first word, Whisper and the chosen voice are loaded on Vocarium;
- * the microphone only opens once both are ready.
+ * the phone's own speech recognizer listens and shows the words live (or,
+ * with `speechRecognition = "server"` or when the phone cannot recognise
+ * speech, the microphone records until you pause and Whisper on Vocarium
+ * writes it down), the text goes into the chat as the next turn, and the
+ * chosen voice (OmniVoice or Mistral) reads the answer sentence by sentence
+ * while it is still streaming, then the recognizer listens again. Turns are
+ * sent with `voice: true`, so Plum knows it is being spoken to and answers
+ * short and for the ear (fast Haiku, adaptive thinking). Before the first
+ * word the voice (and Whisper for the server path) is loaded; the microphone
+ * only opens once that is ready.
  */
 internal enum class VoicePhase { Preparing, Listening, Transcribing, Thinking, Speaking, Paused }
 
@@ -327,6 +333,10 @@ private class VoicePlayer(private val context: Context, private val level: (Floa
 
 // ---------------------------------------------------------------- screen
 
+/** Language of [voice] from the voice list (Mistral voices carry one; OmniVoice says "Auto"). */
+internal fun voiceLanguage(voices: List<com.claudewebui.app.data.model.AssistantVoiceOption>?, voice: String): String? =
+    voices?.firstOrNull { com.claudewebui.app.ui.screens.settings.sameVoice(it.key, voice) }?.language
+
 /**
  * Full-screen voice conversation over the open chat.
  *
@@ -334,6 +344,11 @@ private class VoicePlayer(private val context: Context, private val level: (Floa
  * returns false when the chat cannot take it right now; [turns], [running]
  * and [lastError] read the chat's live state. Tapping the orb ends your turn
  * early, or interrupts Plum while it thinks or speaks.
+ *
+ * [speechRecognition] is the personalisation choice: "device" listens with
+ * Android's recognizer (live text, no upload), "server" records and sends the
+ * audio to Whisper on Vocarium. When the device cannot recognise speech the
+ * session falls back to the server and says so.
  */
 @Composable
 internal fun AssistantVoiceMode(
@@ -347,11 +362,13 @@ internal fun AssistantVoiceMode(
     send: (String) -> Boolean,
     stopTurn: () -> Unit,
     onClose: (String?) -> Unit,
+    speechRecognition: String = "device",
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val close by rememberUpdatedState(onClose)
+    val recognition by rememberUpdatedState(speechRecognition)
     var phase by remember { mutableStateOf(VoicePhase.Preparing) }
     var currentVoice by remember { mutableStateOf(voice) }
     var readyVoice by remember { mutableStateOf<String?>(null) }   // voice Whisper and OmniVoice were warmed for
@@ -366,9 +383,12 @@ internal fun AssistantVoiceMode(
     var heardText by remember { mutableStateOf("") }
     var caption by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    var onDevice by remember { mutableStateOf(speechRecognition != "server") }   // what this session listens with
     val micLevel = remember { mutableFloatStateOf(0f) }
     val speakLevel = remember { mutableFloatStateOf(0f) }
     val finish = remember { booleanArrayOf(false) }
+    val listening = remember { arrayOfNulls<DeviceSpeech>(1) }   // the device recognizer while it listens
     val current = remember { arrayOfNulls<Job>(1) }
 
     fun interrupt() { current[0]?.cancel() }
@@ -445,154 +465,268 @@ internal fun AssistantVoiceMode(
             texts.close()
         }
 
+        var device: DeviceSpeech? = null
+        var serverOnly = false          // the device could not recognise: Whisper for the rest of the session
+        var quickSilences = 0
+        var idleSince = System.currentTimeMillis()
+        fun fallBack() {
+            serverOnly = true
+            device?.release(); device = null
+            notice = context.getString(R.string.voice_mode_device_fallback)
+        }
+
         var failures = 0
-        while (isActive) {
-            if (readyVoice != currentVoice) {
-                val target = currentVoice
-                phase = VoicePhase.Preparing; whisperReady = null; speechReady = null; prepareError = null
-                val warmed = step { api.warmAssistantVoice(owner, target, "German") } ?: continue
-                val response = warmed.getOrNull()
-                val whisper = response?.data?.get("whisper") as? kotlinx.serialization.json.JsonObject
-                val speech = response?.data?.get("speech") as? kotlinx.serialization.json.JsonObject
-                fun ready(part: kotlinx.serialization.json.JsonObject?) = part?.get("ready")?.jsonPrimitive?.content == "true"
-                fun failure(part: kotlinx.serialization.json.JsonObject?) = part?.get("error")?.jsonPrimitive?.content
-                whisperReady = ready(whisper); speechReady = ready(speech)
-                if (whisperReady == true && speechReady == true) { readyVoice = target; continue }
-                prepareError = warmed.exceptionOrNull()?.message ?: response?.error?.message
-                    ?: listOfNotNull(failure(whisper)?.let { "Whisper: $it" }, failure(speech)?.let { "OmniVoice: $it" }).joinToString("\n").ifBlank { null }
-                    ?: context.getString(R.string.assistant_voice_failed)
-                val tries = retry
-                snapshotFlow { retry != tries || currentVoice != target }.first { it }
-                continue
+        try {
+            while (isActive) {
+                val wantDevice = recognition != "server" && !serverOnly
+                onDevice = wantDevice
+                // Device recognition needs only the voice; Whisper must be up for the server path.
+                if (readyVoice != currentVoice || (!wantDevice && whisperReady != true)) {
+                    val target = currentVoice
+                    phase = VoicePhase.Preparing; whisperReady = null; speechReady = null; prepareError = null
+                    val warmed = step { api.warmAssistantVoice(owner, target, "German") } ?: continue
+                    val response = warmed.getOrNull()
+                    val whisper = response?.data?.get("whisper") as? kotlinx.serialization.json.JsonObject
+                    val speech = response?.data?.get("speech") as? kotlinx.serialization.json.JsonObject
+                    fun ready(part: kotlinx.serialization.json.JsonObject?) = part?.get("ready")?.jsonPrimitive?.content == "true"
+                    fun failure(part: kotlinx.serialization.json.JsonObject?) = part?.get("error")?.jsonPrimitive?.content
+                    whisperReady = ready(whisper); speechReady = ready(speech)
+                    if (speechReady == true && (wantDevice || whisperReady == true)) { readyVoice = target; continue }
+                    val engine = if (target.startsWith("mistral:")) "Mistral" else "OmniVoice"
+                    prepareError = warmed.exceptionOrNull()?.message ?: response?.error?.message
+                        ?: listOfNotNull(failure(whisper)?.takeIf { !wantDevice }?.let { "Whisper: $it" }, failure(speech)?.let { "$engine: $it" }).joinToString("\n").ifBlank { null }
+                        ?: context.getString(R.string.assistant_voice_failed)
+                    val tries = retry
+                    snapshotFlow { retry != tries || currentVoice != target }.first { it }
+                    continue
+                }
+                if (paused) { phase = VoicePhase.Paused; snapshotFlow { !paused || readyVoice != currentVoice }.first { it }; continue }
+                // Coming from another phase restarts the clock for "two minutes of silence".
+                if (phase != VoicePhase.Listening) idleSince = System.currentTimeMillis()
+                phase = VoicePhase.Listening; hearing = false; finish[0] = false
+                val text: String = if (wantDevice) {
+                    val language = voiceLanguage(catalog.voices, currentVoice) ?: "de"
+                    val speech = device?.takeIf { it.language == language }
+                        ?: DeviceSpeech(context, language).also { device?.release(); device = it }
+                    if (!speech.available) { fallBack(); continue }
+                    val started = System.currentTimeMillis()
+                    listening[0] = speech
+                    val round = (try {
+                        step {
+                            speech.listen(
+                                level = { micLevel.floatValue = it },
+                                partial = { heardText = it; caption = "" },
+                                onSpeech = { hearing = true },
+                            )
+                        }
+                    } finally { listening[0] = null; micLevel.floatValue = 0f }) ?: continue
+                    when (val heard = round.getOrElse { DeviceHeard.Unavailable(SR_ERROR_CLIENT) }) {
+                        is DeviceHeard.Unavailable -> { fallBack(); continue }
+                        DeviceHeard.Silence -> {
+                            // A recognizer that gives up at once, again and again, hears nothing (no audio).
+                            quickSilences = if (System.currentTimeMillis() - started < 800) quickSilences + 1 else 0
+                            if (quickSilences >= 5) { fallBack(); continue }
+                            if (System.currentTimeMillis() - idleSince > IDLE_END_MS) { close(context.getString(R.string.voice_mode_idle_end)); return@LaunchedEffect }
+                            if (quickSilences > 0) delay(400)
+                            continue
+                        }
+                        is DeviceHeard.Text -> { quickSilences = 0; heard.text }
+                    }
+                } else {
+                    val heard = step {
+                        capture.listen(level = { micLevel.floatValue = it }, onSpeech = { hearing = true }, finishNow = { finish[0] })
+                    } ?: continue
+                    val wav = heard.getOrElse { close(context.getString(R.string.voice_mode_mic_failed)); return@LaunchedEffect }
+                        ?: run { close(context.getString(R.string.voice_mode_idle_end)); return@LaunchedEffect }
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    phase = VoicePhase.Transcribing
+                    val transcript = step {
+                        val result = api.transcribeAssistantAudio(owner, wav, "voice.wav", "audio/wav")
+                        if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed")
+                        if (!result.success) error(result.error?.message ?: context.getString(R.string.assistant_voice_failed))
+                        result.data?.get("text")?.jsonPrimitive?.content.orEmpty().trim()
+                    } ?: continue
+                    val spoken = transcript.getOrElse { failure ->
+                        if (++failures >= 3) { close(failure.message); return@LaunchedEffect }
+                        message = failure.message; delay(1500); null
+                    } ?: continue
+                    if (inventedTranscript(spoken)) { message = notUnderstood; continue }
+                    spoken
+                }
+                if (wantDevice) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                failures = 0; message = null; heardText = text; caption = ""
+                phase = VoicePhase.Thinking
+                // A new question replaces an answer that is still being written.
+                if (running()) { stopTurn(); withTimeoutOrNull(8_000) { snapshotFlow { running() }.first { !it } } }
+                val before = turns().map { it.id }.toSet()
+                var accepted = false
+                for (attempt in 0 until 20) { if (send(text)) { accepted = true; break }; delay(250) }
+                if (!accepted) { message = lastError() ?: context.getString(R.string.voice_mode_send_failed); delay(1500); continue }
+                notice = null
+                step { answer(text, before) }?.onFailure { message = it.message }
             }
-            if (paused) { phase = VoicePhase.Paused; snapshotFlow { !paused || readyVoice != currentVoice }.first { it }; continue }
-            phase = VoicePhase.Listening; hearing = false; finish[0] = false
-            val heard = step {
-                capture.listen(level = { micLevel.floatValue = it }, onSpeech = { hearing = true }, finishNow = { finish[0] })
-            } ?: continue
-            val wav = heard.getOrElse { close(context.getString(R.string.voice_mode_mic_failed)); return@LaunchedEffect }
-                ?: run { close(context.getString(R.string.voice_mode_idle_end)); return@LaunchedEffect }
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            phase = VoicePhase.Transcribing
-            val transcript = step {
-                val result = api.transcribeAssistantAudio(owner, wav, "voice.wav", "audio/wav")
-                if (TokenStore.assistantOwnerKey() != owner) throw CancellationException("Assistant account changed")
-                if (!result.success) error(result.error?.message ?: context.getString(R.string.assistant_voice_failed))
-                result.data?.get("text")?.jsonPrimitive?.content.orEmpty().trim()
-            } ?: continue
-            val text = transcript.getOrElse { failure ->
-                if (++failures >= 3) { close(failure.message); return@LaunchedEffect }
-                message = failure.message; delay(1500); null
-            } ?: continue
-            if (inventedTranscript(text)) { message = notUnderstood; continue }
-            failures = 0; message = null; heardText = text; caption = ""
-            phase = VoicePhase.Thinking
-            // A new question replaces an answer that is still being written.
-            if (running()) { stopTurn(); withTimeoutOrNull(8_000) { snapshotFlow { running() }.first { !it } } }
-            val before = turns().map { it.id }.toSet()
-            var accepted = false
-            for (attempt in 0 until 20) { if (send(text)) { accepted = true; break }; delay(250) }
-            if (!accepted) { message = lastError() ?: context.getString(R.string.voice_mode_send_failed); delay(1500); continue }
-            step { answer(text, before) }?.onFailure { message = it.message }
+        } finally {
+            device?.release()
         }
     }
 
-    val reduce = reducedMotion()
-    val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
     Dialog(onDismissRequest = { close(null) }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false, dismissOnClickOutside = false)) {
         val view = LocalView.current
         DisposableEffect(view) { view.keepScreenOn = true; onDispose { view.keepScreenOn = false } }
-        Box(
-            Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(palette.background, lerp(palette.background, palette.accentDeep, .35f)))),
+        VoiceModeLayout(
+            title = title,
+            voiceSwitcher = {
+                VoiceDropdown(catalog.voices, catalog.loadError, currentVoice, onOpen = { if (catalog.voices == null && !catalog.loading) catalog.load() }, onRetry = { catalog.load() }, onSelect = ::chooseVoice)
+            },
+            phase = phase,
+            level = when (phase) { VoicePhase.Listening -> micLevel.floatValue; VoicePhase.Speaking -> speakLevel.floatValue; else -> 0f },
+            hearing = hearing,
+            paused = paused,
+            onDevice = onDevice,
+            voiceLabel = com.claudewebui.app.ui.screens.settings.assistantVoiceLabel(currentVoice),
+            whisperReady = whisperReady,
+            speechReady = speechReady,
+            prepareError = prepareError,
+            message = message,
+            notice = notice,
+            heardText = heardText,
+            caption = caption,
+            onOrb = {
+                when (phase) {
+                    VoicePhase.Listening -> if (hearing) { finish[0] = true; listening[0]?.finish() }
+                    VoicePhase.Thinking, VoicePhase.Speaking -> { interrupt(); haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
+                    else -> Unit
+                }
+            },
+            onRetry = { retry++ },
+            onPause = { paused = !paused; if (paused) interrupt() },
+            onClose = { close(null) },
+        )
+    }
+}
+
+/**
+ * What the voice screen shows, without the conversation loop: title and voice
+ * switcher, the orb, status and hint, the engines while preparing, what you
+ * said (live while the device recognizer hears it) and Plum's spoken sentence.
+ */
+@Composable
+internal fun VoiceModeLayout(
+    title: String?,
+    voiceSwitcher: @Composable () -> Unit,
+    phase: VoicePhase,
+    level: Float,
+    hearing: Boolean,
+    paused: Boolean,
+    onDevice: Boolean,
+    voiceLabel: String,
+    whisperReady: Boolean?,
+    speechReady: Boolean?,
+    prepareError: String?,
+    message: String?,
+    notice: String?,
+    heardText: String,
+    caption: String,
+    onOrb: () -> Unit,
+    onRetry: () -> Unit,
+    onPause: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val reduce = reducedMotion()
+    val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
+    Box(
+        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(palette.background, lerp(palette.background, palette.accentDeep, .35f)))),
+    ) {
+        Column(
+            Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(
-                Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 24.dp, vertical = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.voice_mode_new_chat),
-                    style = MaterialTheme.typography.titleMedium, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-                VoiceDropdown(catalog, currentVoice, ::chooseVoice)
-                Spacer(Modifier.weight(1f))
-                val level = when (phase) { VoicePhase.Listening -> micLevel.floatValue; VoicePhase.Speaking -> speakLevel.floatValue; else -> 0f }
-                val orbSource = remember { MutableInteractionSource() }
-                val orbLabel = stringResource(R.string.voice_mode_orb)
-                VoiceOrb(
-                    phase, level, reduce,
-                    Modifier.size(260.dp).semantics { contentDescription = orbLabel }.clickable(orbSource, indication = null) {
-                        when (phase) {
-                            VoicePhase.Listening -> if (hearing) finish[0] = true
-                            VoicePhase.Thinking, VoicePhase.Speaking -> { interrupt(); haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
-                            else -> Unit
-                        }
+            Text(
+                title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.voice_mode_new_chat),
+                style = MaterialTheme.typography.titleMedium, color = palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            voiceSwitcher()
+            Spacer(Modifier.weight(1f))
+            val orbSource = remember { MutableInteractionSource() }
+            val orbLabel = stringResource(R.string.voice_mode_orb)
+            VoiceOrb(
+                phase, level, reduce, failed = prepareError != null || message != null,
+                Modifier.size(260.dp).semantics { contentDescription = orbLabel }.clickable(orbSource, indication = null, onClick = onOrb),
+            )
+            Spacer(Modifier.height(36.dp))
+            val status = when (phase) {
+                VoicePhase.Preparing -> stringResource(
+                    when {
+                        prepareError != null -> R.string.voice_mode_prepare_failed
+                        onDevice -> R.string.voice_mode_preparing_voice
+                        else -> R.string.voice_mode_preparing
                     },
                 )
-                Spacer(Modifier.height(36.dp))
-                val status = when (phase) {
-                    VoicePhase.Preparing -> stringResource(if (prepareError != null) R.string.voice_mode_prepare_failed else R.string.voice_mode_preparing)
-                    VoicePhase.Listening -> stringResource(if (hearing) R.string.voice_mode_listening else R.string.voice_mode_ready)
-                    VoicePhase.Transcribing -> stringResource(R.string.voice_mode_transcribing)
-                    VoicePhase.Thinking -> stringResource(R.string.voice_mode_thinking)
-                    VoicePhase.Speaking -> stringResource(R.string.voice_mode_speaking)
-                    VoicePhase.Paused -> stringResource(R.string.voice_mode_paused)
-                }
-                AnimatedContent(status, transitionSpec = { fadeIn(tween(if (reduce) 0 else 220)) togetherWith fadeOut(tween(if (reduce) 0 else 160)) }, label = "voice_status") { shown ->
-                    Text(shown, style = MaterialTheme.typography.titleLarge, color = palette.text, textAlign = TextAlign.Center)
-                }
-                Spacer(Modifier.height(10.dp))
-                val hint = when (phase) {
-                    VoicePhase.Listening -> if (hearing) stringResource(R.string.voice_mode_hint_finish) else ""
-                    VoicePhase.Thinking, VoicePhase.Speaking -> stringResource(R.string.voice_mode_hint_interrupt)
-                    else -> ""
-                }
-                if (phase == VoicePhase.Preparing) {
-                    // Both engines must be up before the microphone takes your voice.
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        EngineState(stringResource(R.string.voice_mode_engine_whisper), whisperReady, prepareError != null)
-                        EngineState(stringResource(R.string.voice_mode_engine_voice, com.claudewebui.app.ui.screens.settings.assistantVoiceLabel(currentVoice)), speechReady, prepareError != null)
-                        prepareError?.let { failure ->
-                            Text(failure, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, maxLines = 4, overflow = TextOverflow.Ellipsis)
-                            TextButton(onClick = { retry++ }) { Text(stringResource(R.string.voice_mode_retry)) }
-                        }
+                VoicePhase.Listening -> stringResource(if (hearing) R.string.voice_mode_listening else R.string.voice_mode_ready)
+                VoicePhase.Transcribing -> stringResource(R.string.voice_mode_transcribing)
+                VoicePhase.Thinking -> stringResource(R.string.voice_mode_thinking)
+                VoicePhase.Speaking -> stringResource(R.string.voice_mode_speaking)
+                VoicePhase.Paused -> stringResource(R.string.voice_mode_paused)
+            }
+            AnimatedContent(status, transitionSpec = { fadeIn(tween(if (reduce) 0 else 220)) togetherWith fadeOut(tween(if (reduce) 0 else 160)) }, label = "voice_status") { shown ->
+                Text(shown, style = MaterialTheme.typography.titleLarge, color = palette.text, textAlign = TextAlign.Center)
+            }
+            Spacer(Modifier.height(10.dp))
+            val hint = when (phase) {
+                VoicePhase.Listening -> if (hearing) stringResource(R.string.voice_mode_hint_finish) else ""
+                VoicePhase.Thinking, VoicePhase.Speaking -> stringResource(R.string.voice_mode_hint_interrupt)
+                else -> ""
+            }
+            if (phase == VoicePhase.Preparing) {
+                // The engines this session needs must be up before the microphone takes your voice.
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (onDevice) EngineState(stringResource(R.string.voice_mode_engine_device), ready = true, failed = false)
+                    else EngineState(stringResource(R.string.voice_mode_engine_whisper), whisperReady, prepareError != null)
+                    EngineState(stringResource(R.string.voice_mode_engine_voice, voiceLabel), speechReady, prepareError != null)
+                    prepareError?.let { failure ->
+                        Text(failure, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, maxLines = 4, overflow = TextOverflow.Ellipsis)
+                        TextButton(onClick = onRetry) { Text(stringResource(R.string.voice_mode_retry)) }
                     }
-                } else Text(message ?: hint, style = MaterialTheme.typography.bodyMedium, color = if (message != null) MaterialTheme.colorScheme.error else palette.muted, textAlign = TextAlign.Center, minLines = 1, maxLines = 2)
-                Spacer(Modifier.height(20.dp))
-                // What you said, then the sentence Plum is speaking: subtitles for the conversation.
-                Column(Modifier.fillMaxWidth().heightIn(min = 120.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (heardText.isNotBlank()) Text("„$heardText“", style = MaterialTheme.typography.bodyLarge, color = palette.muted, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    if (caption.isNotBlank() && phase == VoicePhase.Speaking) Text(caption, style = MaterialTheme.typography.bodyLarge, color = palette.text, textAlign = TextAlign.Center, maxLines = 5, overflow = TextOverflow.Ellipsis)
                 }
-                Spacer(Modifier.weight(1f))
-                Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                    val pauseSource = remember { MutableInteractionSource() }
-                    FilledTonalIconButton(
-                        onClick = { paused = !paused; if (paused) interrupt() },
-                        modifier = Modifier.size(64.dp).pressScale(pauseSource), interactionSource = pauseSource,
-                    ) {
-                        Icon(if (paused) Icons.Outlined.MicOff else Icons.Outlined.Mic, stringResource(if (paused) R.string.voice_mode_resume else R.string.voice_mode_pause), Modifier.size(28.dp))
-                    }
-                    val closeSource = remember { MutableInteractionSource() }
-                    FilledIconButton(
-                        onClick = { close(null) },
-                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
-                        modifier = Modifier.size(64.dp).pressScale(closeSource), interactionSource = closeSource,
-                    ) { Icon(Icons.Outlined.Close, stringResource(R.string.voice_mode_end), Modifier.size(28.dp)) }
+            } else Text(message ?: notice ?: hint, style = MaterialTheme.typography.bodyMedium, color = if (message != null) MaterialTheme.colorScheme.error else palette.muted, textAlign = TextAlign.Center, minLines = 1, maxLines = 2)
+            Spacer(Modifier.height(20.dp))
+            // What you said, then the sentence Plum is speaking: subtitles for the conversation.
+            Column(Modifier.fillMaxWidth().heightIn(min = 120.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (heardText.isNotBlank()) Text("„$heardText“", style = MaterialTheme.typography.bodyLarge, color = palette.muted, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                if (caption.isNotBlank() && phase == VoicePhase.Speaking) Text(caption, style = MaterialTheme.typography.bodyLarge, color = palette.text, textAlign = TextAlign.Center, maxLines = 5, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.weight(1f))
+            Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                val pauseSource = remember { MutableInteractionSource() }
+                FilledTonalIconButton(
+                    onClick = onPause,
+                    modifier = Modifier.size(64.dp).pressScale(pauseSource), interactionSource = pauseSource,
+                ) {
+                    Icon(if (paused) Icons.Outlined.MicOff else Icons.Outlined.Mic, stringResource(if (paused) R.string.voice_mode_resume else R.string.voice_mode_pause), Modifier.size(28.dp))
                 }
+                val closeSource = remember { MutableInteractionSource() }
+                FilledIconButton(
+                    onClick = onClose,
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
+                    modifier = Modifier.size(64.dp).pressScale(closeSource), interactionSource = closeSource,
+                ) { Icon(Icons.Outlined.Close, stringResource(R.string.voice_mode_end), Modifier.size(28.dp)) }
             }
         }
     }
 }
 
+
 /**
- * The plum orb: layered soft blobs whose edges ripple with the voice. Each
- * phase has its own colours and motion: calm breathing while waiting,
- * following your voice while listening, circling while thinking and pulsing
- * with Plum's speech.
+ * Plum's face: layered soft blobs whose edges ripple with the voice, and two
+ * eyes that say what the voice conversation is doing. Each phase has its own
+ * colours and motion: calm breathing while waiting, eyes wide open while
+ * listening, narrowed while your words are written down, up and away while
+ * thinking, squeezed with every spoken beat, shut while paused. After a
+ * failure the head sinks and the eyes droop.
  */
 @Composable
-private fun VoiceOrb(phase: VoicePhase, level: Float, reduce: Boolean, modifier: Modifier) {
+internal fun VoiceOrb(phase: VoicePhase, level: Float, reduce: Boolean, failed: Boolean = false, modifier: Modifier) {
     val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
     val rose = lerp(palette.accent, palette.red, .45f)
     val (inner, outer) = when (phase) {
@@ -610,9 +744,27 @@ private fun VoiceOrb(phase: VoicePhase, level: Float, reduce: Boolean, modifier:
         val start = withFrameMillis { it }
         while (true) withFrameMillis { time = (it - start) / 1000f }
     }
+    // The eyes: how far they are open, how high they sit (negative = looking
+    // down) and how far the corners droop. A failure overrules the phase.
+    val sad = failed
+    val (open, lift, droop) = when {
+        sad -> Triple(.2f, -.24f, 1f)
+        phase == VoicePhase.Listening -> Triple(1.14f + loud * .22f, .04f, 0f)
+        phase == VoicePhase.Transcribing -> Triple(.4f, -.14f, 0f)
+        phase == VoicePhase.Thinking -> Triple(.68f, .2f, 0f)
+        phase == VoicePhase.Speaking -> Triple(.74f - loud * .16f, .05f, 0f)
+        phase == VoicePhase.Paused -> Triple(.07f, -.02f, 0f)
+        else -> Triple(.7f, .06f, 0f)
+    }
+    val eyeOpen by animateFloatAsState(open, tween(360), label = "face_open")
+    val eyeLift by animateFloatAsState(lift, tween(360), label = "face_lift")
+    val eyeDroop by animateFloatAsState(droop, tween(360), label = "face_droop")
+    // Dark ink on the bright orb of the dark theme, light ink on the deep orb of the light theme.
+    val ink = (if (palette.isLight) Color(0xFFF7F5FB) else Color(0xFF0A0C10)).copy(alpha = .92f)
+    val sag by animateFloatAsState(if (sad) .07f else 0f, tween(420), label = "face_sag")
     Canvas(modifier) {
-        val center = Offset(size.width / 2, size.height / 2)
         val base = size.minDimension * .30f
+        val center = Offset(size.width / 2, size.height / 2 + base * sag)
         val breathe = if (reduce) 0f else sin(time * 1.6f) * .025f
         val swell = 1f + breathe + loud * .32f
         // Glow behind everything.
@@ -635,6 +787,37 @@ private fun VoiceOrb(phase: VoicePhase, level: Float, reduce: Boolean, modifier:
             path.close()
             val colors = when (layer) { 0 -> listOf(b.copy(alpha = .55f), a.copy(alpha = .35f)); 1 -> listOf(a.copy(alpha = .75f), b.copy(alpha = .45f)); else -> listOf(Color.White.copy(alpha = .55f), a) }
             drawPath(path, Brush.radialGradient(colors, center + Offset(-radius * .25f, -radius * .3f), radius * 1.4f))
+        }
+        // The eyes sit on the innermost blob, so the face reads at a glance.
+        val blink = if (reduce || phase == VoicePhase.Paused || sad) 0f else run {
+            val cycle = 5.6f
+            val at = time % cycle
+            if (at < cycle - .26f) 0f else sin((at - (cycle - .26f)) / .26f * PI.toFloat())
+        }
+        val eyeWidth = base * .33f
+        val eyeHeight = (base * .46f * eyeOpen * (1f - blink * .94f)).coerceAtLeast(base * .012f)
+        // Idle glances, a wider look-around while thinking, a small bounce with the voice.
+        val glance = if (reduce) 0f else when {
+            thinking -> sin(time * .9f) * base * .09f
+            phase == VoicePhase.Speaking -> 0f
+            else -> sin(time * .7f) * base * .035f
+        }
+        val bob = if (reduce) 0f else when (phase) {
+            VoicePhase.Speaking -> sin(time * 7f) * base * .022f
+            VoicePhase.Listening -> sin(time * 1.8f) * base * .012f
+            else -> 0f
+        }
+        val eyeY = center.y - base * .02f + base * eyeLift + bob
+        for (side in intArrayOf(-1, 1)) {
+            val eyeX = center.x + side * base * .34f + glance
+            rotate(degrees = eyeDroop * 26f * -side, pivot = Offset(eyeX, eyeY)) {
+                drawRoundRect(
+                    color = ink,
+                    topLeft = Offset(eyeX - eyeWidth / 2f, eyeY - eyeHeight / 2f),
+                    size = Size(eyeWidth, eyeHeight),
+                    cornerRadius = CornerRadius(eyeHeight / 2f, eyeHeight / 2f),
+                )
+            }
         }
         // Thinking: three dots circle the orb.
         if (thinking && !reduce) for (dot in 0 until 3) {
@@ -661,36 +844,49 @@ private fun EngineState(label: String, ready: Boolean?, failed: Boolean) {
 
 /**
  * Voice switcher under the chat title: every OmniVoice and Mistral voice in a
- * dropdown. A choice is saved right away (same as the voice sheet) and warmed
- * before Plum talks with it.
+ * dropdown, grouped by engine; Mistral voices carry their language
+ * („Heidi · Deutsch“). A choice is saved right away (same as the voice sheet)
+ * and warmed before Plum talks with it.
  */
 @Composable
-private fun VoiceDropdown(catalog: com.claudewebui.app.ui.screens.settings.VoiceCatalog, selected: String, onSelect: (String) -> Unit) {
+internal fun VoiceDropdown(
+    voices: List<com.claudewebui.app.data.model.AssistantVoiceOption>?,
+    loadError: String?,
+    selected: String,
+    onOpen: () -> Unit,
+    onRetry: () -> Unit,
+    onSelect: (String) -> Unit,
+    initiallyOpen: Boolean = false,
+) {
     val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
-    var open by remember { mutableStateOf(false) }
+    var open by remember { mutableStateOf(initiallyOpen) }
     Box(Modifier.padding(top = 6.dp)) {
         val source = remember { MutableInteractionSource() }
         AssistChip(
-            onClick = { open = true; if (catalog.voices == null && !catalog.loading) catalog.load() },
+            onClick = { open = true; onOpen() },
             label = { Text(com.claudewebui.app.ui.screens.settings.assistantVoiceLabel(selected), maxLines = 1, overflow = TextOverflow.Ellipsis) },
             leadingIcon = { Icon(Icons.Outlined.RecordVoiceOver, null, Modifier.size(18.dp)) },
             trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, stringResource(R.string.voice_mode_change_voice), Modifier.size(18.dp)) },
             interactionSource = source, modifier = Modifier.pressScale(source),
         )
         DropdownMenu(open, { open = false }, Modifier.heightIn(max = 440.dp)) {
-            val voices = catalog.voices
             when {
-                voices == null && catalog.loadError == null -> DropdownMenuItem(text = { Text(stringResource(R.string.voice_mode_voices_loading)) }, onClick = {}, enabled = false)
-                catalog.loadError != null -> DropdownMenuItem(text = { Text(catalog.loadError.orEmpty(), color = MaterialTheme.colorScheme.error) }, onClick = { catalog.load() })
-                else -> voices.orEmpty().groupBy { if (it.engine == "mistral") "Mistral" else "OmniVoice" }.toSortedMap(compareBy { it != "OmniVoice" }).forEach { (engine, group) ->
-                    Text(engine, style = MaterialTheme.typography.labelMedium, color = palette.muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                    group.forEach { option ->
-                        val chosen = com.claudewebui.app.ui.screens.settings.sameVoice(option.key, selected.ifBlank { com.claudewebui.app.ui.screens.settings.DEFAULT_ASSISTANT_VOICE })
-                        DropdownMenuItem(
-                            text = { Text(option.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            trailingIcon = { if (chosen) Icon(Icons.Outlined.Check, null, tint = palette.accent) },
-                            onClick = { open = false; onSelect(option.key) },
-                        )
+                voices == null && loadError == null -> DropdownMenuItem(text = { Text(stringResource(R.string.voice_mode_voices_loading)) }, onClick = {}, enabled = false)
+                loadError != null -> DropdownMenuItem(text = { Text(loadError, color = MaterialTheme.colorScheme.error) }, onClick = onRetry)
+                else -> {
+                    val omni = voices.orEmpty().filter { it.engine != "mistral" }
+                    val mistral = voices.orEmpty().filter { it.engine == "mistral" }   // server order: German first
+                    listOf(R.string.settings_hub_voice_engine_omni to omni, R.string.settings_hub_voice_engine_mistral to mistral).forEach { (header, group) ->
+                        if (group.isEmpty()) return@forEach
+                        Text(stringResource(header), style = MaterialTheme.typography.labelMedium, color = palette.muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                        group.forEach { option ->
+                            val chosen = com.claudewebui.app.ui.screens.settings.sameVoice(option.key, selected.ifBlank { com.claudewebui.app.ui.screens.settings.DEFAULT_ASSISTANT_VOICE })
+                            DropdownMenuItem(
+                                text = { Text(option.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                trailingIcon = { if (chosen) Icon(Icons.Outlined.Check, null, tint = palette.accent) },
+                                onClick = { open = false; onSelect(option.key) },
+                            )
+                        }
                     }
                 }
             }

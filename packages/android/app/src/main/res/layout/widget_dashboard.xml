@@ -1,0 +1,345 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nested-tile dashboard: hero tile (accent) on the left, a cream and a dark
+    tile above a wide dark tile on the right, footer link below. Used by the
+    limits widget and the three stat widgets; WidgetRenderer hides tiles the
+    cell cannot hold.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="@dimen/widget_pad"
+    android:background="@drawable/widget_container">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <!-- Hero tile -->
+        <LinearLayout
+            android:id="@+id/dash_hero"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="11dp"
+            android:paddingBottom="11dp"
+            android:background="@drawable/widget_tile_hero_terracotta">
+
+            <LinearLayout
+                android:id="@+id/dash_brand_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <ImageView
+                    android:id="@+id/dash_glyph"
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:src="@drawable/widget_glyph_spark"
+                    android:importantForAccessibility="no" />
+
+                <FrameLayout
+                    android:id="@+id/dash_brand_rule"
+                    android:layout_width="1dp"
+                    android:layout_height="16dp"
+                    android:layout_marginStart="9dp"
+                    android:layout_marginEnd="9dp"
+                    android:background="@drawable/widget_rule_hero" />
+
+                <TextView
+                    android:id="@+id/widget_title"
+                    android:layout_width="0dp"
+                    android:layout_height="18dp"
+                    android:layout_weight="1"
+                    android:gravity="center_vertical"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="8sp"
+                    android:autoSizeMaxTextSize="12.5sp"
+                    android:autoSizeStepGranularity="0.5sp"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-medium"
+                    android:textAllCaps="true"
+                    android:letterSpacing="0.06"
+                    android:textColor="@color/widget_text_on_hero"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:text="Plum" />
+
+                <TextView
+                    android:id="@+id/widget_refresh"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="8dp"
+                    android:textSize="13sp"
+                    android:textColor="@color/widget_text_on_hero_muted"
+                    android:text="↻" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/dash_hero_label"
+                android:layout_width="match_parent"
+                android:layout_height="14dp"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="7sp"
+                android:autoSizeMaxTextSize="9.5sp"
+                android:autoSizeStepGranularity="0.5sp"
+                android:textSize="@dimen/widget_label_size"
+                android:fontFamily="sans-serif-medium"
+                android:textAllCaps="true"
+                android:letterSpacing="0.14"
+                android:textColor="@color/widget_text_on_hero_muted"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:text="" />
+
+            <TextView
+                android:id="@+id/dash_hero_value"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center_vertical|start"
+                android:includeFontPadding="false"
+                android:textStyle="bold"
+                android:textColor="@color/widget_text_on_hero"
+                android:maxLines="1"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="12sp"
+                android:autoSizeMaxTextSize="64sp"
+                android:autoSizeStepGranularity="1sp"
+                android:text="—" />
+
+            <TextView
+                android:id="@+id/dash_hero_sub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="@color/widget_text_on_hero"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:text="" />
+
+            <ProgressBar
+                android:id="@+id/dash_hero_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="8dp"
+                android:minHeight="8dp"
+                android:maxHeight="8dp"
+                android:layout_marginTop="6dp"
+                android:max="100"
+                android:progress="0"
+                android:progressDrawable="@drawable/widget_progress_hero" />
+        </LinearLayout>
+
+        <!-- Side column -->
+        <LinearLayout
+            android:id="@+id/dash_side"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1.06"
+            android:layout_marginStart="@dimen/widget_gap"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:id="@+id/dash_cream"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1.06"
+                    android:orientation="vertical"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="10dp"
+                    android:paddingTop="9dp"
+                    android:paddingBottom="8dp"
+                    android:background="@drawable/widget_tile_cream">
+
+                    <TextView
+                        android:id="@+id/dash_cream_label"
+                        android:layout_width="match_parent"
+                        android:layout_height="14dp"
+                        android:gravity="center_vertical"
+                        android:autoSizeTextType="uniform"
+                        android:autoSizeMinTextSize="7sp"
+                        android:autoSizeMaxTextSize="9.5sp"
+                        android:autoSizeStepGranularity="0.5sp"
+                        android:textSize="@dimen/widget_label_size"
+                        android:textStyle="bold"
+                        android:textAllCaps="true"
+                        android:letterSpacing="0.06"
+                        android:textColor="@color/widget_text_on_cream"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:text="" />
+
+                    <TextView
+                        android:id="@+id/dash_cream_value"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical|start"
+                        android:includeFontPadding="false"
+                        android:textStyle="bold"
+                        android:textColor="@color/widget_text_on_cream"
+                        android:maxLines="1"
+                        android:autoSizeTextType="uniform"
+                        android:autoSizeMinTextSize="12sp"
+                        android:autoSizeMaxTextSize="44sp"
+                        android:autoSizeStepGranularity="1sp"
+                        android:text="—" />
+
+                    <TextView
+                        android:id="@+id/dash_cream_sub"
+                        android:layout_width="match_parent"
+                        android:layout_height="16dp"
+                        android:gravity="center_vertical"
+                        android:autoSizeTextType="uniform"
+                        android:autoSizeMinTextSize="8sp"
+                        android:autoSizeMaxTextSize="11.5sp"
+                        android:autoSizeStepGranularity="0.5sp"
+                        android:textSize="11.5sp"
+                        android:textColor="@color/widget_text_on_cream_muted"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:text="" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/dash_dark"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginStart="@dimen/widget_gap"
+                    android:orientation="vertical"
+                    android:paddingStart="11dp"
+                    android:paddingEnd="9dp"
+                    android:paddingTop="9dp"
+                    android:paddingBottom="8dp"
+                    android:background="@drawable/widget_tile_dark">
+
+                    <TextView
+                        android:id="@+id/dash_dark_label"
+                        android:layout_width="match_parent"
+                        android:layout_height="14dp"
+                        android:gravity="center_vertical"
+                        android:autoSizeTextType="uniform"
+                        android:autoSizeMinTextSize="7sp"
+                        android:autoSizeMaxTextSize="9.5sp"
+                        android:autoSizeStepGranularity="0.5sp"
+                        android:textSize="@dimen/widget_label_size"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="true"
+                        android:letterSpacing="0.06"
+                        android:textColor="@color/widget_text_muted"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:text="" />
+
+                    <TextView
+                        android:id="@+id/dash_dark_value"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical|start"
+                        android:includeFontPadding="false"
+                        android:textStyle="bold"
+                        android:textColor="@color/widget_text_on_dark"
+                        android:maxLines="2"
+                        android:lineSpacingMultiplier="0.95"
+                        android:autoSizeTextType="uniform"
+                        android:autoSizeMinTextSize="11sp"
+                        android:autoSizeMaxTextSize="32sp"
+                        android:autoSizeStepGranularity="1sp"
+                        android:text="—" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/dash_wide"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="@dimen/widget_gap"
+                android:orientation="vertical"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="9dp"
+                android:paddingBottom="8dp"
+                android:background="@drawable/widget_tile_dark">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <ImageView
+                        android:id="@+id/dash_wide_dot"
+                        android:layout_width="9dp"
+                        android:layout_height="9dp"
+                        android:src="@drawable/widget_dot"
+                        android:importantForAccessibility="no" />
+
+                    <FrameLayout
+                        android:layout_width="1dp"
+                        android:layout_height="11dp"
+                        android:layout_marginStart="7dp"
+                        android:layout_marginEnd="7dp"
+                        android:background="@drawable/widget_rule" />
+
+                    <TextView
+                        android:id="@+id/dash_wide_label"
+                        android:layout_width="0dp"
+                        android:layout_height="14dp"
+                        android:gravity="center_vertical"
+                        android:autoSizeTextType="uniform"
+                        android:autoSizeMinTextSize="7sp"
+                        android:autoSizeMaxTextSize="9.5sp"
+                        android:autoSizeStepGranularity="0.5sp"
+                        android:layout_weight="1"
+                        android:textSize="@dimen/widget_label_size"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="true"
+                        android:letterSpacing="0.12"
+                        android:textColor="@color/widget_text_muted"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:text="" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/dash_wide_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:gravity="center_vertical|start"
+                    android:includeFontPadding="false"
+                    android:textStyle="bold"
+                    android:textColor="@color/widget_text_on_dark"
+                    android:maxLines="1"
+                    android:autoSizeTextType="uniform"
+                    android:autoSizeMinTextSize="11sp"
+                    android:autoSizeMaxTextSize="34sp"
+                    android:autoSizeStepGranularity="1sp"
+                    android:text="—" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <include layout="@layout/widget_footer" />
+</LinearLayout>

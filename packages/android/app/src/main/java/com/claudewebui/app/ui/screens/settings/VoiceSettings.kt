@@ -17,6 +17,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,11 +50,30 @@ private fun normalizeVoice(value: String) = value.trim().replace('-', ' ').lower
 internal fun sameVoice(a: String, b: String): Boolean =
     a == b || (!a.startsWith("mistral:") && !b.startsWith("mistral:") && normalizeVoice(a) == normalizeVoice(b))
 
-/** Human label for a stored voice value, without needing the voice list. */
+/** Mistral's German preset; the server speaks with it when a stored Mistral voice no longer exists. */
+internal const val MISTRAL_GERMAN_VOICE = "mistral:01a0f318-4ae8-7446-a3e4-45aa092940b2"
+
+/**
+ * Names of the Mistral voices from the last loaded voice list, so every place
+ * that shows the stored `mistral:<uuid>` reads „Heidi · Deutsch“ instead.
+ */
+internal object MistralVoiceNames {
+    private val names = mutableStateMapOf<String, String>()
+    fun learn(voices: List<AssistantVoiceOption>) { voices.forEach { if (it.engine == "mistral" && it.label.isNotBlank()) names[it.key] = it.label } }
+    operator fun get(key: String): String? = names[key]
+}
+
+private val UUID_LIKE = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+/** Human label for a stored voice value; Mistral ids are named from the voice list when it was loaded. */
 @Composable
 fun assistantVoiceLabel(stored: String): String = when {
     stored.isBlank() -> stringResource(R.string.settings_hub_voice_default)
-    stored.startsWith("mistral:") -> stored.removePrefix("mistral:").replace('_', ' ') + " · Mistral"
+    stored.startsWith("mistral:") -> MistralVoiceNames[stored]
+        ?: if (stored == MISTRAL_GERMAN_VOICE) "Heidi · Deutsch"
+        else stored.removePrefix("mistral:").let { id ->
+            if (UUID_LIKE.matches(id)) stringResource(R.string.voice_mistral_generic) else id.replace('_', ' ') + " · Mistral"
+        }
     else -> stored
 }
 
@@ -89,7 +109,7 @@ class VoiceCatalog internal constructor(
             try {
                 val response = api.getAssistantVoices()
                 if (TokenStore.assistantOwnerKey() != owner) return@launch
-                if (response.success) voices = response.data.orEmpty().filter { it.key.isNotBlank() }
+                if (response.success) voices = response.data.orEmpty().filter { it.key.isNotBlank() }.also(MistralVoiceNames::learn)
                 else loadError = response.error?.message ?: context.getString(R.string.assistant_voice_failed)
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -180,7 +200,7 @@ fun VoiceChoiceGroups(
             if (!known && selected.isNotBlank() && catalog.loadError == null) SettingsGroup {
                 item(hasIcon = false) {
                     SettingsOptionRow(
-                        title = stringResource(R.string.settings_hub_voice_unavailable, selected.removePrefix("mistral:")),
+                        title = stringResource(R.string.settings_hub_voice_unavailable, assistantVoiceLabel(selected)),
                         selected = true,
                         enabled = enabled,
                         onClick = {},
@@ -211,6 +231,36 @@ fun VoiceChoiceGroups(
                 }
             }
             if (catalog.loading) CircularProgressIndicator(Modifier.padding(start = 16.dp))
+        }
+    }
+}
+
+/**
+ * Where the voice chat recognises speech: on the device (Android's
+ * recognizer, live text) or on the server (Whisper on Vocarium). Saved as
+ * `speechRecognition`; anything but "server" counts as the device.
+ */
+@Composable
+fun SpeechRecognitionGroup(selected: String, enabled: Boolean, onSelect: (String) -> Unit) {
+    val server = selected == "server"
+    SettingsGroup(header = stringResource(R.string.voice_recognition_title), footer = stringResource(R.string.voice_recognition_footer)) {
+        item(hasIcon = false) {
+            SettingsOptionRow(
+                title = stringResource(R.string.voice_recognition_device),
+                subtitle = stringResource(R.string.voice_recognition_device_hint),
+                selected = !server,
+                enabled = enabled,
+                onClick = { if (server) onSelect("device") },
+            )
+        }
+        item(hasIcon = false) {
+            SettingsOptionRow(
+                title = stringResource(R.string.voice_recognition_server),
+                subtitle = stringResource(R.string.voice_recognition_server_hint),
+                selected = server,
+                enabled = enabled,
+                onClick = { if (!server) onSelect("server") },
+            )
         }
     }
 }

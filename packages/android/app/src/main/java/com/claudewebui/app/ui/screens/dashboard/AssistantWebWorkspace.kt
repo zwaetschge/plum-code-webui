@@ -100,6 +100,15 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
     } }
     val client = remember { OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build() }
     fun bundledHtml(route: String): String {
+        // TODO(security): the raw JWT is exposed to the page as
+        // window.__PLUM_ANDROID__.token because the bundled frontend's Socket.IO
+        // handshake (services/socket.ts) and auth store need it, and the native
+        // shouldInterceptRequest proxy below can only authenticate HTTP(S)
+        // resource requests — it cannot inject headers into the WebSocket
+        // upgrade. All plain fetch/XHR traffic is already authenticated natively,
+        // so the only remaining consumer is the socket handshake. The page is
+        // origin-bound and loaded from bundled assets (no file/content access),
+        // which keeps the exposure scoped to this audited first-party workspace.
         val token = requireNotNull(TokenStore.getToken())
         val config = JSONObject().put("apiBase", base).put("token", token).toString().replace("<", "\\u003c")
         val prelude = """
@@ -189,7 +198,10 @@ private fun WebWorkspaceAccount(owner: String, path: String, area: String, onAre
                 WebView(ctx).apply {
                     webView = this
                     settings.javaScriptEnabled = true; settings.domStorageEnabled = true
-                    settings.allowFileAccess = false; settings.allowContentAccess = true
+                    // The workspace is served entirely from bundled assets and the
+                    // native shouldInterceptRequest proxy; it never needs file:// or
+                    // content:// access, so both stay off to shrink the attack surface.
+                    settings.allowFileAccess = false; settings.allowContentAccess = false
                     settings.javaScriptCanOpenWindowsAutomatically = false; settings.setSupportMultipleWindows(false)
                     settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)

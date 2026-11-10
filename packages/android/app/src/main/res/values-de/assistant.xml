@@ -138,6 +138,9 @@
     <string name="assistant_preferences">Weitere Einstellungen</string>
     <string name="assistant_concise">Kurze Antworten</string>
     <string name="assistant_suggestions">Vorgeschlagene Prompts</string>
+    <string name="assistant_answer_display">Darstellung</string>
+    <string name="assistant_answer_display_standard">Standard</string>
+    <string name="assistant_answer_display_simple">Einfach</string>
     <string name="assistant_voice_history">Frühere Sprachaufnahmen berücksichtigen</string>
     <string name="assistant_web_search">Automatische Websuche</string>
     <string name="assistant_voice_chat">Sprachfunktionen</string>
@@ -314,4 +317,9 @@
     <string name="assistant_delete_chat">Löschen</string>
     <string name="assistant_delete_chat_title">Chat löschen?</string>
     <string name="assistant_delete_chat_text">Dadurch wird «%1$s» endgültig gelöscht, mit allen Antworten und Versionen. Gespeicherte Erinnerungen bleiben erhalten.</string>
+    <!-- Modellmenü des Plum-Chats („Modelle im Chat“) -->
+    <string name="assistant_chat_models">Modelle im Chat</string>
+    <string name="assistant_chat_models_search">Chat-Modell suchen</string>
+    <string name="assistant_chat_models_loading">Modelle werden geladen …</string>
+    <string name="assistant_chat_models_none">Noch keine Modellanbieter verbunden. Lege sie unter Einstellungen → Modellanbieter an.</string>
 </resources>

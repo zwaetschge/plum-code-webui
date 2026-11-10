@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="auth_authenticate_94a01">Authenticate</string>
+    <string name="auth_cleartext_warning">Unencrypted HTTP connection. Only use this on a trusted local network.</string>
     <string name="auth_back_to_login_b5cd3">Back to Login</string>
     <string name="auth_cancel_77dfd">Cancel</string>
     <string name="auth_change_64fbd">Change</string>

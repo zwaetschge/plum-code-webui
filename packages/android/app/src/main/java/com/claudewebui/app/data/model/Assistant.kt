@@ -31,13 +31,21 @@ data class AssistantMatrixLogin(val username: String, val password: String)
 data class AssistantMatrixSend(val commandId: String, val type: String, val content: JsonObject)
 
 @Serializable
-data class AssistantApiProvider(val id: String, val name: String, val protocol: String, val models: List<String> = emptyList())
+data class AssistantApiProvider(
+    val id: String,
+    val name: String,
+    val protocol: String,
+    /** In the user's menu order; the default model comes first. */
+    val models: List<String> = emptyList(),
+    /** The provider of the chat default model (listed first by the server). */
+    val default: Boolean = false,
+)
 @Serializable
 data class AssistantSourceVersion(val id: String, val revision: Long)
 @Serializable
 data class AssistantApiUsage(val input: Long, val output: Long, val cached: Long, val cacheWrite: Long, val costUsd: Double? = null)
 @Serializable
-data class AssistantApiTurn(val id: String, val seq: Long, val prompt: String, val response: String, val status: String, val error: String? = null, val model: String, val providerId: String? = null, val profileId: String? = null, val profileRevision: Long? = null, val sourceVersions: List<AssistantSourceVersion> = emptyList(), val imageAssetIds: List<String> = emptyList(), val usage: AssistantApiUsage? = null, val createdAt: String, val ui: JsonObject? = null, val uiError: String? = null, val uiPending: Boolean = false, val versions: List<String> = emptyList(), val sources: List<AssistantChatSource> = emptyList(), val comparisons: List<AssistantChatComparison> = emptyList(), val toolEvents: List<AssistantChatToolEvent> = emptyList(), val contextReceipt: JsonObject? = null, val compaction: JsonObject? = null, val webSources: List<AssistantWebSource> = emptyList())
+data class AssistantApiTurn(val id: String, val seq: Long, val prompt: String, val response: String, val status: String, val error: String? = null, val model: String, val providerId: String? = null, val profileId: String? = null, val profileRevision: Long? = null, val sourceVersions: List<AssistantSourceVersion> = emptyList(), val imageAssetIds: List<String> = emptyList(), val usage: AssistantApiUsage? = null, val createdAt: String, val ui: JsonObject? = null, val uiError: String? = null, val uiPending: Boolean = false, val followups: List<String> = emptyList(), val uiResults: JsonObject? = null, val versions: List<String> = emptyList(), val sources: List<AssistantChatSource> = emptyList(), val comparisons: List<AssistantChatComparison> = emptyList(), val toolEvents: List<AssistantChatToolEvent> = emptyList(), val contextReceipt: JsonObject? = null, val compaction: JsonObject? = null, val webSources: List<AssistantWebSource> = emptyList())
 @Serializable
 data class AssistantApiHistory(val chat: AssistantResource, val turns: List<AssistantApiTurn> = emptyList())
 @Serializable

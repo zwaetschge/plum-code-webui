@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Runtime for model-authored Dynamic UI tiles (type "widget").
+      Same file in the WebUI (iframe sandbox="allow-scripts", served with a CSP
+      header that adds `sandbox`) and on Android (WebView asset, network blocked
+      by the host). The tile never gets network access: data arrives through
+      plum.props / plum.live from the host, actions leave through plum.* calls
+      that the host validates. Keep in sync with docs/dynamic-ui.md "Eigene Kacheln".
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src data: https://fonts.gstatic.com; img-src data: blob:; media-src data: blob:; worker-src blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Plum-Kachel</title>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+    />
+    <style id="plum-base">
+      :root {
+        color-scheme: dark;
+        --plum-font:
+          'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+          sans-serif;
+        --plum-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        --plum-radius: 14px;
+        --plum-bg: transparent;
+        --plum-surface: rgba(255, 255, 255, 0.06);
+        --plum-surface-2: rgba(255, 255, 255, 0.1);
+        --plum-border: rgba(255, 255, 255, 0.14);
+        --plum-text: #eef0f6;
+        --plum-muted: #a6abbd;
+        --plum-accent: #5eead4;
+        --plum-accent-text: #062a26;
+        --plum-good: #4ade80;
+        --plum-bad: #f87171;
+        --plum-warn: #fbbf24;
+        --plum-chart-1: #5eead4;
+        --plum-chart-2: #a78bfa;
+        --plum-chart-3: #f472b6;
+        --plum-chart-4: #fbbf24;
+        --plum-chart-5: #60a5fa;
+        --plum-chart-6: #f97316;
+      }
+      :root[data-theme='light'] {
+        color-scheme: light;
+        --plum-surface: rgba(255, 255, 255, 0.7);
+        --plum-surface-2: rgba(15, 23, 42, 0.06);
+        --plum-border: rgba(15, 23, 42, 0.12);
+        --plum-text: #141824;
+        --plum-muted: #5b6275;
+        --plum-accent: #0f9f8f;
+        --plum-accent-text: #ffffff;
+        --plum-good: #16a34a;
+        --plum-bad: #dc2626;
+        --plum-warn: #b45309;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--plum-bg);
+        color: var(--plum-text);
+        font: 14px/1.5 var(--plum-font);
+        -webkit-text-size-adjust: 100%;
+        /* Android WebView would draw a blue box around every tapped control. */
+        -webkit-tap-highlight-color: transparent;
+      }
+      body {
+        padding: 16px;
+        overflow-wrap: anywhere;
+      }
+      h1,
+      h2,
+      h3,
+      h4 {
+        margin: 0 0 0.5em;
+        line-height: 1.25;
+        font-weight: 650;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      h2 {
+        font-size: 17px;
+      }
+      h3 {
+        font-size: 15px;
+      }
+      p {
+        margin: 0 0 0.75em;
+      }
+      small,
+      .muted {
+        color: var(--plum-muted);
+      }
+      a {
+        color: var(--plum-accent);
+      }
+      /* Neutral by default (models restyle buttons freely); .primary is the accent action. */
+      button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        font: inherit;
+        font-weight: 600;
+        color: var(--plum-text);
+        background: var(--plum-surface-2);
+        border: 1px solid var(--plum-border);
+        border-radius: 10px;
+        padding: 8px 14px;
+        min-height: 38px;
+        cursor: pointer;
+        transition:
+          transform 0.12s ease,
+          filter 0.12s ease,
+          background-color 0.12s ease;
+      }
+      button:hover {
+        filter: brightness(1.08);
+      }
+      button:active {
+        transform: scale(0.97);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      button.primary,
+      button[data-variant='primary'],
+      button[type='submit'] {
+        color: var(--plum-accent-text);
+        background: var(--plum-accent);
+        border-color: transparent;
+      }
+      input,
+      select,
+      textarea {
+        font: inherit;
+        color: var(--plum-text);
+        background: var(--plum-surface-2);
+        border: 1px solid var(--plum-border);
+        border-radius: 10px;
+        padding: 8px 10px;
+        min-height: 38px;
+        max-width: 100%;
+      }
+      input[type='range'],
+      input[type='checkbox'],
+      input[type='radio'],
+      progress {
+        accent-color: var(--plum-accent);
+        min-height: auto;
+        padding: 0;
+        background: none;
+        border: 0;
+      }
+      input[type='range'] {
+        width: 100%;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-variant-numeric: tabular-nums;
+      }
+      th,
+      td {
+        padding: 7px 8px;
+        border-bottom: 1px solid var(--plum-border);
+        text-align: left;
+      }
+      th {
+        color: var(--plum-muted);
+        font-weight: 600;
+      }
+      code,
+      pre {
+        font-family: var(--plum-mono);
+      }
+      .card {
+        background: var(--plum-surface);
+        border: 1px solid var(--plum-border);
+        border-radius: var(--plum-radius);
+        padding: 12px 14px;
+      }
+      :focus-visible {
+        outline: 2px solid var(--plum-accent);
+        outline-offset: 2px;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      (() => {
+        'use strict';
+        // Captured before tile code runs, so it cannot swap the channel.
+        const bridge =
+          typeof window.PlumAndroid === 'object' &&
+          window.PlumAndroid &&
+          typeof window.PlumAndroid.postMessage === 'function'
+            ? window.PlumAndroid
+            : null;
+        const hostWindow = window.parent;
+        const toHost = (message) => {
+          try {
+            if (bridge) bridge.postMessage(JSON.stringify(message));
+            else hostWindow.postMessage(message, '*');
+          } catch {
+            /* host gone */
+          }
+        };
+        const text = (value, max) => String(value ?? '').slice(0, max);
+
+        let errors = 0;
+        const report = (error) => {
+          if (errors++ >= 3) return;
+          const message =
+            error && typeof error === 'object' && 'message' in error ? error.message : error;
+          toHost({ plum: 'error', message: text(message, 300) });
+        };
+        addEventListener('error', (event) => report(event.error || event.message));
+        addEventListener('unhandledrejection', (event) => report(event.reason));
+
+        const listeners = { live: [], theme: [], state: [], display: [] };
+        const emit = (kind, value) => {
+          for (const fn of listeners[kind].slice()) {
+            try {
+              fn(value);
+            } catch (error) {
+              report(error);
+            }
+          }
+        };
+        let state = {};
+        let rendered = false;
+        const images = new Map();
+        let imageSeq = 0;
+        let imageCount = 0;
+
+        const plum = {
+          version: 1,
+          props: {},
+          live: {},
+          theme: { mode: 'dark' },
+          display: 'inline',
+          locale: 'de-CH',
+          on(kind, fn) {
+            if (!listeners[kind] || typeof fn !== 'function') return () => {};
+            listeners[kind].push(fn);
+            return () => {
+              const list = listeners[kind];
+              const index = list.indexOf(fn);
+              if (index >= 0) list.splice(index, 1);
+            };
+          },
+          /** Shallow-merges into plum.state and saves it with the message (max 32 KB). */
+          setState(next) {
+            const value = typeof next === 'function' ? next(state) : next;
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+            const merged = { ...state, ...value };
+            const json = JSON.stringify(merged);
+            if (json.length > 32000) {
+              report(new Error('plum.setState: Zustand grösser als 32 KB'));
+              return;
+            }
+            state = JSON.parse(json);
+            toHost({ plum: 'state', value: state });
+            emit('state', state);
+          },
+          sendMessage(message) {
+            const value = text(message, 2000).trim();
+            if (value) toHost({ plum: 'sendMessage', text: value });
+          },
+          prefill(message) {
+            toHost({ plum: 'prefill', text: text(message, 2000) });
+          },
+          copy(value) {
+            toHost({ plum: 'copy', text: text(value, 20000) });
+          },
+          openUrl(url) {
+            if (/^https:\/\//i.test(String(url))) toHost({ plum: 'openUrl', url: text(url, 2000) });
+          },
+          openEntity(title, lang) {
+            toHost({
+              plum: 'openEntity',
+              title: text(title, 200),
+              lang: lang ? text(lang, 3) : undefined,
+            });
+          },
+          /** data: URL of a public https image, loaded by the host through Plum's image proxy. */
+          image(url) {
+            return new Promise((resolve, reject) => {
+              if (!/^https:\/\//i.test(String(url)))
+                return reject(new Error('plum.image: https-URL erwartet'));
+              if (imageCount++ >= 24) return reject(new Error('plum.image: höchstens 24 Bilder'));
+              const id = ++imageSeq;
+              images.set(id, { resolve, reject });
+              toHost({ plum: 'image', id, url: text(url, 2000) });
+              setTimeout(() => {
+                if (!images.has(id)) return;
+                images.delete(id);
+                reject(new Error('plum.image: Zeitüberschreitung'));
+              }, 20000);
+            });
+          },
+          /** Fetches a live input again (after a failure). */
+          refresh(name) {
+            toHost({ plum: 'refresh', name: text(name, 40) });
+          },
+          requestFullscreen() {
+            toHost({ plum: 'display', value: 'fullscreen' });
+          },
+          exitFullscreen() {
+            toHost({ plum: 'display', value: 'inline' });
+          },
+          format: Object.freeze({
+            number(value, digits = 2) {
+              return new Intl.NumberFormat('de-CH', { maximumFractionDigits: digits }).format(
+                Number(value)
+              );
+            },
+            currency(value, code = 'CHF', digits) {
+              return new Intl.NumberFormat('de-CH', {
+                style: 'currency',
+                currency: code,
+                ...(digits === undefined
+                  ? {}
+                  : { minimumFractionDigits: digits, maximumFractionDigits: digits }),
+              }).format(Number(value));
+            },
+            percent(value, digits = 1) {
+              return (
+                new Intl.NumberFormat('de-CH', { maximumFractionDigits: digits }).format(
+                  Number(value)
+                ) + ' %'
+              );
+            },
+            date(value, options = { day: 'numeric', month: 'short', year: 'numeric' }) {
+              return new Intl.DateTimeFormat('de-CH', options).format(new Date(value));
+            },
+          }),
+        };
+        Object.defineProperty(plum, 'state', { get: () => state, enumerable: true });
+        window.plum = plum;
+
+        // Sandboxed tiles have no storage of their own; keep localStorage use
+        // working (and saved with the message) through plum.state.__storage.
+        const makeStorage = (persist) => {
+          let memory = {};
+          const read = () => (persist ? { ...(state.__storage || {}) } : memory);
+          const write = (data) => {
+            if (persist) plum.setState({ __storage: data });
+            else memory = data;
+          };
+          return {
+            get length() {
+              return Object.keys(read()).length;
+            },
+            key: (index) => Object.keys(read())[index] ?? null,
+            getItem: (key) => (Object.hasOwn(read(), String(key)) ? read()[String(key)] : null),
+            setItem: (key, value) => write({ ...read(), [String(key)]: String(value) }),
+            removeItem: (key) => {
+              const data = read();
+              delete data[String(key)];
+              write(data);
+            },
+            clear: () => write({}),
+          };
+        };
+        try {
+          Object.defineProperty(window, 'localStorage', {
+            value: makeStorage(true),
+            configurable: true,
+          });
+          Object.defineProperty(window, 'sessionStorage', {
+            value: makeStorage(false),
+            configurable: true,
+          });
+        } catch {
+          /* keep the native (throwing) objects */
+        }
+
+        let lastHeight = 0;
+        // The content's own height. The root's scrollHeight never drops below the
+        // frame itself, so it only counts when the content overflows the frame;
+        // otherwise a tile could grow but never shrink. Body children also count
+        // (positioned layers that fill the frame keep it from collapsing).
+        const measure = () => {
+          const root = document.documentElement;
+          const body = document.body;
+          let height = body ? body.scrollHeight : 0;
+          if (root.scrollHeight > root.clientHeight + 1)
+            height = Math.max(height, root.scrollHeight);
+          if (body)
+            for (const child of body.children) {
+              const box = child.getBoundingClientRect();
+              if (box.width || box.height) height = Math.max(height, box.bottom + window.scrollY);
+            }
+          height = Math.ceil(height);
+          if (Math.abs(height - lastHeight) > 1) {
+            lastHeight = height;
+            toHost({ plum: 'height', value: height });
+          }
+        };
+        new ResizeObserver(measure).observe(document.documentElement);
+
+        const applyTheme = (theme) => {
+          const mode = theme && theme.mode === 'light' ? 'light' : 'dark';
+          plum.theme = { ...(theme || {}), mode };
+          const root = document.documentElement;
+          root.dataset.theme = mode;
+          const vars = (theme && theme.vars) || {};
+          for (const [name, value] of Object.entries(vars))
+            if (
+              /^--plum-[a-z0-9-]{1,40}$/.test(name) &&
+              typeof value === 'string' &&
+              value.length < 200
+            )
+              root.style.setProperty(name, value);
+        };
+
+        const render = (message) => {
+          rendered = true;
+          plum.props = message.props && typeof message.props === 'object' ? message.props : {};
+          plum.live = message.live && typeof message.live === 'object' ? message.live : {};
+          state = message.state && typeof message.state === 'object' ? message.state : {};
+          plum.display = message.display === 'fullscreen' ? 'fullscreen' : 'inline';
+          applyTheme(message.theme);
+          const parsed = new DOMParser().parseFromString(String(message.html || ''), 'text/html');
+          if (parsed.title) document.title = parsed.title;
+          // Styles of the tile's <head>; anything loading from the network is blocked anyway.
+          for (const node of [...parsed.head.querySelectorAll('style')])
+            document.head.append(document.importNode(node, true));
+          // Parsed scripts never run when moved; each is re-created in place.
+          // Head scripts run first, then body scripts in document order, like a page load.
+          const fresh = (script) => {
+            const element = document.createElement('script');
+            const type = script.getAttribute('type');
+            // module and data blocks (application/json …) keep their type.
+            if (type) element.type = type;
+            element.textContent = script.textContent || '';
+            return element;
+          };
+          const headScripts = [...parsed.head.querySelectorAll('script')];
+          headScripts.forEach((script) => script.remove());
+          const bodyScripts = [...parsed.body.querySelectorAll('script')];
+          bodyScripts.forEach((script) => script.replaceWith(parsed.createComment('plum-script')));
+          for (const node of [...parsed.body.childNodes])
+            document.body.append(document.importNode(node, true));
+          for (const script of headScripts) document.head.append(fresh(script));
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
+          const marks = [];
+          for (let node = walker.nextNode(); node; node = walker.nextNode())
+            if (node.nodeValue === 'plum-script') marks.push(node);
+          bodyScripts.forEach((script, index) => {
+            const mark = marks[index];
+            if (mark) mark.replaceWith(fresh(script));
+            else document.body.append(fresh(script));
+          });
+          // Tiles often wait for these; the page itself loaded long ago.
+          document.dispatchEvent(new Event('DOMContentLoaded', { bubbles: true }));
+          window.dispatchEvent(new Event('load'));
+          new ResizeObserver(measure).observe(document.body);
+          measure();
+          toHost({ plum: 'rendered' });
+        };
+
+        const handle = (message) => {
+          if (!message || typeof message !== 'object' || typeof message.plum !== 'string') return;
+          if (message.plum === 'render') {
+            if (!rendered) {
+              try {
+                render(message);
+              } catch (error) {
+                report(error);
+              }
+            }
+            return;
+          }
+          if (!rendered) return;
+          if (message.plum === 'image') {
+            const waiting = images.get(message.id);
+            if (!waiting) return;
+            images.delete(message.id);
+            if (
+              typeof message.dataUrl === 'string' &&
+              /^data:image\/(png|jpeg|gif|webp|avif|bmp);base64,/.test(message.dataUrl)
+            )
+              waiting.resolve(message.dataUrl);
+            else waiting.reject(new Error(text(message.error || 'Bild nicht verfügbar', 200)));
+          } else if (message.plum === 'live') {
+            plum.live = message.live && typeof message.live === 'object' ? message.live : {};
+            emit('live', plum.live);
+          } else if (message.plum === 'theme') {
+            applyTheme(message.theme);
+            emit('theme', plum.theme);
+          } else if (message.plum === 'display') {
+            plum.display = message.value === 'fullscreen' ? 'fullscreen' : 'inline';
+            emit('display', plum.display);
+          } else return;
+          // Off-screen frames get no ResizeObserver callbacks until they are
+          // visible; measure here so the host sizes them before they scroll in.
+          measure();
+          setTimeout(measure, 80);
+        };
+        // Android calls this through evaluateJavascript; the WebUI posts messages.
+        window.__plumHost = (message) => {
+          try {
+            handle(typeof message === 'string' ? JSON.parse(message) : message);
+          } catch (error) {
+            report(error);
+          }
+        };
+        addEventListener('message', (event) => {
+          if (!bridge && event.source === hostWindow) handle(event.data);
+        });
+        toHost({ plum: 'ready' });
+      })();
+    </script>
+  </body>
+</html>

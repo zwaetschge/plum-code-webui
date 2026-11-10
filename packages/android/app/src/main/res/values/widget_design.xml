@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home-screen widget design system: nested tiles on a near-black container. -->
+<resources>
+    <color name="widget_container">#F2141216</color>
+    <color name="widget_container_translucent">#A6141216</color>
+    <color name="widget_container_stroke">#1FFFFFFF</color>
+    <color name="widget_tile_dark">#FF242029</color>
+    <color name="widget_tile_dark_stroke">#14FFFFFF</color>
+    <color name="widget_tile_cream">#FFF3ECE1</color>
+    <color name="widget_rule">#2EFFFFFF</color>
+
+    <color name="widget_text_on_dark">#FFF5F1EA</color>
+    <color name="widget_text_muted">#FFA39CA6</color>
+    <color name="widget_text_faint">#FF77707D</color>
+    <color name="widget_text_on_cream">#FF1A1A1A</color>
+    <color name="widget_text_on_cream_muted">#FF7C746A</color>
+    <color name="widget_text_on_hero">#FFFFF7EE</color>
+    <color name="widget_text_on_hero_muted">#C7FFF1E6</color>
+
+    <color name="widget_accent_terracotta">#FFD97757</color>
+    <color name="widget_accent_violet">#FFA78BFA</color>
+    <color name="widget_accent_amber">#FFF59E0B</color>
+    <color name="widget_accent_copper">#FFCC785C</color>
+    <color name="widget_accent_green">#FF34D399</color>
+    <color name="widget_accent_neutral">#FFC9C2B8</color>
+
+    <dimen name="widget_pad">10dp</dimen>
+    <dimen name="widget_gap">7dp</dimen>
+    <dimen name="widget_row_gap">4dp</dimen>
+    <dimen name="widget_tile_pad">12dp</dimen>
+    <dimen name="widget_label_size">9.5sp</dimen>
+    <dimen name="widget_row_label_size">12.5sp</dimen>
+    <dimen name="widget_row_sub_size">10sp</dimen>
+</resources>

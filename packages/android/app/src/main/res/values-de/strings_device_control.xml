@@ -6,6 +6,7 @@
     <string name="device_control_accessibility_description">Erlaubt Plum-Sessions, dieses Handy zu lesen und zu bedienen: Bildschirm lesen, tippen, Text eingeben, scrollen und Screenshots. Es verlassen keine Daten deinen Plum-Server.</string>
     <string name="device_control_notification_title">Gerätesteuerung</string>
     <string name="device_control_notification_text">Dieses Handy ist mit Plum verbunden und kann von deinen Sessionen bedient werden.</string>
+    <string name="device_control_stop_action">Steuerung stoppen</string>
     <string name="device_control_enable_hint">Aktiviere „Plum Gerätesteuerung“ in den Android-Bedienungshilfen — das Handy koppelt sich von selbst.</string>
     <string name="device_control_open_accessibility">Bedienungshilfen öffnen</string>
     <string name="device_control_status_connected">Verbunden</string>

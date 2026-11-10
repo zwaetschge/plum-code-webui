@@ -64,6 +64,7 @@ import com.claudewebui.app.ui.components.common.PlumBackdrop
 import com.claudewebui.app.ui.components.common.PlumBlue
 import com.claudewebui.app.ui.components.common.PlumBorder
 import com.claudewebui.app.ui.components.common.PlumNavScaffold
+import com.claudewebui.app.ui.components.common.PlumContentWidth
 import com.claudewebui.app.ui.components.common.PlumGreen
 import com.claudewebui.app.ui.components.common.PlumIconButton
 import com.claudewebui.app.ui.components.common.PlumMuted
@@ -144,8 +145,14 @@ fun AnalyticsScreen(
 
     PlumBackdrop {
         PlumNavScaffold(MainDestination.ANALYTICS, onNavigateMain) { padding ->
-            LazyColumn(
+            // Cap and centre the column so charts and ledgers stay a readable
+            // measure on tablets/foldables instead of stretching edge to edge.
+            PlumContentWidth(
                 modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()),
+                max = 1100.dp,
+            ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = 14.dp,
                     end = 14.dp,
@@ -352,6 +359,7 @@ fun AnalyticsScreen(
                 }
 
                 item { Spacer(Modifier.height(8.dp)) }
+            }
             }
         }
     }

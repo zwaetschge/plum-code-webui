@@ -44,10 +44,22 @@ import com.claudewebui.app.ui.components.common.PlumSubtleFill
 import com.claudewebui.app.ui.components.common.PlumText
 
 /**
+ * A stored model menu: [default] first (when it is shown), the other shown
+ * models in catalog order. Shared by the Pi and the Plum Chat model menus.
+ */
+internal fun modelMenuOrder(catalog: List<String>, shown: Set<String>, default: String?): List<String> {
+    val head = default?.takeIf { it in shown }
+    return listOfNotNull(head) + catalog.filter { it in shown && it != head }
+}
+
+/**
  * Chooses which of Pi's runnable models the session menus offer, mirroring the
  * WebUI's Pi settings. The stored list (`cliProviderModelLists.pi`) keeps the
  * default first; an empty list offers every model, including ones a provider
  * adds later. The server narrows `/api/cli-providers` by the same list.
+ *
+ * The Plum Chat menu („Modelle im Chat“, `chatModels`) reuses it with its own
+ * labels; [groupLabels] maps a provider id (the part before `/`) to its name.
  */
 @Composable
 fun PiModelMenuPanel(
@@ -56,22 +68,27 @@ fun PiModelMenuPanel(
     providerDefault: String?,
     saving: Boolean,
     onSave: (List<String>) -> Unit,
+    title: String? = null,
+    searchLabel: String? = null,
+    loadingLabel: String? = null,
+    emptyLabel: String? = null,
+    groupLabels: Map<String, String> = emptyMap(),
 ) {
     val res = LocalContext.current.resources
     var query by remember { mutableStateOf("") }
 
     GlassPanel(Modifier.fillMaxWidth(), radius = 19.dp) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(res.getString(R.string.pi_models_menu_title), color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(title ?: res.getString(R.string.pi_models_menu_title), color = PlumText, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             if (catalog == null) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = PlumAccent)
-                    Text(res.getString(R.string.pi_models_loading), color = PlumMuted, fontSize = 12.sp)
+                    Text(loadingLabel ?: res.getString(R.string.pi_models_loading), color = PlumMuted, fontSize = 12.sp)
                 }
                 return@Column
             }
             if (catalog.isEmpty()) {
-                Text(res.getString(R.string.pi_models_none), color = PlumMuted, fontSize = 12.sp)
+                Text(emptyLabel ?: res.getString(R.string.pi_models_none), color = PlumMuted, fontSize = 12.sp)
                 return@Column
             }
 
@@ -87,9 +104,7 @@ fun PiModelMenuPanel(
 
             fun save(next: Set<String>, nextDefault: String?) {
                 if (next.isEmpty()) return
-                val head = nextDefault?.takeIf { it in next }
-                val rest = catalog.filter { it in next && it != head }
-                onSave(listOfNotNull(head) + rest)
+                onSave(modelMenuOrder(catalog, next, nextDefault))
             }
 
             Text(
@@ -118,7 +133,7 @@ fun PiModelMenuPanel(
                 value = query,
                 onValueChange = { query = it },
                 singleLine = true,
-                placeholder = { Text(res.getString(R.string.pi_models_search), fontSize = 13.sp) },
+                placeholder = { Text(searchLabel ?: res.getString(R.string.pi_models_search), fontSize = 13.sp) },
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -136,7 +151,7 @@ fun PiModelMenuPanel(
                     Modifier.fillMaxWidth().padding(top = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(providerId, color = PlumText, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Text(groupLabels[providerId] ?: providerId, color = PlumText, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                     Text("$shown/${models.size}", color = PlumAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     val canToggle = !saving && !(allShown && shown == visible.size)
                     Text(

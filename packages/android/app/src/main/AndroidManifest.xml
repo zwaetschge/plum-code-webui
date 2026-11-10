@@ -5,9 +5,6 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Device control: list launchable apps for open_app/list_apps -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-
     <!-- POST_NOTIFICATIONS required on Android 13+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -25,6 +22,21 @@
 
     <!-- Vibration for high-priority permission-request notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <queries>
+        <!-- Device control: enumerate launcher apps (list_apps) and resolve a
+             package's launch intent (open_app) WITHOUT QUERY_ALL_PACKAGES.
+             queryIntentActivities(MAIN/LAUNCHER) and getLaunchIntentForPackage()
+             only need visibility of launchable activities, which this grants. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- Voice mode: the phone's speech recognizer (SpeechRecognizer) must be visible. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
 
     <application
         android:name=".ClaudeWebUIApp"

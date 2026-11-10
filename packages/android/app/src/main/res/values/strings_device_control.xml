@@ -6,6 +6,7 @@
     <string name="device_control_accessibility_description">Lets Plum sessions read and operate this phone: read the screen, tap, type, scroll and take screenshots. No data leaves your Plum server.</string>
     <string name="device_control_notification_title">Device control</string>
     <string name="device_control_notification_text">This phone is connected to Plum and can be operated by your sessions.</string>
+    <string name="device_control_stop_action">Stop control</string>
     <string name="device_control_enable_hint">Enable “Plum device control” in Android’s accessibility settings; the phone pairs itself.</string>
     <string name="device_control_open_accessibility">Open accessibility settings</string>
     <string name="device_control_status_connected">Connected</string>

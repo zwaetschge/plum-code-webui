@@ -21,6 +21,7 @@ import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Mic
@@ -300,6 +301,9 @@ private fun LazyListScope.voicePage(controller: AssistantSettingsController, val
             }
         }
     }
+    item(key = "voice-recognition") {
+        SpeechRecognitionGroup(value.speechRecognition, enabled) { controller.setChoice("speechRecognition", it) }
+    }
     item(key = "voice-history") {
         SettingsGroup {
             item { SettingsSwitchRow(stringResource(R.string.assistant_voice_history), value.voiceHistory, { controller.setBoolean("voiceHistory", it) }, Icons.Outlined.Mic, TileTone.Red, enabled = enabled) }
@@ -387,9 +391,35 @@ private fun LazyListScope.personalPage(
         SettingsGroup(header = stringResource(R.string.settings_hub_answers), footer = stringResource(R.string.settings_hub_autosave_footer)) {
             item { SettingsSwitchRow(stringResource(R.string.assistant_concise), value.conciseAnswers, { controller.setBoolean("conciseAnswers", it) }, Icons.Outlined.Speed, TileTone.Amber, enabled = enabled) }
             item { SettingsSwitchRow(stringResource(R.string.assistant_suggestions), value.suggestedPrompts, { controller.setBoolean("suggestedPrompts", it) }, Icons.Outlined.Lightbulb, TileTone.Amber, enabled = enabled) }
+            item {
+                SettingsMenuRow(
+                    stringResource(R.string.assistant_answer_display), value.answerDisplay,
+                    listOf("standard" to stringResource(R.string.assistant_answer_display_standard), "simple" to stringResource(R.string.assistant_answer_display_simple)),
+                    { controller.setChoice("answerDisplay", it) }, Icons.Outlined.Dashboard, TileTone.Violet, enabled = enabled,
+                )
+            }
             item { SettingsSwitchRow(stringResource(R.string.assistant_web_search), value.webSearch, { controller.setBoolean("webSearch", it) }, Icons.Outlined.TravelExplore, TileTone.Blue, enabled = enabled) }
             item { SettingsSwitchRow(stringResource(R.string.assistant_project_search), value.projectSearch, { controller.setBoolean("projectSearch", it) }, Icons.Outlined.FolderOpen, TileTone.Blue, enabled = enabled) }
             item { SettingsSwitchRow(stringResource(R.string.assistant_connector_search), value.connectorSearch, { controller.setBoolean("connectorSearch", it) }, Icons.Outlined.Cable, TileTone.Gray, enabled = enabled) }
+        }
+    }
+    // Which models the Plum Chat model menu offers (`chatModels`, default first), like Pi's menu.
+    item(key = "chat-models") {
+        LaunchedEffect(controller) { controller.loadAllChatProviders() }
+        val providers = controller.allChatProviders
+        Column(Modifier.fillMaxWidth()) {
+            SettingsGroup(header = stringResource(R.string.assistant_chat_models)) {}
+            PiModelMenuPanel(
+                catalog = providers?.flatMap { provider -> provider.models.map { "${provider.id}/$it" } },
+                stored = value.chatModels,
+                providerDefault = null,
+                saving = controller.saving || !enabled,
+                onSave = { controller.setList("chatModels", it) },
+                searchLabel = stringResource(R.string.assistant_chat_models_search),
+                loadingLabel = stringResource(R.string.assistant_chat_models_loading),
+                emptyLabel = stringResource(R.string.assistant_chat_models_none),
+                groupLabels = providers?.associate { it.id to it.name }.orEmpty(),
+            )
         }
     }
 }

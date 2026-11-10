@@ -230,6 +230,14 @@ class SocketManager {
     val notificationNew: SharedFlow<AppNotification> = _notificationNew.asSharedFlow()
 
     /**
+     * `assistant:ui-result` on the user room: a Dynamic UI live widget of a
+     * model-chat answer resolved, failed or was refreshed. The open chat merges
+     * `result` into the turn's `uiResults[id]`.
+     */
+    private val _assistantUiResults = MutableSharedFlow<AssistantUiResultEvent>(extraBufferCapacity = 32)
+    val assistantUiResults: SharedFlow<AssistantUiResultEvent> = _assistantUiResults.asSharedFlow()
+
+    /**
      * Ids covered by the last `session:subscribe-all` acknowledgement. Empty on
      * a server without the handler, in which case per-session subscribes carry
      * the monitoring exactly as before.
@@ -296,6 +304,7 @@ class SocketManager {
                 on("session:mode", onMode)
                 on("session:lifecycle", onLifecycle)
                 on("notification:new", onNotificationNew)
+                on("assistant:ui-result", onAssistantUiResult)
 
                 connect()
             }
@@ -820,6 +829,19 @@ class SocketManager {
         parseAndEmit<AppNotification>(args) { _notificationNew.dispatch(it) }
     }
 
+    private val onAssistantUiResult = Emitter.Listener { args ->
+        val obj = args.firstOrNull() as? JSONObject ?: return@Listener
+        val element = try {
+            json.parseToJsonElement(obj.toString()) as? kotlinx.serialization.json.JsonObject
+        } catch (_: Exception) { null } ?: return@Listener
+        val text = { key: String -> (element[key] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content }
+        val chatId = text("chatId") ?: return@Listener
+        val turnId = text("turnId") ?: return@Listener
+        val id = text("id") ?: return@Listener
+        val result = element["result"] as? kotlinx.serialization.json.JsonObject ?: return@Listener
+        _assistantUiResults.dispatch(AssistantUiResultEvent(chatId, turnId, id, result))
+    }
+
     private val onMode = Emitter.Listener { args ->
         val obj = args.firstOrNull() as? JSONObject ?: return@Listener
         val sessionId = obj.optString("sessionId")
@@ -907,6 +929,14 @@ class SocketManager {
         }
     }
 }
+
+/** `assistant:ui-result`: one live widget envelope of a model-chat turn. */
+data class AssistantUiResultEvent(
+    val chatId: String,
+    val turnId: String,
+    val id: String,
+    val result: kotlinx.serialization.json.JsonObject,
+)
 
 /**
  * Data class for compact/context-clear events from the server.

@@ -1,0 +1,136 @@
+<div class="rain" id="app"></div>
+<style>
+  .rain { display: grid; gap: 16px; }
+  .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .head h3 { margin: 0; font-size: 15px; }
+  .place { margin: 2px 0 0; font-size: 12.5px; color: var(--plum-muted); }
+  .controls { display: grid; gap: 10px; }
+  .label { font-size: 12px; font-weight: 600; color: var(--plum-muted); margin-bottom: 6px; }
+  .chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .chips button { flex: 0 0 auto; min-height: 36px; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+  .chips button[aria-pressed='true'] { background: var(--plum-accent); color: var(--plum-accent-text); border-color: transparent; }
+  .bars { position: relative; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; align-items: end; height: 112px; padding-top: 18px; }
+  .bar { position: relative; height: 100%; }
+  .bar i { position: absolute; left: 0; right: 0; bottom: 0; height: var(--h); border-radius: 6px 6px 3px 3px; background: var(--plum-surface-2); transition: background-color 0.25s; }
+  .bar.in i { background: var(--plum-accent); }
+  .bar b { position: absolute; left: -2px; right: -2px; bottom: calc(var(--h) + 3px); text-align: center; font-size: 10.5px; font-weight: 600; color: var(--plum-muted); font-variant-numeric: tabular-nums; }
+  .bar.in b { color: var(--plum-text); }
+  .hours { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; margin-top: 6px; font-size: 10.5px; color: var(--plum-muted); text-align: center; }
+  .hours span { overflow: hidden; white-space: nowrap; }
+  .result { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; padding: 14px; border-radius: var(--plum-radius); background: var(--plum-surface); border: 1px solid var(--plum-border); }
+  .gauge { position: relative; width: 84px; height: 84px; }
+  .gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .gauge .t { fill: none; stroke: var(--plum-surface-2); stroke-width: 9; }
+  .gauge .v { fill: none; stroke: var(--tone); stroke-width: 9; stroke-linecap: round; stroke-dasharray: 213.6; transition: stroke-dashoffset 0.6s cubic-bezier(.16, 1, .3, 1), stroke 0.3s; }
+  .gauge strong { position: absolute; inset: 0; display: grid; place-items: center; font-size: 21px; font-variant-numeric: tabular-nums; }
+  .verdict { margin: 0; font-size: 15px; font-weight: 650; color: var(--tone); }
+  .why { margin: 2px 0 0; font-size: 12.5px; color: var(--plum-muted); }
+  .sim { display: grid; gap: 10px; }
+  .simbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .roll { min-height: 42px; }
+  .die { width: 22px; height: 22px; }
+  .rolling .die { animation: spin 0.6s cubic-bezier(.3, .7, .4, 1); }
+  @keyframes spin { to { transform: rotate(360deg) scale(1); } 50% { transform: rotate(200deg) scale(1.2); } }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(22px, 1fr)); gap: 5px; }
+  .grid span { aspect-ratio: 1; border-radius: 7px; display: grid; place-items: center; background: var(--plum-surface); border: 1px solid var(--plum-border); opacity: 0; transform: scale(0.6); animation: drop 0.35s cubic-bezier(.2, .9, .3, 1.3) forwards; animation-delay: calc(var(--i) * 18ms); }
+  .grid span.wet { background: color-mix(in srgb, var(--plum-accent) 20%, transparent); border-color: color-mix(in srgb, var(--plum-accent) 45%, transparent); color: var(--plum-accent); }
+  .grid span.dry { color: var(--plum-warn); }
+  .grid svg { width: 13px; height: 13px; }
+  @keyframes drop { to { opacity: 1; transform: none; } }
+  .tally { margin: 0; font-size: 13px; color: var(--plum-muted); }
+  .tally b { color: var(--plum-text); }
+  .empty { display: grid; gap: 10px; padding: 8px 0; color: var(--plum-muted); font-size: 13px; }
+  .sk { height: 12px; border-radius: 7px; background: linear-gradient(90deg, var(--plum-surface), var(--plum-surface-2), var(--plum-surface)) 0 0 / 200% 100%; animation: sh 1.4s linear infinite; }
+  @keyframes sh { to { background-position: -200% 0; } }
+  .source { margin: 0; font-size: 11.5px; color: var(--plum-muted); }
+  .source a { color: inherit; }
+</style>
+<script>
+(function () {
+  var app = document.getElementById('app');
+  var s = Object.assign({ start: 0, hours: 2 }, plum.state);
+  var built = false, sim = null;
+  var DROP = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3s6 6.4 6 10.5A6 6 0 0 1 6 13.5C6 9.4 12 3 12 3Z" fill="currentColor"/></svg>';
+  var SUN = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  function esc(v) { return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function pct(v) { return Math.round(v * 100) + ' %'; }
+  function hoursOf(data) { return (data.hourly || []).slice(0, 12); }
+  function windowOf(hours) { return hours.slice(s.start, s.start + s.hours); }
+  function risk(list) { return 1 - list.reduce(function (dry, h) { return dry * (1 - (h.precip_chance || 0) / 100); }, 1); }
+  function state() { return plum.live.wetter || { status: 'pending' }; }
+  function render() {
+    var l = state();
+    if (l.status !== 'resolved' || !l.data) {
+      built = false;
+      app.innerHTML = l.status === 'failed'
+        ? '<div class="empty"><strong>Keine Wetterdaten</strong><span>' + esc(l.error || 'Die Quelle antwortet gerade nicht.') + '</span><button id="retry">Erneut versuchen</button></div>'
+        : '<div class="empty" aria-label="Wetterdaten werden geladen"><span>Wetterdaten werden geladen …</span><div class="sk" style="width:60%"></div><div class="sk" style="height:88px"></div><div class="sk" style="width:40%"></div></div>';
+      var retry = document.getElementById('retry');
+      if (retry) retry.onclick = function () { plum.refresh('wetter'); retry.disabled = true; };
+      return;
+    }
+    var data = l.data, hours = hoursOf(data);
+    if (s.start > hours.length - 1) s.start = 0;
+    if (!built) build(data, hours);
+    update(hours);
+  }
+  function build(data, hours) {
+    built = true;
+    var cur = data.current || {};
+    app.innerHTML =
+      '<div class="head"><div><h3>Wirst du nass?</h3><p class="place">' + esc(data.location && data.location.label) +
+      (cur.temperature_c != null ? ' · jetzt ' + Math.round(cur.temperature_c) + ' °C, ' + esc(cur.description) : '') + '</p></div></div>' +
+      '<div class="controls"><div><div class="label" id="l-start">Los geht es</div><div class="chips" role="group" aria-labelledby="l-start">' +
+      hours.slice(0, 8).map(function (h, i) { return '<button data-start="' + i + '">' + esc(h.label) + '</button>'; }).join('') +
+      '</div></div><div><div class="label" id="l-len">Unterwegs</div><div class="chips" role="group" aria-labelledby="l-len">' +
+      [1, 2, 3, 4].map(function (n) { return '<button data-hours="' + n + '">' + n + ' Std.</button>'; }).join('') + '</div></div></div>' +
+      '<div><div class="bars" id="bars" role="img" aria-label="Regenwahrscheinlichkeit der nächsten 12 Stunden">' +
+      hours.map(function (h) { return '<div class="bar" style="--h:' + Math.max(3, h.precip_chance || 0) + '%"><b>' + (h.precip_chance || 0) + '</b><i></i></div>'; }).join('') +
+      '</div><div class="hours" aria-hidden="true">' + hours.map(function (h, i) { return '<span>' + (i % 2 ? '' : esc(String(h.label).replace(' Uhr', ''))) + '</span>'; }).join('') + '</div></div>' +
+      '<div class="result" id="result"><div class="gauge"><svg viewBox="0 0 84 84"><circle class="t" cx="42" cy="42" r="34"/><circle class="v" id="gv" cx="42" cy="42" r="34"/></svg><strong id="gp">0 %</strong></div>' +
+      '<div><p class="verdict" id="verdict"></p><p class="why" id="why"></p></div></div>' +
+      '<div class="sim"><div class="simbar"><p class="tally" id="tally">Würfle 40 Spaziergänge mit diesen Wahrscheinlichkeiten durch.</p>' +
+      '<button class="primary roll" id="roll"><svg class="die" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8.5" cy="8.5" r="1.6" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>Würfeln</button></div>' +
+      '<div class="grid" id="grid" aria-live="polite"></div></div>' +
+      '<p class="source">Quelle: <a href="#" id="src">' + esc(data.source && data.source.name) + '</a> · Stunden gelten als unabhängig</p>';
+    [].forEach.call(app.querySelectorAll('[data-start]'), function (b) { b.onclick = function () { s.start = +b.dataset.start; sim = null; plum.setState({ start: s.start }); update(hoursOf(state().data)); }; });
+    [].forEach.call(app.querySelectorAll('[data-hours]'), function (b) { b.onclick = function () { s.hours = +b.dataset.hours; sim = null; plum.setState({ hours: s.hours }); update(hoursOf(state().data)); }; });
+    document.getElementById('roll').onclick = roll;
+    document.getElementById('src').onclick = function (e) { e.preventDefault(); if (data.source && data.source.url) plum.openUrl(data.source.url); };
+  }
+  function update(hours) {
+    var win = windowOf(hours), p = risk(win);
+    [].forEach.call(app.querySelectorAll('[data-start]'), function (b) { b.setAttribute('aria-pressed', String(+b.dataset.start === s.start)); });
+    [].forEach.call(app.querySelectorAll('[data-hours]'), function (b) { b.setAttribute('aria-pressed', String(+b.dataset.hours === s.hours)); });
+    [].forEach.call(document.getElementById('bars').children, function (bar, i) { bar.classList.toggle('in', i >= s.start && i < s.start + s.hours); });
+    var tone = p < 0.2 ? 'var(--plum-good)' : p < 0.5 ? 'var(--plum-warn)' : 'var(--plum-bad)';
+    var result = document.getElementById('result');
+    result.style.setProperty('--tone', tone);
+    document.getElementById('gv').style.strokeDashoffset = String(213.6 * (1 - p));
+    document.getElementById('gp').textContent = pct(p);
+    document.getElementById('verdict').textContent = p < 0.2 ? 'Schirm kann zu Hause bleiben' : p < 0.5 ? 'Knirps einpacken' : 'Lieber den grossen Schirm';
+    var peak = win.reduce(function (a, h) { return (h.precip_chance || 0) > (a.precip_chance || 0) ? h : a; }, win[0] || {});
+    var when = !win[0] || win[0].label === 'Jetzt' ? 'jetzt' : 'um ' + win[0].label;
+    document.getElementById('why').textContent = 'Chance auf mindestens einen Schauer, wenn du ' + when + ' losgehst und ' + s.hours + ' Std. unterwegs bist.' +
+      (peak && peak.precip_chance ? ' Am heikelsten: ' + peak.label + ' (' + peak.precip_chance + ' %).' : '');
+    if (!sim) { document.getElementById('grid').innerHTML = ''; document.getElementById('tally').innerHTML = 'Würfle 40 Spaziergänge mit diesen Wahrscheinlichkeiten durch.'; }
+  }
+  function roll() {
+    var hours = hoursOf(state().data), win = windowOf(hours), runs = 40, wet = 0, cells = [];
+    for (var r = 0; r < runs; r++) {
+      var hit = win.some(function (h) { return Math.random() < (h.precip_chance || 0) / 100; });
+      if (hit) wet++;
+      cells.push(hit);
+    }
+    sim = { wet: wet, runs: runs };
+    var btn = document.getElementById('roll');
+    btn.classList.remove('rolling'); void btn.offsetWidth; btn.classList.add('rolling');
+    document.getElementById('grid').innerHTML = cells.map(function (hit, i) {
+      return '<span class="' + (hit ? 'wet' : 'dry') + '" style="--i:' + i + '" title="' + (hit ? 'nass' : 'trocken') + '">' + (hit ? DROP : SUN) + '</span>';
+    }).join('');
+    document.getElementById('tally').innerHTML = '<b>' + wet + ' von ' + runs + '</b> Spaziergängen wurden nass (' + Math.round(wet / runs * 100) + ' %). Berechnet: ' + pct(risk(win)) + '.';
+  }
+  plum.on('live', render);
+  render();
+})();
+</script>
