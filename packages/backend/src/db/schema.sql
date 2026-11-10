@@ -881,6 +881,7 @@ CREATE INDEX IF NOT EXISTS "idx_notes_session_id" ON "notes" ("session_id");
 CREATE INDEX IF NOT EXISTS "idx_notes_user_id" ON "notes" ("user_id");
 CREATE INDEX IF NOT EXISTS "idx_notifications_request_id" ON "notifications" ("request_id");
 CREATE INDEX IF NOT EXISTS "idx_notifications_user_created" ON "notifications" ("user_id", "created_at");
+CREATE INDEX IF NOT EXISTS "idx_notifications_unread" ON "notifications" ("user_id") WHERE "read_at" IS NULL;
 CREATE INDEX IF NOT EXISTS "idx_orchestration_sessions_session_id" ON "orchestration_sessions" ("session_id");
 CREATE INDEX IF NOT EXISTS "idx_orchestration_tasks_worker_id" ON "orchestration_tasks" ("worker_id");
 CREATE INDEX IF NOT EXISTS "idx_orchestration_tasks_orchestration_id" ON "orchestration_tasks" ("orchestration_id");

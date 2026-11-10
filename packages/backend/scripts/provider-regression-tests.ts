@@ -1774,6 +1774,52 @@ async function testClaudeTurnIsJournalledForResume() {
   assert.equal(getPiRun(sessionId), null, 'a stopped turn leaves nothing to resume');
 }
 
+/**
+ * A resumed CLI reports a background task from before the restart with a
+ * `task_notification` and an empty `result`, and only then reads the prompt.
+ * That report must not end the turn: the run stays journalled and busy.
+ */
+async function testClaudeStaleTaskNotificationKeepsTurnJournalled() {
+  const sessionId = 'session-claude-stale-task';
+  const { managerPrivate, proc } = makePiManagerFixture(sessionId, {
+    cliProvider: 'claude',
+    piTurnInFlight: false,
+    claudeIdle: true,
+    outputBuffer: { push: () => undefined },
+  });
+  const claudePrivate = managerPrivate as unknown as {
+    dispatchClaudeTurn: (sessionId: string, proc: unknown, turn: unknown) => void;
+    processStreamMessage: (sessionId: string, msg: unknown) => Promise<void>;
+  };
+  claudePrivate.dispatchClaudeTurn(sessionId, proc, {
+    queueId: 'r1',
+    chatId: 'chat-r',
+    queuedAt: new Date().toISOString(),
+    originalMessage: 'weiter nach dem Neustart',
+    messageForClaude: 'weiter nach dem Neustart',
+    updateLastMessage: false,
+  });
+  assert.equal(proc.claudeIdle, false);
+
+  await claudePrivate.processStreamMessage(sessionId, {
+    type: 'system',
+    subtype: 'task_notification',
+    task_id: 'task-from-before',
+    status: 'stopped',
+  });
+  await claudePrivate.processStreamMessage(sessionId, {
+    type: 'result',
+    subtype: 'success',
+    num_turns: 0,
+    duration_api_ms: 0,
+    result: '',
+  });
+
+  assert.equal(getPiRun(sessionId)?.chatId, 'chat-r', 'the run is still journalled');
+  assert.equal(proc.claudeIdle, false, 'the dispatched turn is still running');
+  assert.equal(proc.taskNotificationPending, false, 'the report is consumed once');
+}
+
 /** A manual /compact between turns must not inject a continuation. */
 async function testPiManualCompactWithoutTurnDoesNotResume() {
   const sessionId = 'session-pi-compact-manual';
@@ -4950,6 +4996,7 @@ await testPiNoContinueAfterCleanStop();
 await testPiRejectedPromptIsRequeued();
 await testPiRunIsJournalledUntilItSettles();
 await testClaudeTurnIsJournalledForResume();
+await testClaudeStaleTaskNotificationKeepsTurnJournalled();
 await testCodexContextFallbackUsesThreadState();
 await testCodexContextFallbackCapsThreadStateAtWindow();
 await testCodexCompactEventRetainsCompactedContext();

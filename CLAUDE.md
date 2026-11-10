@@ -4,13 +4,13 @@ Guidance for coding agents. Rules live in `AGENTS.md`; the full former text of b
 
 ## Repository
 
-Plum Code WebUI: pnpm monorepo (Express + Socket.IO + Postgres backend, React 18 + Vite frontend, shared types, Android app), deployed as one Docker container on Unraid. Codex is the default provider. Node ≥ 20, pnpm ≥ 9 (`pnpm@9.15.0`).
+Plum Code WebUI: pnpm monorepo (Express + Socket.IO + Postgres backend, React 18 + Vite frontend, shared types, Android app), deployed as one Docker container (production on the Geekom server). Claude Code is the main provider; Codex stays supported. Node ≥ 20, pnpm ≥ 9 (`pnpm@9.15.0`).
 
 ## Commands
 
 ```bash
 pnpm install          # workspace deps
-pnpm dev              # backend :3006 + frontend :5173
+pnpm dev              # backend :3006 (PORT in packages/backend/.env; default 3001) + frontend :5173
 pnpm build            # tsc (backend/shared) + vite (frontend)
 pnpm typecheck        # tsc --noEmit
 pnpm lint             # eslint
@@ -23,7 +23,7 @@ Docker maps `4545:3001`. Backend DB migrations: `pnpm db:migrate` (from `package
 ## Architecture in short
 
 - **Backend** `packages/backend/src`: `routes/`, `services/`. `services/claude/ClaudeProcessManager.ts` runs provider lifecycles, streaming, interrupts, queued input and is the sole usage write path.
-- **Providers:** Codex per-turn respawn; Pi JSONL RPC (model provider registry „Modellanbieter“, `/api/model-providers`); Kimi Code / Mistral Vibe persistent ACP; Claude Code legacy stream-json.
+- **Providers:** Codex per-turn respawn; Pi JSONL RPC (model provider registry „Modellanbieter“, `/api/model-providers`); Mistral Vibe persistent ACP; Claude Code legacy stream-json.
 - **Model chat** (`/chat`): `services/assistant/apiChats.ts`, `apiTransport.ts`; `reasoningEffort` per turn (low/medium/high/max/ultra).
 - **Frontend** `packages/frontend/src`: `pages/SessionPage.tsx` (chat), `components/assistant/ModelEffortPicker.tsx` (model + animated effort rail), Zustand stores, `services/socket.ts`.
 - **Android** `packages/android`: areas Chat/Task/Code/Schwarm are hoisted in `ui/screens/dashboard/DashboardScreen.kt`; effort rail in `ModelEffortSheet.kt`.

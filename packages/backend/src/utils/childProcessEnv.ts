@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 const INHERITED_CHILD_ENV_KEYS = [
   'HOME',
   'PATH',
@@ -68,8 +72,54 @@ const BACKEND_SECRET_ENV_KEYS = new Set([
   'MISTRAL_API_KEY',
 ]);
 
+const AGENT_DATABASE_KEYS = ['PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD'] as const;
+const AGENT_DATABASE_FILE = 'agent-test-db.env';
+
+let agentDatabaseCache: { file: string; mtimeMs: number; env: Record<string, string> } | null =
+  null;
+
+/**
+ * The database an agent process may use: a role that can create its own
+ * `test_*` schemas and has no access to the application's tables.
+ *
+ * A session used to inherit the application's database user without the
+ * password, and test runs picked a password up from a local `.env` — so tests
+ * started by agents ran as the application's own role against the live
+ * database. An operator who creates such a role puts its connection settings
+ * into `<data dir>/agent-test-db.env` (PGHOST, PGPORT, PGDATABASE, PGUSER,
+ * PGPASSWORD); without the file nothing changes.
+ */
+export function readAgentDatabaseEnv(
+  dataDirectory: string | undefined = process.env.WEBUI_DATA_DIR
+): Record<string, string> | null {
+  // Same rule as db/index.ts: WEBUI_DATA_DIR, else the package's own data directory.
+  const directory = dataDirectory
+    ? path.resolve(dataDirectory)
+    : path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'data');
+  const file = path.join(directory, AGENT_DATABASE_FILE);
+  try {
+    const { mtimeMs } = fs.statSync(file);
+    if (agentDatabaseCache?.file === file && agentDatabaseCache.mtimeMs === mtimeMs) {
+      return agentDatabaseCache.env;
+    }
+    const env: Record<string, string> = {};
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      const match = /^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/.exec(line);
+      if (!match?.[1] || match[2] === undefined) continue;
+      if ((AGENT_DATABASE_KEYS as readonly string[]).includes(match[1])) env[match[1]] = match[2];
+    }
+    // Half a configuration would mix this role with the application's settings.
+    if (!env.PGUSER || !env.PGPASSWORD) return null;
+    agentDatabaseCache = { file, mtimeMs, env };
+    return env;
+  } catch {
+    return null;
+  }
+}
+
 export function stripBackendSecretsFromEnv(
-  source: NodeJS.ProcessEnv = process.env
+  source: NodeJS.ProcessEnv = process.env,
+  agentDatabase: Record<string, string> | null = readAgentDatabaseEnv()
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(source)) {
@@ -78,6 +128,8 @@ export function stripBackendSecretsFromEnv(
     if (/(^|_)(SECRET|PRIVATE_KEY)$/.test(key)) continue;
     env[key] = value;
   }
+  // The agent's own database role replaces the application's user name.
+  if (agentDatabase) Object.assign(env, agentDatabase);
   return env;
 }
 

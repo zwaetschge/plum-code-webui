@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Plum Code WebUI: pnpm monorepo (`packages/backend|frontend|shared|android|desktop`), one Docker container on Unraid. **Codex is the default provider.** Full former text (provider notes, usage/pricing, MCP servers, parity details): `docs/history/AGENTS-full-2026-10-12.md` — read a section there only when you need it.
+Plum Code WebUI: pnpm monorepo (`packages/backend|frontend|shared|android|desktop`), one Docker container; production runs on the Geekom server. **Claude Code is the main provider** (Codex stays supported). Full former text (provider notes, usage/pricing, MCP servers, parity details): `docs/history/AGENTS-full-2026-10-12.md` — read a section there only when you need it.
 
 ## Rules
 
@@ -12,6 +12,7 @@ Plum Code WebUI: pnpm monorepo (`packages/backend|frontend|shared|android|deskto
 - **Short sessions:** every prompt rereads the whole context. One topic per session; hand over via `session-*.md` in memory; run long builds/polling and screenshot checks in subagents or background tasks, not in the main context. Do not poll in loops.
 - **Secrets** are write-only in both clients (`*Configured` flags, `clear*` to remove).
 - **MCPs bind at spawn:** start a new session after registration changes.
+- **Tests and the database:** a session's `PG*` environment is a test role that can create its own `test_*` schemas and cannot read application data. Never look for the application's database password to run tests.
 
 ## Providers (one line each)
 
@@ -25,7 +26,7 @@ Never run `docker compose down|build|up --force-recreate` inside the WebUI conta
 bash scripts/plum-rebuild.sh        # flags: --no-cache --no-wait --timeout=N
 ```
 
-It triggers `repair-bot` (sidecar in `docker-compose.override.yml`), which builds, restarts externally, checks `/health/ready`, and rolls back on failure. If `repair-bot` is dead: `docker compose up -d repair-bot`. Main container never mounts raw `docker.sock`; keep `CLI_RUNNER_ACCESS=admin-only`.
+It triggers `repair-bot` (sidecar in `docker-compose.override.yml`), which builds, restarts externally, checks `/health/ready`, and rolls back on failure. It builds this repository's `Dockerfile` from the deploy tree, so a change is live only after its files are in that tree; check what actually runs (`/app/...`) after a rebuild. If `repair-bot` is dead: `docker compose up -d repair-bot`. Main container never mounts raw `docker.sock`; keep `CLI_RUNNER_ACCESS=admin-only`.
 
 **Public routing (verified 2026-10-19):** public Plum currently targets Geekom `192.168.1.124:4545` through Traefik file `plum-geekom-prod.yml`; an older CLI session may still run against Unraid localhost. Verify the actual public target before deploying or pairing. Create production browser tokens through its authenticated public API. Geekom file-router priorities exceed legacy Docker routers to prevent split routing. Handover: `docs/plans/session-new-desktop-2026-10-19.md`.
 

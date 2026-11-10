@@ -73,6 +73,7 @@ import {
 import SQLiteDatabase from 'better-sqlite3';
 import { config } from '../../config.js';
 import { sessionHookToken } from '../../middleware/hookSecret.js';
+import { isEmptyNotificationResult } from './notificationResult.js';
 import {
   CLI_PROVIDERS,
   ULTRACODE_SETTINGS,
@@ -2711,6 +2712,8 @@ interface ClaudeProcess {
   vibeWorkflowToolId?: string | null;
   vibeWorkflowUsage?: { input: number; output: number; cached: number };
   claudeIdle?: boolean;
+  /** A task notification arrived and nothing from the model since (see notificationResult.ts). */
+  taskNotificationPending?: boolean;
   claudeQueuedTurns?: ClaudePreparedTurn[];
   /** Settings reload parked until the running turn (and its queue) finishes. */
   deferredRestart?: {
@@ -8262,6 +8265,11 @@ Discord Main Gateway:
       last_tool_name?: string;
       message?: { model?: string; content?: Array<{ type: string; name?: string }> };
     };
+    if (msg.type === 'system' && msg.subtype === 'task_notification') {
+      proc.taskNotificationPending = true;
+    } else if (msg.type === 'assistant' || msg.type === 'stream_event') {
+      proc.taskNotificationPending = false;
+    }
     if (
       msg.type === 'system' &&
       ['task_started', 'task_progress', 'task_notification'].includes(msg.subtype || '')
@@ -8655,6 +8663,18 @@ The planning phase is complete. You are now in Auto-Accept mode.
         proc.currentToolId = null;
         proc.currentToolInput = '';
       }
+    }
+
+    // The CLI's empty report on a background task from before a restart is not
+    // the end of the turn that was just dispatched.
+    if (
+      proc.taskNotificationPending &&
+      isClaudeTransportProvider(proc.cliProvider) &&
+      isEmptyNotificationResult(msg as Parameters<typeof isEmptyNotificationResult>[0])
+    ) {
+      proc.taskNotificationPending = false;
+      console.log(`[CLAUDE] Empty result after a task notification ignored [${sessionId}]`);
+      return;
     }
 
     // Handle result message with final usage

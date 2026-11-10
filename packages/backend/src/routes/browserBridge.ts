@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { get as pgGet } from '../db/pg.js';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import { requireHookSecret } from '../middleware/hookSecret.js';
+import { plumDeskEnabled } from '../middleware/mobileGateway.js';
 import { rateLimiters } from '../middleware/rateLimiter.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { BrowserBridgeError, browserBridge } from '../services/browserBridge/bridge.js';
@@ -467,6 +468,8 @@ router.use('/internal', internalRouter);
 // token. Reachable through the /mobile gateway (see mobileGateway.ts).
 
 async function deskOwner(req: Request): Promise<string> {
+  // Retired with the board; a deployment that still has one opts back in.
+  if (!plumDeskEnabled()) throw new AppError('Not found', 404, 'NOT_FOUND');
   const token = String(req.get('authorization') || '').replace(/^Bearer\s+/i, '');
   const resolved = await resolveBrowserToken(token);
   // A watch token opens the bridge socket for the watch and nothing else.

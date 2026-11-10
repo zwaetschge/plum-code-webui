@@ -5,6 +5,67 @@ import type { GitHubUser, GitHubRepo, CreateRepoRequest } from '@plum-code-webui
 import { getGitHubTokenForUser } from '../routes/settings.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { isAllowedBasePath } from '../utils/allowedPaths.js';
+import { stripBackendSecretsFromEnv } from '../utils/childProcessEnv.js';
+
+const GIT_AUTH_ENVIRONMENT = [
+  'GIT_CONFIG_COUNT',
+  'GIT_CONFIG_KEY_0',
+  'GIT_CONFIG_VALUE_0',
+  'GIT_TERMINAL_PROMPT',
+];
+
+/**
+ * The environment for a git call that may need the user's GitHub token.
+ *
+ * The token used to be written into the remote URL. A clone kept it in
+ * `.git/config` for good, a failed push left it there too, and either way it
+ * sat on git's command line and in its error messages. It now reaches git as an
+ * HTTP header for github.com through the process environment and is never
+ * stored. Git also runs without the backend's own secrets.
+ */
+export function gitHubAuthEnvironment(
+  token: string | null,
+  base: NodeJS.ProcessEnv = stripBackendSecretsFromEnv()
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(base)) {
+    // simple-git refuses GIT_* variables it was not told about.
+    if (value !== undefined && !key.startsWith('GIT_')) env[key] = value;
+  }
+  env.GIT_TERMINAL_PROMPT = '0';
+  if (token) {
+    const basic = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
+    env.GIT_CONFIG_COUNT = '1';
+    env.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader';
+    env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${basic}`;
+  }
+  return env;
+}
+
+function gitForGitHub(token: string | null, baseDir?: string): SimpleGit {
+  return simpleGit({
+    ...(baseDir ? { baseDir } : {}),
+    // The config entries above are built here, not taken from a request.
+    unsafe: { allowUnsafeConfigEnvCount: true },
+    allowEnvironment: GIT_AUTH_ENVIRONMENT,
+  }).env(gitHubAuthEnvironment(token));
+}
+
+/** A github.com URL without embedded credentials, or null when it has none. */
+export function withoutUrlCredentials(url: string): string | null {
+  const match = /^https:\/\/[^@/]+@github\.com\/(.*)$/.exec(url);
+  return match ? `https://github.com/${match[1]}` : null;
+}
+
+/** Git echoes URLs and headers in its errors; none of it should leave with a token in it. */
+function describeGitError(error: unknown, token: string | null, fallback: string): string {
+  let message = error instanceof Error ? error.message : fallback;
+  if (token) {
+    const basic = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
+    message = message.split(token).join('***').split(basic).join('***');
+  }
+  return message.replace(/https:\/\/[^@/\s]+@github\.com\//g, 'https://github.com/');
+}
 
 /**
  * The `gh`-backed sibling service resolves every working directory through
@@ -204,20 +265,15 @@ export class GitHubService {
     const cloneTarget = resolveWorkspacePath(targetDir, 'Target directory');
 
     try {
-      // Inject token into URL for private repos
-      let cloneUrl = url;
-      if (token && url.startsWith('https://github.com/')) {
-        cloneUrl = url.replace('https://github.com/', `https://${token}@github.com/`);
-      }
-
-      const git: SimpleGit = simpleGit();
+      const git = gitForGitHub(token);
       const cloneOptions: string[] = [];
 
       if (branch) {
         cloneOptions.push('--branch', branch);
       }
 
-      await git.clone(cloneUrl, cloneTarget, cloneOptions);
+      // The plain URL: the token authenticates the request and stays out of the repository.
+      await git.clone(url, cloneTarget, cloneOptions);
 
       return {
         success: true,
@@ -226,7 +282,7 @@ export class GitHubService {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to clone repository',
+        error: describeGitError(error, token, 'Failed to clone repository'),
       };
     }
   }
@@ -242,7 +298,7 @@ export class GitHubService {
     const repoPath = resolveWorkspacePath(workingDirectory, 'Working directory');
 
     try {
-      const git: SimpleGit = simpleGit(repoPath);
+      const git = gitForGitHub(token, repoPath);
 
       // Get current branch if not specified
       const currentBranch = branch || (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
@@ -255,13 +311,11 @@ export class GitHubService {
         return { success: false, error: `Remote '${remote}' not found` };
       }
 
-      // Get remote URL and inject token if needed
+      // A repository cloned before the token moved out of the URL still carries
+      // it in its remote; take it out now that it is not needed there.
       const remoteUrl = remotes.find((r) => r.name === remote)?.refs.push || '';
-
-      if (token && remoteUrl.startsWith('https://github.com/')) {
-        const tokenUrl = remoteUrl.replace('https://github.com/', `https://${token}@github.com/`);
-        await git.remote(['set-url', remote, tokenUrl]);
-      }
+      const cleanUrl = withoutUrlCredentials(remoteUrl);
+      if (cleanUrl) await git.remote(['set-url', remote, cleanUrl]);
 
       // Push
       const pushOptions: string[] = [];
@@ -271,16 +325,11 @@ export class GitHubService {
 
       await git.push(remote, currentBranch, pushOptions);
 
-      // Reset URL to remove token
-      if (token && remoteUrl.startsWith('https://github.com/')) {
-        await git.remote(['set-url', remote, remoteUrl]);
-      }
-
       return { success: true };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to push to GitHub',
+        error: describeGitError(error, token, 'Failed to push to GitHub'),
       };
     }
   }

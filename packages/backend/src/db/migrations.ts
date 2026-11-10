@@ -272,6 +272,15 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE assistant_api_turns ADD COLUMN IF NOT EXISTS ui_results_json TEXT NOT NULL DEFAULT '{}'`,
     ],
   },
+  {
+    // The unread badge is polled by every open tab. One user owns nearly all
+    // rows, so the user index did not narrow anything and each poll read the
+    // whole table; the unread rows alone are a handful.
+    id: '028-notifications-unread-index',
+    statements: [
+      `CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications (user_id) WHERE read_at IS NULL`,
+    ],
+  },
 ];
 
 /** Per-provider settings maps that may still carry an `opencode` entry. */

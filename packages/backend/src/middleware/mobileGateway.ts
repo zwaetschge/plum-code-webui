@@ -3,6 +3,15 @@ import { requireAuth } from './auth.js';
 
 export const MOBILE_GATEWAY_HEADER = 'x-plum-mobile-gateway';
 
+/**
+ * The ESP32 desk board was retired on 2026-11-05. Its routes take any paired
+ * browser token and are reachable without the identity provider, so they are
+ * off unless a deployment still runs a board (`PLUM_DESK_ENABLED=1`).
+ */
+export function plumDeskEnabled(): boolean {
+  return process.env.PLUM_DESK_ENABLED === '1';
+}
+
 const PUBLIC_MOBILE_ROUTES = new Set([
   'GET /health',
   'GET /auth/providers',
@@ -13,10 +22,15 @@ const PUBLIC_MOBILE_ROUTES = new Set([
   // DownloadManager has no session header; the app route verifies its expiring HMAC.
   'GET /api/app/download',
   // Plum Desk authenticates itself with its device token (routes/browserBridge.ts).
-  'POST /api/browser-bridge/desk/transcribe',
-  'POST /api/browser-bridge/desk/wake',
-  'POST /api/browser-bridge/desk/turn',
-  'POST /api/browser-bridge/desk/speech',
+  // The board is retired; its routes exist only where it is switched on.
+  ...(plumDeskEnabled()
+    ? [
+        'POST /api/browser-bridge/desk/transcribe',
+        'POST /api/browser-bridge/desk/wake',
+        'POST /api/browser-bridge/desk/turn',
+        'POST /api/browser-bridge/desk/speech',
+      ]
+    : []),
   // Plum Desktop installer; the single-use code in the query is the credential.
   'GET /api/browser-bridge/desktop/install',
 ]);
