@@ -5,6 +5,7 @@ import { resolveConfigHome } from '../../utils/configPaths.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { readModelProvidersForUser } from '../../utils/modelProviderKeys.js';
 import { safeDecrypt } from '../../utils/encryption.js';
+import { readMistralBilling, type MistralBilling } from '../mistralBilling.js';
 
 /** Voices from the Mistral API are addressed as `mistral:<voice_id>`; everything else is OmniVoice. */
 export const MISTRAL_VOICE_PREFIX = 'mistral:';
@@ -31,11 +32,98 @@ const LANGUAGE_NAMES: Record<string, string> = {
   en: 'Englisch',
 };
 
+/**
+ * The key speech runs on.
+ *
+ * A key from a coding plan spends that plan's allowance, so once coding has
+ * used the month up, speech stops with it — while the account's API budget
+ * sits untouched. A deployment can therefore name a second key for speech
+ * (`MISTRAL_VOICE_API_KEY`). It stands in for the deployment's own key only:
+ * an account that brought its own Mistral key keeps speaking on that one.
+ */
+export function speechKeyFor(
+  accountKey: string | null,
+  environment: NodeJS.ProcessEnv = process.env
+): string | null {
+  const voiceKey = environment.MISTRAL_VOICE_API_KEY?.trim();
+  const deploymentKey = environment.MISTRAL_API_KEY?.trim();
+  if (voiceKey && accountKey && deploymentKey && accountKey === deploymentKey) return voiceKey;
+  return accountKey;
+}
+
 async function mistralKey(userId: string): Promise<string | null> {
   const providers = await readModelProvidersForUser(userId);
   const mistral = providers.find((provider) => provider.id === 'mistral');
   if (!mistral?.enabled || !mistral.apiKey) return null;
-  return safeDecrypt(mistral.apiKey) || null;
+  return speechKeyFor(safeDecrypt(mistral.apiKey) || null);
+}
+
+export interface MistralSpeechFailure {
+  message: string;
+  statusCode: number;
+  code: string;
+}
+
+function resetDay(resetAt: string | null | undefined): string | null {
+  if (!resetAt) return null;
+  const date = new Date(resetAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('de-CH', {
+    day: 'numeric',
+    month: 'long',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
+/**
+ * What a refused speech request means, in words the voice screen can show.
+ *
+ * Every refusal used to read "Mistral konnte die Sprachausgabe nicht erzeugen",
+ * with the status thrown away — a used-up budget looked the same as an outage
+ * and "try again" was the only advice. The budget case names its reset day,
+ * taken from the billing figures of the same key.
+ */
+export function describeMistralSpeechFailure(
+  status: number,
+  body: unknown,
+  billing: MistralBilling | null = null
+): MistralSpeechFailure {
+  const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const type = typeof record.type === 'string' ? record.type : '';
+  if (status === 402 || /budget_exhausted|insufficient|quota/.test(type)) {
+    const allowance = type.includes('vibe') ? billing?.vibe : (billing?.api ?? billing?.vibe);
+    const day = resetDay(allowance?.resetAt);
+    return {
+      message: day
+        ? `Das Mistral-Budget ist aufgebraucht; es wird am ${day} zurückgesetzt.`
+        : 'Das Mistral-Budget ist aufgebraucht.',
+      statusCode: 402,
+      code: 'VOICE_BUDGET_EXHAUSTED',
+    };
+  }
+  if (status === 401)
+    return {
+      message: 'Mistral lehnt den API-Schlüssel ab.',
+      statusCode: 502,
+      code: 'VOICE_KEY_REJECTED',
+    };
+  if (status === 403)
+    return {
+      message: 'Mistral hat den Text abgelehnt (Moderation).',
+      statusCode: 502,
+      code: 'VOICE_REQUEST_FAILED',
+    };
+  if (status === 429)
+    return {
+      message: 'Mistral drosselt gerade; gleich nochmal versuchen.',
+      statusCode: 429,
+      code: 'VOICE_RATE_LIMITED',
+    };
+  return {
+    message: 'Mistral konnte die Sprachausgabe nicht erzeugen.',
+    statusCode: 502,
+    code: 'VOICE_REQUEST_FAILED',
+  };
 }
 
 export interface MistralVoice {
@@ -151,14 +239,19 @@ async function mistralSpeech(userId: string, voiceId: string, text: string) {
     response = await request(MISTRAL_GERMAN_VOICE.id);
   }
   if (!response.ok) {
-    await response.body?.cancel();
-    throw new AppError(
-      response.status === 403
-        ? 'Mistral hat den Text abgelehnt (Moderation).'
-        : 'Mistral konnte die Sprachausgabe nicht erzeugen.',
-      response.status === 429 ? 429 : 502,
-      'VOICE_REQUEST_FAILED'
-    );
+    const refusal = (await response
+      .text()
+      .then((text) => JSON.parse(text.slice(0, 4000)) as unknown)
+      .catch(() => null)) as { type?: unknown; code?: unknown } | null;
+    // The reason is in the log even when the client only shows one line.
+    console.warn('[VOICE] Mistral refused the speech request', {
+      status: response.status,
+      type: typeof refusal?.type === 'string' ? refusal.type : undefined,
+      code: refusal?.code,
+    });
+    const budget = response.status === 402 ? await readMistralBilling(key).catch(() => null) : null;
+    const failure = describeMistralSpeechFailure(response.status, refusal, budget);
+    throw new AppError(failure.message, failure.statusCode, failure.code);
   }
   const body = (await response.json().catch(() => null)) as { audio_data?: unknown } | null;
   if (typeof body?.audio_data !== 'string' || body.audio_data.length > 90 * 1024 * 1024)
@@ -371,6 +464,8 @@ export async function assistantVoiceWarmup(
         ready: false,
         ms: Date.now() - start,
         error: failure instanceof Error ? failure.message : String(failure),
+        // Lets a client tell a used-up budget from an outage worth retrying.
+        ...(failure instanceof AppError ? { code: failure.code } : {}),
       };
     }
   };

@@ -70,6 +70,7 @@ const BACKEND_SECRET_ENV_KEYS = new Set([
   // meant for DeepSeek emptied the Mistral budget that way. Pi and Vibe
   // sessions and the subagents bridge get their keys explicitly.
   'MISTRAL_API_KEY',
+  'MISTRAL_VOICE_API_KEY',
 ]);
 
 const AGENT_DATABASE_KEYS = ['PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD'] as const;
