@@ -67,7 +67,12 @@ LABEL org.opencontainers.image.vendor="Plum Code WebUI"
 # date, so imagemagick, libssh, openexr and python3 shipped with published CVE
 # fixes already available in the repository. The image scan gates the pipeline
 # on exactly those.
-RUN apk upgrade --no-cache && \
+# The step is cached like any other, so a fix published after it last ran does
+# not arrive by itself: bump the date to run it again. (2026-11-10: libxslt
+# 1.1.43-r4, two HIGH findings that failed the image scan.)
+ARG ALPINE_PACKAGES_AS_OF=2026-11-10
+RUN echo "Alpine packages as of ${ALPINE_PACKAGES_AS_OF}" && \
+    apk upgrade --no-cache && \
     apk add --no-cache git bash docker-cli docker-cli-compose curl openssh-client unzip imagemagick gcompat libstdc++ libgcc python3 py3-pip py3-numpy pipx ripgrep procps-ng py3-httpx jq coreutils tzdata chromium chromium-chromedriver nss freetype harfbuzz font-noto font-noto-cjk ttf-freefont xvfb blender-headless github-cli postgresql17-client ffmpeg tesseract-ocr tesseract-ocr-data-deu tesseract-ocr-data-eng
 
 # plum-python: one venv with the PDF/TTS/screenshot toolkit skills expect
