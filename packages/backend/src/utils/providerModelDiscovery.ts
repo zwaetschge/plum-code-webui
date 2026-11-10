@@ -1,4 +1,6 @@
 import { safeDecrypt } from './encryption.js';
+import { providerBaseUrlProblem } from './providerUrlGuard.js';
+import { getRunnerAccessDecision } from './runnerAccess.js';
 import { getModelProviderCatalog, type ModelProviderCatalog } from './modelCatalog.js';
 import {
   readModelProvidersForUser,
@@ -58,6 +60,8 @@ export async function fetchProviderModelIds(
   try {
     const response = await fetchImpl(url, {
       headers,
+      // The key goes to the host that was configured, not to wherever it points.
+      redirect: 'error',
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!response.ok) return null;
@@ -105,10 +109,16 @@ export async function refreshProviderModels(
   const results: ProviderModelRefresh[] = [];
   const updates = new Map<string, string[]>();
 
+  const allowPrivateNetwork = (await getRunnerAccessDecision(userId)).allowed;
+
   for (const provider of providers) {
     if (options.only && provider.id !== options.only) continue;
     if (!provider.enabled || !provider.apiKey || CURATED_PROVIDERS.has(provider.id)) {
       results.push({ id: provider.id, status: 'skipped' });
+      continue;
+    }
+    if (provider.baseUrl && providerBaseUrlProblem(provider.baseUrl, { allowPrivateNetwork })) {
+      results.push({ id: provider.id, status: 'failed' });
       continue;
     }
     const apiKey = safeDecrypt(provider.apiKey);

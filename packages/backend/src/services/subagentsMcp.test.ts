@@ -20,7 +20,7 @@
 
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
@@ -490,6 +490,65 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
     assert.match(toolText(unknown), /Configured: Codex, GLM, Claude, Z.AI, Pi/);
   } finally {
     mcp.close();
+  }
+
+  // A worker is held to the calling session's permission mode: planning and
+  // manual sessions get read-only workers, auto-accept gets edit-only ones.
+  const planning = startMcp({ ...baseEnv, WEBUI_SESSION_MODE: 'planning' });
+  try {
+    await planning.call('initialize', { protocolVersion: '2024-11-05' });
+    await planning.call('tools/call', {
+      name: 'run_subagent',
+      arguments: { subagent: 'claude', prompt: 'look', working_directory: work },
+    });
+    const planned = JSON.parse(readFileSync(claudeRecord, 'utf8'));
+    assert.deepEqual(planned.argv, [
+      '-p',
+      '--output-format',
+      'json',
+      '--permission-mode',
+      'plan',
+      'look',
+    ]);
+
+    await planning.call('tools/call', {
+      name: 'run_subagent',
+      arguments: { subagent: 'Codex', prompt: 'look', working_directory: work },
+    });
+    const sandbox = JSON.parse(readFileSync(codexRecord, 'utf8')).argv as string[];
+    assert.equal(sandbox[sandbox.indexOf('--sandbox') + 1], 'read-only');
+
+    // Pi's print mode cannot be restricted, so it does not start at all.
+    rmSync(piRecord, { force: true });
+    const refused = await planning.call('tools/call', {
+      name: 'run_subagent',
+      arguments: { subagent: 'GLM', prompt: 'look', working_directory: work },
+    });
+    assert.equal(refused.result.isError, true);
+    assert.match(toolText(refused), /"planning" mode/);
+    assert.equal(existsSync(piRecord), false, 'pi must not be started');
+  } finally {
+    planning.close();
+  }
+
+  const autoAccept = startMcp({ ...baseEnv, WEBUI_SESSION_MODE: 'auto-accept' });
+  try {
+    await autoAccept.call('initialize', { protocolVersion: '2024-11-05' });
+    await autoAccept.call('tools/call', {
+      name: 'run_subagent',
+      arguments: { subagent: 'claude', prompt: 'edit', working_directory: work },
+    });
+    const edits = JSON.parse(readFileSync(claudeRecord, 'utf8'));
+    assert.deepEqual(edits.argv, [
+      '-p',
+      '--output-format',
+      'json',
+      '--permission-mode',
+      'acceptEdits',
+      'edit',
+    ]);
+  } finally {
+    autoAccept.close();
   }
 
   // PLUM_CODEX_WEBSOCKETS=1 keeps the Responses WebSocket as an opt-out.

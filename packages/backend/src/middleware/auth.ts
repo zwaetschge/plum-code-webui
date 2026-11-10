@@ -136,11 +136,48 @@ export async function resolveAuthenticatedUserId(req: Request): Promise<string |
     if (typeof userId !== 'string' || !userId) {
       throw new AppError('Invalid session identity', 401, 'INVALID_SESSION');
     }
+    if (isForeignOriginWrite(req)) {
+      throw new AppError('Cross-origin request refused', 403, 'CROSS_ORIGIN_SESSION');
+    }
     await enforceUserLifecycle(userId);
     return userId;
   }
 
   return null;
+}
+
+/**
+ * A state-changing request that rides on the session cookie but was sent by
+ * another origin.
+ *
+ * The cookie is `SameSite=Lax`, which stops other sites but not other origins
+ * of the same site — and the workspace previews live on sibling subdomains,
+ * running whatever an agent or a repository put there. A form or upload posted
+ * from such a page arrived with the user's session. Bearer tokens are not
+ * affected: a page has to hold the token to send it.
+ *
+ * Browsers name the sender in `Origin` on every cross-origin write; requests
+ * without it (curl, native clients) are not what this is about.
+ */
+export function isForeignOriginWrite(req: Request): boolean {
+  if (SAFE_METHODS.has(req.method.toUpperCase())) return false;
+
+  const origin = req.headers.origin;
+  if (typeof origin === 'string' && origin) {
+    // An opaque origin (sandboxed frame, data: document) is never ours.
+    if (origin === 'null') return true;
+    const normalized = origin.toLowerCase();
+    if (config.allowedOrigins.includes(normalized)) return false;
+    try {
+      const host = String(req.headers.host || '').toLowerCase();
+      return new URL(normalized).host !== host;
+    } catch {
+      return true;
+    }
+  }
+
+  const site = req.headers['sec-fetch-site'];
+  return typeof site === 'string' && site !== 'same-origin' && site !== 'none';
 }
 
 export async function requireAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {

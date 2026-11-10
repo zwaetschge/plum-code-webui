@@ -271,7 +271,7 @@ function parseCliProvider(value: unknown): CLIProvider {
     value === 'pi' ||
     value === 'vibe'
     ? value
-    : 'codex';
+    : 'claude';
 }
 
 export function parseEnabledCliProviders(value: unknown): CLIProvider[] {

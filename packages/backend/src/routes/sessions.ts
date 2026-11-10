@@ -45,6 +45,8 @@ import {
 } from '../services/sessionIconGenerator.js';
 import {
   ensureSessionIconThumbnail,
+  sniffSessionIconFormat,
+  type SessionIconFormat,
   parseSessionIconThumbnailSize,
   sessionIconCacheControl,
 } from '../services/sessionIconThumbnail.js';
@@ -292,6 +294,15 @@ const ICON_MIME_BY_EXT: Record<string, string> = {
 };
 
 const ALLOWED_ICON_EXTENSIONS = new Set(Object.keys(ICON_MIME_BY_EXT));
+
+const ICON_EXT_BY_FORMAT: Record<SessionIconFormat, string> = {
+  png: '.png',
+  jpeg: '.jpg',
+  webp: '.webp',
+  gif: '.gif',
+  ico: '.ico',
+  svg: '.svg',
+};
 const AUTO_GOAL_MIN_CHARS = 220;
 const AUTO_GOAL_MAX_CHARS = 3200;
 const AUTO_GOAL_ACTION_HINT =
@@ -558,10 +569,19 @@ async function storeSessionIcon(
   if (buffer.length > MAX_ICON_BYTES) {
     throw new AppError('Icon file is too large', 400, 'ICON_TOO_LARGE');
   }
-  if (ext === '.svg') assertSafeSvg(buffer);
+  // The extension comes from the client; the bytes decide. A file that is not
+  // the image it claims to be is refused before anything renders it.
+  const format = sniffSessionIconFormat(buffer.subarray(0, 4096));
+  if (!format || !ALLOWED_ICON_EXTENSIONS.has(ext)) {
+    throw new AppError('Icon file is not a supported image', 400, 'INVALID_ICON');
+  }
+  if (format === 'svg') assertSafeSvg(buffer);
+  // Stored under the extension of what it is (a favicon.ico is often a PNG), so
+  // the served content type always matches the bytes.
+  const storedExt = ICON_EXT_BY_FORMAT[format];
   await ensureDir(SESSION_ICON_DIR);
   await removeExistingSessionIcons(sessionId);
-  const filename = `${sessionId}-${nanoid(10)}${ext}`;
+  const filename = `${sessionId}-${nanoid(10)}${storedExt}`;
   const iconPath = path.join(SESSION_ICON_DIR, filename);
   await fs.writeFile(iconPath, buffer);
   await pgRun(
@@ -2222,7 +2242,8 @@ router.get('/:id/icon', async (req, res) => {
   if (thumbnailSize !== null) {
     try {
       responsePath = await ensureSessionIconThumbnail(iconPath, thumbnailSize);
-      variant = `thumbnail-${thumbnailSize}`;
+      // A vector icon comes back as itself; it has no raster thumbnail.
+      variant = responsePath === iconPath ? 'original' : `thumbnail-${thumbnailSize}`;
     } catch (error) {
       thumbnailFallback = true;
       variant = 'original-fallback';

@@ -8,6 +8,8 @@ import { readPersonalization } from './personalization.js';
 import { readModelProvidersForUser } from '../../utils/modelProviderKeys.js';
 import { getModelProviderCatalog } from '../../utils/modelCatalog.js';
 import { safeDecrypt } from '../../utils/encryption.js';
+import { providerBaseUrlProblem } from '../../utils/providerUrlGuard.js';
+import { getRunnerAccessDecision } from '../../utils/runnerAccess.js';
 import { AppError } from '../../middleware/errorHandler.js';
 
 const compatible = new Set([
@@ -36,9 +38,14 @@ interface Endpoint extends AssistantApiProvider {
 }
 async function endpoints(userId: string): Promise<Endpoint[]> {
   const providers = await readModelProvidersForUser(userId),
-    catalog = getModelProviderCatalog();
+    catalog = getModelProviderCatalog(),
+    allowPrivateNetwork = (await getRunnerAccessDecision(userId)).allowed;
   return providers.flatMap((provider) => {
     if (!provider.enabled || !provider.apiKey) return [];
+    // A stored URL is checked again here: it may predate the rule at save time.
+    if (provider.baseUrl && providerBaseUrlProblem(provider.baseUrl, { allowPrivateNetwork })) {
+      return [];
+    }
     const protocol =
       provider.id === 'anthropic'
         ? 'anthropic'

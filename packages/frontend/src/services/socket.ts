@@ -248,7 +248,8 @@ class SocketService {
       ...(native
         ? { path: `${new URL(native.apiBase).pathname.replace(/\/$/, '')}/socket.io` }
         : {}),
-      auth: { token },
+      // Read at every (re)connect, so a renewed token is the one presented.
+      auth: (send) => send({ token: useAuthStore.getState().token ?? token }),
       transports: ['websocket', 'polling'],
     });
 
@@ -277,6 +278,14 @@ class SocketService {
 
     this.socket.on('disconnect', (reason) => {
       console.log('Socket disconnected:', reason);
+    });
+
+    // The server refuses the handshake when the login is gone. Without this the
+    // socket retried forever with the same token while the UI looked signed in.
+    this.socket.on('connect_error', (error) => {
+      if (/Invalid token|Authentication required|Account unavailable/i.test(error.message)) {
+        void useAuthStore.getState().checkAuth();
+      }
     });
 
     this.socket.on('assistant:ui-result', (event) => {

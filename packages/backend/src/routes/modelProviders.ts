@@ -5,6 +5,8 @@ import {
 } from '../utils/providerModelDiscovery.js';
 import { z } from 'zod';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
+import { providerBaseUrlProblem } from '../utils/providerUrlGuard.js';
+import { getRunnerAccessDecision } from '../utils/runnerAccess.js';
 import {
   getModelProviderCatalog,
   resetModelProviderCatalogCache,
@@ -72,6 +74,16 @@ router.put('/providers', requireAuth, async (req, res) => {
       : undefined;
     const catalogProvider = getModelProviderCatalog()[id];
     const finalBaseUrl = baseUrl && baseUrl.trim() !== '' ? baseUrl.trim() : catalogProvider?.api;
+    if (baseUrl && baseUrl.trim() !== '') {
+      const problem = providerBaseUrlProblem(baseUrl, {
+        allowPrivateNetwork: (await getRunnerAccessDecision(userId)).allowed,
+      });
+      if (problem) {
+        return res
+          .status(400)
+          .json({ success: false, error: { code: 'INVALID_BASE_URL', message: problem } });
+      }
+    }
 
     const providers = await readModelProvidersForUser(userId);
     const now = new Date().toISOString();

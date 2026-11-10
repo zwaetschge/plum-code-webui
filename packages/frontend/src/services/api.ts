@@ -16,6 +16,26 @@ export class ApiError extends Error {
   }
 }
 
+/** Endpoints whose 401 is the answer itself, not news about the login. */
+const AUTH_PROBE_ENDPOINTS = /^\/auth\/(me|logout|refresh|web\/exchange)(\?|$)/;
+const AUTH_RECHECK_INTERVAL_MS = 10_000;
+let lastAuthRecheckAt = 0;
+
+/**
+ * A 401 on a request that carried the stored token means the login may be
+ * gone (expired, revoked, account suspended). It used to surface only as one
+ * failed request while the app kept looking signed in. The store asks
+ * `/auth/me` and signs out if the server agrees; a 401 that was about
+ * something else leaves the session alone.
+ */
+function recheckLoginAfterUnauthorized(endpoint: string, sentToken: boolean): void {
+  if (!sentToken || AUTH_PROBE_ENDPOINTS.test(endpoint)) return;
+  const now = Date.now();
+  if (now - lastAuthRecheckAt < AUTH_RECHECK_INTERVAL_MS) return;
+  lastAuthRecheckAt = now;
+  void useAuthStore.getState().checkAuth();
+}
+
 class ApiClient {
   private getAuthHeader(): Record<string, string> {
     const token = useAuthStore.getState().token;
@@ -42,6 +62,9 @@ class ApiClient {
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        recheckLoginAfterUnauthorized(endpoint, Boolean(headers.Authorization));
+      }
       const error = await response.json().catch(() => ({ message: 'Request failed' }));
       throw new ApiError(
         error.error?.message || error.message || 'Request failed',
@@ -67,6 +90,9 @@ class ApiClient {
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        recheckLoginAfterUnauthorized(endpoint, Boolean(headers.Authorization));
+      }
       const error = await response.json().catch(() => ({ message: 'Request failed' }));
       throw new ApiError(
         error.error?.message || error.message || 'Request failed',

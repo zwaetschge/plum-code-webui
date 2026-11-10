@@ -1,9 +1,9 @@
 import { get as pgGet } from '../db/pg.js';
 import { Router, type NextFunction, type Request, type Response } from 'express';
-import { timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import { config } from '../config.js';
+import { bindHookCaller } from '../middleware/hookSecret.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { getOracleBrowserManager } from '../services/oracleBrowser.js';
 import {
@@ -15,23 +15,17 @@ import {
 const router = Router();
 
 function requireHookSecret(req: Request, res: Response, next: NextFunction): void {
-  const provided = req.header('x-webui-hook-secret') || '';
-  const expected = config.hookSecret;
-
-  if (!expected) {
+  if (!config.hookSecret) {
     res
       .status(503)
       .json({ success: false, error: { code: 'NO_HOOK', message: 'hook secret unconfigured' } });
     return;
   }
-
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+  // Binds the request to the session the credential was issued to.
+  if (!bindHookCaller(req)) {
     res.status(401).json({ success: false, error: { code: 'UNAUTH', message: 'invalid secret' } });
     return;
   }
-
   next();
 }
 

@@ -72,6 +72,7 @@ import {
 } from '@agentclientprotocol/sdk';
 import SQLiteDatabase from 'better-sqlite3';
 import { config } from '../../config.js';
+import { sessionHookToken } from '../../middleware/hookSecret.js';
 import {
   CLI_PROVIDERS,
   ULTRACODE_SETTINGS,
@@ -4944,7 +4945,7 @@ Discord Main Gateway:
               vibeEnv,
               extraEnv: {
                 WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
-                WEBUI_HOOK_SECRET: config.hookSecret,
+                WEBUI_HOOK_SECRET: sessionHookToken(sessionId),
                 WEBUI_PROJECT_PATH: session.working_directory,
                 WEBUI_SESSION_MODE: effectiveMode,
               },
@@ -4961,7 +4962,7 @@ Discord Main Gateway:
           WEBUI_SESSION_MODE: effectiveMode,
           WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
           WEBUI_PROJECT_PATH: session.working_directory,
-          WEBUI_HOOK_SECRET: config.hookSecret,
+          WEBUI_HOOK_SECRET: sessionHookToken(sessionId),
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -4972,7 +4973,7 @@ Discord Main Gateway:
           ? buildVibeMcpServers(sessionId, {
               ...extraEnv,
               WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
-              WEBUI_HOOK_SECRET: config.hookSecret,
+              WEBUI_HOOK_SECRET: sessionHookToken(sessionId),
               WEBUI_PROJECT_PATH: session.working_directory,
               WEBUI_SESSION_MODE: effectiveMode,
             })
@@ -5397,7 +5398,7 @@ Discord Main Gateway:
         WEBUI_PROJECT_PATH: session.working_directory,
         // Shared secret the permission-prompt script sends back in a header so
         // the backend can distinguish real hook calls from forged requests.
-        WEBUI_HOOK_SECRET: config.hookSecret,
+        WEBUI_HOOK_SECRET: sessionHookToken(sessionId),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -7643,7 +7644,7 @@ Discord Main Gateway:
         WEBUI_SESSION_ID: sessionId,
         WEBUI_BACKEND_URL: `http://localhost:${config.port}`,
         WEBUI_PROJECT_PATH: session.working_directory,
-        WEBUI_HOOK_SECRET: config.hookSecret,
+        WEBUI_HOOK_SECRET: sessionHookToken(sessionId),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -11823,7 +11824,7 @@ ${messageForClaude}`;
         WEBUI_PROJECT_PATH: workingDirectory,
         WEBUI_SESSION_MODE: mode,
         WEBUI_CONFIG_HOME: configHome,
-        WEBUI_HOOK_SECRET: config.hookSecret,
+        WEBUI_HOOK_SECRET: sessionHookToken(sessionId),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });

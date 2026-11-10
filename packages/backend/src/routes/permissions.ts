@@ -1,11 +1,10 @@
 import { get as pgGet, all as pgAll } from '../db/pg.js';
 import { Router, Request, Response, NextFunction } from 'express';
-import { timingSafeEqual } from 'crypto';
 import { z } from 'zod';
 import { requireAuth, type AuthenticatedRequest } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { addPatternToSettings } from '../services/claudeSettings.js';
-import { config } from '../config.js';
+import { bindHookCaller } from '../middleware/hookSecret.js';
 import { clearPendingQuestion } from '../services/pendingQuestions.js';
 import { auditFromRequest, recordAudit } from '../utils/auditLog.js';
 import { getProcessManager } from '../websocket/index.js';
@@ -79,11 +78,8 @@ permissionCleanupTimer.unref();
 // exposed. They must only accept calls from our own permission-prompt script, which
 // receives the secret via env. We compare with constant-time to not leak length.
 function requireHookSecret(req: Request, res: Response, next: NextFunction): void {
-  const provided = req.header('x-webui-hook-secret') || '';
-  const expected = config.hookSecret;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+  // Binds the request to the session the credential was issued to.
+  if (!bindHookCaller(req)) {
     res.status(401).json({ success: false, error: 'Unauthorized' });
     return;
   }

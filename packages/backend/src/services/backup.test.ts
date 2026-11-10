@@ -87,7 +87,7 @@ test('retention keeps the newest and never empties the directory', options, asyn
   const before = listBackups();
   assert.ok(before.length >= 3, `expected at least 3 backups, saw ${before.length}`);
 
-  pruneBackups(2);
+  pruneBackups({ recent: 2, days: 1 });
   const after = listBackups();
   assert.equal(after.length, 2);
   assert.deepEqual(
@@ -96,8 +96,8 @@ test('retention keeps the newest and never empties the directory', options, asyn
     'the two newest must be the ones kept'
   );
 
-  // keep=0 would otherwise delete everything, which is never what a retention
+  // Zero would otherwise delete everything, which is never what a retention
   // setting should mean.
-  pruneBackups(0);
+  pruneBackups({ recent: 0, days: 0 });
   assert.equal(listBackups().length, 1);
 });

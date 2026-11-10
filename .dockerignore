@@ -37,3 +37,10 @@ logos
 
 # Session diagnostics and rendered test artifacts are not runtime source.
 .probe
+
+# Local env files and scratch directories below the root: the patterns above
+# only match the top level, and `COPY packages/backend` would take them along.
+**/.env
+**/.env.*
+!**/.env.example
+packages/backend/tmp

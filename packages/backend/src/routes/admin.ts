@@ -13,8 +13,7 @@ import { auditFromRequest } from '../utils/auditLog.js';
 import { revokeUserHttpSessions } from '../services/SqliteSessionStore.js';
 import { disconnectUserSockets } from '../websocket/index.js';
 import { createBackup, listBackups } from '../services/backup.js';
-import { config } from '../config.js';
-import { timingSafeEqual } from 'crypto';
+import { identifyHookCaller } from '../middleware/hookSecret.js';
 
 const router = Router();
 
@@ -23,8 +22,8 @@ const router = Router();
  * The only supported way to back this database up. Outside processes must not
  * open the live file — see services/backup.ts for what that did on 2026-08-26.
  *
- * Reachable two ways: an admin session, or the shared hook secret that spawned
- * CLI subprocesses already use. The maintenance script has no browser session,
+ * Reachable two ways: an admin session, or the hook credential of a session
+ * that belongs to an admin. The maintenance script has no browser session,
  * and without the second path it could no longer take a backup at all.
  */
 async function backupCallerAllowed(req: Request): Promise<boolean> {
@@ -38,12 +37,16 @@ async function backupCallerAllowed(req: Request): Promise<boolean> {
       | undefined;
     if (row?.role === 'admin' && row.status !== 'suspended') return true;
   }
-  const provided = req.header('x-webui-hook-secret') || '';
-  const expected = config.hookSecret;
-  if (!expected || !provided) return false;
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
+  const caller = identifyHookCaller(req.header('x-webui-hook-secret') || '');
+  if (!caller) return false;
+  if (caller.kind === 'internal') return true;
+  // A session credential counts when the session belongs to an admin — the
+  // maintenance script runs inside one.
+  const owner = (await pgGet(
+    `SELECT u.role, u.status FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`,
+    caller.sessionId
+  )) as unknown as { role: string; status: string } | undefined;
+  return owner?.role === 'admin' && owner.status !== 'suspended';
 }
 
 router.post('/backup', async (req: Request, res: Response) => {

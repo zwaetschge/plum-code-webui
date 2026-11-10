@@ -51,6 +51,10 @@ const SESSION_ID = RUNTIME_ENV.WEBUI_SESSION_ID || '';
 // two is a fork bomb.
 const SUBAGENT_DEPTH = Number(RUNTIME_ENV.PLUM_SUBAGENT_DEPTH || 0);
 const DEFAULT_TIMEOUT_S = Number(RUNTIME_ENV.SUBAGENT_TIMEOUT_SECONDS || 600);
+// The permission mode of the session that calls this server. A worker used to
+// run with every permission whatever the session allowed, which made
+// delegating the way around a planning or manual session.
+const SESSION_MODE = String(RUNTIME_ENV.WEBUI_SESSION_MODE || '').trim();
 const MAX_OUTPUT_CHARS = Number(RUNTIME_ENV.SUBAGENT_MAX_OUTPUT_CHARS || 60_000);
 // MAX_OUTPUT_CHARS only trims what we hand back. The raw capture needs its own
 // ceiling: a subagent that loops on a progress spinner can emit hundreds of
@@ -146,7 +150,18 @@ function cliAvailable(provider) {
 // ---------------------------------------------------------------------------
 // Spawning
 
-function buildInvocation(provider, prompt, model) {
+/**
+ * What a worker may do, from the calling session's mode. A headless worker
+ * cannot ask anyone, so "manual" means the same as "planning" for it: look,
+ * do not touch. A harness that states no mode keeps the full profile it had.
+ */
+function permissionProfile(mode) {
+  if (!mode || mode === 'danger') return 'full';
+  if (mode === 'auto-accept') return 'edits';
+  return 'read-only';
+}
+
+function buildInvocation(provider, prompt, model, profile = 'full') {
   switch (provider) {
     case 'codex':
       // --json gives us the final agent message and token usage as JSONL.
@@ -159,7 +174,7 @@ function buildInvocation(provider, prompt, model) {
           '--json',
           '--skip-git-repo-check',
           '--sandbox',
-          'workspace-write',
+          profile === 'read-only' ? 'read-only' : 'workspace-write',
           '-c',
           'approval_policy="never"',
           // HTTPS streaming instead of the Responses WebSocket, which the server
@@ -184,12 +199,17 @@ function buildInvocation(provider, prompt, model) {
           '-p',
           '--output-format',
           'json',
-          '--dangerously-skip-permissions',
+          ...(profile === 'full'
+            ? ['--dangerously-skip-permissions']
+            : ['--permission-mode', profile === 'edits' ? 'acceptEdits' : 'plan']),
           ...(model ? ['--model', model] : []),
           prompt,
         ],
       };
     case 'pi':
+      // Pi's print mode has no restricted variant; it only runs for a session
+      // that may do everything itself.
+      if (profile !== 'full') return { refused: true };
       // --print is pi's non-interactive mode; --no-session keeps one-shot
       // workers out of the session store. --model accepts provider/id ids.
       return {
@@ -202,6 +222,9 @@ function buildInvocation(provider, prompt, model) {
       // skips the interactive workspace-trust prompt (a headless child cannot
       // answer it) and --auto-approve replaces tool approvals. Vibe picks its
       // model from its own config, so `model` is reported but not passed.
+      // Without --auto-approve a headless Vibe just blocks, so like Pi it is
+      // only offered to a session with full permissions.
+      if (profile !== 'full') return { refused: true };
       return {
         command: 'vibe',
         args: [
@@ -640,8 +663,16 @@ async function handleRunSubagent(args) {
     }
     model = resolved.id;
   }
-  const invocation = buildInvocation(entry.provider, prompt, model);
+  const profile = permissionProfile(SESSION_MODE);
+  const invocation = buildInvocation(entry.provider, prompt, model, profile);
   if (!invocation) return asText(`Unsupported provider "${entry.provider}".`, true);
+  if (invocation.refused) {
+    return asText(
+      `This session runs in "${SESSION_MODE}" mode, and a ${entry.provider} worker cannot be held to it. ` +
+        'Use a Claude or Codex worker, which run read-only or edit-only here, or switch the session mode.',
+      true
+    );
+  }
   if (!cliAvailable(invocation.command)) {
     return asText(`The ${entry.provider} CLI is not installed in this environment.`, true);
   }

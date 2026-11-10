@@ -129,6 +129,8 @@ export async function createBackup(now: Date = new Date()): Promise<BackupResult
     { env: { ...process.env, PGPASSWORD: pg.password }, maxBuffer: 32 * 1024 * 1024 }
   );
 
+  // The archive holds every row of the application; pg_dump writes it 0644.
+  fs.chmodSync(target, 0o600);
   const bytes = fs.statSync(target).size;
   const verification = await verify(target);
   const result: BackupResult = {
@@ -161,20 +163,58 @@ export function listBackups(): Array<{ path: string; bytes: number; createdAt: s
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export function pruneBackups(keep: number): string[] {
+export interface BackupRetention {
+  /** Newest backups kept no matter how close together they are. */
+  recent: number;
+  /** Days that keep their newest backup. */
+  days: number;
+}
+
+/**
+ * Which backups to delete.
+ *
+ * "Keep the newest 14" looked like two weeks and was two days: every restart
+ * writes a backup, so a night of deployments pushed everything older out. The
+ * rule is by calendar day instead — each of the last `days` days that has a
+ * backup keeps its newest one — plus the newest few regardless, so the most
+ * recent states stay close together. Restarts now cost one slot, not history.
+ */
+export function selectBackupsToRemove(
+  entries: Array<{ path: string; createdAt: string }>,
+  retention: BackupRetention
+): string[] {
+  const newestFirst = [...entries].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const keep = new Set<string>();
+  for (const entry of newestFirst.slice(0, Math.max(retention.recent, 1))) keep.add(entry.path);
+
+  const seenDays = new Set<string>();
+  for (const entry of newestFirst) {
+    const day = entry.createdAt.slice(0, 10);
+    if (seenDays.has(day)) continue;
+    if (seenDays.size >= Math.max(retention.days, 1)) break;
+    seenDays.add(day);
+    keep.add(entry.path);
+  }
+  return newestFirst.filter((entry) => !keep.has(entry.path)).map((entry) => entry.path);
+}
+
+export function pruneBackups(retention: BackupRetention): string[] {
   const removed: string[] = [];
-  for (const entry of listBackups().slice(Math.max(keep, 1))) {
+  for (const target of selectBackupsToRemove(listBackups(), retention)) {
     try {
-      fs.rmSync(entry.path);
-      removed.push(entry.path);
+      fs.rmSync(target);
+      removed.push(target);
     } catch (error) {
-      log.warn('Could not remove old backup', { path: entry.path, error: String(error) });
+      log.warn('Could not remove old backup', { path: target, error: String(error) });
     }
   }
   return removed;
 }
 
 let timer: NodeJS.Timeout | null = null;
+
+/** A backup younger than this makes the one at boot redundant. */
+const BOOT_BACKUP_MIN_AGE_MS = 60 * 60 * 1000;
 
 /**
  * Runs one backup shortly after boot and then on an interval. The first one is
@@ -184,7 +224,12 @@ export function startBackupSchedule(): void {
   if (timer) return;
 
   const intervalHours = Number(process.env.PLUM_BACKUP_INTERVAL_HOURS || 6);
-  const keep = Number(process.env.PLUM_BACKUP_KEEP || 14);
+  // PLUM_BACKUP_KEEP used to count files; it now counts days, which is what
+  // the old default of 14 was meant to be.
+  const retention: BackupRetention = {
+    days: Number(process.env.PLUM_BACKUP_KEEP || 14),
+    recent: Number(process.env.PLUM_BACKUP_KEEP_RECENT || 3),
+  };
   if (!Number.isFinite(intervalHours) || intervalHours <= 0) {
     log.info('Scheduled backups disabled', { intervalHours });
     return;
@@ -193,16 +238,30 @@ export function startBackupSchedule(): void {
   const run = async () => {
     try {
       await createBackup();
-      pruneBackups(keep);
+      pruneBackups(retention);
     } catch (error) {
       log.error('Scheduled backup failed', { error: String(error) });
     }
   };
 
-  setTimeout(run, 60_000).unref();
+  // A restart shortly after a backup has nothing new worth a full dump; the
+  // interval run still happens on time.
+  const runAfterBoot = async () => {
+    const newest = listBackups()[0];
+    const ageMs = newest ? Date.now() - Date.parse(newest.createdAt) : Infinity;
+    if (ageMs < BOOT_BACKUP_MIN_AGE_MS) {
+      log.info('Boot backup skipped, the newest one is recent', {
+        ageMinutes: Math.round(ageMs / 60_000),
+      });
+      return;
+    }
+    await run();
+  };
+
+  setTimeout(() => void runAfterBoot(), 60_000).unref();
   timer = setInterval(run, intervalHours * 3_600_000);
   timer.unref();
-  log.info('Backup schedule started', { intervalHours, keep });
+  log.info('Backup schedule started', { intervalHours, ...retention });
 }
 
 export function stopBackupSchedule(): void {

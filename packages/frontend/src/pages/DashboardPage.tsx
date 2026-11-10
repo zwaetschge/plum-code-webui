@@ -226,7 +226,7 @@ function getDashboardDefaultProvider(
   ) {
     return savedDefaultProvider;
   }
-  return enabledProviders?.[0] ?? 'codex';
+  return enabledProviders?.[0] ?? 'claude';
 }
 
 function toDashboardSentence(value: string | null | undefined): string | null {

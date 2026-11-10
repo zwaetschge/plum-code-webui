@@ -37,6 +37,13 @@ export const requestIdMiddleware: RequestHandler = (req, res, next) => {
   withRequestContext({ requestId: id }, () => next());
 };
 
+/**
+ * Answers that are an ordinary state rather than a fault. The UI asks for the
+ * git status of every open project once a minute; a folder without a repository
+ * answered each time with a warning in the log.
+ */
+const EXPECTED_ERROR_CODES = new Set(['NOT_GIT_REPO']);
+
 interface ErrorLogContext extends Record<string, unknown> {
   requestId: string;
   method: string;
@@ -94,7 +101,7 @@ export function errorHandler(
 
   if (statusCode >= 500) {
     log.error(err.message, { ...context, stack: err.stack });
-  } else {
+  } else if (!(isAppError && EXPECTED_ERROR_CODES.has(err.code))) {
     log.warn(err.message, context);
   }
 
