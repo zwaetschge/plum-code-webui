@@ -22,7 +22,7 @@ Docker maps `4545:3001`. Backend DB migrations: `pnpm db:migrate` (from `package
 
 ## Architecture in short
 
-- **Backend** `packages/backend/src`: `routes/`, `services/`. `services/claude/ClaudeProcessManager.ts` runs provider lifecycles, streaming, interrupts, queued input and is the sole usage write path.
+- **Backend** `packages/backend/src`: `routes/`, `services/`. `services/claude/ClaudeProcessManager.ts` runs provider lifecycles, streaming, interrupts, queued input and books turn usage (one row per result). Claude Code agents are booked from their transcripts (`claudeSubagentBooking.ts`), CLI-subagent workers through `/api/settings/internal/cli-subagents/usage`.
 - **Providers:** Codex per-turn respawn; Pi JSONL RPC (model provider registry „Modellanbieter“, `/api/model-providers`); Mistral Vibe persistent ACP; Claude Code legacy stream-json.
 - **Model chat** (`/chat`): `services/assistant/apiChats.ts`, `apiTransport.ts`; `reasoningEffort` per turn (low/medium/high/max/ultra).
 - **Frontend** `packages/frontend/src`: `pages/SessionPage.tsx` (chat), `components/assistant/ModelEffortPicker.tsx` (model + animated effort rail), Zustand stores, `services/socket.ts`.

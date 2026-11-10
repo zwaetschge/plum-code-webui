@@ -65,7 +65,7 @@ import { upsertProxyUserInDatabase } from '../src/utils/proxyUser.js';
 import { createTestSchema, dropTestSchema, useTestSchema } from '../src/db/testing.js';
 
 useTestSchema();
-const { get: pgGet, run: pgRun } = await import('../src/db/pg.js');
+const { all: pgAllRows, get: pgGet, run: pgRun } = await import('../src/db/pg.js');
 await createTestSchema();
 import { syncCodexConfig } from '../src/utils/codexConfigSync.js';
 import {
@@ -1818,6 +1818,159 @@ async function testClaudeStaleTaskNotificationKeepsTurnJournalled() {
   assert.equal(getPiRun(sessionId)?.chatId, 'chat-r', 'the run is still journalled');
   assert.equal(proc.claudeIdle, false, 'the dispatched turn is still running');
   assert.equal(proc.taskNotificationPending, false, 'the report is consumed once');
+}
+
+/**
+ * What a Claude turn puts into the ledger, through the real stream handling
+ * and the real database.
+ *
+ * Until 2026-11-10 a turn was one row under the id of its message. Claude
+ * carries on by itself when a background task or agent finishes and ends with
+ * a result of its own; that second result arrived under the same id and was
+ * dropped as a duplicate, so sessions working with background agents booked a
+ * tenth of what they spent. Tokens the model router had booked for agents were
+ * subtracted from the turn as well, although the turn never contained them.
+ */
+async function testClaudeBooksEveryResultOfATurn() {
+  const sessionId = 'session-claude-results';
+  await pgRun(
+    `INSERT INTO users (id, email, name, provider, provider_id)
+     VALUES ('user-results', 'results@example.test', 'R', 'local', 'user-results')`
+  );
+  await pgRun(
+    `INSERT INTO sessions (id, user_id, name, working_directory, cli_provider)
+     VALUES (?, 'user-results', 'Results', '/tmp', 'claude')`,
+    sessionId
+  );
+  const { managerPrivate, proc } = makePiManagerFixture(sessionId, {
+    cliProvider: 'claude',
+    userId: 'user-results',
+    model: 'claude-fable-5-2',
+    piTurnInFlight: false,
+    claudeIdle: true,
+    isStreaming: false,
+    outputBuffer: { push: () => undefined },
+  });
+  // The fixture replaces these two; this test is about the real ones.
+  const own = managerPrivate as unknown as Record<string, unknown>;
+  delete own.saveUsageToDatabase;
+  delete own.resetCurrentContextUsage;
+  const claudePrivate = managerPrivate as unknown as {
+    dispatchClaudeTurn: (sessionId: string, proc: unknown, turn: unknown) => void;
+    processStreamMessage: (sessionId: string, msg: unknown) => Promise<void>;
+    saveUsageToDatabase: (sessionId: string, proc: unknown) => Promise<void>;
+    reportCliSubagent: (sessionId: string, input: unknown) => void;
+  };
+  const turn = (queueId: string) => ({
+    queueId,
+    chatId: null,
+    queuedAt: new Date().toISOString(),
+    originalMessage: 'go',
+    messageForClaude: 'go',
+    updateLastMessage: false,
+  });
+  const response = async (
+    id: string,
+    model: string,
+    usage: { input: number; output: number; cacheRead: number; cacheWrite: number }
+  ) => {
+    await claudePrivate.processStreamMessage(sessionId, {
+      type: 'stream_event',
+      event: {
+        type: 'message_start',
+        message: {
+          id,
+          model,
+          usage: {
+            input_tokens: usage.input,
+            output_tokens: 1,
+            cache_read_input_tokens: usage.cacheRead,
+            cache_creation_input_tokens: usage.cacheWrite,
+          },
+        },
+      },
+    });
+    await claudePrivate.processStreamMessage(sessionId, {
+      type: 'stream_event',
+      event: { type: 'message_delta', usage: { output_tokens: usage.output }, delta: {} },
+    });
+  };
+  const result = (usage: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+  }) =>
+    claudePrivate.processStreamMessage(sessionId, {
+      type: 'result',
+      subtype: 'success',
+      num_turns: 1,
+      duration_api_ms: 5,
+      result: 'done',
+      usage: {
+        input_tokens: usage.input,
+        output_tokens: usage.output,
+        cache_read_input_tokens: usage.cacheRead,
+        cache_creation_input_tokens: usage.cacheWrite,
+      },
+    });
+  const ledger = async () =>
+    (
+      (await pgAllRows(
+        `SELECT turn_id, total_tokens::int AS total, model FROM usage_history
+          WHERE session_id = ? ORDER BY id`,
+        sessionId
+      )) as Array<{ turn_id: string; total: number; model: string }>
+    ).map((row) => [row.turn_id, row.total, row.model]);
+
+  // A worker of the CLI-subagent bridge, started from a background shell. The
+  // parent writing on and its turn ending say nothing about it.
+  claudePrivate.dispatchClaudeTurn(sessionId, proc, turn('q1'));
+  claudePrivate.reportCliSubagent(sessionId, { id: 'w-1', provider: 'pi', status: 'started' });
+  const worker = () =>
+    (proc.subagentRuns as Map<string, { status: string; lifecycle?: string }>).get('cli-w-1');
+
+  const first = { input: 10, output: 200, cacheRead: 5000, cacheWrite: 300 };
+  await response('m1', 'claude-fable-5-2', first);
+  await claudePrivate.processStreamMessage(sessionId, {
+    type: 'stream_event',
+    event: { type: 'content_block_start', content_block: { type: 'text' } },
+  });
+  assert.equal(worker()?.status, 'started', 'text from the parent does not end a worker');
+  await result(first);
+  assert.equal(worker()?.status, 'started', 'nor does the end of the turn');
+  assert.deepEqual(await ledger(), [['q1', 5510, 'claude-fable-5-2']]);
+
+  // A background task finished; Claude carries on without a new message.
+  const second = { input: 4, output: 60, cacheRead: 4000, cacheWrite: 0 };
+  await response('m2', 'claude-fable-5-2', second);
+  await result(second);
+  assert.deepEqual(await ledger(), [
+    ['q1', 5510, 'claude-fable-5-2'],
+    ['q1:c1', 4064, 'claude-fable-5-2'],
+  ]);
+
+  // The same state booked again, as the shutdown flush does: nothing new.
+  await claudePrivate.saveUsageToDatabase(sessionId, proc);
+  assert.equal((await ledger()).length, 2);
+
+  // The worker reports its own end.
+  claudePrivate.reportCliSubagent(sessionId, { id: 'w-1', provider: 'pi', status: 'completed' });
+  assert.equal(worker()?.status, 'completed');
+
+  // Next message. One of its calls goes to a routed model, which the router
+  // books itself; the other is the turn's own and must be booked in full.
+  claudePrivate.dispatchClaudeTurn(sessionId, proc, turn('q2'));
+  await response('m3', 'glm-5.3', { input: 100, output: 50, cacheRead: 0, cacheWrite: 0 });
+  const own2 = { input: 7, output: 9, cacheRead: 100, cacheWrite: 0 };
+  await response('m4', 'claude-fable-5-2', own2);
+  await result({ input: 107, output: 59, cacheRead: 100, cacheWrite: 0 });
+  assert.deepEqual((await ledger()).slice(2), [['q2', 116, 'claude-fable-5-2']]);
+
+  // Later tests count the rows of these tables.
+  await pgRun('DELETE FROM usage_history WHERE session_id = ?', sessionId);
+  await pgRun('DELETE FROM sessions WHERE id = ?', sessionId);
+  await pgRun(`DELETE FROM users WHERE id = 'user-results'`);
 }
 
 /** A manual /compact between turns must not inject a continuation. */
@@ -4997,6 +5150,7 @@ await testPiRejectedPromptIsRequeued();
 await testPiRunIsJournalledUntilItSettles();
 await testClaudeTurnIsJournalledForResume();
 await testClaudeStaleTaskNotificationKeepsTurnJournalled();
+await testClaudeBooksEveryResultOfATurn();
 await testCodexContextFallbackUsesThreadState();
 await testCodexContextFallbackCapsThreadStateAtWindow();
 await testCodexCompactEventRetainsCompactedContext();

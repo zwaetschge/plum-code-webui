@@ -46,6 +46,16 @@ import {
   insertUsageSubagentTurns,
   usageHistoryTurnExists,
 } from '../../db/index.js';
+import { bookClaudeSubagentUsage } from './claudeSubagentBooking.js';
+import {
+  NO_TOKENS,
+  addTokens,
+  tokensBeyond,
+  totalTokens,
+  type TokenCounters,
+} from './claudeSubagentUsage.js';
+import { planTurnBooking, recordTurnBooking } from './turnUsageBooking.js';
+import { isAnthropicModel } from '../modelRouter.js';
 import { nanoid } from 'nanoid';
 import fs from 'fs/promises';
 import fsSync from 'fs';
@@ -2729,6 +2739,18 @@ interface ClaudeProcess {
   claudeQueueDraining?: boolean;
   claudeCurrentResponseId?: string;
   claudeCurrentResponseOutputTokens?: number;
+  /** The response in flight went to a routed model; the router books it. */
+  claudeCurrentResponseRouted?: boolean;
+  /** Tokens of this turn's own (main-thread) calls that the router booked. */
+  turnRoutedTokens?: TokenCounters;
+  // Which part of the running turn is in the ledger; see turnUsageBooking.ts.
+  usageBookedBaseId?: string;
+  usageBookedCount?: number;
+  turnBookedTokens?: TokenCounters;
+  /** When this process last booked its agents (ms since epoch). */
+  subagentUsageBookedAt?: number;
+  /** Bookings of this process run one after the other. */
+  usageBookingChain?: Promise<void>;
   // Track tool callIDs we've already emitted 'started' for, so we don't
   // re-emit on every status transition (pending → running → completed).
   emittedTools?: Set<string>;
@@ -2807,19 +2829,53 @@ export function applyClaudeResultUsage(
     output_tokens?: number;
     cache_read_input_tokens?: number;
     cache_creation_input_tokens?: number;
-  }
+  },
+  // What earlier results of the same turn already booked. A result reports its
+  // own stretch only, while the turn's counters run on across results, so the
+  // comparison is made on top of that.
+  booked: TokenCounters = NO_TOKENS
 ): void {
-  target.turnInputTokens = Math.max(target.turnInputTokens, usage.input_tokens || 0);
-  target.turnOutputTokens = Math.max(target.turnOutputTokens, usage.output_tokens || 0);
-  target.turnCacheReadTokens = Math.max(
-    target.turnCacheReadTokens,
-    usage.cache_read_input_tokens || 0
+  const atLeast = (current: number, earlier: number, reported: number | undefined) =>
+    earlier + Math.max(current - earlier, reported || 0);
+  target.turnInputTokens = atLeast(target.turnInputTokens, booked.inputTokens, usage.input_tokens);
+  target.turnOutputTokens = atLeast(
+    target.turnOutputTokens,
+    booked.outputTokens,
+    usage.output_tokens
   );
-  target.turnCacheCreationTokens = Math.max(
+  target.turnCacheReadTokens = atLeast(
+    target.turnCacheReadTokens,
+    booked.cacheReadTokens,
+    usage.cache_read_input_tokens
+  );
+  target.turnCacheCreationTokens = atLeast(
     target.turnCacheCreationTokens,
-    usage.cache_creation_input_tokens || 0
+    booked.cacheCreationTokens,
+    usage.cache_creation_input_tokens
   );
 }
+
+function turnTokens(
+  proc: Pick<
+    ClaudeProcess,
+    'turnInputTokens' | 'turnOutputTokens' | 'turnCacheReadTokens' | 'turnCacheCreationTokens'
+  >
+): TokenCounters {
+  return {
+    inputTokens: proc.turnInputTokens,
+    outputTokens: proc.turnOutputTokens,
+    cacheReadTokens: proc.turnCacheReadTokens,
+    cacheCreationTokens: proc.turnCacheCreationTokens,
+  };
+}
+
+/**
+ * The CLI-subagent bridge announces the end of its runs itself. Nothing in the
+ * session's own stream says anything about them, so only the bridge — or the
+ * end of the process — may close one.
+ */
+const CLI_SUBAGENT_TYPE = 'CLI subagent';
+const reportsOwnEnd = (run: SubagentRun) => run.agentType === CLI_SUBAGENT_TYPE;
 
 interface CodexPreparedTurn {
   queueId: string;
@@ -3360,8 +3416,14 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
       includeBackground?: boolean;
     } = {}
   ): void {
+    // A run of the CLI-subagent bridge is not part of this stream: the parent
+    // writing text, or its turn ending, says nothing about a worker started
+    // from a background shell. Closing those here marked every one of them
+    // "interrupted" while it was still working.
     const activeRuns = Array.from(proc.subagentRuns.values()).filter(
-      (run) => run.status === 'started' && (!run.background || update.includeBackground === true)
+      (run) =>
+        run.status === 'started' &&
+        (update.includeBackground === true || (!run.background && !reportsOwnEnd(run)))
     );
     for (const run of activeRuns) {
       this.completeSubagentRun(
@@ -3659,7 +3721,7 @@ You are in Planning Mode. Do not execute tools other than TodoWrite or ExitPlanM
     if (input.status === 'started')
       this.startSubagentRun(sessionId, proc, {
         agentId: id,
-        agentType: 'CLI subagent',
+        agentType: CLI_SUBAGENT_TYPE,
         description: input.description,
         provider: input.provider,
         model: input.model,
@@ -7950,6 +8012,8 @@ Discord Main Gateway:
     proc.contextCacheCreationTokens = 0;
     proc.contextOutputTokens = 0;
     proc.turnCostUsd = undefined;
+    proc.turnRoutedTokens = undefined;
+    proc.turnBookedTokens = undefined;
   }
 
   private calculateTurnCost(proc: ClaudeProcess): number {
@@ -8031,25 +8095,9 @@ Discord Main Gateway:
    * losing the last turn of a session is losing money that was already spent.
    */
   private async saveUsageToDatabase(sessionId: string, proc: ClaudeProcess): Promise<void> {
-    // Claude Code's final result aggregates the whole turn including its
-    // subagents — and a subagent routed to Z.AI was already booked by the
-    // model router as its own `zai` row the moment its response completed.
-    // Left in, those tokens would be billed twice, the second time priced as
-    // whatever the main model is. The router hands them over exactly once.
     if (isClaudeTransportProvider(proc.cliProvider)) {
-      const routed = modelRouter.drainRoutedUsage(sessionId);
-      if (routed.requests > 0) {
-        proc.turnInputTokens = Math.max(0, proc.turnInputTokens - routed.inputTokens);
-        proc.turnOutputTokens = Math.max(0, proc.turnOutputTokens - routed.outputTokens);
-        proc.turnCacheReadTokens = Math.max(0, proc.turnCacheReadTokens - routed.cacheReadTokens);
-        proc.turnCacheCreationTokens = Math.max(
-          0,
-          proc.turnCacheCreationTokens - routed.cacheCreationTokens
-        );
-        // The CLI's own cost figure also contains the routed tokens, priced by
-        // its idea of the model; recompute from the corrected counters instead.
-        proc.turnCostUsd = undefined;
-      }
+      await this.saveClaudeUsageToDatabase(sessionId, proc);
+      return;
     }
 
     const turnTotalTokens =
@@ -8101,6 +8149,120 @@ Discord Main Gateway:
       proc.turnCostUsd = undefined;
     } catch (error) {
       console.error('[USAGE] Failed to save usage to database:', error);
+    }
+  }
+
+  /**
+   * Book what a Claude Code turn has spent since it was last booked.
+   *
+   * Three things the single row per turn got wrong, all found by comparing the
+   * ledger with the transcripts (2026-11-10, CLI 2.1.319):
+   *
+   * - A result reports the main thread only. The agents a turn starts are in
+   *   no counter of ours; they are read from their transcripts and booked as
+   *   rows of their own (claudeSubagentBooking.ts).
+   * - One message can end in several results: Claude carries on by itself
+   *   when a background task or agent finishes. Each result books what came
+   *   since the last (turnUsageBooking.ts) instead of being dropped as a
+   *   repeat of the first.
+   * - The model router books every response it sends to another vendor. Those
+   *   tokens were subtracted from the turn on the belief that the turn's
+   *   total contained its agents; it does not, so the turn lost real tokens.
+   *   Only what the main thread itself spent on a routed model is in our
+   *   counters, and only that comes off.
+   */
+  private saveClaudeUsageToDatabase(sessionId: string, proc: ClaudeProcess): Promise<void> {
+    // One at a time: each booking works from what the one before it recorded.
+    // A result and the shutdown flush arriving together would otherwise both
+    // start from the same state, and the later, larger one would be dropped.
+    const booking = (proc.usageBookingChain ?? Promise.resolve()).then(() =>
+      this.bookClaudeUsageNow(sessionId, proc)
+    );
+    proc.usageBookingChain = booking.catch(() => undefined);
+    return booking;
+  }
+
+  private async bookClaudeUsageNow(sessionId: string, proc: ClaudeProcess): Promise<void> {
+    // Clears the router's tally for this session; the amount is known here.
+    modelRouter.drainRoutedUsage(sessionId);
+
+    const turn = tokensBeyond(turnTokens(proc), proc.turnRoutedTokens ?? NO_TOKENS);
+    const baseId =
+      proc.currentUsageTurnId ??
+      (totalTokens(turn) > 0
+        ? (proc.currentUsageTurnId = this.deriveUsageTurnId(sessionId, proc))
+        : null);
+    const plan = baseId ? planTurnBooking(proc, baseId, turn) : null;
+    if (!plan || !baseId) {
+      // Nothing new on the main thread; its agents may still have worked.
+      await this.bookNativeSubagentUsage(
+        sessionId,
+        proc,
+        `${baseId ?? 'idle'}:a${Date.now().toString(36)}`
+      );
+      return;
+    }
+
+    const tokens = totalTokens(plan.tokens);
+    const costUsd = estimateModelCost(proc.model, plan.tokens, null).cost;
+    try {
+      const inserted = await insertUsageHistoryTurn({
+        userId: proc.userId,
+        sessionId,
+        provider: proc.cliProvider,
+        turnId: plan.turnId,
+        ...plan.tokens,
+        totalTokens: tokens,
+        costUsd,
+        model: proc.model,
+        // Booked when the result arrived, not when the message was queued: a
+        // long turn would otherwise bury its spend in an earlier bucket.
+        createdAt: undefined,
+      });
+      console.log(
+        inserted
+          ? `[USAGE] Saved ${proc.cliProvider} turn ${plan.turnId}: ${tokens} tokens, $${costUsd.toFixed(4)}`
+          : `[USAGE] Skipped duplicate ${proc.cliProvider} turn ${plan.turnId}`
+      );
+      // Either way these counters are in the ledger now.
+      recordTurnBooking(proc, baseId, turn);
+      proc.turnCostUsd = undefined;
+    } catch (error) {
+      // Left unrecorded, so the next booking carries these tokens with it.
+      console.error('[USAGE] Failed to save usage to database:', error);
+    }
+    await this.bookNativeSubagentUsage(sessionId, proc, plan.turnId);
+  }
+
+  /** The tokens of the agents this session started, as far as not yet booked. */
+  private async bookNativeSubagentUsage(
+    sessionId: string,
+    proc: ClaudeProcess,
+    bookingId: string
+  ): Promise<void> {
+    if (!isClaudeTransportProvider(proc.cliProvider) || !proc.claudeSessionId) return;
+    // Only agents that worked since this process last looked: those before
+    // were booked then, and anything older still open is left to the pass at
+    // boot. A minute of slack covers a transcript written just before.
+    const startedAt = Date.now();
+    const turnStartedAt = Date.parse(proc.currentUsageTurnStartedAt ?? '');
+    const since =
+      proc.subagentUsageBookedAt ?? (Number.isFinite(turnStartedAt) ? turnStartedAt : startedAt);
+    try {
+      const rows = await bookClaudeSubagentUsage({
+        sessionId,
+        userId: proc.userId,
+        provider: proc.cliProvider,
+        claudeSessionId: proc.claudeSessionId,
+        workingDirectory: proc.workingDirectory,
+        bookingId,
+        modifiedSince: since - 60_000,
+      });
+      proc.subagentUsageBookedAt = startedAt;
+      if (rows > 0) console.log(`[USAGE] Saved usage of ${rows} subagent(s) [${sessionId}]`);
+    } catch (error) {
+      // The turn itself is booked; the agents are picked up by the next booking.
+      console.warn('[USAGE] Failed to save subagent usage:', error);
     }
   }
 
@@ -8409,7 +8571,17 @@ Discord Main Gateway:
           if (event.message.usage) {
             const responseId =
               typeof event.message.id === 'string' ? event.message.id : `response-${Date.now()}`;
+            const before = turnTokens(proc);
             accumulateClaudeMessageStartUsage(proc, responseId, event.message.usage);
+            // Only a `claude` session reaches other vendors' models, through
+            // the model router, which books each such response itself.
+            proc.claudeCurrentResponseRouted =
+              proc.cliProvider === 'claude' && !isAnthropicModel(event.message.model);
+            if (proc.claudeCurrentResponseRouted)
+              proc.turnRoutedTokens = addTokens(
+                proc.turnRoutedTokens ?? NO_TOKENS,
+                tokensBeyond(turnTokens(proc), before)
+              );
             await this.emitUsage(sessionId, proc);
           }
         }
@@ -8420,7 +8592,13 @@ Discord Main Gateway:
         if (event.usage) {
           // message_delta output usage is cumulative for the current model
           // response. Add only its growth to billed turn usage.
+          const before = turnTokens(proc);
           accumulateClaudeMessageDeltaUsage(proc, event.usage);
+          if (proc.claudeCurrentResponseRouted)
+            proc.turnRoutedTokens = addTokens(
+              proc.turnRoutedTokens ?? NO_TOKENS,
+              tokensBeyond(turnTokens(proc), before)
+            );
           await this.emitUsage(sessionId, proc);
         }
         // If stop_reason is tool_use, Claude is about to use a tool - show thinking
@@ -8743,7 +8921,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
         // Z.AI can omit input/cache counters from streaming message_start
         // events. The final result retains the complete turn aggregate, so use
         // it as a non-decreasing fallback before writing usage_history.
-        applyClaudeResultUsage(proc, msg.usage);
+        applyClaudeResultUsage(proc, msg.usage, proc.turnBookedTokens);
         // Keep the latest provider totals for the live session readout.
         proc.totalInputTokens = msg.usage.input_tokens || proc.totalInputTokens;
         proc.totalOutputTokens = msg.usage.output_tokens || proc.totalOutputTokens;
@@ -9374,7 +9552,7 @@ The planning phase is complete. You are now in Auto-Accept mode.
   /** The running turn is over; only queued follow-ups may still be waiting. */
   private isTurnSettled(proc: ClaudeProcess): boolean {
     const hasActiveSubagents = Array.from(proc.subagentRuns.values()).some(
-      (run) => run.status === 'started' && !run.background
+      (run) => run.status === 'started' && !run.background && !reportsOwnEnd(run)
     );
     if (hasActiveSubagents) return false;
     if (proc.cliProvider === 'codex') return proc.codexIdle !== false;
@@ -11534,7 +11712,7 @@ ${messageForClaude}`;
       attachments: turn.attachments?.length,
     }));
     const hasActiveSubagents = Array.from(proc.subagentRuns.values()).some(
-      (run) => run.status === 'started' && !run.background
+      (run) => run.status === 'started' && !run.background && !reportsOwnEnd(run)
     );
     const hasPendingCodexFollowup =
       proc.cliProvider === 'codex' && (proc.codexQueuedTurns?.length ?? 0) > 0;

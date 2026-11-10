@@ -22,6 +22,7 @@
 
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { StringDecoder } from 'node:string_decoder';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
@@ -212,9 +213,19 @@ function buildInvocation(provider, prompt, model, profile = 'full') {
       if (profile !== 'full') return { refused: true };
       // --print is pi's non-interactive mode; --no-session keeps one-shot
       // workers out of the session store. --model accepts provider/id ids.
+      // --mode json makes the run report its tokens: the plain text mode prints
+      // the answer and nothing else, so Pi workers never reached the analytics.
       return {
         command: 'pi',
-        args: ['-p', '--no-session', ...(model ? ['--model', model] : []), prompt],
+        args: [
+          '-p',
+          '--mode',
+          'json',
+          '--no-session',
+          ...(model ? ['--model', model] : []),
+          prompt,
+        ],
+        stream: 'pi-json',
       };
     case 'vibe':
       // Mistral Vibe's programmatic mode. It spends the plan's Vibe Code
@@ -301,7 +312,127 @@ function createCapture(limit = MAX_CAPTURE_CHARS) {
   };
 }
 
-function runChild(invocation, { cwd, env, timeoutMs }) {
+/**
+ * Reads Pi's JSON event stream while it arrives: the answer, and the tokens of
+ * every model call.
+ *
+ * The stream cannot go through the bounded capture. A one-word answer is
+ * already 150 kB of events, a real run is many megabytes, and the capture
+ * drops the middle — which is where most of the usage records are. Only
+ * `message_end` records matter; everything else (deltas, and the turn and agent
+ * summaries that repeat whole messages) is skipped without being buffered.
+ */
+function createPiJsonReader() {
+  const KEEP = '{"type":"message_end"';
+  const MAX_LINE_CHARS = 16_000_000;
+  const decoder = new StringDecoder('utf8');
+  const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+  let line = '';
+  let skipping = false;
+  let decided = false;
+  let text = '';
+  let model = '';
+  let errorMessage = '';
+  let calls = 0;
+
+  const add = (reported) => {
+    if (!reported || typeof reported !== 'object') return;
+    const input = Number(reported.input) || 0;
+    const output = Number(reported.output) || 0;
+    const cacheRead = Number(reported.cacheRead) || 0;
+    const cacheWrite = Number(reported.cacheWrite) || 0;
+    // Whatever Pi counts into its total beyond the four (reasoning tokens some
+    // APIs report apart from the output) was produced by the model as well.
+    const beyond = Math.max(
+      0,
+      (Number(reported.totalTokens) || 0) - input - output - cacheRead - cacheWrite
+    );
+    usage.inputTokens += input;
+    usage.outputTokens += output + beyond;
+    usage.cacheReadTokens += cacheRead;
+    usage.cacheCreationTokens += cacheWrite;
+  };
+
+  const take = (record) => {
+    if (record?.type !== 'message_end' || !record.message) return;
+    const message = record.message;
+    if (message.role !== 'assistant') {
+      // A tool that ran a model of its own reports those tokens on its result.
+      add(message.usage);
+      return;
+    }
+    calls += 1;
+    add(message.usage);
+    if (message.provider && message.model) model = `${message.provider}/${message.model}`;
+    const parts = (Array.isArray(message.content) ? message.content : [])
+      .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+      .map((block) => block.text);
+    if (parts.length > 0) text = parts.join('\n');
+    errorMessage =
+      message.stopReason === 'error' || message.stopReason === 'aborted'
+        ? String(message.errorMessage || `Pi stopped (${message.stopReason})`)
+        : '';
+  };
+
+  const endLine = () => {
+    if (!skipping && line) {
+      try {
+        take(JSON.parse(line.endsWith('\r') ? line.slice(0, -1) : line));
+      } catch {
+        /* a cut-off or foreign line carries nothing we need */
+      }
+    }
+    line = '';
+    skipping = false;
+    decided = false;
+  };
+
+  const feed = (piece) => {
+    if (skipping || !piece) return;
+    line += piece;
+    if (!decided && line.length >= KEEP.length) {
+      decided = true;
+      // Every record starts with its type; anything but message_end is dropped
+      // from here to the end of the line.
+      if (line.startsWith('{"type":"') && !line.startsWith(KEEP)) skipping = true;
+    }
+    if (line.length > MAX_LINE_CHARS) skipping = true;
+    if (skipping) line = '';
+  };
+
+  return {
+    push(chunk) {
+      const data = decoder.write(chunk);
+      let start = 0;
+      for (;;) {
+        const end = data.indexOf('\n', start);
+        if (end < 0) {
+          feed(data.slice(start));
+          return;
+        }
+        feed(data.slice(start, end));
+        endLine();
+        start = end + 1;
+      }
+    },
+    result() {
+      feed(decoder.end());
+      endLine();
+      const total =
+        usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+      return {
+        text,
+        model,
+        calls,
+        isError: errorMessage !== '',
+        errorMessage,
+        usage: total > 0 ? { ...usage } : null,
+      };
+    },
+  };
+}
+
+function runChild(invocation, { cwd, env, timeoutMs, onStdout }) {
   return new Promise((resolve) => {
     // stdin must be closed: codex and pi both detect a piped stdin and wait
     // for EOF to append it to the prompt — an open pipe hangs them forever.
@@ -319,7 +450,9 @@ function runChild(invocation, { cwd, env, timeoutMs }) {
       setTimeout(() => proc.kill('SIGKILL'), 5000).unref();
     }, timeoutMs);
     proc.stdout.on('data', (chunk) => {
-      stdoutCapture.push(chunk);
+      // A stream with a reader of its own is not kept a second time.
+      if (onStdout) onStdout(chunk);
+      else stdoutCapture.push(chunk);
     });
     proc.stderr.on('data', (chunk) => {
       stderrCapture.push(chunk);
@@ -476,7 +609,7 @@ async function bookUsage(provider, model, usage, runId) {
     usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
   if (total <= 0) return;
   try {
-    await fetch(`${BACKEND}/api/settings/internal/cli-subagents/usage`, {
+    const response = await fetch(`${BACKEND}/api/settings/internal/cli-subagents/usage`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -486,6 +619,8 @@ async function bookUsage(provider, model, usage, runId) {
       body: JSON.stringify({ provider, model: model || provider, runId, ...usage }),
       signal: AbortSignal.timeout(5000),
     });
+    // A refused booking used to pass for a booked one.
+    if (!response.ok) throw new Error(`backend responded ${response.status}`);
   } catch (error) {
     log('usage booking failed:', String(error));
   }
@@ -694,10 +829,12 @@ async function handleRunSubagent(args) {
     description: prompt.slice(0, 2000),
     status: 'started',
   });
+  const piReader = invocation.stream === 'pi-json' ? createPiJsonReader() : null;
   const result = await runChild(invocation, {
     cwd,
     env: buildChildEnv(entry.provider, providerEnv),
     timeoutMs,
+    onStdout: piReader ? (chunk) => piReader.push(chunk) : undefined,
   }).catch(async (error) => {
     await reportActivity({
       id: runId,
@@ -709,6 +846,8 @@ async function handleRunSubagent(args) {
   });
   const durationS = Math.round((Date.now() - startedAt) / 1000);
 
+  const piRun = piReader ? piReader.result() : null;
+
   if (result.timedOut) {
     await reportActivity({
       id: runId,
@@ -716,8 +855,10 @@ async function handleRunSubagent(args) {
       status: 'error',
       error: 'Zeitlimit erreicht',
     });
+    // The tokens of a run that was cut off were spent all the same.
+    if (piRun) await bookUsage(entry.provider, model, piRun.usage, runId);
     return asText(
-      `Subagent ${entry.label} timed out after ${Math.round(timeoutMs / 1000)}s.\nPartial output:\n${truncate(result.stdout || result.stderr)}`,
+      `Subagent ${entry.label} timed out after ${Math.round(timeoutMs / 1000)}s.\nPartial output:\n${truncate((piRun ? piRun.text : result.stdout) || result.stderr)}`,
       true
     );
   }
@@ -751,6 +892,11 @@ async function handleRunSubagent(args) {
     text = parsed.text;
     usage = parsed.usage;
     usageModel = model || 'mistral-medium-3.5';
+  } else if (piRun) {
+    text = piRun.text;
+    usage = piRun.usage;
+    failed ||= piRun.isError;
+    if (piRun.isError && !text) text = piRun.errorMessage;
   } else {
     text = result.stdout.trim();
   }
@@ -766,6 +912,11 @@ async function handleRunSubagent(args) {
       : undefined,
   });
 
+  // Booked before any early return: a run that failed has still spent its tokens.
+  // Awaited: this process may exit as soon as the answer is out, and a booking
+  // still on its way was lost with it.
+  await bookUsage(entry.provider, usageModel, usage, runId);
+
   if (result.code !== 0 && !text) {
     return asText(
       `Subagent ${entry.label} exited with code ${result.code}.\n${truncate(result.stderr || result.stdout)}`,
@@ -773,12 +924,13 @@ async function handleRunSubagent(args) {
     );
   }
 
-  void bookUsage(entry.provider, usageModel, usage, runId);
-
   const header = `[subagent ${entry.label} · ${entry.provider}${model ? ` · ${model}` : ''} · ${durationS}s${
     usage ? ` · ${usage.inputTokens} in / ${usage.outputTokens} out tokens` : ''
   }]`;
-  return asText(`${header}\n\n${truncate(text || result.stdout.trim())}`, failed);
+  return asText(
+    `${header}\n\n${truncate(text || result.stdout.trim() || (piRun ? result.stderr.trim() : ''))}`,
+    failed
+  );
 }
 
 // ---------------------------------------------------------------------------

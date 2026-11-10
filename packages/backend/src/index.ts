@@ -673,6 +673,20 @@ async function main() {
         .resumeInterruptedPiRuns()
         .catch((error) => console.error('[PI] Resuming interrupted runs failed:', error));
     }, 20_000).unref();
+    // What Claude Code's agents spent and no turn booked: agents that worked on
+    // after their turn, runs a restart cut off, and everything from before
+    // agents were counted at all (services/claude/claudeSubagentBooking.ts).
+    setTimeout(() => {
+      void import('./services/claude/claudeSubagentBooking.js')
+        .then(({ reconcileClaudeSubagentUsage }) => reconcileClaudeSubagentUsage())
+        .then(({ sessions, rows }) => {
+          if (rows > 0)
+            console.log(
+              `[USAGE] Booked ${rows} unbooked subagent run(s) of ${sessions} session(s)`
+            );
+        })
+        .catch((error) => console.warn('[USAGE] Subagent reconcile failed:', error));
+    }, 120_000).unref();
   });
 
   registerGracefulShutdown(httpServer, io);

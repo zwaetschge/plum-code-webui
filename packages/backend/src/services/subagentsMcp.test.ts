@@ -143,7 +143,60 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
   });
   const codexRecord = writeFakeCli(bin, 'codex', codexStdout);
   const claudeRecord = writeFakeCli(bin, 'claude', claudeStdout);
-  const piRecord = writeFakeCli(bin, 'pi', 'pi says hi\n');
+  // Pi's JSON event stream as it really arrives: deltas, the turn and agent
+  // summaries that repeat whole messages, and one line far larger than the
+  // rest. Only the message_end records count.
+  const piUsage = (input: number, output: number, cacheRead: number, extra = {}) => ({
+    input,
+    output,
+    cacheRead,
+    cacheWrite: 0,
+    totalTokens: input + output + cacheRead,
+    ...extra,
+  });
+  const piFirst = {
+    role: 'assistant',
+    provider: 'z-ai',
+    model: 'glm-5.3',
+    stopReason: 'toolUse',
+    content: [
+      { type: 'text', text: 'looking' },
+      { type: 'toolCall', name: 'read' },
+    ],
+    usage: { ...piUsage(100, 20, 1000), cacheWrite: 5, totalTokens: 1125 },
+  };
+  const piLast = {
+    role: 'assistant',
+    provider: 'z-ai',
+    model: 'glm-5.3',
+    stopReason: 'stop',
+    content: [{ type: 'text', text: 'pi says hi' }],
+    // Four reasoning tokens that the total counts but the output does not.
+    usage: piUsage(10, 3, 1100, { reasoning: 4, totalTokens: 1117 }),
+  };
+  const piStdout =
+    [
+      { type: 'session', version: 3, id: 'pi-session' },
+      { type: 'agent_start' },
+      { type: 'message_end', message: { role: 'user', content: 'answer briefly' } },
+      {
+        type: 'message_update',
+        assistantMessageEvent: { type: 'text_delta', delta: 'x'.repeat(5000) },
+      },
+      { type: 'message_end', message: piFirst },
+      // A tool that ran a model of its own reports those tokens on its result.
+      {
+        type: 'message_end',
+        message: { role: 'toolResult', content: [], usage: piUsage(7, 1, 0) },
+      },
+      { type: 'turn_end', message: piFirst, toolResults: [] },
+      { type: 'message_end', message: piLast },
+      { type: 'agent_end', messages: [piFirst, piLast], padding: 'y'.repeat(300_000) },
+      { type: 'agent_settled', aborted: false },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n') + '\n';
+  const piRecord = writeFakeCli(bin, 'pi', piStdout);
 
   const piModels = [
     {
@@ -325,6 +378,8 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
     const piSeen = JSON.parse(readFileSync(piRecord, 'utf8'));
     assert.deepEqual(piSeen.argv, [
       '-p',
+      '--mode',
+      'json',
       '--no-session',
       '--model',
       'z-ai/glm-5.3',
@@ -345,6 +400,8 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
     });
     assert.deepEqual(JSON.parse(readFileSync(piRecord, 'utf8')).argv, [
       '-p',
+      '--mode',
+      'json',
       '--no-session',
       '--model',
       'z-ai/glm-5.3',
@@ -358,6 +415,8 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
     });
     assert.deepEqual(JSON.parse(readFileSync(piRecord, 'utf8')).argv, [
       '-p',
+      '--mode',
+      'json',
       '--no-session',
       '--model',
       'mistral/devstral-latest',
@@ -432,12 +491,10 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
     assert.equal(zaiSeen.env.ANTHROPIC_AUTH_TOKEN, 'zai-token');
     assert.equal(zaiSeen.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'glm-5.3');
 
-    // Usage: codex, claude and zai book (pi's print mode reports no usage).
-    // bookUsage is fire-and-forget, so give the posts a beat to land.
-    for (let i = 0; i < 50 && usagePosts.length < 3; i++) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    assert.equal(usagePosts.length, 3);
+    // Usage: every run books — codex, claude, zai, and the three pi runs, which
+    // used to print their answer and nothing else. The booking is awaited
+    // before the answer goes out, so all six are here by now.
+    assert.equal(usagePosts.length, 6);
     // Every booking carries a run id. The backend deduplicates on it, so what
     // matters is that it is there and that two runs never share one; the value
     // itself is per-process and deliberately unpredictable.
@@ -446,7 +503,7 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
       runIds.every((id) => typeof id === 'string' && id.length > 0),
       JSON.stringify(runIds)
     );
-    assert.equal(new Set(runIds).size, 3, JSON.stringify(runIds));
+    assert.equal(new Set(runIds).size, 6, JSON.stringify(runIds));
 
     const withoutRunId = (post: any) => {
       const { runId: _runId, ...rest } = post ?? {};
@@ -469,6 +526,22 @@ test('subagents MCP: invocations, env boundaries, usage booking, depth guard', a
       outputTokens: 7,
       cacheReadTokens: 2,
       cacheCreationTokens: 1,
+    });
+
+    // Pi: the tokens of both model calls and of the tool's own model call,
+    // under the model the run was started with.
+    const piPosts = usagePosts.filter((p) => p.provider === 'pi');
+    assert.deepEqual(
+      piPosts.map((post) => post.model),
+      ['z-ai/glm-5.3', 'z-ai/glm-5.3', 'mistral/devstral-latest']
+    );
+    assert.deepEqual(withoutRunId(piPosts[0]), {
+      provider: 'pi',
+      model: 'z-ai/glm-5.3',
+      inputTokens: 117,
+      outputTokens: 28,
+      cacheReadTokens: 2100,
+      cacheCreationTokens: 5,
     });
 
     const zaiUsage = usagePosts.find((p) => p.provider === 'zai');

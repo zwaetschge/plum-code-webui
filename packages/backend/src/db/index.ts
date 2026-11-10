@@ -149,6 +149,137 @@ export async function insertUsageSubagentTurns(rows: UsageSubagentTurnInput[]): 
   });
 }
 
+export interface SubagentUsageBooking extends UsageSubagentTurnInput {
+  /**
+   * When the tokens were spent, if that is not now: usage found after the fact
+   * belongs to the day it happened on, not to the day it was noticed.
+   */
+  spentAt?: string | null;
+}
+
+/** Per agent: what has been booked of its tokens so far, in this session. */
+export async function bookedSubagentTokens(
+  sessionId: string,
+  provider: string
+): Promise<
+  Map<
+    string,
+    {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheCreationTokens: number;
+    }
+  >
+> {
+  const rows = (await getPool().query(
+    `SELECT agent_id,
+            COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+            COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+            COALESCE(SUM(cache_read_tokens), 0)::bigint AS cache_read_tokens,
+            COALESCE(SUM(cache_creation_tokens), 0)::bigint AS cache_creation_tokens
+       FROM usage_subagent_turns
+      WHERE session_id = $1 AND provider = $2
+      GROUP BY agent_id`,
+    [sessionId, provider]
+  )) as unknown as {
+    rows: Array<{
+      agent_id: string;
+      input_tokens: string | number;
+      output_tokens: string | number;
+      cache_read_tokens: string | number;
+      cache_creation_tokens: string | number;
+    }>;
+  };
+  return new Map(
+    rows.rows.map((row) => [
+      row.agent_id,
+      {
+        inputTokens: Number(row.input_tokens),
+        outputTokens: Number(row.output_tokens),
+        cacheReadTokens: Number(row.cache_read_tokens),
+        cacheCreationTokens: Number(row.cache_creation_tokens),
+      },
+    ])
+  );
+}
+
+/**
+ * Book tokens that subagents spent on top of their turn.
+ *
+ * Unlike {@link insertUsageSubagentTurns}, whose rows split a total that is
+ * already in the ledger, these tokens are in no turn's row: Claude Code
+ * reports the main thread only. Each agent gets its split row and a ledger
+ * row of its own, in one transaction — the split rows are what the next
+ * booking subtracts, so one without the other would lose or double the spend.
+ */
+export async function bookSubagentUsage(rows: SubagentUsageBooking[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  const users = new Set<string>();
+  const booked = await pgTransaction(async (tx) => {
+    let inserted = 0;
+    for (const row of rows) {
+      const spentAt = row.spentAt
+        ? new Date(row.spentAt).toISOString().slice(0, 19).replace('T', ' ')
+        : null;
+      const cost = toMicroDollars(row.costUsd);
+      const split = await tx.run(
+        `INSERT INTO usage_subagent_turns (
+           user_id, session_id, provider, turn_id, agent_id, parent_agent_id, agent_type, model,
+           input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+           total_tokens, cost_usd, created_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                 COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')))
+         ON CONFLICT (session_id, provider, turn_id, agent_id) DO NOTHING`,
+        row.userId,
+        row.sessionId,
+        row.provider,
+        row.turnId,
+        row.agentId,
+        row.parentAgentId,
+        row.agentType,
+        row.model,
+        row.inputTokens,
+        row.outputTokens,
+        row.cacheReadTokens,
+        row.cacheCreationTokens,
+        row.totalTokens,
+        cost,
+        spentAt
+      );
+      if (split.changes === 0) continue;
+      await tx.run(
+        `INSERT INTO usage_history (
+           user_id, session_id, provider, turn_id,
+           input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+           total_tokens, cost_usd, model, created_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                 COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')))
+         ON CONFLICT (session_id, provider, turn_id) DO NOTHING`,
+        row.userId,
+        row.sessionId,
+        row.provider,
+        `agent:${row.agentId}:${row.turnId}`,
+        row.inputTokens,
+        row.outputTokens,
+        row.cacheReadTokens,
+        row.cacheCreationTokens,
+        row.totalTokens,
+        cost,
+        row.model,
+        spentAt
+      );
+      users.add(row.userId);
+      inserted += 1;
+    }
+    return inserted;
+  });
+  for (const userId of users) liveEvents.emit('usage', userId);
+  return booked;
+}
+
 /** True when this provider turn has already been booked into usage_history. */
 export async function usageHistoryTurnExists(
   sessionId: string,
