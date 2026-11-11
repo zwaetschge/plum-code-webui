@@ -159,3 +159,39 @@ test('usage found after the fact lands on the day it was spent', async () => {
   assert.equal(found?.total, 789302);
   assert.equal(found?.createdAt, '2026-11-03 01:22:13');
 });
+
+test('transcripts of an id the session has left behind are found by their project', async () => {
+  // A session starts a new Claude Code session now and then; Plum keeps the
+  // current id only. This one is from before, in the same project directory.
+  const FORMER = '7c4b5b49-0000-4000-8000-000000000001';
+  writeFileSync(
+    agentFile(FORMER, 'old1'),
+    call('msg_o', 'claude-opus-5-5', [3, 400, 90000, 2000], '2026-10-12T16:50:00.000Z') + '\n'
+  );
+  const pass = () => reconcileClaudeSubagentUsage({ configHome: home, days: 400 });
+
+  // The session booked nothing around that time: it may not be its transcript.
+  assert.deepEqual(await pass(), { sessions: 0, rows: 0 });
+
+  // With a turn of its own on that day it is.
+  await pgRun(
+    `INSERT INTO usage_history (user_id, session_id, provider, turn_id, total_tokens, created_at)
+     VALUES ('user-1', 'plum-1', 'claude', 'turn-then', 1000, '2026-10-12 17:05:00')`
+  );
+  assert.deepEqual(await pass(), { sessions: 1, rows: 1 });
+  const found = (await ledger()).find((row) => row.turnId.startsWith('agent:old1:'));
+  assert.equal(found?.total, 92403);
+  assert.equal(found?.createdAt, '2026-10-12 16:50:00');
+
+  // Two sessions in one directory: nobody can say whose transcript it is.
+  const OTHER = '7c4b5b49-0000-4000-8000-000000000002';
+  writeFileSync(
+    agentFile(OTHER, 'old2'),
+    call('msg_p', 'claude-opus-5-5', [1, 10, 500, 0], '2026-10-12 16:55:00.000Z') + '\n'
+  );
+  await pgRun(
+    `INSERT INTO sessions (id, user_id, name, working_directory, cli_provider)
+     VALUES ('plum-2', 'user-1', 'Other', '/tmp/project', 'codex')`
+  );
+  assert.deepEqual(await pass(), { sessions: 0, rows: 0 });
+});
