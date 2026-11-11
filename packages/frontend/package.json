@@ -12,6 +12,7 @@
     "test:recent-sessions": "node scripts/recent-sessions-limit-tests.mjs",
     "test:session-list-polling": "node scripts/session-list-polling-tests.mjs",
     "test:session-storage-keys": "../backend/node_modules/.bin/tsx scripts/session-storage-keys-tests.ts",
+    "test:subagent-usage": "../backend/node_modules/.bin/tsx scripts/subagent-usage-tests.ts",
     "test:socket-reconnect": "../backend/node_modules/.bin/tsx scripts/socket-reconnect-tests.ts",
     "test:chat-sync": "tsx scripts/chat-sync-regression-tests.ts",
     "test:chat-delivery": "tsx scripts/chat-delivery-regression-tests.ts",

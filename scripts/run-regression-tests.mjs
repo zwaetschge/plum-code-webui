@@ -208,6 +208,17 @@ export const REGRESSION_SUITES = [
     ],
   },
   {
+    name: 'subagent usage',
+    command: 'pnpm',
+    args: [
+      '--filter',
+      '@plum-code-webui/backend',
+      'exec',
+      'tsx',
+      '../frontend/scripts/subagent-usage-tests.ts',
+    ],
+  },
+  {
     name: 'ambient motion',
     command: 'pnpm',
     args: [

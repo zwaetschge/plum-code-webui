@@ -6,6 +6,7 @@ import {
   getUsageModelKey,
 } from '@plum-code-webui/shared';
 import { insertUsageHistoryTurn } from '../db/index.js';
+import { summariseSubagentUsage } from '../services/subagentAnalytics.js';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
 import { nanoid } from 'nanoid';
 import type { CLIProvider } from '../services/cli-providers.js';
@@ -755,89 +756,21 @@ router.get('/summary', async (req: Request, res: Response) => {
 });
 
 /**
- * Per-subagent usage inside the selected window.
- *
- * These tokens are a SUBSET of /summary — a turn's usage_history row already
- * includes everything its subagents spent. `parentShare` says how much of the
- * window's total was driven by spawned agents rather than the top-level turn.
+ * What subagents spent inside the selected window: agents a session started,
+ * workers of the CLI-subagent bridge, and agent calls routed to another vendor
+ * (services/subagentAnalytics.ts). All of it is part of /summary; `sharePercent`
+ * says how much of the window's total it is.
  */
 router.get('/subagents', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
 
   try {
     const window = await resolveAnalyticsWindow(req.query.period, req.query.tz, req.query.offset);
-    const dateFilter = buildDateFilter(window);
-    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 500);
-
-    const agents = await pgAll(
-      `
-      SELECT
-        agent_id as agentId,
-        MAX(agent_type) as agentType,
-        MAX(model) as model,
-        MAX(parent_agent_id) as parentAgentId,
-        provider,
-        COUNT(*) as turns,
-        COUNT(DISTINCT session_id) as sessions,
-        COALESCE(SUM(input_tokens), 0) as inputTokens,
-        COALESCE(SUM(output_tokens), 0) as outputTokens,
-        COALESCE(SUM(cache_read_tokens), 0) as cacheReadTokens,
-        COALESCE(SUM(total_tokens), 0) as totalTokens,
-        COALESCE(SUM(cost_usd), 0) as costUsd,
-        MAX(created_at) as lastUsedAt
-      FROM usage_subagent_turns
-      WHERE user_id = ? ${dateFilter.sql}
-      GROUP BY agent_id, provider
-      ORDER BY totalTokens DESC
-      LIMIT ?
-    `,
-      authReq.userId,
-      ...dateFilter.params,
-      limit
-    );
-
-    const totals = (await pgGet(
-      `
-      SELECT
-        COALESCE(SUM(total_tokens), 0) as totalTokens,
-        COALESCE(SUM(cost_usd), 0) as costUsd,
-        COUNT(DISTINCT agent_id) as agentCount,
-        COUNT(DISTINCT turn_id) as turnCount
-      FROM usage_subagent_turns
-      WHERE user_id = ? ${dateFilter.sql}
-    `,
-      authReq.userId,
-      ...dateFilter.params
-    )) as unknown as {
-      totalTokens: number;
-      costUsd: number;
-      agentCount: number;
-      turnCount: number;
-    };
-
-    const overall = (await pgGet(
-      `SELECT COALESCE(SUM(total_tokens), 0) as totalTokens
-         FROM usage_history
-         WHERE user_id = ? ${dateFilter.sql}`,
-      authReq.userId,
-      ...dateFilter.params
-    )) as unknown as { totalTokens: number };
-
-    res.json({
-      success: true,
-      data: {
-        period: window.period,
-        agents,
-        totals: {
-          ...totals,
-          windowTotalTokens: overall.totalTokens,
-          parentSharePercent:
-            overall.totalTokens > 0
-              ? Math.round((totals.totalTokens / overall.totalTokens) * 100)
-              : 0,
-        },
-      },
+    const summary = await summariseSubagentUsage(authReq.userId, {
+      from: window.startsAt ? toSqlTimestamp(window.startsAt) : null,
+      to: window.endsAt ? toSqlTimestamp(window.endsAt) : null,
     });
+    res.json({ success: true, data: { period: window.period, ...summary } });
   } catch (error) {
     console.error('Error fetching subagent analytics:', error);
     res
@@ -846,7 +779,6 @@ router.get('/subagents', async (req: Request, res: Response) => {
   }
 });
 
-// Get usage over time (for charts)
 router.get('/timeline', async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
 

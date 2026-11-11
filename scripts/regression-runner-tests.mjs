@@ -38,6 +38,7 @@ const expectedSuites = [
   'appearance themes',
   'session storage keys',
   'socket reconnect',
+  'subagent usage',
   'ambient motion',
   'chat timeline',
   'operations view state',

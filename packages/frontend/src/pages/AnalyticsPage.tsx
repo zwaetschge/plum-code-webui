@@ -40,6 +40,8 @@ import {
 } from '@/components/analytics/UsageOverTimeCard';
 import { ProviderMixCard } from '@/components/analytics/ProviderMixCard';
 import { TopModelsCard } from '@/components/analytics/TopModelsCard';
+import { SubagentUsageCard } from '@/components/analytics/SubagentUsageCard';
+import type { SubagentResponse } from '@/lib/subagentUsage';
 import { ProviderLimitsCard } from '@/components/analytics/ProviderLimitsCard';
 import { PricingHealthCard } from '@/components/analytics/PricingHealthCard';
 import { TopSessionsTable } from '@/components/analytics/TopSessionsTable';
@@ -274,6 +276,23 @@ export function AnalyticsPage() {
     queryFn: async () => {
       const response = await api.get<ApiResponse<TimelineData[]>>(
         `/api/analytics/timeline?period=${period}&tz=${tzOffset}&offset=${periodOffset}&granularity=${timelineGranularity}`
+      );
+      return response.data.data;
+    },
+    refetchInterval: 30_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+  });
+
+  const {
+    data: subagents,
+    isLoading: subagentsLoading,
+    isError: subagentsError,
+  } = useQuery({
+    queryKey: ['analytics-subagents', period, periodOffset, tzOffset],
+    queryFn: async () => {
+      const response = await api.get<ApiResponse<SubagentResponse>>(
+        `/api/analytics/subagents?period=${period}&tz=${tzOffset}&offset=${periodOffset}`
       );
       return response.data.data;
     },
@@ -941,6 +960,14 @@ export function AnalyticsPage() {
         </div>
         <div className="analytics-area-models">
           <TopModelsCard models={scopedModels} />
+        </div>
+        <div className="analytics-area-subagents">
+          <SubagentUsageCard
+            data={subagents}
+            providerFilter={activeFilter ?? null}
+            loading={subagentsLoading}
+            error={subagentsError}
+          />
         </div>
         <div className="analytics-area-limits">
           <ProviderLimitsCard
