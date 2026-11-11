@@ -50,7 +50,7 @@ const webExchangeSchema = z.object({
  * the JWT, and the nonce cookie binds it to this browser. The callback page
  * trades both for the token at POST /auth/web/exchange.
  */
-function redirectWithLoginCode(res: Response, userId: string): void {
+function redirectWithLoginCode(res: Response, userId: string, returnTo?: string): void {
   const { code, nonce } = webLoginCodes.issue(userId);
   res.cookie(WEB_LOGIN_NONCE_COOKIE, nonce, {
     httpOnly: true,
@@ -59,7 +59,9 @@ function redirectWithLoginCode(res: Response, userId: string): void {
     maxAge: 2 * 60 * 1000,
     path: '/auth',
   });
-  res.redirect(`${config.frontendUrl}/auth/callback?code=${code}`);
+  const params = new URLSearchParams({ code });
+  if (returnTo) params.set('returnTo', returnTo);
+  res.redirect(`${config.frontendUrl}/auth/callback?${params.toString()}`);
 }
 
 async function getAuthenticatedCliLinkUser(req: Request): Promise<User | null> {
@@ -230,12 +232,10 @@ router.get('/proxy', async (req, res, next) => {
 
   try {
     const user = await establishProxyLogin(req, proxyEmail, proxyName, proxyUser);
-
-    const params = new URLSearchParams({
-      token: generateUserToken(user.id),
-      returnTo: safeReturnTo(req.query.returnTo),
-    });
-    res.redirect(`${config.frontendUrl}/auth/callback?${params.toString()}`);
+    // A one-time code, like every other browser login: the callback page has
+    // not accepted a token from the address since 2026-11-10, so the SSO login
+    // sent everyone back to the login page once their old token ran out.
+    redirectWithLoginCode(res, user.id, safeReturnTo(req.query.returnTo));
   } catch (err) {
     next(err);
   }
