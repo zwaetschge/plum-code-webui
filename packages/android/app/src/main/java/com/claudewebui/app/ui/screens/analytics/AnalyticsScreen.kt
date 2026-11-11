@@ -101,6 +101,7 @@ fun AnalyticsScreen(
     onNavigateMain: (MainDestination) -> Unit = {},
     designPreview: Boolean = false,
     initialRange: String? = null,
+    previewScrollToSubagents: Boolean = false,
     viewModel: AnalyticsViewModel = koinViewModel(),
 ) {
     val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
@@ -142,6 +143,15 @@ fun AnalyticsScreen(
     }
 
     val wide = isTabletWidth()
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // Debug preview only: bring the subagents panel (the last panel before the
+    // closing spacer) into view for screenshots.
+    if (previewScrollToSubagents && designPreview && BuildConfig.DEBUG) {
+        LaunchedEffect(Unit) {
+            kotlinx.coroutines.delay(400)
+            listState.scrollToItem((listState.layoutInfo.totalItemsCount - 2).coerceAtLeast(0))
+        }
+    }
 
     PlumBackdrop {
         PlumNavScaffold(MainDestination.ANALYTICS, onNavigateMain) { padding ->
@@ -152,6 +162,7 @@ fun AnalyticsScreen(
                 max = 1100.dp,
             ) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = 14.dp,
@@ -355,6 +366,9 @@ fun AnalyticsScreen(
                 if (state.isLoaded) {
                     item {
                         TopSessionsPanel(state.topSessions)
+                    }
+                    item {
+                        SubagentsPanel(state.subagents)
                     }
                 }
 
@@ -1384,6 +1398,119 @@ private fun TopSessionsPanel(sessions: List<TopSessionItem>) {
 }
 
 @Composable
+private fun SubagentsPanel(usage: SubagentUsage) {
+    val screenTokens = com.claudewebui.app.ui.theme.PlumTheme.tokens
+    val res = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    GlassPanel(Modifier.fillMaxWidth(), radius = 20.dp) {
+        Column(Modifier.padding(screenTokens.spacing.lg), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Text(res.getString(R.string.analytics_subagents_title), color = PlumText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(res.getString(R.string.analytics_subagents_subtitle), color = PlumMuted, fontSize = 12.sp)
+            if (usage.groups.isEmpty()) {
+                EmptyPanelMessage(res.getString(R.string.analytics_subagents_empty))
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        res.getString(
+                            R.string.analytics_subagents_share,
+                            String.format(Locale.getDefault(), "%.1f", usage.sharePercent),
+                        ),
+                        color = PlumAccent,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        res.getString(
+                            R.string.analytics_subagents_header_detail,
+                            compactNumber(usage.totalTokens),
+                            formatCurrency(usage.costUsd),
+                        ),
+                        color = PlumMuted,
+                        fontSize = 12.sp,
+                    )
+                }
+                val groupTotal = usage.groups.sumOf { it.totalTokens }.coerceAtLeast(1)
+                usage.groups.take(8).forEach { group -> SubagentRow(group, group.totalTokens.toFloat() / groupTotal) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubagentRow(group: SubagentUsageItem, fraction: Float) {
+    val res = androidx.compose.ui.platform.LocalContext.current.resources
+    androidx.compose.ui.platform.LocalConfiguration.current
+
+    val kindLabel = res.getString(
+        when (group.kind) {
+            "worker" -> R.string.analytics_subagents_kind_worker
+            "routed" -> R.string.analytics_subagents_kind_routed
+            else -> R.string.analytics_subagents_kind_agent
+        },
+    )
+    // Agents are told apart by type, workers and routed calls by the harness.
+    val title = when (group.kind) {
+        "worker", "routed" -> group.providerLabel.ifBlank { group.provider }
+        else -> group.agentType.ifBlank { kindLabel }
+    }.ifBlank { kindLabel }
+    val runs = if (group.kind == "routed") {
+        res.getQuantityString(R.plurals.analytics_subagents_calls, group.runs.coerceIn(0, Int.MAX_VALUE.toLong()).toInt(), compactNumber(group.runs))
+    } else {
+        res.getQuantityString(R.plurals.analytics_subagents_runs, group.runs.coerceIn(0, Int.MAX_VALUE.toLong()).toInt(), compactNumber(group.runs))
+    }
+    val kindColor = when (group.kind) {
+        "worker" -> PlumBlue
+        "routed" -> PlumAmber
+        else -> PlumAccent
+    }
+    val barColor = Color(analyticsProviderColor(group.provider.ifBlank { group.providerLabel }))
+
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp)).background(PlumSubtleFill).border(1.dp, PlumBorder, RoundedCornerShape(13.dp)).padding(11.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, color = PlumText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    Text(
+                        kindLabel,
+                        color = kindColor,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .padding(start = 6.dp)
+                            .background(kindColor.copy(alpha = .14f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                }
+                Text(
+                    listOf(group.model.takeIf { it.isNotBlank() }, group.providerLabel.takeIf { it.isNotBlank() && group.kind == "agent" })
+                        .filterNotNull().joinToString(" · "),
+                    color = PlumMuted,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    res.getString(R.string.analytics_subagents_row_detail, runs, compactNumber(group.totalTokens)),
+                    color = PlumMuted,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(formatCurrency(group.costUsd), color = PlumText, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, modifier = Modifier.padding(start = 8.dp))
+        }
+        Box(Modifier.fillMaxWidth().height(5.dp).background(PlumTrackFill, RoundedCornerShape(5.dp))) {
+            Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(5.dp).background(barColor, RoundedCornerShape(5.dp)))
+        }
+    }
+}
+
+@Composable
 private fun EmptyPanelMessage(message: String, height: Dp = 90.dp) {
     Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.Center) {
         Text(message, color = PlumMuted, fontSize = 12.sp)
@@ -1481,6 +1608,22 @@ private fun previewAnalyticsState(chartMetric: AnalyticsChartMetric): AnalyticsU
             TopSessionItem("preview-1", "Plum Code Android analytics", 1_240_000_000, 83, 744.16),
             TopSessionItem("preview-2", "Kimi analytics backfill", 940_000_000, 64, 512.72),
             TopSessionItem("preview-3", "Mobile gateway integration", 710_000_000, 49, 418.05),
+        ),
+        subagentsLoaded = true,
+        subagents = SubagentUsage(
+            groups = listOf(
+                SubagentUsageItem("agent", "claude", "Claude Code", "general-purpose", "claude-opus-5", 214, 37, 1_840_000_000, 912.40),
+                SubagentUsageItem("agent", "claude", "Claude Code", "fork", "claude-sonnet-5-5", 96, 18, 702_000_000, 188.13),
+                SubagentUsageItem("worker", "pi", "Pi", "", "deepseek/deepseek-v4-pro", 41, 12, 388_000_000, 64.02),
+                SubagentUsageItem("worker", "codex", "Codex", "", "gpt-5.6-sol", 17, 9, 241_500_000, 133.77),
+                SubagentUsageItem("routed", "claude", "Z.AI", "", "z-ai/glm-5.2", 1_380, 22, 96_000_000, 12.9),
+                SubagentUsageItem("agent", "codex", "Codex", "explorer", "gpt-5.6-luna", 1, 1, 640_000, 0.0042),
+            ),
+            totalTokens = 3_268_140_000,
+            costUsd = 1_311.2242,
+            runs = 1_749,
+            windowTotalTokens = 5_071_000_000,
+            sharePercent = 64.4,
         ),
     )
 }

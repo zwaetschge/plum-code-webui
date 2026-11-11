@@ -22,6 +22,17 @@ interface AnalyticsApi {
         granularity: String = if (period == "24h") "hour" else "day",
     ): ApiResponse<JsonElement>
 
+    /**
+     * GET /api/analytics/subagents — what subagents spent in the same window.
+     * Older backends answer with a different shape (no `groups`); callers parse
+     * leniently.
+     */
+    suspend fun getAnalyticsSubagents(
+        period: String,
+        timezoneOffsetMinutes: Int,
+        offset: Int = 0,
+    ): ApiResponse<JsonElement>
+
     /** GET /api/analytics/sessions/:sessionId — per-session token totals + history. */
     suspend fun getSessionUsage(sessionId: String): ApiResponse<JsonElement>
 
@@ -69,6 +80,17 @@ class AnalyticsApiImpl(private val http: ApiHttp) : AnalyticsApi {
             parameter("tz", timezoneOffsetMinutes)
             parameter("offset", offset)
             parameter("granularity", granularity)
+        }
+
+    override suspend fun getAnalyticsSubagents(
+        period: String,
+        timezoneOffsetMinutes: Int,
+        offset: Int,
+    ): ApiResponse<JsonElement> =
+        http.get("/api/analytics/subagents") {
+            parameter("period", period)
+            parameter("tz", timezoneOffsetMinutes)
+            parameter("offset", offset)
         }
 
     override suspend fun getSessionUsage(sessionId: String): ApiResponse<JsonElement> =

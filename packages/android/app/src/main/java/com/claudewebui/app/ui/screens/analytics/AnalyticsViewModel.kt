@@ -190,6 +190,31 @@ data class ProviderLimitItem(
     val planUsage: com.claudewebui.app.data.model.PlanUsage? = null,
 )
 
+/** One row of `/api/analytics/subagents`: what a kind of subagent spent. */
+data class SubagentUsageItem(
+    /** `agent`, `worker` or `routed`; anything else is shown as an agent. */
+    val kind: String = "agent",
+    val provider: String = "",
+    val providerLabel: String = "",
+    val agentType: String = "",
+    val model: String = "",
+    /** Agents, worker runs, or for `routed` single calls. */
+    val runs: Long = 0,
+    val sessions: Long = 0,
+    val totalTokens: Long = 0,
+    val costUsd: Double = 0.0,
+)
+
+/** Subagents' share of a window; empty when the backend has no such data. */
+data class SubagentUsage(
+    val groups: List<SubagentUsageItem> = emptyList(),
+    val totalTokens: Long = 0,
+    val costUsd: Double = 0.0,
+    val runs: Long = 0,
+    val windowTotalTokens: Long = 0,
+    val sharePercent: Double = 0.0,
+)
+
 data class AnalyticsUiState(
     val isLoading: Boolean = false,
     val isLoaded: Boolean = false,
@@ -201,6 +226,8 @@ data class AnalyticsUiState(
     val timeline: List<CostPoint> = emptyList(),
     val topSessions: List<TopSessionItem> = emptyList(),
     val missingPricing: List<MissingPricingItem> = emptyList(),
+    val subagents: SubagentUsage = SubagentUsage(),
+    val subagentsLoaded: Boolean = false,
     val providerLimits: List<ProviderLimitItem> = emptyList(),
     val limitsLoading: Boolean = false,
     /** Account-wide daily spend limit; numbers alone say nothing without it. */
@@ -227,6 +254,7 @@ class AnalyticsViewModel(
     val uiState: StateFlow<AnalyticsUiState> = _uiState.asStateFlow()
     private var loadJob: Job? = null
     private var limitsJob: Job? = null
+    private var subagentsJob: Job? = null
 
     init {
         loadAnalytics(AnalyticsTimeRange.WEEK)
@@ -391,8 +419,29 @@ class AnalyticsViewModel(
         }
     }
 
+    /**
+     * Subagent spend for the same window. Independent of the ledger query: an
+     * older backend without the route, or a failure, only empties this section.
+     */
+    private fun loadSubagents(timeRange: AnalyticsTimeRange) {
+        subagentsJob?.cancel()
+        subagentsJob = viewModelScope.launch {
+            val usage = try {
+                val tz = TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000
+                val response = api.getAnalyticsSubagents(timeRange.apiPeriod, tz)
+                if (response.success) AnalyticsParser.parseSubagents(response.data) else SubagentUsage()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                SubagentUsage()
+            }
+            _uiState.value = _uiState.value.copy(subagents = usage, subagentsLoaded = true)
+        }
+    }
+
     fun loadAnalytics(timeRange: AnalyticsTimeRange) {
         loadJob?.cancel()
+        loadSubagents(timeRange)
         loadJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isLoading = true,
@@ -584,6 +633,37 @@ internal object AnalyticsParser {
             timeline = timeline,
             topSessions = topSessions,
             missingPricing = missingPricing,
+        )
+    }
+
+    /**
+     * Lenient on purpose: an older backend answers with `agents` and other
+     * totals keys but no `groups`; that parses to an empty [SubagentUsage].
+     */
+    fun parseSubagents(root: kotlinx.serialization.json.JsonElement?): SubagentUsage {
+        val obj = root as? JsonObject ?: return SubagentUsage()
+        val totals = obj.objectValue("totals")
+        val groups = obj.arrayValue("groups").mapNotNull { element ->
+            val item = element as? JsonObject ?: return@mapNotNull null
+            SubagentUsageItem(
+                kind = item.stringValue("kind") ?: "agent",
+                provider = item.stringValue("provider").orEmpty(),
+                providerLabel = item.stringValue("providerLabel").orEmpty(),
+                agentType = item.stringValue("agentType").orEmpty(),
+                model = item.stringValue("model").orEmpty(),
+                runs = item.longValue("runs"),
+                sessions = item.longValue("sessions"),
+                totalTokens = item.longValue("totalTokens"),
+                costUsd = item.doubleValue("costUsd"),
+            )
+        }.sortedByDescending { it.totalTokens }
+        return SubagentUsage(
+            groups = groups,
+            totalTokens = totals.longValue("totalTokens"),
+            costUsd = totals.doubleValue("costUsd"),
+            runs = totals.longValue("runs"),
+            windowTotalTokens = totals.longValue("windowTotalTokens"),
+            sharePercent = totals.doubleValue("sharePercent"),
         )
     }
 

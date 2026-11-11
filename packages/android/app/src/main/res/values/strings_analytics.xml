@@ -109,4 +109,21 @@
     <string name="analytics_mistral_allowance_vibe">Vibe Code allowance</string>
     <string name="analytics_vibe_budget_title">Vibe Code monthly allowance</string>
     <string name="analytics_vibe_budget_hint">Vibe turns draw on the plan\'s Vibe Code allowance (Pro: €255 a month), tracked apart from the API/Studio allowance. Plum counts its own Vibe turns at list prices (€ = $); Le Chat, Studio and the Vibe CLI outside Plum are not included.</string>
+    <string name="analytics_subagents_title">Subagents</string>
+    <string name="analytics_subagents_subtitle">What agents started by sessions, CLI workers and routed calls spent</string>
+    <string name="analytics_subagents_empty">No subagent usage in this period</string>
+    <string name="analytics_subagents_share">%1$s%% of usage</string>
+    <string name="analytics_subagents_header_detail">%1$s tokens · %2$s</string>
+    <string name="analytics_subagents_kind_agent">Agent</string>
+    <string name="analytics_subagents_kind_worker">CLI worker</string>
+    <string name="analytics_subagents_kind_routed">Routed</string>
+    <string name="analytics_subagents_row_detail">%1$s · %2$s tokens</string>
+    <plurals name="analytics_subagents_runs">
+        <item quantity="one">%1$s run</item>
+        <item quantity="other">%1$s runs</item>
+    </plurals>
+    <plurals name="analytics_subagents_calls">
+        <item quantity="one">%1$s call</item>
+        <item quantity="other">%1$s calls</item>
+    </plurals>
 </resources>

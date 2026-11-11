@@ -153,7 +153,7 @@ fun AppNavigation(
 ) {
     val socketManager = koinInject<SocketManager>()
     val reduceMotion = LocalReduceMotion.current
-    val isAnalyticsPreview = BuildConfig.DEBUG && deepLinkUri == "claudewebui://preview-analytics"
+    val isAnalyticsPreview = BuildConfig.DEBUG && deepLinkUri?.startsWith("claudewebui://preview-analytics") == true
     val startDestination = remember(deepLinkUri) {
         val isDesignPreview = BuildConfig.DEBUG && deepLinkUri == "claudewebui://preview"
         val isChatPreview = BuildConfig.DEBUG && deepLinkUri == "claudewebui://preview-chat"
@@ -678,6 +678,8 @@ fun AppNavigation(
             AnalyticsScreen(
                 onNavigateMain = { navController.navigateMain(it) },
                 designPreview = isAnalyticsPreview,
+                // claudewebui://preview-analytics-subagents scrolls to the subagents panel.
+                previewScrollToSubagents = deepLinkUri?.startsWith("claudewebui://preview-analytics-subagents") == true,
                 initialRange = backStackEntry.arguments?.getString("range"),
             )
         }

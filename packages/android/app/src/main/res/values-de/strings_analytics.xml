@@ -109,4 +109,21 @@
     <string name="analytics_mistral_allowance_vibe">Vibe-Code-Kontingent</string>
     <string name="analytics_vibe_budget_title">Vibe-Code-Monatskontingent</string>
     <string name="analytics_vibe_budget_hint">Vibe-Züge verbrauchen das Vibe-Code-Kontingent des Plans (Pro: 255 € pro Monat) und werden getrennt vom API/Studio-Kontingent gezählt. Plum zählt seine eigenen Vibe-Züge zu Listenpreisen (€ = $); Le Chat, Studio und das Vibe-CLI ausserhalb von Plum sind nicht enthalten.</string>
+    <string name="analytics_subagents_title">Subagenten</string>
+    <string name="analytics_subagents_subtitle">Was von Sessions gestartete Agenten, CLI-Worker und umgeleitete Aufrufe verbraucht haben</string>
+    <string name="analytics_subagents_empty">Kein Subagenten-Verbrauch in diesem Zeitraum</string>
+    <string name="analytics_subagents_share">%1$s %% des Verbrauchs</string>
+    <string name="analytics_subagents_header_detail">%1$s Tokens · %2$s</string>
+    <string name="analytics_subagents_kind_agent">Agent</string>
+    <string name="analytics_subagents_kind_worker">CLI-Worker</string>
+    <string name="analytics_subagents_kind_routed">Umgeleitet</string>
+    <string name="analytics_subagents_row_detail">%1$s · %2$s Tokens</string>
+    <plurals name="analytics_subagents_runs">
+        <item quantity="one">%1$s Lauf</item>
+        <item quantity="other">%1$s Läufe</item>
+    </plurals>
+    <plurals name="analytics_subagents_calls">
+        <item quantity="one">%1$s Aufruf</item>
+        <item quantity="other">%1$s Aufrufe</item>
+    </plurals>
 </resources>

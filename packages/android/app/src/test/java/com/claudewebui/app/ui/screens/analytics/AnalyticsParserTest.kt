@@ -62,4 +62,29 @@ class AnalyticsParserTest {
         assertEquals(0xFFFF7000L, parsed.modelUsage.single().color)
         assertEquals(2.4, provider.costUsd, 0.0001)
     }
+
+    @Test
+    fun `subagent groups parse with big counts and sort by tokens`() {
+        val root = Json.parseToJsonElement(
+            """{"period":"7d","unknownKey":1,"groups":[
+                {"kind":"worker","provider":"pi","providerLabel":"Pi","model":"m","runs":2,"totalTokens":10,"costUsd":0.5},
+                {"kind":"agent","provider":"claude","providerLabel":"Claude Code","agentType":"fork","model":"x","runs":3,"sessions":1,"totalTokens":5000000000,"costUsd":12.5,"lastUsedAt":null}
+            ],"totals":{"totalTokens":5000000010,"costUsd":13.0,"runs":5,"windowTotalTokens":10000000020,"sharePercent":50.0}}""",
+        )
+        val usage = AnalyticsParser.parseSubagents(root)
+        assertEquals(listOf("agent", "worker"), usage.groups.map { it.kind })
+        assertEquals(5_000_000_000L, usage.groups.first().totalTokens)
+        assertEquals("fork", usage.groups.first().agentType)
+        assertEquals(50.0, usage.sharePercent, 0.0)
+    }
+
+    @Test
+    fun `old backend answer without groups parses to empty subagent usage`() {
+        val old = Json.parseToJsonElement("""{"agents":[{"name":"a"}],"totals":{"agents":3,"tokens":9}}""")
+        val usage = AnalyticsParser.parseSubagents(old)
+        assertTrue(usage.groups.isEmpty())
+        assertEquals(0.0, usage.sharePercent, 0.0)
+        assertTrue(AnalyticsParser.parseSubagents(null).groups.isEmpty())
+        assertTrue(AnalyticsParser.parseSubagents(Json.parseToJsonElement("[]")).groups.isEmpty())
+    }
 }
