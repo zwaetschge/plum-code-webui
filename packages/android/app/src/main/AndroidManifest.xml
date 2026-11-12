@@ -108,17 +108,22 @@
             </intent-filter>
 
             <!--
-                HTTPS app links require a matching /.well-known/assetlinks.json
-                on the server for autoVerify to succeed (optional but recommended).
+                HTTPS app links, verified through /.well-known/assetlinks.json.
+                Only the pages the app can show: claiming the whole host also took
+                the app's own login page (/mobile/auth/proxy/mobile), so "Mit Authelia
+                fortfahren" opened the app instead of the browser once the release
+                build's links were verified (2026-11-12).
             -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="https"
-                    android:host="plum.zwaetschge-webui.ch" />
-                <data android:scheme="https" android:host="code.zwaetschge-webui.ch" />
+                <data android:scheme="https" />
+                <data android:host="plum.zwaetschge-webui.ch" />
+                <data android:host="code.zwaetschge-webui.ch" />
+                <data android:pathPrefix="/session/" />
+                <data android:pathPrefix="/sessions/" />
+                <data android:path="/new" />
             </intent-filter>
         </activity>
 
