@@ -254,7 +254,8 @@ fun AppNavigation(
                     navController.navigate(Routes.ServerSetup.route)
                 },
                 authCallbackUri = deepLinkUri?.takeIf {
-                    it.startsWith("claudewebui://auth/callback")
+                    it.startsWith("claudewebui://plum-auth/callback") ||
+                        it.startsWith("claudewebui://auth/callback")
                 },
             )
         }

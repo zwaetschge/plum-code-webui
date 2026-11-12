@@ -34,7 +34,22 @@ const router = Router();
 const mobileProxyQuerySchema = z.object({
   state: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/),
   code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  // Which app asked; see MOBILE_AUTH_CALLBACKS.
+  app: z.enum(['plum']).optional(),
 });
+
+/**
+ * Where the login goes back to, per app. Android hands a custom-scheme link to
+ * the app whose intent filter matches it most closely, not to the app that
+ * asked: the Plum Flipper app registers `claudewebui://auth/callback` exactly
+ * and the Plum app only the `claudewebui` scheme, so the Plum app's logins
+ * landed in the Flipper app (2026-11-12). The Plum app now asks for an address
+ * of its own; without `app` the old one stays for the apps that use it.
+ */
+const MOBILE_AUTH_CALLBACKS = {
+  default: 'claudewebui://auth/callback',
+  plum: 'claudewebui://plum-auth/callback',
+} as const;
 
 const mobileExchangeSchema = z.object({
   code: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
@@ -149,8 +164,16 @@ function redirectProxyError(res: Response, error: string): void {
   res.redirect(`${config.frontendUrl}/login?${params.toString()}`);
 }
 
-function redirectMobileAuth(res: Response, values: Record<string, string>): void {
-  res.redirect(`claudewebui://auth/callback?${new URLSearchParams(values).toString()}`);
+export function mobileAuthCallback(app: unknown): string {
+  return app === 'plum' ? MOBILE_AUTH_CALLBACKS.plum : MOBILE_AUTH_CALLBACKS.default;
+}
+
+function redirectMobileAuth(
+  res: Response,
+  values: Record<string, string>,
+  callback: string = MOBILE_AUTH_CALLBACKS.default
+): void {
+  res.redirect(`${callback}?${new URLSearchParams(values).toString()}`);
 }
 
 /**
@@ -244,26 +267,30 @@ router.get('/proxy', async (req, res, next) => {
 // Native Android login handoff. Traefik keeps this single route behind
 // Authelia, while the rest of /mobile is protected by Plum JWTs.
 router.get('/proxy/mobile', rateLimiters.strict, async (req, res, next) => {
+  // Errors go back to the app that asked, even when the rest of the query is bad.
+  const callback = mobileAuthCallback(req.query.app);
   const query = mobileProxyQuerySchema.safeParse(req.query);
-  if (!query.success) return redirectMobileAuth(res, { error: 'invalid_request' });
-  if (!config.proxyAuth.enabled) return redirectMobileAuth(res, { error: 'proxy_disabled' });
+  if (!query.success) return redirectMobileAuth(res, { error: 'invalid_request' }, callback);
+  if (!config.proxyAuth.enabled) {
+    return redirectMobileAuth(res, { error: 'proxy_disabled' }, callback);
+  }
   if (!isTrustedProxyPeer(req)) {
     console.warn(
       `[auth] Rejected mobile proxy login from untrusted peer ${req.socket?.remoteAddress ?? 'unknown'}.`
     );
-    return redirectMobileAuth(res, { error: 'untrusted_proxy' });
+    return redirectMobileAuth(res, { error: 'untrusted_proxy' }, callback);
   }
 
   const { proxyUser, proxyName, proxyEmail } = getProxyIdentity(req);
-  if (!proxyEmail) return redirectMobileAuth(res, { error: 'missing_identity' });
+  if (!proxyEmail) return redirectMobileAuth(res, { error: 'missing_identity' }, callback);
   if (!isEmailAllowed(proxyEmail)) {
-    return redirectMobileAuth(res, { error: 'email_not_allowed' });
+    return redirectMobileAuth(res, { error: 'email_not_allowed' }, callback);
   }
 
   try {
     const user = await establishProxyLogin(req, proxyEmail, proxyName, proxyUser);
     const code = mobileAuthCodes.issue(user.id, query.data.code_challenge);
-    return redirectMobileAuth(res, { code, state: query.data.state });
+    return redirectMobileAuth(res, { code, state: query.data.state }, callback);
   } catch (err) {
     next(err);
   }

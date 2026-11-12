@@ -24,6 +24,9 @@ private const val KEY_RECENT_SERVERS = "recent_servers"
 private const val KEY_BIOMETRIC_ENABLED = "biometric_enabled"
 private const val MAX_RECENT_SERVERS = 5
 
+/** `plum-auth`: this app's own login callback; `auth`: the one servers before 2026-11-12 use. */
+private val AUTH_CALLBACK_HOSTS = setOf("plum-auth", "auth")
+
 class LoginViewModel(
     private val apiClient: ApiClient,
     private val context: Context,
@@ -218,13 +221,16 @@ class LoginViewModel(
             .buildUpon()
             .appendQueryParameter("state", pending.state)
             .appendQueryParameter("code_challenge", pending.challenge)
+            // Our own return address: Android gave claudewebui://auth/callback to the
+            // Plum Flipper app, which registers it more precisely than we do.
+            .appendQueryParameter("app", "plum")
             .build()
             .toString()
     }
 
     fun handleMobileAuthCallback(callbackUri: String) {
         val uri = runCatching { Uri.parse(callbackUri) }.getOrNull() ?: return
-        if (uri.scheme != "claudewebui" || uri.host != "auth" || uri.path != "/callback") return
+        if (uri.scheme != "claudewebui" || uri.host !in AUTH_CALLBACK_HOSTS || uri.path != "/callback") return
 
         uri.getQueryParameter("error")?.let { error ->
             _authState.value = AuthState.Error(context.getString(R.string.auth_error_authelia_failed, error))

@@ -87,6 +87,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!--
+                Login callback, registered exactly: Android hands a custom-scheme link
+                to the app whose filter matches it most closely. The bare scheme below
+                lost claudewebui://auth/callback to the Plum Flipper app.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="claudewebui" android:host="plum-auth" android:path="/callback" />
+            </intent-filter>
+
             <!-- Custom-scheme deep links: claudewebui://session/{id} etc. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
