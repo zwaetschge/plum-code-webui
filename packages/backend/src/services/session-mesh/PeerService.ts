@@ -351,6 +351,12 @@ export class PeerService {
       '- Use your own session context and tools if needed.',
       '- Keep the answer concise and include the Delegation ID in the final answer.',
       '- Do not call other peers unless explicitly necessary; avoid loops.',
+      ...(input.source
+        ? [
+            `- The sender only sees your answer if you send it: call the plum_message_session tool once with to="${input.source.id}" and your answer as message.`,
+            '- If this message is itself an answer to something you sent, do not answer it again.',
+          ]
+        : []),
     ].join('\n');
   }
 }

@@ -170,21 +170,67 @@ const TOOL_LIST = [
   },
   {
     name: 'plum_forget_memory',
-    description: 'Permanently forget an owned permitted memory and its learned source summaries, after the user requests forgetting. Search knowledge first to find its exact ID and revision. Does not delete original chats. Temporary/read-only profiles refuse writes.',
-    inputSchema: schema({id:string,expectedRevision:{type:'integer',minimum:1}}),
-    annotations:{readOnlyHint:false,destructiveHint:true,openWorldHint:false},
+    description:
+      'Permanently forget an owned permitted memory and its learned source summaries, after the user requests forgetting. Search knowledge first to find its exact ID and revision. Does not delete original chats. Temporary/read-only profiles refuse writes.',
+    inputSchema: schema({ id: string, expectedRevision: { type: 'integer', minimum: 1 } }),
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   },
   {
     name: 'plum_revise_memory',
-    description: 'Correct an owned permitted memory after an explicit user correction. Search knowledge first for its exact ID/revision. Preserves provenance and pins the corrected entry against automatic overwrites.',
-    inputSchema: schema({id:string,expectedRevision:{type:'integer',minimum:1},title:string,text:{type:'string',minLength:1,maxLength:10000}}),
-    annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false},
+    description:
+      'Correct an owned permitted memory after an explicit user correction. Search knowledge first for its exact ID/revision. Preserves provenance and pins the corrected entry against automatic overwrites.',
+    inputSchema: schema({
+      id: string,
+      expectedRevision: { type: 'integer', minimum: 1 },
+      title: string,
+      text: { type: 'string', minLength: 1, maxLength: 10000 },
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
-    name:'plum_process_memory',
-    description:'Learn from the current owned assistant user turn. Use the sourceHash in the Plum context. Exact user quotes, sensitive review, dedup, corrections, consent and temporary-chat exclusions are enforced server-side. Runs inside this CLI turn without a second API request.',
-    inputSchema:schema({sourceHash:{type:'string',pattern:'^[a-f0-9]{64}$'},data:{type:'object',properties:{memories:{type:'array',maxItems:8,items:{type:'object',properties:{key:string,title:string,text:string,quote:string,keywords:{type:'array',items:string},sensitive:{type:'boolean'},replacesId:string},required:['key','title','text','quote'],additionalProperties:false}},forget:{type:'array',items:{type:'object',properties:{id:string,quote:string},required:['id','quote'],additionalProperties:false}},summary:string,writingStyle:string},required:['memories','summary','writingStyle'],additionalProperties:false}}),
-    annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false},
+    name: 'plum_process_memory',
+    description:
+      'Learn from the current owned assistant user turn. Use the sourceHash in the Plum context. Exact user quotes, sensitive review, dedup, corrections, consent and temporary-chat exclusions are enforced server-side. Runs inside this CLI turn without a second API request.',
+    inputSchema: schema({
+      sourceHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+      data: {
+        type: 'object',
+        properties: {
+          memories: {
+            type: 'array',
+            maxItems: 8,
+            items: {
+              type: 'object',
+              properties: {
+                key: string,
+                title: string,
+                text: string,
+                quote: string,
+                keywords: { type: 'array', items: string },
+                sensitive: { type: 'boolean' },
+                replacesId: string,
+              },
+              required: ['key', 'title', 'text', 'quote'],
+              additionalProperties: false,
+            },
+          },
+          forget: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { id: string, quote: string },
+              required: ['id', 'quote'],
+              additionalProperties: false,
+            },
+          },
+          summary: string,
+          writingStyle: string,
+        },
+        required: ['memories', 'summary', 'writingStyle'],
+        additionalProperties: false,
+      },
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
     name: 'plum_remember',
@@ -193,6 +239,23 @@ const TOOL_LIST = [
     inputSchema: schema({
       title: string,
       text: { type: 'string', minLength: 1, maxLength: 10000 },
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'plum_list_sessions',
+    description:
+      'List all Plum sessions of this account (Code, Task, Chat), also the ones that are stopped: id, name, area, provider, running, busy, working directory. Unlike the built-in agent list, this also shows sessions without a running process. Optional query filters by name.',
+    inputSchema: schema({ query: { type: 'string', maxLength: 200 } }, []),
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'plum_message_session',
+    description:
+      'Send a message to another Plum session by id or name. A stopped session is started with the message. The other session answers by calling this tool back, so its reply arrives as a new message in this session. Use for questions to and coordination with other sessions.',
+    inputSchema: schema({
+      to: string,
+      message: { type: 'string', minLength: 1, maxLength: 20000 },
     }),
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },

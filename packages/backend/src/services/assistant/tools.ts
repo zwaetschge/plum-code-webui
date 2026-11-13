@@ -10,6 +10,8 @@ import { readPersonalization, memoryPermission, referencePhoto } from './persona
 import { searchSourceChunks } from './sourceChunks.js';
 import { z } from 'zod';
 import { get } from '../../db/pg.js';
+import { peerService } from '../session-mesh/PeerService.js';
+import { listSessionDirectory, resolveSessionTarget } from '../session-mesh/sessionDirectory.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { apiChatImage } from './apiFiles.js';
 import { taskImage } from './taskFiles.js';
@@ -156,6 +158,17 @@ const tools = z.discriminatedUnion('name', [
     name: z.literal('plum_create_task'),
     arguments: z.object({ title: z.string().min(1).max(200), body: BODY_SCHEMAS.task }),
   }),
+  z.object({
+    name: z.literal('plum_list_sessions'),
+    arguments: z.object({ query: z.string().max(200).optional() }).default({}),
+  }),
+  z.object({
+    name: z.literal('plum_message_session'),
+    arguments: z.object({
+      to: z.string().min(1).max(200),
+      message: z.string().min(1).max(20000),
+    }),
+  }),
 ]);
 export async function executeAssistantTool(sessionId: string, userId: string, input: unknown) {
   const parsed = tools.safeParse(input);
@@ -213,6 +226,35 @@ export async function executeAssistantTool(sessionId: string, userId: string, in
       'TEMPORARY_PERSISTENCE_DISABLED'
     );
   switch (tool.name) {
+    case 'plum_list_sessions': {
+      const { getProcessManager } = await import('../../websocket/index.js');
+      return listSessionDirectory(userId, sessionId, getProcessManager(), {
+        query: tool.arguments.query,
+      });
+    }
+    case 'plum_message_session': {
+      const { getProcessManager } = await import('../../websocket/index.js');
+      const runtime = getProcessManager();
+      const sessions = await listSessionDirectory(userId, sessionId, runtime, { limit: 1000 });
+      const target = resolveSessionTarget(sessions, tool.arguments.to, sessionId);
+      const wasRunning = runtime.isSessionRunning(target.id);
+      const delegation = await peerService.createDelegation({
+        fromSessionId: sessionId,
+        toSessionId: target.id,
+        userId,
+        content: tool.arguments.message,
+        kind: 'consult',
+      });
+      return {
+        delivered: delegation.status !== 'error',
+        to: { id: target.id, name: target.name },
+        wasRunning,
+        delegationId: delegation.id,
+        note: wasRunning
+          ? 'Zugestellt; die Session antwortet mit plum_message_session an dich.'
+          : 'Die Session war gestoppt und wurde mit der Nachricht gestartet; sie antwortet mit plum_message_session an dich.',
+      };
+    }
     case 'plum_read_reference_photo': {
       const session = await get(
         'SELECT id,surface FROM sessions WHERE id=? AND user_id=?',
