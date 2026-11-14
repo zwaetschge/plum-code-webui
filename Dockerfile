@@ -69,8 +69,8 @@ LABEL org.opencontainers.image.vendor="Plum Code WebUI"
 # on exactly those.
 # The step is cached like any other, so a fix published after it last ran does
 # not arrive by itself: bump the date to run it again. (2026-11-10: libxslt
-# 1.1.43-r4, two HIGH findings that failed the image scan.)
-ARG ALPINE_PACKAGES_AS_OF=2026-11-10
+# 1.1.43-r4; 2026-11-14: libpq 18.7 and postgresql17-client 17.12.)
+ARG ALPINE_PACKAGES_AS_OF=2026-11-14
 RUN echo "Alpine packages as of ${ALPINE_PACKAGES_AS_OF}" && \
     apk upgrade --no-cache && \
     apk add --no-cache git bash docker-cli docker-cli-compose curl openssh-client unzip imagemagick gcompat libstdc++ libgcc python3 py3-pip py3-numpy pipx ripgrep procps-ng py3-httpx jq coreutils tzdata chromium chromium-chromedriver nss freetype harfbuzz font-noto font-noto-cjk ttf-freefont xvfb blender-headless github-cli postgresql17-client ffmpeg tesseract-ocr tesseract-ocr-data-deu tesseract-ocr-data-eng
@@ -251,7 +251,7 @@ RUN mkdir -p /home/node/.npm-global /opt/plum-cli && \
 # and the `--version` smoke test below still has to pass with the result.
 # `~=` on purpose: the list passes through `su -c "…"`, where `>` and `<` would
 # be redirections.
-ARG VIBE_PATCHED_DEPENDENCIES="gitpython~=3.2.1 pyjwt~=2.14 anyio~=4.14.2 certifi~=2026.10 pyasn1~=0.6.5 urllib3~=2.8"
+ARG VIBE_PATCHED_DEPENDENCIES="gitpython~=3.2.1 pyjwt~=2.14 anyio~=4.14.2 certifi~=2026.10 pyasn1~=0.6.5 urllib3~=2.8 soupsieve~=4.1"
 RUN set -eux; \
     su -s /bin/sh node -c "PIPX_HOME=/home/node/.local/pipx PIPX_BIN_DIR=/home/node/.local/bin pipx install --pip-args=--no-cache-dir mistral-vibe==${VIBE_VERSION}"; \
     su -s /bin/sh node -c "PIPX_HOME=/home/node/.local/pipx PIPX_BIN_DIR=/home/node/.local/bin pipx runpip mistral-vibe install --no-cache-dir --upgrade ${VIBE_PATCHED_DEPENDENCIES}"; \
