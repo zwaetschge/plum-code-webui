@@ -369,7 +369,11 @@ export async function streamApiChat(
                         functionDeclarations: generation.tools.map((t) => ({
                           name: t.name,
                           description: t.description,
-                          parameters: t.parameters,
+                          // Gemini's `parameters` takes only its OpenAPI subset and
+                          // rejects additionalProperties, type arrays and the like
+                          // (HTTP 400 on every chat with tools, 2026-11-15);
+                          // `parametersJsonSchema` takes the JSON Schema as is.
+                          parametersJsonSchema: t.parameters,
                         })),
                       },
                     ],
