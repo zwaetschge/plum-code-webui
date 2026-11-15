@@ -935,6 +935,27 @@ export function buildPiAgentSettings(
   };
 }
 
+/**
+ * With the agy bridge an `antigravity` entry left in Pi's auth.json from the
+ * old pi-antigravity OAuth login breaks every turn: Pi finds a credential for
+ * the provider, has no OAuth handler for it any more and fails with "No API key
+ * found for antigravity" before the bridge is asked (2026-11-15). agy holds
+ * its own login, so the entry is dead weight.
+ */
+export function dropPiAntigravityLogin(authFile: string): boolean {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(authFile, 'utf8')) as unknown;
+    if (!isRecord(parsed)) return false;
+    const stale = Object.keys(parsed).filter((key) => key.toLowerCase().startsWith('antigravity'));
+    if (stale.length === 0) return false;
+    for (const key of stale) delete parsed[key];
+    writeFileAtomicSync(authFile, `${JSON.stringify(parsed, null, 2)}\n`, { mode: 0o600 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function syncPiConfig(userId: string): Promise<PiConfigSyncResult> {
   const agentDir = path.join(PI_ROOT, safeUserSegment(userId), 'agent');
   fs.mkdirSync(agentDir, { recursive: true });
@@ -951,6 +972,7 @@ export async function syncPiConfig(userId: string): Promise<PiConfigSyncResult> 
   const mcpServers = isRecord(mcpConfig.mcpServers) ? mcpConfig.mcpServers : {};
 
   const extensions = resolvePiExtensionPaths();
+  if (resolveAgyBridgeExtension()) dropPiAntigravityLogin(path.join(agentDir, 'auth.json'));
   const currentSettings = readJsonObject(path.join(agentDir, 'settings.json'));
   writeJsonIfChanged(
     path.join(agentDir, 'settings.json'),

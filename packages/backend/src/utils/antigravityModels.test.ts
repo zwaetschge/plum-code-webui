@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -8,8 +8,12 @@ process.env.NODE_ENV = 'test';
 process.env.SESSION_SECRET ||= 'antigravity-models-test-session-secret-000000000';
 process.env.JWT_SECRET ||= 'antigravity-models-test-jwt-secret-00000000000000';
 
-const { agyBridgeModels, discoveredAntigravityModels, PI_ANTIGRAVITY_MODELS } =
-  await import('./piConfig.js');
+const {
+  agyBridgeModels,
+  discoveredAntigravityModels,
+  dropPiAntigravityLogin,
+  PI_ANTIGRAVITY_MODELS,
+} = await import('./piConfig.js');
 
 test("the account's live list replaces the static one", () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'antigravity-store-'));
@@ -85,6 +89,23 @@ test('the agy bridge ids come from its cached `agy models` output', () => {
     writeFileSync(cache, JSON.stringify({ raw: 'Error: Please sign in', savedAt: 0 }));
     assert.equal(agyBridgeModels(cache), null);
     assert.equal(agyBridgeModels(path.join(dir, 'missing.json')), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a leftover Antigravity OAuth login is removed, other logins stay', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'pi-auth-'));
+  try {
+    const auth = path.join(dir, 'auth.json');
+    writeFileSync(
+      auth,
+      JSON.stringify({ antigravity: { type: 'oauth' }, zai: { type: 'api_key' } })
+    );
+    assert.equal(dropPiAntigravityLogin(auth), true);
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(auth, 'utf8'))), ['zai']);
+    assert.equal(dropPiAntigravityLogin(auth), false);
+    assert.equal(dropPiAntigravityLogin(path.join(dir, 'missing.json')), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
