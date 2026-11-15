@@ -84,6 +84,9 @@ import {
 } from '@/components/assistant/ChatImages';
 import { PROJECT_MEMORY, projectMemoryMode } from '@/components/assistant/projectMemory';
 
+/** Mistral's German preset (Heidi), the classic voice mode's voice after Gemini Live. */
+const MISTRAL_FALLBACK_VOICE = 'mistral:01a0f318-4ae8-7446-a3e4-45aa092940b2';
+
 // Interactive views pull in the chart library; only messages that have one load it.
 const DynamicUi = lazy(() => import('@/components/assistant/dynamic-ui/DynamicUi'));
 
@@ -130,6 +133,8 @@ export function ApiChatPage() {
   const scrollStop = useRef<(() => void) | null>(null);
   const [tools, setTools] = useState(false),
     [voiceOpen, setVoiceOpen] = useState(false),
+    /** Why Gemini Live could not start; the classic voice mode takes over then. */
+    [liveFallback, setLiveFallback] = useState(''),
     [copied, setCopied] = useState(''),
     [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [draft, setDraft] = useState(''),
@@ -186,11 +191,21 @@ export function ApiChatPage() {
   useEffect(() => {
     setTools(false);
     setVoiceOpen(false);
+    setLiveFallback('');
     setCopied('');
   }, [scope]);
   const [effort, setEffort] = useEffortChoice();
   const speechVoice = (profileVoice: unknown) =>
     preferences.voiceName || String(profileVoice ?? 'Rufus Beck');
+  /**
+   * Voice of the classic voice mode once Gemini Live has failed: a Mistral
+   * voice (the user's own, else Heidi); the server speaks with Vocarium when
+   * Mistral fails too.
+   */
+  const fallbackVoice = (profileVoice: unknown) => {
+    const chosen = speechVoice(profileVoice);
+    return chosen.startsWith('mistral:') ? chosen : MISTRAL_FALLBACK_VOICE;
+  };
   const providers = useQuery({
     queryKey: ['assistant', 'api-chat-providers', owner],
     select: orderChatApiProviders,
@@ -1226,15 +1241,32 @@ export function ApiChatPage() {
           )}
           {voiceOpen && preferences.voiceChat && (
             <div className="px-4 pb-3 space-y-2">
-              <RealtimeVoice
-                chatId={chat.id}
-                onSaved={() => {
-                  void latest.refetch();
-                }}
-              />
+              {liveFallback ? (
+                <p className="text-xs text-muted-foreground" role="status">
+                  Gemini Live nicht verfügbar ({liveFallback}). Sprachmodus läuft mit Mistral, bei
+                  Ausfall mit Vocarium.{' '}
+                  <button type="button" className="underline" onClick={() => setLiveFallback('')}>
+                    Live erneut versuchen
+                  </button>
+                </p>
+              ) : (
+                <RealtimeVoice
+                  chatId={chat.id}
+                  autoStart
+                  voice={speechVoice(profile.data?.body.voice)}
+                  onFallback={setLiveFallback}
+                  onSaved={() => {
+                    void latest.refetch();
+                  }}
+                />
+              )}
               <VoiceComposer
                 scopeKey={scope}
-                voice={speechVoice(profile.data?.body.voice)}
+                voice={
+                  liveFallback
+                    ? fallbackVoice(profile.data?.body.voice)
+                    : speechVoice(profile.data?.body.voice)
+                }
                 language={String(profile.data?.body.language ?? 'German')}
                 text={spoken?.response ?? ''}
                 onSend={(text) => transmit(text, true)}

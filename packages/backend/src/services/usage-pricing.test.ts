@@ -151,3 +151,8 @@ test('Gemini 4 and 3.8 Flash are priced under every id Plum books them with', ()
   assert.equal(resolveModelPricing('antigravity/gemini-3-8-flash')?.input, 0.75);
   assert.equal(resolveModelPricing('google/gemini-3.8-flash')?.label, 'Gemini 3.8 Flash');
 });
+
+test('Gemini Live is priced: text in, audio out', () => {
+  assert.equal(resolveModelPricing('google/gemini-3.8-live')?.input, 0.75);
+  assert.equal(resolveModelPricing('gemini-3.8-live-extended-thinking')?.output, 12);
+});

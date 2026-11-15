@@ -1,14 +1,64 @@
 import { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { io, type Socket } from 'socket.io-client';
+import { api } from '@/services/api';
 import { nativeShell } from '@/lib/nativeShell';
 import { useAuthStore } from '@/stores/authStore';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { PlumFace, type FacePhase } from './PlumFace';
 
-/** Full-duplex PCM; recognition, audio generation and interruption stay in one model session. */
-export function RealtimeVoice({ chatId, onSaved }: { chatId: string; onSaved?: () => void }) {
-  const [open, setOpen] = useState(false),
+export interface LiveOptions {
+  gemini: string[];
+  openai: boolean;
+  defaultModel: string | null;
+}
+
+const LIVE_MODEL_KEY = 'plum:voice:live-model';
+export const LIVE_MODEL_LABELS: Record<string, string> = {
+  'gemini-3.8-live': 'Gemini Live',
+  'gemini-3.8-live-extended-thinking': 'Gemini Live · Extended Thinking',
+};
+
+/** Which live engines the account has (Gemini first); shared by the chat page. */
+export function useLiveOptions() {
+  return useQuery({
+    queryKey: ['assistant', 'voice', 'live'],
+    queryFn: async () =>
+      (await api.get<{ data: LiveOptions }>('/api/assistant/voice/live')).data.data,
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Full-duplex PCM; recognition, audio generation and interruption stay in one
+ * model session. The voice mode's first choice: Gemini Live (or OpenAI
+ * Realtime without a Google key). A failure before the session is ready hands
+ * over to the classic voice mode (`onFallback`).
+ */
+export function RealtimeVoice({
+  chatId,
+  onSaved,
+  autoStart = false,
+  voice,
+  onFallback,
+}: {
+  chatId: string;
+  onSaved?: () => void;
+  autoStart?: boolean;
+  /** Stored profile voice; a `gemini:<name>` voice is used for Gemini Live. */
+  voice?: string;
+  onFallback?: (reason: string) => void;
+}) {
+  const options = useLiveOptions();
+  const [model, setModel] = useState<string>(
+    () => window.localStorage.getItem(LIVE_MODEL_KEY) ?? 'gemini-3.8-live'
+  );
+  const usable = options.data?.gemini.includes(model)
+    ? model
+    : (options.data?.defaultModel ?? model);
+  const [open, setOpen] = useState(autoStart),
     [status, setStatus] = useState('Verbindet …'),
     [error, setError] = useState('');
   const [heard, setHeard] = useState(''),
@@ -75,24 +125,27 @@ export function RealtimeVoice({ chatId, onSaved }: { chatId: string; onSaved?: (
           path: native
             ? new URL(native.apiBase).pathname.replace(/\/$/, '') + '/socket.io'
             : '/socket.io',
-          auth: { token, chatId },
+          auth: { token, chatId, model: usable, voice },
           transports: ['websocket'],
           reconnection: false,
         });
         resources.current.socket = socket;
-        socket.on('connect_error', () => {
-          setError('Sprachverbindung nicht möglich');
-          setStatus('Verbindung beendet');
-          setPhase('failed');
-          close();
-        });
-        socket.on('problem', (message: string) => {
+        let ready = false;
+        const fail = (message: string) => {
           setError(message);
           setStatus('Verbindung beendet');
           setPhase('failed');
           close();
-        });
+          // Not even started: the classic voice mode (Mistral, then Vocarium) takes over.
+          if (!ready && onFallback) {
+            setOpen(false);
+            onFallback(message);
+          }
+        };
+        socket.on('connect_error', () => fail('Sprachverbindung nicht möglich'));
+        socket.on('problem', (message: string) => fail(message));
         socket.on('ready', () => {
+          ready = true;
           setStatus('Hört zu');
           setPhase('listening');
           const input = context.createScriptProcessor(4096, 1, 1);
@@ -191,15 +244,36 @@ export function RealtimeVoice({ chatId, onSaved }: { chatId: string; onSaved?: (
       clear();
       close();
     };
-  }, [open, chatId]);
+    // onFallback and voice are read when the session connects.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, chatId, usable]);
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
-        Realtime-Sprache
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" onClick={() => setOpen(true)}>
+          {LIVE_MODEL_LABELS[usable] ?? 'Realtime-Sprache'} starten
+        </Button>
+        {(options.data?.gemini.length ?? 0) > 1 && (
+          <select
+            aria-label="Live-Modell"
+            className="rounded-md border bg-background px-2 py-1 text-sm"
+            value={usable}
+            onChange={(event) => {
+              setModel(event.target.value);
+              window.localStorage.setItem(LIVE_MODEL_KEY, event.target.value);
+            }}
+          >
+            {options.data!.gemini.map((id) => (
+              <option key={id} value={id}>
+                {LIVE_MODEL_LABELS[id] ?? id}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
-          <DialogTitle>Realtime-Sprache</DialogTitle>
+          <DialogTitle>{LIVE_MODEL_LABELS[usable] ?? 'Realtime-Sprache'}</DialogTitle>
           <div className="plum-voice-presence">
             <PlumFace phase={muted ? 'paused' : phase} level={level} size={112} title="Plum" />
             <p role="status">{status}</p>

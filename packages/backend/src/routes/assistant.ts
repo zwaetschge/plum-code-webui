@@ -170,6 +170,7 @@ import {
   assistantVoiceWarmup,
   assistantTranscription,
 } from '../services/assistant/voice.js';
+import { realtimeOptions } from '../services/assistant/realtimeVoice.js';
 
 const router = Router();
 const handle =
@@ -1640,6 +1641,12 @@ router.post(
       success: true,
       data: await importDataset(owner(req), req.file, input.commandId, input.format),
     });
+  })
+);
+router.get(
+  '/voice/live',
+  handle(async (req, res) => {
+    res.json({ success: true, data: await realtimeOptions(owner(req)) });
   })
 );
 router.get(

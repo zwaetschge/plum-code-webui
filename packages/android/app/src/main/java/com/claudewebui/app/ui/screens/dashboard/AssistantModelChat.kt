@@ -148,6 +148,18 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     var documentIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var documentNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var realtimeVoice by remember { mutableStateOf(false) }
+    // Voice mode order (2026-11-15): Gemini Live first, then the classic mode with
+    // a Mistral voice; the server speaks with Vocarium when Mistral fails.
+    val voicePrefs = remember { context.getSharedPreferences("plum_voice", android.content.Context.MODE_PRIVATE) }
+    var liveModels by remember { mutableStateOf<List<String>>(emptyList()) }
+    var liveModel by remember { mutableStateOf(voicePrefs.getString("live_model", "gemini-3.8-live") ?: "gemini-3.8-live") }
+    var liveFallback by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(owner) {
+        liveModels = runCatching {
+            api.getLiveVoiceOptions().data?.get("gemini")?.let { it as? kotlinx.serialization.json.JsonArray }
+                ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }.orEmpty()
+        }.getOrDefault(emptyList())
+    }
     var showAdvanced by remember { mutableStateOf(false) }
     var newChatOptions by remember { mutableStateOf(buildJsonObject {}) }
     var prompt by rememberSaveable { mutableStateOf("") }
@@ -415,6 +427,8 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         else realtimePermission.launch(android.Manifest.permission.RECORD_AUDIO)
     }
     fun openVoiceMode() {
+        // Gemini Live needs a saved chat to write into; a new chat starts classic.
+        if (chat != null && liveModels.isNotEmpty() && liveFallback == null) { openRealtime(); return }
         if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) voiceMode = true
         else voicePermission.launch(android.Manifest.permission.RECORD_AUDIO)
     }
@@ -539,7 +553,19 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         } }) { Text("Originaldatei") } }, dismissButton = { TextButton(onClick = { openedSource = null }) { Text("Schliessen") } })
     }
     if (openedWebSources.isNotEmpty()) ChatWebSourceSheet(openedWebSources) { openedWebSources = emptyList() }
-    if (realtimeVoice && chat != null) RealtimeVoiceSheet(owner, chat!!.id, { refresh++ }) { realtimeVoice = false; refresh++ }
+    if (realtimeVoice && chat != null) RealtimeVoiceSheet(
+        owner, chat!!.id, { refresh++ }, { realtimeVoice = false; refresh++ },
+        model = if (liveModel in liveModels) liveModel else liveModels.firstOrNull().orEmpty(),
+        models = liveModels,
+        onModel = { liveModel = it; voicePrefs.edit().putString("live_model", it).apply() },
+        voice = personalization?.voiceName?.ifBlank { null },
+        onFallback = if (liveModels.isEmpty()) null else { reason ->
+            realtimeVoice = false
+            liveFallback = reason
+            notice = "Gemini Live nicht verfügbar ($reason). Sprachmodus läuft mit Mistral."
+            voiceMode = true
+        },
+    )
     if (showAdvanced) ChatWorkbenchSheet(
         owner, api, chat, providers, newChatOptions.takeIf { it.isNotEmpty() } ?: (profiles.firstOrNull { it.id == profileId }?.body?.get("chatOptions") as? JsonObject ?: newChatOptions),
         onSaved = { options, resource -> newChatOptions = options; resource?.let { chat = it }; refresh++ },
@@ -948,12 +974,16 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     LaunchedEffect(voiceEnabled) { if (!voiceEnabled) voiceMode = false }
     if (voiceMode) AssistantVoiceMode(
         owner = owner, api = api,
-        voice = personalization?.voiceName?.ifBlank { null } ?: "Rufus Beck",
+        voice = personalization?.voiceName?.ifBlank { null }.let { chosen ->
+            // After Gemini Live failed: a Mistral voice (the user's own, else Heidi).
+            if (liveFallback != null) chosen?.takeIf { it.startsWith("mistral:") } ?: com.claudewebui.app.ui.screens.settings.MISTRAL_GERMAN_VOICE
+            else chosen ?: "Rufus Beck"
+        },
         title = chat?.title,
         turns = { turns }, running = { turns.any { it.status == "running" } }, lastError = { error },
         send = { text -> if (busy || turns.any { it.status == "running" } || (chat == null && (providerId.isBlank() || model.isBlank()))) false else { send(text, voice = true); true } },
         stopTurn = { turns.lastOrNull { it.status == "running" }?.let { turn -> command("/api/assistant/api-chats/$chatId/turns/${turn.id}/stop", buildJsonObject {}, context.getString(R.string.assistant_stop)) } },
-        onClose = { reason -> voiceMode = false; reason?.let { notice = it } },
+        onClose = { reason -> voiceMode = false; liveFallback = null; reason?.let { notice = it } },
         speechRecognition = personalization?.speechRecognition ?: "device",
     )
     if (showMemory) key(chat?.id, chat?.revision) {

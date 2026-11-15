@@ -477,14 +477,36 @@ export async function assistantVoices(userId: string) {
     throw new AppError('Vocarium ist nicht erreichbar', 503, 'VOICE_UNAVAILABLE');
   return [...(omni ?? []), ...mistral, ...gemini];
 }
+/** OmniVoice voice the API voices fall back to (the default profile voice). */
+const VOCARIUM_FALLBACK_VOICE = 'Rufus Beck';
+
 export async function assistantSpeech(
   userId: string,
   input: { text: string; voice: string; language: string }
 ) {
-  if (input.voice.startsWith(MISTRAL_VOICE_PREFIX))
-    return mistralSpeech(userId, input.voice.slice(MISTRAL_VOICE_PREFIX.length), input.text);
-  if (input.voice.startsWith(GEMINI_VOICE_PREFIX))
-    return geminiSpeech(userId, input.voice.slice(GEMINI_VOICE_PREFIX.length), input.text);
+  // API voices fall back to Vocarium (OmniVoice): a used-up budget or an outage
+  // must not silence the voice mode (2026-11-15: Gemini Live first, Mistral
+  // second, Vocarium last).
+  const api = input.voice.startsWith(MISTRAL_VOICE_PREFIX)
+    ? () => mistralSpeech(userId, input.voice.slice(MISTRAL_VOICE_PREFIX.length), input.text)
+    : input.voice.startsWith(GEMINI_VOICE_PREFIX)
+      ? () => geminiSpeech(userId, input.voice.slice(GEMINI_VOICE_PREFIX.length), input.text)
+      : null;
+  if (api) {
+    try {
+      return await api();
+    } catch (failure) {
+      console.warn('[VOICE] API voice failed, speaking with Vocarium', {
+        voice: input.voice.split(':')[0],
+        code: failure instanceof AppError ? failure.code : undefined,
+      });
+      try {
+        return await assistantSpeech(userId, { ...input, voice: VOCARIUM_FALLBACK_VOICE });
+      } catch {
+        throw failure;
+      }
+    }
+  }
   // Engine is explicit and cannot silently fall back to Kikiri or Edge.
   // Vocarium ids use hyphens ("Rufus-Beck") while profiles and clients store the
   // spoken name ("Rufus Beck"), so the hyphenated form is tried when the name is unknown.

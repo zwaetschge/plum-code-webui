@@ -25,10 +25,30 @@ import java.net.URI
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
+/** Names of the Gemini Live models (the voice mode's first choice). */
+internal val LIVE_MODEL_LABELS = mapOf(
+    "gemini-3.8-live" to "Gemini Live",
+    "gemini-3.8-live-extended-thinking" to "Gemini Live · Extended Thinking",
+)
+
 @SuppressLint("MissingPermission")
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-internal fun RealtimeVoiceSheet(owner: String, chatId: String, onSaved: () -> Unit, onDismiss: () -> Unit) {
+internal fun RealtimeVoiceSheet(
+    owner: String,
+    chatId: String,
+    onSaved: () -> Unit,
+    onDismiss: () -> Unit,
+    /** Gemini Live model; blank lets the server pick (Gemini first, else OpenAI). */
+    model: String = "",
+    /** Gemini Live models the user can switch between. */
+    models: List<String> = emptyList(),
+    onModel: (String) -> Unit = {},
+    /** Stored profile voice; a `gemini:<name>` voice is used for Gemini Live. */
+    voice: String? = null,
+    /** Live could not start: the classic voice mode (Mistral, then Vocarium) takes over. */
+    onFallback: ((String) -> Unit)? = null,
+) {
     val context=LocalContext.current
     val scope=rememberCoroutineScope()
     val lifecycle=LocalLifecycleOwner.current.lifecycle
@@ -44,11 +64,18 @@ internal fun RealtimeVoiceSheet(owner: String, chatId: String, onSaved: () -> Un
     val generation=remember { AtomicInteger(0) }
     val latestSaved by rememberUpdatedState(onSaved)
     val latestDismiss by rememberUpdatedState(onDismiss)
+    val latestFallback by rememberUpdatedState(onFallback)
+    val ready=remember(model) { java.util.concurrent.atomic.AtomicBoolean(false) }
+    fun fail(message: String) {
+        error=message
+        if(!ready.get()) latestFallback?.invoke(message)
+    }
     DisposableEffect(lifecycle) {
         val observer=LifecycleEventObserver { _, event -> if(event==Lifecycle.Event.ON_STOP) latestDismiss() }
         lifecycle.addObserver(observer); onDispose { lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(owner,chatId) {
+    LaunchedEffect(owner,chatId,model) {
+        error=null; heard=""; answer=""; status="Verbindet …"
         val output=Channel<Pair<Int,ByteArray>>(64)
         val jobs=mutableListOf<Job>()
         var echo:AcousticEchoCanceler?=null
@@ -56,12 +83,13 @@ internal fun RealtimeVoiceSheet(owner: String, chatId: String, onSaved: () -> Un
             require(owner==TokenStore.assistantOwnerKey())
             val endpoint=socketEndpoint(requireNotNull(TokenStore.getServerUrl()))
             val client=IO.socket(URI(endpoint.origin+"/realtime"),IO.Options().apply {
-                path=endpoint.path; auth=mapOf("token" to TokenStore.getToken(),"chatId" to chatId)
+                path=endpoint.path; auth=buildMap { put("token",TokenStore.getToken()); put("chatId",chatId); if(model.isNotBlank()) put("model",model); voice?.let { put("voice",it) } }
                 transports=arrayOf("websocket"); reconnection=false
             }); socket.set(client)
-            client.on(Socket.EVENT_CONNECT_ERROR) { args -> scope.launch { error="Sprachverbindung nicht möglich"; record.get()?.stop() } }
-            client.on("problem") { args -> scope.launch { error=args.firstOrNull()?.toString() ?: "Sprachverbindung fehlgeschlagen"; runCatching { record.get()?.stop() }; client.disconnect() } }
+            client.on(Socket.EVENT_CONNECT_ERROR) { args -> scope.launch { fail("Sprachverbindung nicht möglich"); record.get()?.stop() } }
+            client.on("problem") { args -> scope.launch { fail(args.firstOrNull()?.toString() ?: "Sprachverbindung fehlgeschlagen"); runCatching { record.get()?.stop() }; client.disconnect() } }
             client.on("ready") {
+                ready.set(true)
                 scope.launch {
                     try {
                         val rate=24000
@@ -100,7 +128,10 @@ internal fun RealtimeVoiceSheet(owner: String, chatId: String, onSaved: () -> Un
     }
     ModalBottomSheet(onDismissRequest=onDismiss,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true)) {
         Column(Modifier.fillMaxWidth().heightIn(max=androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * .85f).padding(20.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-            Text("Realtime-Sprache",style=MaterialTheme.typography.headlineSmall)
+            Text(LIVE_MODEL_LABELS[model] ?: "Realtime-Sprache",style=MaterialTheme.typography.headlineSmall)
+            if(models.size>1) FlowRow(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                models.forEach { id -> FilterChip(selected=id==model,onClick={ if(id!=model) onModel(id) },label={ Text(LIVE_MODEL_LABELS[id] ?: id) }) }
+            }
             Text(status)
             Column(Modifier.fillMaxWidth().weight(1f, fill=false).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 if(heard.isNotBlank())Text(heard,style=MaterialTheme.typography.bodyMedium)

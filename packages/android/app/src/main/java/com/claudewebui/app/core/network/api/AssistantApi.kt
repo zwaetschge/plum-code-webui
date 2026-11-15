@@ -80,6 +80,8 @@ interface AssistantApi {
     /** Loads Whisper and [voice] on Vocarium before a voice conversation; reports each one's readiness. */
     suspend fun warmAssistantVoice(owner: String, voice: String, language: String): ApiResponse<JsonObject>
     suspend fun getAssistantVoices(): ApiResponse<List<AssistantVoiceOption>>
+    /** Live voice engines of the account: `gemini` (model ids, Gemini first), `openai`, `defaultModel`. */
+    suspend fun getLiveVoiceOptions(): ApiResponse<JsonObject>
     suspend fun deliverAssistantApiCommand(owner: String, path: String, payload: JsonObject): ApiResponse<JsonObject>
     /** PATCH /api/assistant/api-chats/:id — model, profile, sources and writing style of a model chat. */
     suspend fun updateAssistantApiChat(owner: String, id: String, input: JsonObject): ApiResponse<AssistantResource>
@@ -251,6 +253,7 @@ class AssistantApiImpl(private val http: ApiHttp) : AssistantApi {
         }.body()
     }
     override suspend fun getAssistantVoices(): ApiResponse<List<AssistantVoiceOption>> = http.get("/api/assistant/voice/voices")
+    override suspend fun getLiveVoiceOptions(): ApiResponse<JsonObject> = http.get("/api/assistant/voice/live")
     override suspend fun speakAssistantText(owner: String, text: String, voice: String, language: String): ByteArray {
         require(owner == TokenStore.assistantOwnerKey())
         require(text.isNotBlank() && text.length <= 5000)

@@ -425,6 +425,34 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
     const name = gemini.includes('carbon') ? 'Gemini 4 Carbon' : 'Gemini 4 Argon';
     return price(2, 10, 0.1, 0, 'Google Gemini API pricing (until 2026-11-30), 2026-11-15', name);
   }
+  // Gemini Live (voice mode). Google bills text and audio apart (input $0.75
+  // text / $3 audio, output $4.50 text / $12 audio, thinking at the output
+  // rate); a usage row has one input and one output count. The prompt is mostly
+  // the text context resent every turn and the answer is spoken, so input is
+  // priced as text and output as audio.
+  if (/^gemini-3\.8-live(?:-extended-thinking)?$/.test(id)) {
+    const name = id.endsWith('thinking')
+      ? 'Gemini 3.8 Live (Extended Thinking)'
+      : 'Gemini 3.8 Live';
+    return price(
+      0.75,
+      12,
+      0,
+      0,
+      'Google Gemini API pricing (Live, text in / audio out), 2026-11-15',
+      name
+    );
+  }
+  if (id === 'gemini-3.8-flash-tts') {
+    return price(
+      0.5,
+      9,
+      0,
+      0,
+      'Google Gemini API pricing (until 2026-12-31), 2026-11-15',
+      'Gemini 3.8 Flash TTS'
+    );
+  }
   if (/^gemini-4-hydrogen(?:-(?:low|medium|high|xhigh))?$/.test(gemini)) {
     return price(1.5, 7.5, 0.075, 0, 'Google Gemini API pricing, 2026-11-15', 'Gemini 4 Hydrogen');
   }
