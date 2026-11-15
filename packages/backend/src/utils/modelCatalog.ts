@@ -149,7 +149,8 @@ const FALLBACK_PROVIDERS: Array<{
     id: 'google',
     name: 'Google',
     env: ['GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'],
-    models: ['gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+    // Only used without models.dev; current as of 2026-11.
+    models: ['gemini-4-carbon', 'gemini-3.8-flash', 'gemini-flash-latest'],
   },
   {
     id: 'openrouter',

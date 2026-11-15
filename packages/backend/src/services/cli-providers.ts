@@ -157,7 +157,7 @@ const CLI_PROVIDER_MODELS: Record<CLIProvider, string[]> = {
     'anthropic/claude-sonnet-4-5',
     'openai/gpt-4o',
     'deepseek/deepseek-chat',
-    'google/gemini-2.5-pro',
+    'google/gemini-3.8-flash',
   ],
   // Mistral Vibe ships exactly one hosted model: the alias `mistral-medium-3.5`
   // for `mistral-vibe-cli-latest`, which is the model the plan's Vibe Code
@@ -215,7 +215,7 @@ const MODEL_DISPLAY_LABELS: Record<string, string> = {
   'anthropic/claude-sonnet-4-5': 'Claude Sonnet 4.5',
   'openai/gpt-4o': 'GPT-4o',
   'deepseek/deepseek-chat': 'DeepSeek Chat',
-  'google/gemini-2.5-pro': 'Gemini 2.5 Pro',
+  'google/gemini-3.8-flash': 'Gemini 3.8 Flash',
   k3: 'Kimi K3',
   // Mistral Vibe aliases. `mistral-medium-3.5` is the alias Vibe exposes for
   // `mistral-vibe-cli-latest`; the others come from a deployment's own

@@ -135,7 +135,7 @@ ARG PI_MCP_ADAPTER_VERSION=2.11.0
 # Pi dropped built-in Google Antigravity in 0.71.0; this community extension is
 # the supported way back in — it registers an `antigravity` provider with its
 # own OAuth flow. Ships TypeScript source with no install scripts.
-ARG PI_ANTIGRAVITY_VERSION=0.3.0
+ARG PI_ANTIGRAVITY_VERSION=0.14.0
 # Mistral Vibe ships on PyPI (package `mistral-vibe`), not npm, so it gets its
 # own pipx layer below instead of joining the npm prefix.
 ARG VIBE_VERSION=2.25.0

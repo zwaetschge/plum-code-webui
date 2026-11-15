@@ -506,7 +506,40 @@ export async function getPiModelsForUser(userId: string): Promise<string[]> {
   // could select and none could use: the turn failed with an unknown-provider
   // error deep in Pi, far from the dropdown that suggested it.
   if (!hasPiAntigravityExtension() || !hasPiAntigravityLogin(userId)) return models;
-  return [...new Set([...models, ...PI_ANTIGRAVITY_MODELS])];
+  return [...new Set([...models, ...piAntigravityModelsForUser(userId)])];
+}
+
+/**
+ * The Antigravity models this user can actually use.
+ *
+ * The extension asks Antigravity which models the account may use and keeps
+ * that list in the agent's `models-store.json` (refreshed every few hours by
+ * every Pi run). Google retires and adds models without notice: on
+ * 2026-11-15 the account offered only Gemini 3.8 Flash, while the picker
+ * still showed Gemini 3.1 Pro and 3.5–3.7 Flash from the static list. The
+ * stored list wins; the static one only covers the time before the first run.
+ */
+export function piAntigravityModelsForUser(userId: string): string[] {
+  return (
+    discoveredAntigravityModels(
+      path.join(path.dirname(piAuthFile(userId)), 'models-store.json')
+    ) ?? [...PI_ANTIGRAVITY_MODELS]
+  );
+}
+
+export function discoveredAntigravityModels(storeFile: string): string[] | null {
+  try {
+    const store = JSON.parse(fs.readFileSync(storeFile, 'utf8')) as unknown;
+    const entry = isRecord(store) ? store.antigravity : undefined;
+    const listed = isRecord(entry) && Array.isArray(entry.models) ? entry.models : [];
+    const ids = listed
+      .map((model) => (isRecord(model) && typeof model.id === 'string' ? model.id.trim() : ''))
+      .filter((id) => /^[A-Za-z0-9._-]+$/.test(id))
+      .map((id) => `antigravity/${id}`);
+    return ids.length > 0 ? [...new Set(ids)] : null;
+  } catch {
+    return null;
+  }
 }
 
 function readClaudeMcpServers(): Record<string, ClaudeMcpServer> {
@@ -682,14 +715,14 @@ export function resolvePiExtensionPaths(): string[] {
  * Mirrored here rather than read from the package: the WebUI resolves the Pi
  * model list from the provider registry, and an extension's catalog only
  * materialises inside Pi's own process. Without this the models exist but
- * cannot be picked in the UI. Keep in sync with pi-antigravity's models.ts
- * when bumping PI_ANTIGRAVITY_VERSION in the Dockerfile.
+ * cannot be picked in the UI. The account's live list (piAntigravityModelsForUser)
+ * takes precedence; keep this fallback roughly in sync with pi-antigravity's
+ * models.ts when bumping PI_ANTIGRAVITY_VERSION in the Dockerfile.
  */
 export const PI_ANTIGRAVITY_MODELS = [
-  'antigravity/gemini-3.7-flash',
-  'antigravity/gemini-3.6-flash',
-  'antigravity/gemini-3.5-flash',
-  'antigravity/gemini-3.1-pro',
+  // What a Pro account was offered on 2026-11-15 (pi-antigravity 0.14.0
+  // discovery). Only the fallback until the extension has stored its live list.
+  'antigravity/gemini-3.8-flash',
   'antigravity/claude-opus-4-6',
   'antigravity/claude-sonnet-4-6',
   'antigravity/gpt-oss-120b',
