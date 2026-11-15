@@ -1,6 +1,6 @@
 import { all as pgAll, transaction as pgTransaction } from '../db/pg.js';
 
-export type TrackedUsageLimitProvider = 'codex' | 'claude' | 'zai' | 'kimi';
+export type TrackedUsageLimitProvider = 'codex' | 'claude' | 'zai' | 'kimi' | 'gemini';
 export type UsageLimitHistoryRange = '24h' | '7d' | '30d' | '90d';
 
 export interface UsageLimitWindowSnapshot {

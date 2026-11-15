@@ -164,6 +164,7 @@ object WidgetDataFetcher {
                     // Mistral orange, one shade apart from the API allowance so
                     // the two plan ledgers stay distinguishable in one list.
                     UsageLimitProvider.VIBE -> 0xFFFF7000L
+                    UsageLimitProvider.GEMINI -> 0xFF4285F4L
                 }
                 fun reset(iso: String?) = WidgetLimits.parseResetMs(iso)
                 buildList {

@@ -493,6 +493,7 @@ export function AnalyticsPage() {
         point.provider !== 'alibaba' &&
         point.provider !== 'mistral' &&
         point.provider !== 'vibe' &&
+        point.provider !== 'gemini' &&
         hiddenLimitMetrics[point.provider]?.includes(point.metricKey)
       ) {
         continue;

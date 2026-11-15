@@ -36,6 +36,7 @@ import {
   recordUsageLimitSnapshots,
   type TrackedUsageLimitProvider,
 } from '../services/usage-limit-history.js';
+import { buildGeminiLimitResponse } from '../services/geminiQuota.js';
 
 const router = Router();
 const claudeCredentialsRoot = CLI_PROVIDERS.claude.credentialsPath;
@@ -77,7 +78,7 @@ interface LocalUsageBudget {
   weeklyUsd?: number;
 }
 
-type UsageProviderId = CLIProvider | 'z-ai';
+type UsageProviderId = CLIProvider | 'z-ai' | 'gemini';
 
 interface NormalizedUsageWindow {
   utilization: number;
@@ -126,7 +127,12 @@ interface UsageLimitResult {
   error?: { code: string; message: string };
 }
 
-const TRACKED_USAGE_LIMIT_PROVIDERS: TrackedUsageLimitProvider[] = ['codex', 'claude', 'zai'];
+const TRACKED_USAGE_LIMIT_PROVIDERS: TrackedUsageLimitProvider[] = [
+  'codex',
+  'claude',
+  'zai',
+  'gemini',
+];
 
 function persistUsageLimitResult(userId: string, result: UsageLimitResult): UsageLimitResult {
   if (!result.success || !result.supported || !result.data) return result;
@@ -946,6 +952,7 @@ async function localBudgetLimitResult(
   userId: string,
   provider: UsageProviderId
 ): Promise<UsageLimitResult | null> {
+  if (provider === 'gemini') return null;
   const cliProvider: CLIProvider = provider === 'z-ai' ? 'zai' : provider;
   const data = await fetchLocalBudgetUsage(userId, cliProvider);
   return data ? { success: true, supported: true, provider, data } : null;
@@ -1244,6 +1251,17 @@ router.get('/limits', requireAuth, rateLimiters.usageLimits, async (req, res) =>
       return res.json(await buildMistralLimitResponse((req as AuthenticatedRequest).userId));
     }
 
+    if (providerParam === 'gemini') {
+      // Gemini through Google's agy CLI: its own /usage screen (geminiQuota.ts).
+      const userId = (req as AuthenticatedRequest).userId;
+      const result = await buildGeminiLimitResponse();
+      return res.json(
+        result.success && result.supported
+          ? persistUsageLimitResult(userId, result as UsageLimitResult)
+          : result
+      );
+    }
+
     if (providerParam === 'vibe') {
       // Vibe is a Mistral harness, but its turns draw on the plan's separate
       // Vibe Code allowance, so it gets its own monthly ledger view.
@@ -1262,7 +1280,7 @@ router.get('/limits', requireAuth, rateLimiters.usageLimits, async (req, res) =>
         error: {
           code: 'UNKNOWN_LIMIT_PROVIDER',
           message:
-            'Account limits are available for Codex, Claude, Z.AI, Mistral, and the Alibaba Token Plan.',
+            'Account limits are available for Codex, Claude, Z.AI, Gemini, Mistral, and the Alibaba Token Plan.',
         },
       });
     }

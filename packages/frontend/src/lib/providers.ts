@@ -13,6 +13,8 @@ export const ACCOUNT_USAGE_LIMIT_PROVIDERS = [
   // Vibe is the second allowance of the same Mistral plan, tracked on its own
   // so harness turns and routed API traffic never share one budget.
   'vibe',
+  // Gemini through Google's agy CLI (Antigravity): agy's own quota screen.
+  'gemini',
 ] as const;
 export type AccountUsageLimitProvider = (typeof ACCOUNT_USAGE_LIMIT_PROVIDERS)[number];
 export type UsageLimitProvider = AccountUsageLimitProvider | 'z-ai';
@@ -124,6 +126,7 @@ export const USAGE_PROVIDER_LABEL: Record<UsageLimitProvider, string> = {
   alibaba: 'Alibaba Token Plan',
   mistral: 'Mistral',
   vibe: CLI_PROVIDER_LABEL.vibe,
+  gemini: 'Gemini (Antigravity)',
   'z-ai': 'Z.ai Coding Plan',
 };
 
@@ -134,6 +137,7 @@ export const USAGE_PROVIDER_SHORT_LABEL: Record<UsageLimitProvider, string> = {
   alibaba: 'Token Plan',
   mistral: 'Mistral',
   vibe: 'Vibe',
+  gemini: 'Gemini',
   'z-ai': 'Z.ai',
 };
 
@@ -180,6 +184,12 @@ export const CLI_PROVIDER_LIMIT_LABELS: Record<
     // Vibe Code allowance, declared through /api/usage/plan/vibe.
     session: { title: 'Today' },
     weeklyAll: { title: 'Month', subtitle: 'Vibe Code' },
+  },
+  gemini: {
+    // Antigravity shares one 5-hour and one weekly window across all Gemini
+    // models; Claude/GPT over Antigravity have their own pair (extra bars).
+    session: { title: '5h', subtitle: 'Gemini' },
+    weeklyAll: { title: 'Weekly', subtitle: 'Gemini' },
   },
 };
 
@@ -238,6 +248,9 @@ export function getUsageLimitProviderForModel(
   }
   if (value.startsWith('mistral/')) {
     return 'mistral';
+  }
+  if (value.startsWith('antigravity/')) {
+    return 'gemini';
   }
   if (value.startsWith('z-ai/') || value.startsWith('zai/') || value.startsWith('glm-')) {
     return 'zai';

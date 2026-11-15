@@ -124,7 +124,10 @@ enum class UsageLimitProvider(val id: String, val label: String) {
     /** Mistral Vibe: the plan's Vibe Code allowance, tracked apart from `mistral`. */
     VIBE("vibe", "Vibe"),
     ALIBABA("alibaba", "Alibaba"),
-    MISTRAL("mistral", "Mistral");
+    MISTRAL("mistral", "Mistral"),
+
+    /** Gemini through Google's agy CLI (Antigravity): 5-hour and weekly window. */
+    GEMINI("gemini", "Gemini");
 
     /**
      * Whether the long window is Plum's own billing-month ledger rather than an

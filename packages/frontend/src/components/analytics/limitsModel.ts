@@ -91,6 +91,7 @@ export const USAGE_PROVIDER_COLORS: Record<AccountUsageLimitProvider, string> = 
   alibaba: '#f59e0b',
   mistral: '#fa520f',
   vibe: '#ff7000',
+  gemini: '#4285f4',
 };
 
 export const USAGE_PROVIDER_LIMIT_COLORS: Record<AccountUsageLimitProvider, readonly string[]> = {
@@ -100,6 +101,7 @@ export const USAGE_PROVIDER_LIMIT_COLORS: Record<AccountUsageLimitProvider, read
   alibaba: ['#f59e0b', '#fcd34d', '#b45309', '#fbbf24'],
   mistral: ['#fa520f', '#fdba74', '#c2410c', '#fb923c'],
   vibe: ['#ff7000', '#ffa94d', '#c2410c', '#fb923c'],
+  gemini: ['#4285f4', '#8ab4f8', '#1a56c4', '#a142f4'],
 };
 
 export const USAGE_PROVIDER_LABELS: Record<AccountUsageLimitProvider, string> = {
@@ -109,6 +111,7 @@ export const USAGE_PROVIDER_LABELS: Record<AccountUsageLimitProvider, string> = 
   alibaba: 'Alibaba Token Plan',
   mistral: 'Mistral',
   vibe: CLI_PROVIDER_LABEL.vibe,
+  gemini: 'Gemini (Antigravity)',
 };
 
 export const USAGE_TRACKER_LABELS: Record<UsageLimitTracker, string> = {
@@ -118,6 +121,7 @@ export const USAGE_TRACKER_LABELS: Record<UsageLimitTracker, string> = {
   alibaba: 'Token Plan',
   mistral: 'Mistral',
   vibe: 'Vibe',
+  gemini: 'Gemini',
 };
 
 /** The analytics provider label each quota belongs to (for the provider filter). */
@@ -130,6 +134,8 @@ export const USAGE_TRACKER_ANALYTICS_LABEL: Record<UsageLimitTracker, string> = 
   // Vibe harness turns are booked with provider 'vibe', which the shared
   // analytics mapping already resolves to the Vibe family.
   vibe: 'Vibe',
+  // Gemini turns run as Pi with antigravity/* models.
+  gemini: 'Pi',
 };
 
 export const USAGE_PROVIDER_LOGO: Record<AccountUsageLimitProvider, UiProvider> = {
@@ -140,6 +146,7 @@ export const USAGE_PROVIDER_LOGO: Record<AccountUsageLimitProvider, UiProvider> 
   alibaba: 'plum',
   mistral: 'plum',
   vibe: 'vibe',
+  gemini: 'pi',
 };
 
 export const USAGE_LIMIT_LABELS: Record<
@@ -153,13 +160,15 @@ export const USAGE_LIMIT_LABELS: Record<
   ...CLI_PROVIDER_LIMIT_LABELS,
 };
 
-const USAGE_TRACKERS_STORAGE_KEY = 'plum:analytics:usage-limit-trackers:v5';
+const USAGE_TRACKERS_STORAGE_KEY = 'plum:analytics:usage-limit-trackers:v6';
+const V5_USAGE_TRACKERS_STORAGE_KEY = 'plum:analytics:usage-limit-trackers:v5';
 const V4_USAGE_TRACKERS_STORAGE_KEY = 'plum:analytics:usage-limit-trackers:v4';
 const V3_USAGE_TRACKERS_STORAGE_KEY = 'plum:analytics:usage-limit-trackers:v3';
 const LEGACY_USAGE_TRACKERS_STORAGE_KEY = 'plum:analytics:usage-limit-trackers:v2';
 /** Providers that joined after a stored choice was made start out visible once. */
-const ADDED_SINCE_V4: UsageLimitTracker[] = ['vibe'];
-const ADDED_SINCE_V3: UsageLimitTracker[] = ['alibaba', 'mistral', 'vibe'];
+const ADDED_SINCE_V5: UsageLimitTracker[] = ['gemini'];
+const ADDED_SINCE_V4: UsageLimitTracker[] = ['vibe', 'gemini'];
+const ADDED_SINCE_V3: UsageLimitTracker[] = ['alibaba', 'mistral', 'vibe', 'gemini'];
 
 function migrateStoredTrackers(stored: unknown, added: UsageLimitTracker[]): UsageLimitTracker[] {
   const choices = Array.isArray(stored) ? stored : [];
@@ -174,6 +183,12 @@ export function loadUsageLimitTrackers(): UsageLimitTracker[] {
     const current = JSON.parse(window.localStorage.getItem(USAGE_TRACKERS_STORAGE_KEY) || 'null');
     if (Array.isArray(current)) {
       return USAGE_PROVIDERS.filter((provider) => current.includes(provider));
+    }
+    const v5 = JSON.parse(window.localStorage.getItem(V5_USAGE_TRACKERS_STORAGE_KEY) || 'null');
+    if (Array.isArray(v5)) {
+      const migrated = migrateStoredTrackers(v5, ADDED_SINCE_V5);
+      window.localStorage.setItem(USAGE_TRACKERS_STORAGE_KEY, JSON.stringify(migrated));
+      return migrated;
     }
     const v4 = JSON.parse(window.localStorage.getItem(V4_USAGE_TRACKERS_STORAGE_KEY) || 'null');
     if (Array.isArray(v4)) {

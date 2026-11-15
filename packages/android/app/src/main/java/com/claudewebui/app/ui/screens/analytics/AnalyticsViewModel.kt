@@ -383,6 +383,7 @@ class AnalyticsViewModel(
         // Same family as the Mistral API row, one shade apart: two allowances of
         // one plan must not read as the same tracker.
         UsageLimitProvider.VIBE -> 0xFFFF7000L
+        UsageLimitProvider.GEMINI -> 0xFF4285F4L
     }
 
     fun selectTimeRange(range: AnalyticsTimeRange) {
