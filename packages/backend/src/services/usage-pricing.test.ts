@@ -124,3 +124,30 @@ test('GLM 5.3 and Flash resolve independently, including provider aliases', () =
   }
   assert.equal(resolveModelPricing('glm-5.3-unknown'), null);
 });
+
+test('Gemini 4 and 3.8 Flash are priced under every id Plum books them with', () => {
+  const carbon = { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 0 };
+  for (const model of [
+    'antigravity/gemini-4-argon',
+    'antigravity/gemini-4-carbon',
+    'google/gemini-4-carbon',
+    'gemini-4-argon-high',
+  ]) {
+    const pricing = resolveModelPricing(model);
+    assert.ok(pricing, model);
+    assert.deepEqual(
+      {
+        input: pricing.input,
+        output: pricing.output,
+        cacheRead: pricing.cacheRead,
+        cacheWrite: pricing.cacheWrite,
+      },
+      carbon,
+      model
+    );
+  }
+  assert.equal(resolveModelPricing('antigravity/gemini-4-hydrogen-xhigh')?.output, 7.5);
+  // The agy bridge slugifies the dot away.
+  assert.equal(resolveModelPricing('antigravity/gemini-3-8-flash')?.input, 0.75);
+  assert.equal(resolveModelPricing('google/gemini-3.8-flash')?.label, 'Gemini 3.8 Flash');
+});

@@ -20,7 +20,7 @@ export interface ModelCostEstimate {
   known: boolean;
 }
 
-export const LLM_PRICING_RATE_CARD_VERSION = '2026-10-16-standard-api-equivalent-v16';
+export const LLM_PRICING_RATE_CARD_VERSION = '2026-11-15-standard-api-equivalent-v17';
 
 export const DEFAULT_MODEL_PRICING: ModelPricing = {
   input: 5,
@@ -54,7 +54,11 @@ function normalizeProviderModelId(provider: string | null, id: string, raw: stri
     provider === 'kimi' ||
     provider === 'kimi-code' ||
     provider === 'moonshot' ||
-    provider === 'alibaba-token-plan'
+    provider === 'alibaba-token-plan' ||
+    // Gemini through the Gemini API (`google/…`, model chat) and through
+    // Google's agy CLI (`antigravity/…`, the Pi bridge): same model ids.
+    provider === 'google' ||
+    provider === 'antigravity'
   ) {
     return id;
   }
@@ -410,6 +414,31 @@ export function resolveModelPricing(model?: string | null): ModelPricing | null 
 
   // Google Gemini API, USD per 1M tokens. Use the standard <=200k prompt tier
   // because usage_history stores aggregate rows, not per-request context length.
+  // Gemini 4 and 3.8 Flash: one price at every prompt length, thinking tokens
+  // billed as output, implicit caching only. Carbon and Argon carry an
+  // introductory price until 2026-11-30 ($4/$20, cache $0.20 from
+  // 2026-12-01); 3.8 and 3.6 Flash until 2026-12-31 ($1.50/$7.50 from
+  // 2027-01-01). Update these on those dates. The agy bridge slugifies the
+  // dot ("gemini-3-8-flash") and appends effort tiers ("-high").
+  const gemini = id.replace(/^gemini-3-([68])-flash/, 'gemini-3.$1-flash');
+  if (/^gemini-4-(carbon|argon)(?:-(?:low|medium|high|xhigh))?$/.test(gemini)) {
+    const name = gemini.includes('carbon') ? 'Gemini 4 Carbon' : 'Gemini 4 Argon';
+    return price(2, 10, 0.1, 0, 'Google Gemini API pricing (until 2026-11-30), 2026-11-15', name);
+  }
+  if (/^gemini-4-hydrogen(?:-(?:low|medium|high|xhigh))?$/.test(gemini)) {
+    return price(1.5, 7.5, 0.075, 0, 'Google Gemini API pricing, 2026-11-15', 'Gemini 4 Hydrogen');
+  }
+  if (/^gemini-3\.[68]-flash(?:-(?:low|medium|high))?$/.test(gemini)) {
+    const name = gemini.startsWith('gemini-3.8') ? 'Gemini 3.8 Flash' : 'Gemini 3.6 Flash';
+    return price(
+      0.75,
+      3.75,
+      0.075,
+      0,
+      'Google Gemini API pricing (until 2026-12-31), 2026-11-15',
+      name
+    );
+  }
   if (id === 'gemini-3.1-pro-preview' || id === 'google/gemini-3.1-pro-preview') {
     return price(2, 12, 0.2, 0, 'Google Gemini API pricing, 2026-06-01', 'Gemini 3.1 Pro Preview');
   }
