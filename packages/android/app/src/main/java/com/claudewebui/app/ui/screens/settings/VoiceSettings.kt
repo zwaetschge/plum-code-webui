@@ -48,7 +48,10 @@ const val DEFAULT_ASSISTANT_VOICE = "Rufus Beck"
 private fun normalizeVoice(value: String) = value.trim().replace('-', ' ').lowercase()
 
 internal fun sameVoice(a: String, b: String): Boolean =
-    a == b || (!a.startsWith("mistral:") && !b.startsWith("mistral:") && normalizeVoice(a) == normalizeVoice(b))
+    a == b || (!isApiVoice(a) && !isApiVoice(b) && normalizeVoice(a) == normalizeVoice(b))
+
+/** Voices of a speech API, stored as `<engine>:<id>`; everything else is an OmniVoice name. */
+internal fun isApiVoice(value: String) = value.startsWith("mistral:") || value.startsWith("gemini:")
 
 /** Mistral's German preset; the server speaks with it when a stored Mistral voice no longer exists. */
 internal const val MISTRAL_GERMAN_VOICE = "mistral:01a0f318-4ae8-7446-a3e4-45aa092940b2"
@@ -59,7 +62,7 @@ internal const val MISTRAL_GERMAN_VOICE = "mistral:01a0f318-4ae8-7446-a3e4-45aa0
  */
 internal object MistralVoiceNames {
     private val names = mutableStateMapOf<String, String>()
-    fun learn(voices: List<AssistantVoiceOption>) { voices.forEach { if (it.engine == "mistral" && it.label.isNotBlank()) names[it.key] = it.label } }
+    fun learn(voices: List<AssistantVoiceOption>) { voices.forEach { if ((it.engine == "mistral" || it.engine == "gemini") && it.label.isNotBlank()) names[it.key] = it.label } }
     operator fun get(key: String): String? = names[key]
 }
 
@@ -69,6 +72,7 @@ private val UUID_LIKE = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9
 @Composable
 fun assistantVoiceLabel(stored: String): String = when {
     stored.isBlank() -> stringResource(R.string.settings_hub_voice_default)
+    stored.startsWith("gemini:") -> MistralVoiceNames[stored] ?: (stored.removePrefix("gemini:") + " · Gemini")
     stored.startsWith("mistral:") -> MistralVoiceNames[stored]
         ?: if (stored == MISTRAL_GERMAN_VOICE) "Heidi · Deutsch"
         else stored.removePrefix("mistral:").let { id ->
@@ -207,9 +211,10 @@ fun VoiceChoiceGroups(
                     )
                 }
             }
-            val omni = voices.filter { it.engine != "mistral" }
+            val omni = voices.filter { it.engine != "mistral" && it.engine != "gemini" }
             val mistral = voices.filter { it.engine == "mistral" }
-            listOf(R.string.settings_hub_voice_engine_omni to omni, R.string.settings_hub_voice_engine_mistral to mistral).forEach { (header, group) ->
+            val gemini = voices.filter { it.engine == "gemini" }
+            listOf(R.string.settings_hub_voice_engine_omni to omni, R.string.settings_hub_voice_engine_mistral to mistral, R.string.settings_hub_voice_engine_gemini to gemini).forEach { (header, group) ->
                 if (group.isNotEmpty()) SettingsGroup(header = stringResource(header)) {
                     group.forEach { voice ->
                         item(hasIcon = false) {

@@ -8,12 +8,23 @@ interface VoiceOption {
   engine?: string;
 }
 
-const MISTRAL_PREFIX = 'mistral:';
+/** Voice APIs whose voices are stored as `<engine>:<id>`; OmniVoice stores the name. */
+export const API_VOICE_ENGINES: Record<string, string> = {
+  mistral: 'Mistral (API)',
+  gemini: 'Gemini (API)',
+};
+
+function storedApiVoiceLabel(value: string): string | null {
+  const engine = Object.keys(API_VOICE_ENGINES).find((id) => value.startsWith(`${id}:`));
+  if (!engine) return null;
+  return `${engine === 'gemini' ? 'Gemini' : 'Mistral'} · ${value.slice(engine.length + 1)}`;
+}
 
 /**
  * Voice choice for a profile: OmniVoice voices (stored by name) and, when a
- * Mistral API connection exists, Mistral voices (stored as `mistral:<id>`).
- * A stored value that is no longer offered stays selectable.
+ * Mistral or Google API connection exists, their voices (stored as
+ * `mistral:<id>` / `gemini:<name>`). A stored value that is no longer offered
+ * stays selectable.
  */
 export function VoiceSelect({
   label,
@@ -32,11 +43,17 @@ export function VoiceSelect({
     retry: false,
     staleTime: 60_000,
   });
-  const omni = (voices.data ?? []).filter((voice) => voice.engine !== 'mistral');
-  const mistral = (voices.data ?? []).filter((voice) => voice.engine === 'mistral');
+  const isApi = (voice: VoiceOption) => !!voice.engine && voice.engine in API_VOICE_ENGINES;
+  const omni = (voices.data ?? []).filter((voice) => !isApi(voice));
+  const apiGroups = Object.entries(API_VOICE_ENGINES)
+    .map(([engine, label]) => ({
+      label,
+      voices: (voices.data ?? []).filter((voice) => voice.engine === engine),
+    }))
+    .filter((group) => group.voices.length);
   const known = new Set([
     ...omni.map((voice) => voice.name ?? voice.id ?? ''),
-    ...mistral.map((voice) => voice.id ?? ''),
+    ...apiGroups.flatMap((group) => group.voices.map((voice) => voice.id ?? '')),
   ]);
   return (
     <label className="grid gap-2 text-sm">
@@ -47,9 +64,7 @@ export function VoiceSelect({
         onChange={(event) => onChange(event.target.value)}
       >
         {value && !known.has(value) && (
-          <option value={value}>
-            {value.startsWith(MISTRAL_PREFIX) ? `Mistral · ${value.slice(8)}` : value}
-          </option>
+          <option value={value}>{storedApiVoiceLabel(value) ?? value}</option>
         )}
         {!!omni.length && (
           <optgroup label="OmniVoice (lokal)">
@@ -60,15 +75,15 @@ export function VoiceSelect({
             ))}
           </optgroup>
         )}
-        {!!mistral.length && (
-          <optgroup label="Mistral (API)">
-            {mistral.map((voice) => (
+        {apiGroups.map((group) => (
+          <optgroup key={group.label} label={group.label}>
+            {group.voices.map((voice) => (
               <option key={voice.id} value={voice.id ?? ''}>
                 {voice.name ?? voice.id}
               </option>
             ))}
           </optgroup>
-        )}
+        ))}
       </select>
       {voices.isError && (
         <span className="text-xs text-muted-foreground">

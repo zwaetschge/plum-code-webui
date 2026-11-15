@@ -492,7 +492,7 @@ internal fun AssistantVoiceMode(
                     fun failure(part: kotlinx.serialization.json.JsonObject?) = part?.get("error")?.jsonPrimitive?.content
                     whisperReady = ready(whisper); speechReady = ready(speech)
                     if (speechReady == true && (wantDevice || whisperReady == true)) { readyVoice = target; continue }
-                    val engine = if (target.startsWith("mistral:")) "Mistral" else "OmniVoice"
+                    val engine = when { target.startsWith("mistral:") -> "Mistral"; target.startsWith("gemini:") -> "Gemini"; else -> "OmniVoice" }
                     prepareError = warmed.exceptionOrNull()?.message ?: response?.error?.message
                         ?: listOfNotNull(failure(whisper)?.takeIf { !wantDevice }?.let { "Whisper: $it" }, failure(speech)?.let { "$engine: $it" }).joinToString("\n").ifBlank { null }
                         ?: context.getString(R.string.assistant_voice_failed)
@@ -879,9 +879,10 @@ internal fun VoiceDropdown(
                 voices == null && loadError == null -> DropdownMenuItem(text = { Text(stringResource(R.string.voice_mode_voices_loading)) }, onClick = {}, enabled = false)
                 loadError != null -> DropdownMenuItem(text = { Text(loadError, color = MaterialTheme.colorScheme.error) }, onClick = onRetry)
                 else -> {
-                    val omni = voices.orEmpty().filter { it.engine != "mistral" }
+                    val omni = voices.orEmpty().filter { it.engine != "mistral" && it.engine != "gemini" }
                     val mistral = voices.orEmpty().filter { it.engine == "mistral" }   // server order: German first
-                    listOf(R.string.settings_hub_voice_engine_omni to omni, R.string.settings_hub_voice_engine_mistral to mistral).forEach { (header, group) ->
+                    val gemini = voices.orEmpty().filter { it.engine == "gemini" }
+                    listOf(R.string.settings_hub_voice_engine_omni to omni, R.string.settings_hub_voice_engine_mistral to mistral, R.string.settings_hub_voice_engine_gemini to gemini).forEach { (header, group) ->
                         if (group.isEmpty()) return@forEach
                         Text(stringResource(header), style = MaterialTheme.typography.labelMedium, color = palette.muted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
                         group.forEach { option ->

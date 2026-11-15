@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
 import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
+import { API_VOICE_ENGINES } from './VoiceSelect';
 import { ReadAloudButton } from './ReadAloud';
 
 interface VoiceOption {
@@ -29,9 +30,12 @@ export function VoicePicker({
     staleTime: 60_000,
   });
   const entries = (voices.data ?? []).map((voice) => ({
-    key: voice.engine === 'mistral' ? String(voice.id) : String(voice.name ?? voice.id),
+    key:
+      voice.engine && voice.engine in API_VOICE_ENGINES
+        ? String(voice.id)
+        : String(voice.name ?? voice.id),
     label: String(voice.name ?? voice.id),
-    engine: voice.engine === 'mistral' ? 'Mistral (API)' : 'OmniVoice (lokal)',
+    engine: (voice.engine && API_VOICE_ENGINES[voice.engine]) || 'OmniVoice (lokal)',
   }));
   const groups = [...new Set(entries.map((entry) => entry.engine))];
   return (

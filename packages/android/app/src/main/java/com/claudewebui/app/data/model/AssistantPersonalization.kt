@@ -14,8 +14,8 @@ data class AssistantVoiceOption(
     /** Mistral: base code ("de", "fr", "it", "en"); OmniVoice: usually "Auto". */
     val language: String? = null,
 ) {
-    /** What is stored and sent: OmniVoice by name, Mistral as `mistral:<id>`. */
-    val key: String get() = if (engine == "mistral") id.orEmpty() else (name ?: id).orEmpty()
+    /** What is stored and sent: OmniVoice by name, the API voices as `mistral:<id>` / `gemini:<name>`. */
+    val key: String get() = if (engine == "mistral" || engine == "gemini") id.orEmpty() else (name ?: id).orEmpty()
     val label: String get() = (name ?: id).orEmpty()
 }
 

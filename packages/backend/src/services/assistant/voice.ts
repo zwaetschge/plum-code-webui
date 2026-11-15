@@ -262,6 +262,137 @@ async function mistralSpeech(userId: string, voiceId: string, text: string) {
   return audio;
 }
 
+/** Voices of the Gemini API's speech models, addressed as `gemini:<voice name>`. */
+export const GEMINI_VOICE_PREFIX = 'gemini:';
+const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta';
+/** Gemini 3.8 Flash TTS: follows spoken style hints, speaks German without a language switch. */
+const GEMINI_TTS_MODEL = 'gemini-3.8-flash-tts';
+/**
+ * The prebuilt voices and how Google characterises them. Every voice speaks
+ * every supported language; the language comes from the text.
+ */
+export const GEMINI_VOICES: Array<[name: string, character: string]> = [
+  ['Kore', 'bestimmt'],
+  ['Aoede', 'luftig'],
+  ['Leda', 'jugendlich'],
+  ['Zephyr', 'hell'],
+  ['Callirrhoe', 'gelassen'],
+  ['Autonoe', 'klar'],
+  ['Despina', 'sanft'],
+  ['Erinome', 'deutlich'],
+  ['Laomedeia', 'munter'],
+  ['Achernar', 'weich'],
+  ['Gacrux', 'reif'],
+  ['Pulcherrima', 'nach vorne'],
+  ['Vindemiatrix', 'freundlich'],
+  ['Sulafat', 'warm'],
+  ['Puck', 'fröhlich'],
+  ['Charon', 'informativ'],
+  ['Fenrir', 'aufgeweckt'],
+  ['Orus', 'fest'],
+  ['Enceladus', 'hauchig'],
+  ['Iapetus', 'klar'],
+  ['Umbriel', 'locker'],
+  ['Algieba', 'geschmeidig'],
+  ['Algenib', 'rau'],
+  ['Rasalgethi', 'informativ'],
+  ['Alnilam', 'bestimmt'],
+  ['Schedar', 'ausgeglichen'],
+  ['Achird', 'freundlich'],
+  ['Zubenelgenubi', 'lässig'],
+  ['Sadachbia', 'lebhaft'],
+  ['Sadaltager', 'kundig'],
+];
+
+async function geminiKey(userId: string): Promise<string | null> {
+  const providers = await readModelProvidersForUser(userId);
+  const google = providers.find((provider) => provider.id === 'google');
+  if (!google?.enabled || !google.apiKey) return null;
+  return safeDecrypt(google.apiKey) || null;
+}
+
+async function geminiVoices(userId: string) {
+  if (!(await geminiKey(userId))) return [];
+  return GEMINI_VOICES.map(([name, character]) => ({
+    id: `${GEMINI_VOICE_PREFIX}${name}`,
+    name: `${name} · ${character}`,
+    engine: 'gemini',
+  }));
+}
+
+/** 16-bit mono PCM (what Gemini returns, `audio/L16;rate=24000`) in a WAV container. */
+export function pcmToWav(pcm: Buffer, sampleRate = 24000): Buffer {
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8, 'ascii');
+  header.write('fmt ', 12, 'ascii');
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36, 'ascii');
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+async function geminiSpeech(userId: string, voice: string, text: string) {
+  const key = await geminiKey(userId);
+  if (!key)
+    throw new AppError(
+      'Für Gemini-Stimmen fehlt eine aktive Google-API-Verbindung (Modellanbieter „google“).',
+      409,
+      'VOICE_NOT_CONFIGURED'
+    );
+  const known = GEMINI_VOICES.find(([name]) => name === voice)?.[0] ?? 'Kore';
+  const response = await fetch(`${GEMINI_API}/models/${GEMINI_TTS_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text }] }],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: known } } },
+      },
+    }),
+    redirect: 'error',
+    signal: AbortSignal.timeout(120000),
+  }).catch(() => {
+    throw new AppError('Gemini ist nicht erreichbar', 503, 'VOICE_UNAVAILABLE');
+  });
+  const body = (await response.json().catch(() => null)) as {
+    error?: { status?: string; message?: string };
+    candidates?: Array<{
+      content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> };
+    }>;
+  } | null;
+  if (!response.ok) {
+    console.warn('[VOICE] Gemini refused the speech request', {
+      status: response.status,
+      reason: body?.error?.status,
+    });
+    if (response.status === 429)
+      throw new AppError(
+        'Das Gemini-Kontingent für Sprachausgabe ist aufgebraucht.',
+        429,
+        'VOICE_QUOTA'
+      );
+    if (response.status === 400 || response.status === 403)
+      throw new AppError('Google hat den Gemini-Schlüssel abgelehnt.', 409, 'VOICE_NOT_CONFIGURED');
+    throw new AppError('Gemini hat kein Audio geliefert', 502, 'VOICE_RESPONSE_INVALID');
+  }
+  const inline = body?.candidates?.[0]?.content?.parts?.find((part) => part.inlineData)?.inlineData;
+  if (typeof inline?.data !== 'string' || inline.data.length > 90 * 1024 * 1024)
+    throw new AppError('Gemini hat kein Audio geliefert', 502, 'VOICE_RESPONSE_INVALID');
+  const audio = Buffer.from(inline.data, 'base64');
+  if (audio.subarray(0, 4).toString('ascii') === 'RIFF') return audio;
+  const rate = Number(/rate=(\d+)/.exec(inline.mimeType ?? '')?.[1]) || 24000;
+  return pcmToWav(audio, rate);
+}
+
 async function vocariumUrl(): Promise<string> {
   let registered = '';
   try {
@@ -338,10 +469,13 @@ export async function assistantVoices(userId: string) {
       );
     })
     .catch(() => null);
-  const mistral = await mistralVoices(userId).catch(() => []);
-  if (omni === null && !mistral.length)
+  const [mistral, gemini] = await Promise.all([
+    mistralVoices(userId).catch(() => []),
+    geminiVoices(userId).catch(() => []),
+  ]);
+  if (omni === null && !mistral.length && !gemini.length)
     throw new AppError('Vocarium ist nicht erreichbar', 503, 'VOICE_UNAVAILABLE');
-  return [...(omni ?? []), ...mistral];
+  return [...(omni ?? []), ...mistral, ...gemini];
 }
 export async function assistantSpeech(
   userId: string,
@@ -349,6 +483,8 @@ export async function assistantSpeech(
 ) {
   if (input.voice.startsWith(MISTRAL_VOICE_PREFIX))
     return mistralSpeech(userId, input.voice.slice(MISTRAL_VOICE_PREFIX.length), input.text);
+  if (input.voice.startsWith(GEMINI_VOICE_PREFIX))
+    return geminiSpeech(userId, input.voice.slice(GEMINI_VOICE_PREFIX.length), input.text);
   // Engine is explicit and cannot silently fall back to Kikiri or Edge.
   // Vocarium ids use hyphens ("Rufus-Beck") while profiles and clients store the
   // spoken name ("Rufus Beck"), so the hyphenated form is tried when the name is unknown.

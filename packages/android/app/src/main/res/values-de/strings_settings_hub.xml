@@ -41,6 +41,7 @@
     <string name="settings_hub_voice_output">Sprachausgabe</string>
     <string name="settings_hub_voice_engine_omni">OmniVoice (lokal)</string>
     <string name="settings_hub_voice_engine_mistral">Mistral (API)</string>
+    <string name="settings_hub_voice_engine_gemini">Gemini (API)</string>
     <string name="settings_hub_voice_default">Rufus Beck (Standard)</string>
     <string name="settings_hub_voice_footer">Mit dieser Stimme liest Plum Antworten im Chat vor. Die Änderung gilt sofort.</string>
     <string name="settings_hub_voice_load_failed">Stimmen konnten nicht geladen werden: %1$s</string>

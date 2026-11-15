@@ -41,6 +41,7 @@
     <string name="settings_hub_voice_output">Voice output</string>
     <string name="settings_hub_voice_engine_omni">OmniVoice (local)</string>
     <string name="settings_hub_voice_engine_mistral">Mistral (API)</string>
+    <string name="settings_hub_voice_engine_gemini">Gemini (API)</string>
     <string name="settings_hub_voice_default">Rufus Beck (default)</string>
     <string name="settings_hub_voice_footer">Plum reads replies in Chat with this voice. The change applies immediately.</string>
     <string name="settings_hub_voice_load_failed">Voices could not be loaded: %1$s</string>
