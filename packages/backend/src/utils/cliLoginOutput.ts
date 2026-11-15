@@ -51,6 +51,19 @@ export function extractCliLoginUrl(value: string): string | null {
   return match?.[1]?.replace(/[),.;\]}]+$/, '') || null;
 }
 
+/**
+ * The login link of a run, looking only at output from `from` on. `null` means
+ * the login command has not been typed yet, so no link counts: Pi 1.5 shows its
+ * changelog first, and its first link was a GitHub issue (2026-11-15).
+ */
+export function extractCliLoginUrlFrom(
+  rawOutput: string,
+  from: number | null | undefined
+): string | null {
+  if (from === null) return null;
+  return extractCliLoginUrl(rawOutput.slice(from ?? 0));
+}
+
 export function extractCliDeviceCode(value: string): string | null {
   return stripCliLoginAnsi(value).match(DEVICE_CODE_REGEX)?.[0] || null;
 }

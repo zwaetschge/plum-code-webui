@@ -5,6 +5,7 @@ import {
   extractCliLoginUrl,
   resolveCliLoginInvocation,
   stripCliLoginAnsi,
+  extractCliLoginUrlFrom,
 } from '../src/utils/cliLoginOutput.js';
 
 const codexOutput = [
@@ -35,3 +36,23 @@ assert.deepEqual(resolveCliLoginInvocation('claude'), ['auth', 'login']);
 assert.equal(resolveCliLoginInvocation('zai'), null);
 
 console.log('CLI login regression tests passed');
+
+// Pi 1.5 shows its changelog before the prompt; its links are not the login.
+{
+  const changelog =
+    "What's new in 1.5.2\n- Fixed OAuth state mismatch (https://github.com/earendil-works/pi/issues/10265)\n";
+  const login =
+    '/login antigravity\nOpen this URL to sign in: https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=y\n';
+  // Before the command is typed nothing counts.
+  assert.equal(extractCliLoginUrlFrom(changelog, null), null);
+  // After it, only what follows the command.
+  assert.equal(
+    extractCliLoginUrlFrom(changelog + login, changelog.length),
+    'https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=y'
+  );
+  // Logins that are not TUI commands read the whole output, as before.
+  assert.equal(
+    extractCliLoginUrlFrom('Visit https://auth.openai.com/device to continue', undefined),
+    'https://auth.openai.com/device'
+  );
+}

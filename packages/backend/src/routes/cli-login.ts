@@ -11,8 +11,8 @@ import path from 'path';
 import { getCliEnv } from '../utils/cliPaths.js';
 import {
   extractCliDeviceCode,
-  extractCliLoginUrl,
   CLI_LOGIN_TUI_INPUT,
+  extractCliLoginUrlFrom,
   resolveCliLoginInvocation,
   stripCliLoginAnsi,
 } from '../utils/cliLoginOutput.js';
@@ -39,6 +39,12 @@ interface LoginSession {
   output: string;
   rawOutput: string;
   loginUrl?: string;
+  /**
+   * For a TUI login: where in rawOutput the typed command begins. A link
+   * before it is never the login link (Pi 1.5 prints its changelog, full of
+   * GitHub issue links, before the prompt); null until the command is typed.
+   */
+  loginOutputFrom?: number | null;
   verificationCode?: string;
   error?: string;
   exitCode?: number | null;
@@ -161,6 +167,9 @@ async function typeTuiLogin(session: LoginSession, proc: pty.IPty, command: stri
     await sleep(250);
   }
   if (!alive()) return;
+  // Whatever the start screen showed is not the login link.
+  session.loginUrl = undefined;
+  session.loginOutputFrom = session.rawOutput.length;
   write(command);
   // Submitting in the same write as the text does not register.
   for (let attempt = 0; attempt < 8 && alive() && !session.loginUrl; attempt++) {
@@ -177,10 +186,21 @@ function appendOutput(session: LoginSession, chunk: string): void {
   // The URL has to be read from the untouched stream: a TUI publishes it as an
   // OSC-8 hyperlink and only prints a shortened label, so stripping escapes
   // first throws away the one complete copy.
-  session.rawOutput = (session.rawOutput + chunk).slice(-OUTPUT_LIMIT);
+  const combined = session.rawOutput + chunk;
+  session.rawOutput = combined.slice(-OUTPUT_LIMIT);
+  // Keep the start of the login output pointing at the same text after trimming.
+  if (typeof session.loginOutputFrom === 'number') {
+    session.loginOutputFrom = Math.max(
+      0,
+      session.loginOutputFrom - (combined.length - session.rawOutput.length)
+    );
+  }
 
+  // A TUI login only publishes its link after the command is typed; until then
+  // (loginOutputFrom === null) nothing counts.
   if (!session.loginUrl) {
-    session.loginUrl = extractCliLoginUrl(session.rawOutput) || undefined;
+    session.loginUrl =
+      extractCliLoginUrlFrom(session.rawOutput, session.loginOutputFrom) || undefined;
   }
 
   if (!session.verificationCode) {
@@ -427,6 +447,8 @@ router.post('/:provider/start', requireAuth, async (req, res) => {
     status: 'starting',
     output: '',
     rawOutput: '',
+    // A TUI login waits for its typed command before any link counts.
+    loginOutputFrom: CLI_LOGIN_TUI_INPUT[provider] ? null : undefined,
     createdAt: Date.now(),
     waiters: [],
   };
