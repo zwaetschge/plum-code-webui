@@ -303,6 +303,11 @@ RUN mkdir -p /home/node/.claude /home/node/.codex /home/node/.pi \
              /home/node/.config /home/node/.local/share /home/node/.agents \
              /tmp/runtime-node && \
     ln -sfn /home/node/.claude/skills /home/node/.agents/skills && \
+    # Google's agy CLI (Gemini through @estebanforge/pi-antigravity-bridge)
+    # keeps its sign-in in ~/.gemini; the persisted ~/.pi volume holds it.
+    # agy itself and the bridge live in the persisted ~/.npm-global, next to
+    # the auto-updated Pi they need (the bridge wants Pi >= 1.5.1).
+    ln -sfn /home/node/.pi/agy-gemini /home/node/.gemini && \
     chown -R node:node /home/node /tmp/runtime-node
 
 EXPOSE 3001

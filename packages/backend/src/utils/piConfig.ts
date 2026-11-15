@@ -520,6 +520,9 @@ export async function getPiModelsForUser(userId: string): Promise<string[]> {
  * stored list wins; the static one only covers the time before the first run.
  */
 export function piAntigravityModelsForUser(userId: string): string[] {
+  if (resolveAgyBridgeExtension()) {
+    return agyBridgeModels(AGY_BRIDGE_MODELS_CACHE) ?? [...AGY_BRIDGE_FALLBACK_MODELS];
+  }
   return (
     discoveredAntigravityModels(
       path.join(path.dirname(piAuthFile(userId)), 'models-store.json')
@@ -660,8 +663,114 @@ function firstExisting(candidates: string[]): string | null {
   return candidates.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
+const PI_EXTENSION_PREFIXES = ['/home/node/.npm-global', '/opt/plum-cli'];
+
+/**
+ * Gemini over Google's official `agy` CLI (@estebanforge/pi-antigravity-bridge).
+ *
+ * Since 2026-11-14 Google refuses pi-antigravity's direct calls with a generic
+ * RESOURCE_EXHAUSTED (pi-antigravity#137), even with full quota. The bridge
+ * runs the unmodified `agy` binary instead, which signs in by itself; Pi never
+ * sees a Google token. It registers the same provider id `antigravity`, so only
+ * one of the two may load: the bridge wins when it and `agy` are installed.
+ * The user chose this route knowing that Google's Antigravity terms restrict
+ * use from third-party products (2026-11-15).
+ */
+export function resolveAgyBridgeExtension(): string | null {
+  const extension = firstExisting(
+    PI_EXTENSION_PREFIXES.map((prefix) =>
+      path.join(
+        prefix,
+        'lib',
+        'node_modules',
+        '@estebanforge',
+        'pi-antigravity-bridge',
+        'extensions',
+        'index.ts'
+      )
+    )
+  );
+  return extension && agyBinary() ? extension : null;
+}
+
+/** The `agy` binary: AGY_BIN, else the first one on PATH. */
+export function agyBinary(): string | null {
+  const explicit = process.env.AGY_BIN?.trim();
+  if (explicit) return fs.existsSync(explicit) ? explicit : null;
+  return firstExisting(
+    (process.env.PATH ?? '')
+      .split(path.delimiter)
+      .filter(Boolean)
+      .map((dir) => path.join(dir, 'agy'))
+  );
+}
+
+/** Where `agy` keeps its Google sign-in (one per container, shared by all users). */
+export function agyOAuthTokenFile(): string {
+  return path.join(os.homedir(), '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
+}
+
+/** The bridge caches `agy models` output here (its path, not configurable). */
+export const AGY_BRIDGE_MODELS_CACHE = path.join(
+  os.homedir(),
+  '.pi',
+  'agent',
+  'antigravity-bridge',
+  'models-cache.json'
+);
+
+/** What `agy models` offered the Ultra account on 2026-11-15, as bridge ids. */
+export const AGY_BRIDGE_FALLBACK_MODELS = [
+  'antigravity/gemini-4-carbon',
+  'antigravity/gemini-4-argon',
+  'antigravity/gemini-4-hydrogen',
+  'antigravity/gemini-3-8-flash',
+] as const;
+
+/**
+ * The bridge's public model ids from its cached `agy models` output, grouped
+ * the way the bridge does it (entriesFromRaw in its models.ts): Gemini and
+ * Claude bases with two or more of low/medium/high become one id with a
+ * thinking toggle, everything else keeps its own slug, gpt-oss is hidden, and
+ * ids are slugified ("gemini-3.8-flash" -> "gemini-3-8-flash").
+ */
+export function agyBridgeModels(cacheFile: string): string[] | null {
+  let raw: string;
+  try {
+    const cache = JSON.parse(fs.readFileSync(cacheFile, 'utf8')) as unknown;
+    raw = isRecord(cache) && typeof cache.raw === 'string' ? cache.raw : '';
+  } catch {
+    return null;
+  }
+  const slugify = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  const groups = new Map<string, { slugs: string[]; tiers: Set<string> }>();
+  for (const line of raw.split('\n')) {
+    const slug = line.trim().split(/\s+/)[0] ?? '';
+    if (!/^[A-Za-z0-9][A-Za-z0-9._]*-[A-Za-z0-9._-]*$/.test(slug) || /^gpt-oss-/.test(slug)) {
+      continue;
+    }
+    const tier = /^(.+)-(high|medium|low)$/.exec(slug);
+    const base = tier ? tier[1]! : slug;
+    const group = groups.get(base) ?? { slugs: [], tiers: new Set<string>() };
+    group.slugs.push(slug);
+    if (tier) group.tiers.add(tier[2]!);
+    groups.set(base, group);
+  }
+  const ids: string[] = [];
+  for (const [base, group] of groups) {
+    if (group.tiers.size >= 2 && /^(gemini|claude)-/.test(base)) ids.push(slugify(base));
+    else ids.push(...group.slugs.map(slugify));
+  }
+  const unique = [...new Set(ids.filter(Boolean))].map((id) => `antigravity/${id}`);
+  return unique.length > 0 ? unique : null;
+}
+
 export function resolvePiExtensionPaths(): string[] {
-  const prefixes = ['/home/node/.npm-global', '/opt/plum-cli'];
+  const prefixes = PI_EXTENSION_PREFIXES;
   const mcp = firstExisting(
     prefixes.map((prefix) => path.join(prefix, 'lib', 'node_modules', 'pi-mcp-adapter', 'index.ts'))
   );
@@ -697,13 +806,15 @@ export function resolvePiExtensionPaths(): string[] {
   // own nested @earendil-works/pi-agent-core, and the duplicate module makes Pi
   // silently ignore the provider registration ("Unknown provider antigravity").
   // The copy installed next to pi-coding-agent shares that core.
-  const antigravity = firstExisting(
-    [...prefixes]
-      .reverse()
-      .map((prefix) =>
-        path.join(prefix, 'lib', 'node_modules', 'pi-antigravity', 'src', 'index.ts')
-      )
-  );
+  const antigravity =
+    resolveAgyBridgeExtension() ??
+    firstExisting(
+      [...prefixes]
+        .reverse()
+        .map((prefix) =>
+          path.join(prefix, 'lib', 'node_modules', 'pi-antigravity', 'src', 'index.ts')
+        )
+    );
   return [mcp, subagent, permission, ultracode, antigravity].filter(
     (value): value is string => !!value
   );
@@ -747,6 +858,8 @@ export function piAuthFile(userId: string): string {
 }
 
 export function hasPiAntigravityLogin(userId: string): boolean {
+  // The bridge needs no Pi login: `agy` holds its own.
+  if (resolveAgyBridgeExtension()) return fs.existsSync(agyOAuthTokenFile());
   const authFile = piAuthFile(userId);
   try {
     const parsed = JSON.parse(fs.readFileSync(authFile, 'utf8')) as unknown;
