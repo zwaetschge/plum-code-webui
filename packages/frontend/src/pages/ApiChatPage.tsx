@@ -1269,7 +1269,7 @@ export function ApiChatPage() {
                 }
                 language={String(profile.data?.body.language ?? 'German')}
                 text={spoken?.response ?? ''}
-                onSend={(text) => transmit(text, true)}
+                onSend={liveFallback ? (text) => transmit(text, true) : undefined}
                 modelBusy={!!running || busy}
                 answerKey={spoken?.id}
                 onTranscription={(text) =>

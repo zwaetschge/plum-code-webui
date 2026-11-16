@@ -10,6 +10,7 @@ import { api } from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
 import { deliverAssistant } from '@/services/assistantOutbox';
 import { uploadChatAttachments } from '@/components/assistant/ChatImages';
+import { RealtimeVoice } from '@/components/assistant/RealtimeVoice';
 import { VoiceComposer } from '@/components/assistant/VoiceComposer';
 import { ResourcePicker } from '@/components/assistant/ResourcePicker';
 import { AssistantOutbox } from '@/components/assistant/AssistantOutbox';
@@ -69,6 +70,7 @@ function ChatAccountPage({ owner }: { owner?: string }) {
     [project, setProject] = useState(initial.get('project') ?? '');
   const [options, setOptions] = useState(false),
     [voice, setVoice] = useState(false),
+    [liveFallback, setLiveFallback] = useState(''),
     [temporary, setTemporary] = useState(false),
     [files, setFiles] = useState<File[]>([]),
     [busy, setBusy] = useState(false),
@@ -257,7 +259,27 @@ function ChatAccountPage({ owner }: { owner?: string }) {
           </p>
         )}
         {voice && preferences.voiceChat && (
-          <div className="plum-chat-options">
+          <div className="plum-chat-options space-y-2">
+            {liveFallback ? (
+              <p className="text-xs text-muted-foreground" role="status">
+                Gemini Live nicht verfügbar ({liveFallback}). Sprachmodus läuft mit Mistral, bei
+                Ausfall mit Vocarium.{' '}
+                <button type="button" className="underline" onClick={() => setLiveFallback('')}>
+                  Live erneut versuchen
+                </button>
+              </p>
+            ) : (
+              <RealtimeVoice
+                chatId={created?.id}
+                autoStart
+                voice={preferences.voiceName || String(chosenProfile?.body.voice ?? 'Rufus Beck')}
+                onFallback={setLiveFallback}
+                onSaved={(info) => {
+                  void cache.invalidateQueries({ queryKey: ['assistant', 'api-chats'] });
+                  if (info?.chatId) navigate(`/chat/model/${info.chatId}`);
+                }}
+              />
+            )}
             <VoiceComposer
               scopeKey={`${owner}:new-chat`}
               text=""

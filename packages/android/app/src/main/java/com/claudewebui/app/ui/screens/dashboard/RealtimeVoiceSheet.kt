@@ -82,8 +82,10 @@ internal fun RealtimeVoiceSheet(
         try {
             require(owner==TokenStore.assistantOwnerKey())
             val endpoint=socketEndpoint(requireNotNull(TokenStore.getServerUrl()))
+            val token=requireNotNull(TokenStore.getToken())
             val client=IO.socket(URI(endpoint.origin+"/realtime"),IO.Options().apply {
-                path=endpoint.path; auth=buildMap { put("token",TokenStore.getToken()); put("chatId",chatId); if(model.isNotBlank()) put("model",model); voice?.let { put("voice",it) } }
+                forceNew=true; path=endpoint.path; auth=buildMap { put("token",token); if(chatId.isNotBlank()) put("chatId",chatId); if(model.isNotBlank()) put("model",model); voice?.let { put("voice",it) } }
+                extraHeaders=mapOf("Authorization" to listOf("Bearer $token"))
                 transports=arrayOf("websocket"); reconnection=false
             }); socket.set(client)
             client.on(Socket.EVENT_CONNECT_ERROR) { args -> scope.launch { fail("Sprachverbindung nicht möglich"); record.get()?.stop() } }

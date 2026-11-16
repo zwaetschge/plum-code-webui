@@ -422,16 +422,11 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
     val realtimePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) realtimeVoice = true else error = context.getString(R.string.voice_mode_permission)
     }
-    fun openRealtime() {
-        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) realtimeVoice = true
-        else realtimePermission.launch(android.Manifest.permission.RECORD_AUDIO)
-    }
     fun openVoiceMode() {
-        // Gemini Live needs a saved chat to write into; a new chat starts classic.
-        if (chat != null && liveModels.isNotEmpty() && liveFallback == null) { openRealtime(); return }
         if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) voiceMode = true
         else voicePermission.launch(android.Manifest.permission.RECORD_AUDIO)
     }
+    fun openRealtime() = openVoiceMode()
     // Voice and writing style from the ≡ header menu. Without voice features the
     // voice sheet opens, which has the switch to turn them on.
     val voiceAllowed by rememberUpdatedState(voiceEnabled)
@@ -858,7 +853,6 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
                                 enabled = !busy && !running,
                                 onClick = { plusOpen = false; showStyleSheet = true },
                             )
-                            DropdownMenuItem(text = { Text("Realtime-Sprache") }, enabled = chat != null && !busy && !running, onClick = { plusOpen = false; openRealtime() })
                             if (voiceEnabled) DropdownMenuItem(
                                 text = { Text(stringResource(R.string.voice_mode_title)) },
                                 enabled = !busy && !running && !researchChat && (chat != null || providers.isNotEmpty()),
@@ -985,6 +979,23 @@ private fun ModelChatAccount(owner: String, api: ApiClient, topInset: androidx.c
         stopTurn = { turns.lastOrNull { it.status == "running" }?.let { turn -> command("/api/assistant/api-chats/$chatId/turns/${turn.id}/stop", buildJsonObject {}, context.getString(R.string.assistant_stop)) } },
         onClose = { reason -> voiceMode = false; liveFallback = null; reason?.let { notice = it } },
         speechRecognition = personalization?.speechRecognition ?: "device",
+        chatId = chat?.id,
+        liveModels = liveModels,
+        liveModel = if (liveModel in liveModels) liveModel else liveModels.firstOrNull() ?: "gemini-3.8-live",
+        onLiveModel = { liveModel = it; voicePrefs.edit().putString("live_model", it).apply() },
+        onTurnSaved = { savedChatId ->
+            if (chat == null && !savedChatId.isNullOrBlank()) {
+                scope.launch {
+                    runCatching {
+                        val loaded = api.getAssistantApiTurns(savedChatId)
+                        checkOwner()
+                        loaded.data?.chat?.let { showChat(it); currentOnChatSelected(it.id) }
+                    }
+                }
+            } else {
+                refresh++
+            }
+        },
     )
     if (showMemory) key(chat?.id, chat?.revision) {
         var read by remember { mutableStateOf(if (chat == null) memoryRead else chat?.body?.get("memoryRead")?.jsonPrimitive?.booleanOrNull != false) }

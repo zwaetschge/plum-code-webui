@@ -9,7 +9,9 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
+import android.util.Base64
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -66,9 +68,18 @@ import com.claudewebui.app.ui.motion.reducedMotion
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
+import io.socket.client.IO
+import io.socket.client.Socket
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.net.URI
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.PI
@@ -363,14 +374,27 @@ internal fun AssistantVoiceMode(
     stopTurn: () -> Unit,
     onClose: (String?) -> Unit,
     speechRecognition: String = "device",
+    chatId: String? = null,
+    liveModels: List<String> = emptyList(),
+    liveModel: String = "gemini-3.8-live",
+    onLiveModel: (String) -> Unit = {},
+    onTurnSaved: (String?) -> Unit = {},
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val close by rememberUpdatedState(onClose)
     val recognition by rememberUpdatedState(speechRecognition)
+    val latestTurnSaved by rememberUpdatedState(onTurnSaved)
     var phase by remember { mutableStateOf(VoicePhase.Preparing) }
     var currentVoice by remember { mutableStateOf(voice) }
+    var availableLiveModels by remember { mutableStateOf(liveModels) }
+    var liveChecked by remember { mutableStateOf(liveModels.isNotEmpty()) }
+    var currentLiveModel by remember { mutableStateOf(liveModel) }
+    var liveFailed by remember { mutableStateOf(false) }
+    var activeChatId by remember(chatId) { mutableStateOf(chatId) }
+    val liveInterrupt = remember { AtomicReference<(() -> Unit)?>(null) }
+    val livePause = remember { AtomicReference<((Boolean) -> Unit)?>(null) }
     var readyVoice by remember { mutableStateOf<String?>(null) }   // voice Whisper and OmniVoice were warmed for
     var whisperReady by remember { mutableStateOf<Boolean?>(null) }
     var speechReady by remember { mutableStateOf<Boolean?>(null) }
@@ -390,6 +414,7 @@ internal fun AssistantVoiceMode(
     val finish = remember { booleanArrayOf(false) }
     val listening = remember { arrayOfNulls<DeviceSpeech>(1) }   // the device recognizer while it listens
     val current = remember { arrayOfNulls<Job>(1) }
+    val isLive = availableLiveModels.isNotEmpty() && !liveFailed
 
     fun interrupt() { current[0]?.cancel() }
     // A new voice is saved at once and warmed before Plum speaks with it.
@@ -397,6 +422,13 @@ internal fun AssistantVoiceMode(
         if (com.claudewebui.app.ui.screens.settings.sameVoice(key, currentVoice)) return
         currentVoice = key
         settings?.setChoice("voiceName", key)
+        interrupt()
+    }
+    fun chooseLiveModel(id: String) {
+        if (id == currentLiveModel && !liveFailed) return
+        currentLiveModel = id
+        liveFailed = false
+        onLiveModel(id)
         interrupt()
     }
 
@@ -477,7 +509,238 @@ internal fun AssistantVoiceMode(
 
         var failures = 0
         try {
+            if (!liveChecked) {
+                phase = VoicePhase.Preparing; speechReady = null; prepareError = null
+                val fetched = step {
+                    api.getLiveVoiceOptions().data?.get("gemini")?.let { it as? JsonArray }
+                        ?.mapNotNull { (it as? JsonPrimitive)?.content }.orEmpty()
+                }
+                if (fetched != null) {
+                    availableLiveModels = fetched.getOrDefault(emptyList())
+                    liveChecked = true
+                }
+            }
             while (isActive) {
+                if (availableLiveModels.isNotEmpty() && !liveFailed) {
+                    val chosenModel = if (currentLiveModel in availableLiveModels) currentLiveModel else availableLiveModels.first()
+                    val geminiVoice = if (currentVoice.startsWith("gemini:")) currentVoice else "gemini:Kore"
+                    phase = VoicePhase.Preparing; speechReady = null; prepareError = null; message = null; heardText = ""; caption = ""; hearing = false
+                    val outcome = step {
+                        coroutineScope {
+                            val scope = this
+                            val endpoint = com.claudewebui.app.core.network.socketEndpoint(requireNotNull(TokenStore.getServerUrl()))
+                            val token = requireNotNull(TokenStore.getToken())
+                            val output = Channel<Pair<Int, ByteArray>>(64)
+                            val generation = AtomicInteger(0)
+                            val readyFlag = AtomicBoolean(false)
+                            val muteFlag = AtomicBoolean(paused)
+                            val ended = CompletableDeferred<String>()
+                            val socketRef = AtomicReference<Socket?>()
+                            val recordRef = AtomicReference<AudioRecord?>()
+                            val trackRef = AtomicReference<AudioTrack?>()
+                            val jobs = mutableListOf<Job>()
+                            var echo: AcousticEchoCanceler? = null
+                            var suppressor: NoiseSuppressor? = null
+                            try {
+                                val client = IO.socket(URI(endpoint.origin + "/realtime"), IO.Options().apply {
+                                    forceNew = true; reconnection = false; transports = arrayOf("websocket"); path = endpoint.path
+                                    auth = buildMap {
+                                        put("token", token)
+                                        if (!activeChatId.isNullOrBlank()) put("chatId", activeChatId!!)
+                                        put("model", chosenModel)
+                                        put("voice", geminiVoice)
+                                    }
+                                    extraHeaders = mapOf("Authorization" to listOf("Bearer $token"))
+                                })
+                                socketRef.set(client)
+                                val flushOutput = {
+                                    generation.incrementAndGet()
+                                    runCatching { trackRef.get()?.apply { pause(); flush(); play() } }
+                                    speakLevel.floatValue = 0f
+                                }
+                                liveInterrupt.set {
+                                    flushOutput()
+                                    client.emit("interrupt")
+                                    scope.launch(Dispatchers.Main) { caption = ""; if (!muteFlag.get()) phase = VoicePhase.Listening }
+                                }
+                                livePause.set { nowPaused ->
+                                    muteFlag.set(nowPaused)
+                                    if (nowPaused) {
+                                        flushOutput()
+                                        micLevel.floatValue = 0f
+                                        scope.launch(Dispatchers.Main) { phase = VoicePhase.Paused }
+                                    } else {
+                                        scope.launch(Dispatchers.Main) { if (readyFlag.get()) phase = VoicePhase.Listening }
+                                    }
+                                }
+                                client.on(Socket.EVENT_CONNECT_ERROR) { args ->
+                                    ended.complete(args.firstOrNull()?.toString()?.takeIf { it.isNotBlank() } ?: "Sprachverbindung nicht möglich")
+                                }
+                                client.on("problem") { args ->
+                                    ended.complete(args.firstOrNull()?.toString()?.takeIf { it.isNotBlank() } ?: "Sprachverbindung fehlgeschlagen")
+                                }
+                                client.on(Socket.EVENT_DISCONNECT) {
+                                    ended.complete("Verbindung beendet")
+                                }
+                                client.on("ready") { args ->
+                                    readyFlag.set(true)
+                                    val readyChat = (args.firstOrNull() as? JSONObject)?.optString("chatId")?.takeIf { it.isNotBlank() }
+                                    scope.launch(Dispatchers.Main) {
+                                        if (readyChat != null) activeChatId = readyChat
+                                        speechReady = true
+                                        phase = if (muteFlag.get()) VoicePhase.Paused else VoicePhase.Listening
+                                    }
+                                    jobs += scope.launch(Dispatchers.IO) {
+                                        try {
+                                            val outRate = 24000
+                                            val minTrack = AudioTrack.getMinBufferSize(outRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                                            val audio = AudioTrack.Builder()
+                                                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                                                .setAudioFormat(AudioFormat.Builder().setSampleRate(outRate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
+                                                .setBufferSizeInBytes(max(minTrack * 4, outRate * 2))
+                                                .setTransferMode(AudioTrack.MODE_STREAM)
+                                                .build()
+                                            trackRef.set(audio)
+                                            audio.play()
+                                            var recRate = 24000
+                                            val minRec24 = AudioRecord.getMinBufferSize(recRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                                            var input = if (minRec24 > 0) AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION, recRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, max(minRec24 * 4, 24000)) else null
+                                            if (input == null || input.state != AudioRecord.STATE_INITIALIZED) {
+                                                input?.release()
+                                                recRate = 16000
+                                                val minRec16 = AudioRecord.getMinBufferSize(recRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                                                input = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, recRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, max(minRec16 * 4, 16000))
+                                            }
+                                            require(input.state == AudioRecord.STATE_INITIALIZED) { "Mikrofon nicht verfügbar" }
+                                            recordRef.set(input)
+                                            echo = if (AcousticEchoCanceler.isAvailable()) runCatching { AcousticEchoCanceler.create(input.audioSessionId)?.apply { enabled = true } }.getOrNull() else null
+                                            suppressor = if (NoiseSuppressor.isAvailable()) runCatching { NoiseSuppressor.create(input.audioSessionId)?.apply { enabled = true } }.getOrNull() else null
+                                            input.startRecording()
+                                            jobs += scope.launch(Dispatchers.IO) {
+                                                val samples = ShortArray(recRate / 10)
+                                                while (isActive) {
+                                                    val n = input.read(samples, 0, samples.size)
+                                                    if (n <= 0) break
+                                                    var sum = 0.0
+                                                    for (i in 0 until n) sum += samples[i].toDouble() * samples[i]
+                                                    val rms = sqrt(sum / n).toFloat()
+                                                    micLevel.floatValue = if (muteFlag.get()) 0f else min(1f, rms / 5000f)
+                                                    if (!muteFlag.get() && TokenStore.assistantOwnerKey() == owner) {
+                                                        val pcmBytes = if (recRate == 24000) {
+                                                            ByteArray(n * 2).also { b ->
+                                                                for (i in 0 until n) {
+                                                                    b[2 * i] = (samples[i].toInt() and 255).toByte()
+                                                                    b[2 * i + 1] = (samples[i].toInt() shr 8).toByte()
+                                                                }
+                                                            }
+                                                        } else {
+                                                            val outSamples = n * 3 / 2
+                                                            ByteArray(outSamples * 2).also { b ->
+                                                                for (i in 0 until outSamples) {
+                                                                    val src = i * 2 / 3
+                                                                    val s = samples[min(src, n - 1)].toInt()
+                                                                    b[2 * i] = (s and 255).toByte()
+                                                                    b[2 * i + 1] = (s shr 8).toByte()
+                                                                }
+                                                            }
+                                                        }
+                                                        client.emit("audio", Base64.encodeToString(pcmBytes, Base64.NO_WRAP))
+                                                    }
+                                                }
+                                            }
+                                            jobs += scope.launch(Dispatchers.IO) {
+                                                val stepBytes = 960
+                                                for ((epoch, bytes) in output) {
+                                                    var at = 0
+                                                    while (at < bytes.size && epoch == generation.get() && isActive) {
+                                                        val count = min(stepBytes, bytes.size - at) and 1.inv()
+                                                        if (count <= 0) break
+                                                        var sum = 0.0
+                                                        var k = at
+                                                        while (k + 1 < at + count) {
+                                                            val s = (bytes[k].toInt() and 255 or (bytes[k + 1].toInt() shl 8)).toShort().toDouble()
+                                                            sum += s * s
+                                                            k += 2
+                                                        }
+                                                        speakLevel.floatValue = min(1f, sqrt(sum / (count / 2)).toFloat() / 6000f)
+                                                        audio.write(bytes, at, count, AudioTrack.WRITE_BLOCKING)
+                                                        at += count
+                                                    }
+                                                    if (output.isEmpty) {
+                                                        speakLevel.floatValue = 0f
+                                                        withContext(Dispatchers.Main) {
+                                                            if (phase == VoicePhase.Speaking) phase = if (muteFlag.get()) VoicePhase.Paused else VoicePhase.Listening
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } catch (failure: Exception) {
+                                            ended.complete(failure.message ?: "Mikrofon nicht verfügbar")
+                                        }
+                                    }
+                                }
+                                client.on("audio") { args ->
+                                    runCatching {
+                                        val bytes = Base64.decode(args.first().toString(), Base64.DEFAULT)
+                                        output.trySend(generation.get() to bytes)
+                                        scope.launch(Dispatchers.Main) { if (!muteFlag.get()) phase = VoicePhase.Speaking }
+                                    }
+                                }
+                                client.on("speech") {
+                                    flushOutput()
+                                    scope.launch(Dispatchers.Main) {
+                                        caption = ""
+                                        hearing = true
+                                        if (!muteFlag.get()) phase = VoicePhase.Listening
+                                    }
+                                }
+                                client.on("transcript") { args ->
+                                    runCatching {
+                                        val value = args.first() as JSONObject
+                                        val role = value.optString("role")
+                                        val text = value.optString("text")
+                                        scope.launch(Dispatchers.Main) {
+                                            if (role == "user") { heardText = text; hearing = true }
+                                            else caption = text
+                                        }
+                                    }
+                                }
+                                client.on("saved") { args ->
+                                    val savedChat = (args.firstOrNull() as? JSONObject)?.optString("chatId")?.takeIf { it.isNotBlank() }
+                                    scope.launch(Dispatchers.Main) {
+                                        if (savedChat != null) activeChatId = savedChat
+                                        hearing = false
+                                        latestTurnSaved(savedChat ?: activeChatId)
+                                    }
+                                }
+                                client.connect()
+                                readyFlag.get() to ended.await()
+                            } finally {
+                                liveInterrupt.set(null)
+                                livePause.set(null)
+                                micLevel.floatValue = 0f
+                                speakLevel.floatValue = 0f
+                                socketRef.getAndSet(null)?.apply { emit("stop"); off(); disconnect() }
+                                runCatching { recordRef.getAndSet(null)?.apply { stop(); release() } }
+                                echo?.release(); suppressor?.release()
+                                output.close(); jobs.forEach { it.cancel() }
+                                runCatching { trackRef.getAndSet(null)?.apply { pause(); flush(); release() } }
+                            }
+                        }
+                    } ?: continue
+                    val (wasReady, reason) = outcome.getOrElse { false to (it.message ?: "Sprachverbindung fehlgeschlagen") }
+                    if (!wasReady) {
+                        liveFailed = true
+                        if (!currentVoice.startsWith("mistral:")) currentVoice = com.claudewebui.app.ui.screens.settings.MISTRAL_GERMAN_VOICE
+                        notice = "Gemini Live nicht verfügbar ($reason). Sprachmodus läuft mit Mistral."
+                        continue
+                    }
+                    prepareError = reason
+                    phase = VoicePhase.Preparing; speechReady = false
+                    val tries = retry
+                    snapshotFlow { retry != tries || currentLiveModel != chosenModel || (currentVoice.startsWith("gemini:") && currentVoice != geminiVoice) }.first { it }
+                    continue
+                }
                 val wantDevice = recognition != "server" && !serverOnly
                 onDevice = wantDevice
                 // Device recognition needs only the voice; Whisper must be up for the server path.
@@ -570,20 +833,28 @@ internal fun AssistantVoiceMode(
         }
     }
 
+    val shownVoice = if (isLive && !currentVoice.startsWith("gemini:")) "gemini:Kore" else currentVoice
+    val activeLiveModel = if (currentLiveModel in availableLiveModels) currentLiveModel else availableLiveModels.firstOrNull() ?: "gemini-3.8-live"
     Dialog(onDismissRequest = { close(null) }, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false, dismissOnClickOutside = false)) {
         val view = LocalView.current
         DisposableEffect(view) { view.keepScreenOn = true; onDispose { view.keepScreenOn = false } }
         VoiceModeLayout(
             title = title,
             voiceSwitcher = {
-                VoiceDropdown(catalog.voices, catalog.loadError, currentVoice, onOpen = { if (catalog.voices == null && !catalog.loading) catalog.load() }, onRetry = { catalog.load() }, onSelect = ::chooseVoice)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (availableLiveModels.isNotEmpty()) {
+                        LiveModelDropdown(availableLiveModels, if (liveFailed) "" else activeLiveModel, onSelect = ::chooseLiveModel)
+                    }
+                    VoiceDropdown(catalog.voices, catalog.loadError, shownVoice, onOpen = { if (catalog.voices == null && !catalog.loading) catalog.load() }, onRetry = { catalog.load() }, onSelect = ::chooseVoice)
+                }
             },
             phase = phase,
             level = when (phase) { VoicePhase.Listening -> micLevel.floatValue; VoicePhase.Speaking -> speakLevel.floatValue; else -> 0f },
             hearing = hearing,
             paused = paused,
             onDevice = onDevice,
-            voiceLabel = com.claudewebui.app.ui.screens.settings.assistantVoiceLabel(currentVoice),
+            voiceLabel = com.claudewebui.app.ui.screens.settings.assistantVoiceLabel(shownVoice),
+            liveLabel = if (isLive) (LIVE_MODEL_LABELS[activeLiveModel] ?: "Gemini Live") else null,
             whisperReady = whisperReady,
             speechReady = speechReady,
             prepareError = prepareError,
@@ -592,14 +863,23 @@ internal fun AssistantVoiceMode(
             heardText = heardText,
             caption = caption,
             onOrb = {
-                when (phase) {
+                if (isLive) {
+                    if (phase == VoicePhase.Speaking) {
+                        liveInterrupt.get()?.invoke()
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    }
+                } else when (phase) {
                     VoicePhase.Listening -> if (hearing) { finish[0] = true; listening[0]?.finish() }
                     VoicePhase.Thinking, VoicePhase.Speaking -> { interrupt(); haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
                     else -> Unit
                 }
             },
             onRetry = { retry++ },
-            onPause = { paused = !paused; if (paused) interrupt() },
+            onPause = {
+                paused = !paused
+                if (isLive) livePause.get()?.invoke(paused)
+                else if (paused) interrupt()
+            },
             onClose = { close(null) },
         )
     }
@@ -631,6 +911,7 @@ internal fun VoiceModeLayout(
     onRetry: () -> Unit,
     onPause: () -> Unit,
     onClose: () -> Unit,
+    liveLabel: String? = null,
 ) {
     val reduce = reducedMotion()
     val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
@@ -685,9 +966,13 @@ internal fun VoiceModeLayout(
             if (phase == VoicePhase.Preparing) {
                 // The engines this session needs must be up before the microphone takes your voice.
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (onDevice) EngineState(stringResource(R.string.voice_mode_engine_device), ready = true, failed = false)
-                    else EngineState(stringResource(R.string.voice_mode_engine_whisper), whisperReady, prepareError != null)
-                    EngineState(stringResource(R.string.voice_mode_engine_voice, voiceLabel), speechReady, prepareError != null)
+                    if (liveLabel != null) {
+                        EngineState(liveLabel, speechReady, prepareError != null)
+                    } else {
+                        if (onDevice) EngineState(stringResource(R.string.voice_mode_engine_device), ready = true, failed = false)
+                        else EngineState(stringResource(R.string.voice_mode_engine_whisper), whisperReady, prepareError != null)
+                        EngineState(stringResource(R.string.voice_mode_engine_voice, voiceLabel), speechReady, prepareError != null)
+                    }
                     prepareError?.let { failure ->
                         Text(failure, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, maxLines = 4, overflow = TextOverflow.Ellipsis)
                         TextButton(onClick = onRetry) { Text(stringResource(R.string.voice_mode_retry)) }
@@ -844,6 +1129,37 @@ private fun EngineState(label: String, ready: Boolean?, failed: Boolean) {
             else -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = palette.muted)
         }
         Text(label, style = MaterialTheme.typography.bodyMedium, color = palette.muted)
+    }
+}
+
+/** Gemini Live model switcher under the chat title. */
+@Composable
+internal fun LiveModelDropdown(
+    models: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    val palette = com.claudewebui.app.ui.theme.PlumTheme.palette
+    var open by remember { mutableStateOf(false) }
+    val label = LIVE_MODEL_LABELS[selected] ?: if (selected.isBlank()) "Klassisch (Mistral)" else selected
+    Box(Modifier.padding(top = 6.dp)) {
+        val source = remember { MutableInteractionSource() }
+        AssistChip(
+            onClick = { open = true },
+            label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            trailingIcon = { Icon(Icons.Outlined.ArrowDropDown, null, Modifier.size(18.dp)) },
+            interactionSource = source, modifier = Modifier.pressScale(source),
+        )
+        DropdownMenu(open, { open = false }) {
+            models.forEach { id ->
+                val chosen = id == selected
+                DropdownMenuItem(
+                    text = { Text(LIVE_MODEL_LABELS[id] ?: id, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    trailingIcon = { if (chosen) Icon(Icons.Outlined.Check, null, tint = palette.accent) },
+                    onClick = { open = false; onSelect(id) },
+                )
+            }
+        }
     }
 }
 

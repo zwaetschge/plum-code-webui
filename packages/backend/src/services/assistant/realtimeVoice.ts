@@ -10,7 +10,7 @@ async function isActiveUser(id: string) {
   return !!(await get("SELECT id FROM users WHERE id=? AND status='active'", id));
 }
 import { all, get, run, transaction } from '../../db/pg.js';
-import { findResource } from './resources.js';
+import { createResource, findResource } from './resources.js';
 import { systemContext } from './apiChats.js';
 import { readModelProvidersForUser } from '../../utils/modelProviderKeys.js';
 import { safeDecrypt } from '../../utils/encryption.js';
@@ -119,8 +119,10 @@ export function setupRealtimeVoice(io: Server, connectUpstream: UpstreamFactory 
   });
 }
 async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
-  const userId = String(socket.data.userId),
-    chatId = String(socket.handshake.auth.chatId ?? '');
+  const userId = String(socket.data.userId);
+  let chatId = String(socket.handshake.auth.chatId ?? '').trim(),
+    autoCreatedChat = false,
+    turnsSaved = 0;
   let upstream: WebSocket | null = null,
     guard: string | null = null,
     closed = false;
@@ -149,6 +151,8 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
       socket.emit('problem', 'Sprachverlauf konnte nicht gespeichert werden.');
     });
     if (guard) await run('DELETE FROM assistant_api_turns WHERE id=? AND chat_id=?', guard, chatId);
+    if (autoCreatedChat && turnsSaved === 0 && chatId)
+      await run('DELETE FROM assistant_resources WHERE id=? AND user_id=?', chatId, userId);
     socket.disconnect(true);
   };
   const lifetime = setTimeout(() => {
@@ -206,7 +210,29 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
       String(socket.handshake.auth.model ?? '') || undefined
     );
     engine = connection.engine;
-    const chat = await findResource(userId, chatId);
+    const chat = chatId
+      ? await findResource(userId, chatId)
+      : await createResource(userId, 'api-chat', 'Sprachgespräch', {
+          providerId: String(
+            socket.handshake.auth.providerId || (engine === 'gemini' ? 'google' : 'openai')
+          ),
+          model: String(
+            socket.handshake.auth.chatModel ||
+              (engine === 'gemini' ? 'gemini-3.8-flash' : connection.model)
+          ),
+          ...(socket.handshake.auth.profileId
+            ? { profileId: String(socket.handshake.auth.profileId) }
+            : {}),
+          projectId: socket.handshake.auth.projectId
+            ? String(socket.handshake.auth.projectId)
+            : null,
+          temporary: Boolean(socket.handshake.auth.temporary),
+          sourceIds: [],
+        });
+    if (!chatId) {
+      chatId = chat.id;
+      autoCreatedChat = true;
+    }
     if (
       chat.kind !== 'api-chat' ||
       (chat.body.temporary && Date.parse(String(chat.body.expiresAt)) <= Date.now())
@@ -364,13 +390,14 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
             : response.status === 'cancelled'
               ? 'stopped'
               : 'failed';
+        const promptText = transcripts.get(state.inputId) ?? 'Sprachnachricht';
         await tx.run(
           'INSERT INTO assistant_api_turns(id,chat_id,seq,payload_hash,prompt,response,status,model,profile_json,source_versions,workbench_json,usage_json,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
           turnId,
           chatId,
           row!.seq,
           createHash('sha256').update(response.id).digest('hex'),
-          transcripts.get(state.inputId) ?? 'Sprachnachricht',
+          promptText,
           state.text,
           status,
           connection.model,
@@ -388,14 +415,17 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
           now
         );
         await tx.run(
-          'UPDATE assistant_resources SET updated_at=? WHERE id=? AND user_id=?',
+          "UPDATE assistant_resources SET title = CASE WHEN title = 'Sprachgespräch' AND ? <> 'Sprachnachricht' THEN ? ELSE title END, updated_at=? WHERE id=? AND user_id=?",
+          promptText,
+          promptText.slice(0, 80),
           now,
           chatId,
           userId
         );
       });
       state.turnId = turnId;
-      socket.emit('saved', { turnId });
+      turnsSaved++;
+      socket.emit('saved', { turnId, chatId });
       if (responses.size > 100)
         for (const [id, value] of responses) {
           if (value.turnId) {
@@ -532,8 +562,13 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
                   : []),
               ]);
             if (!resume && turns.length)
-              socketUp.send(JSON.stringify({ clientContent: { turns, turnComplete: true } }));
-            socket.emit('ready', { model: connection.model, engine: 'gemini', voice: voiceName });
+              socketUp.send(JSON.stringify({ clientContent: { turns, turnComplete: false } }));
+            socket.emit('ready', {
+              chatId,
+              model: connection.model,
+              engine: 'gemini',
+              voice: voiceName,
+            });
             return;
           }
           if (

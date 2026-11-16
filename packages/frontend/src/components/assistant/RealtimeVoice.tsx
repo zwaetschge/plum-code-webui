@@ -38,14 +38,14 @@ export function useLiveOptions() {
  * over to the classic voice mode (`onFallback`).
  */
 export function RealtimeVoice({
-  chatId,
+  chatId = '',
   onSaved,
   autoStart = false,
   voice,
   onFallback,
 }: {
-  chatId: string;
-  onSaved?: () => void;
+  chatId?: string;
+  onSaved?: (info?: { turnId?: string; chatId?: string }) => void;
   autoStart?: boolean;
   /** Stored profile voice; a `gemini:<name>` voice is used for Gemini Live. */
   voice?: string;
@@ -103,7 +103,7 @@ export function RealtimeVoice({
       try {
         const native = nativeShell(),
           token = native?.token ?? useAuthStore.getState().token;
-        const context = new AudioContext({ sampleRate: 24000 });
+        const context = new AudioContext();
         resources.current.context = context;
         await context.resume();
         const media = await navigator.mediaDevices.getUserMedia({
@@ -145,36 +145,40 @@ export function RealtimeVoice({
         socket.on('connect_error', () => fail('Sprachverbindung nicht möglich'));
         socket.on('problem', (message: string) => fail(message));
         socket.on('ready', () => {
-          ready = true;
-          setStatus('Hört zu');
-          setPhase('listening');
-          const input = context.createScriptProcessor(4096, 1, 1);
-          resources.current.input = input;
-          const source = context.createMediaStreamSource(media),
-            silent = context.createGain();
-          silent.gain.value = 0;
-          source.connect(input);
-          input.connect(silent);
-          silent.connect(context.destination);
-          input.onaudioprocess = (e) => {
-            if (!active || media.getAudioTracks()[0]?.enabled === false) return;
-            const samples = e.inputBuffer.getChannelData(0),
-              ratio = context.sampleRate / 24000;
-            let energy = 0;
-            for (const sample of samples) energy += sample * sample;
-            loud.current = Math.min(1, Math.sqrt(energy / samples.length) * 6);
-            const bytes = new Uint8Array(Math.floor(samples.length / ratio) * 2),
-              view = new DataView(bytes.buffer);
-            for (let i = 0; i < bytes.length / 2; i++)
-              view.setInt16(
-                i * 2,
-                Math.max(-32768, Math.min(32767, samples[Math.floor(i * ratio)]! * 32767)),
-                true
-              );
-            let binary = '';
-            for (const b of bytes) binary += String.fromCharCode(b);
-            socket.emit('audio', btoa(binary));
-          };
+          try {
+            ready = true;
+            setStatus('Hört zu');
+            setPhase('listening');
+            const input = context.createScriptProcessor(4096, 1, 1);
+            resources.current.input = input;
+            const source = context.createMediaStreamSource(media),
+              silent = context.createGain();
+            silent.gain.value = 0;
+            source.connect(input);
+            input.connect(silent);
+            silent.connect(context.destination);
+            input.onaudioprocess = (e) => {
+              if (!active || media.getAudioTracks()[0]?.enabled === false) return;
+              const samples = e.inputBuffer.getChannelData(0),
+                ratio = context.sampleRate / 24000;
+              let energy = 0;
+              for (const sample of samples) energy += sample * sample;
+              loud.current = Math.min(1, Math.sqrt(energy / samples.length) * 6);
+              const bytes = new Uint8Array(Math.floor(samples.length / ratio) * 2),
+                view = new DataView(bytes.buffer);
+              for (let i = 0; i < bytes.length / 2; i++)
+                view.setInt16(
+                  i * 2,
+                  Math.max(-32768, Math.min(32767, samples[Math.floor(i * ratio)]! * 32767)),
+                  true
+                );
+              let binary = '';
+              for (const b of bytes) binary += String.fromCharCode(b);
+              socket.emit('audio', btoa(binary));
+            };
+          } catch {
+            fail('Mikrofon oder Audioverbindung nicht verfügbar');
+          }
         });
         socket.on('audio', (encoded: string) => {
           if (!active) return;
@@ -213,7 +217,7 @@ export function RealtimeVoice({
           if (t.role === 'user') setHeard(t.text);
           else setAnswer(t.text);
         });
-        socket.on('saved', () => onSaved?.());
+        socket.on('saved', (info?: { turnId?: string; chatId?: string }) => onSaved?.(info));
         socket.on('disconnect', () => {
           if (active) {
             setStatus('Verbindung beendet');

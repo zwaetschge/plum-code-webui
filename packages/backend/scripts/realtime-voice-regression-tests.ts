@@ -198,6 +198,43 @@ try {
     'Noch nicht fertig.',
     'closing preserves partial spoken reply'
   );
+  // Starting voice mode on a new chat (no chatId yet) creates a chat and names it from the first question.
+  const freshSocket = connect('voice-alice', '');
+  await event(freshSocket, 'ready');
+  const freshItem = randomUUID();
+  for (const e of [
+    { type: 'input_audio_buffer.committed', item_id: freshItem },
+    { type: 'response.created', response: { id: 'fresh-response' } },
+    {
+      type: 'conversation.item.input_audio_transcription.completed',
+      item_id: freshItem,
+      transcript: 'Wie wird das Wetter morgen?',
+    },
+    {
+      type: 'response.output_audio_transcript.delta',
+      response_id: 'fresh-response',
+      delta: 'Morgen scheint die Sonne.',
+    },
+    {
+      type: 'response.done',
+      response: {
+        id: 'fresh-response',
+        status: 'completed',
+        usage: { input_tokens: 12, output_tokens: 8 },
+      },
+    },
+  ])
+    wire!.send(JSON.stringify(e));
+  const savedPayload = (await event(freshSocket, 'saved')) as { chatId?: string };
+  assert(savedPayload?.chatId, 'saved event carries the auto-created chatId');
+  const autoChat = await get(
+    'SELECT title FROM assistant_resources WHERE id=?',
+    savedPayload.chatId
+  );
+  assert.equal(autoChat!.title, 'Wie wird das Wetter morgen?');
+  const freshDone = event(freshSocket, 'disconnect');
+  freshSocket.emit('stop');
+  await freshDone;
   console.log(
     'PASS: authenticated bidirectional audio, owned chat isolation, missing-provider boundary, concurrent-turn guard, real WebSocket continuation, transcript/usage persistence and disconnect cleanup'
   );
