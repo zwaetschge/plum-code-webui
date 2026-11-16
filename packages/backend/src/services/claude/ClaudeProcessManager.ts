@@ -5910,10 +5910,18 @@ Discord Main Gateway:
 
     if (type === 'message_end' && message?.role === 'assistant') {
       this.capturePiUsage(proc, message);
+      const content = piMessageText(message.content);
+      const hasAssistantText = Boolean(proc.streamingText.trim() || content.trim());
+      // agy's stream-json mode can stamp `status: "ERROR"` from a historical
+      // trajectory error step even after streaming a complete final response.
+      // When Antigravity already delivered non-empty assistant text in this
+      // round, treat the round as completed rather than a provider failure.
+      const isSpuriousAgyError =
+        message.stopReason === 'error' && message.provider === 'antigravity' && hasAssistantText;
       // A provider failure ends the round with `stopReason: 'error'`; Pi may
       // still retry. Remember it so the run does not end silently, and forget
       // it once a later round gets through.
-      if (message.stopReason === 'error') {
+      if (message.stopReason === 'error' && !isSpuriousAgyError) {
         proc.piRunError =
           typeof message.errorMessage === 'string' && message.errorMessage.trim()
             ? message.errorMessage.trim()
@@ -5922,7 +5930,6 @@ Discord Main Gateway:
         proc.piRunError = undefined;
       }
       if (proc.streamingText.trim()) return { type: 'content_block_stop' };
-      const content = piMessageText(message.content);
       return content
         ? {
             type: 'assistant',
@@ -6099,11 +6106,11 @@ Discord Main Gateway:
     }
 
     if (type === 'auto_retry_end') {
-      if (event.success === false) {
+      if (event.success === false && proc.piRunError) {
         proc.piRunError =
           typeof event.finalError === 'string' && event.finalError.trim()
             ? event.finalError.trim()
-            : (proc.piRunError ?? 'Alle Wiederholungen sind fehlgeschlagen.');
+            : proc.piRunError;
       }
       proc.currentActivitySummary = 'Agent working';
       return null;
