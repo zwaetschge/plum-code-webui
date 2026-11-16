@@ -229,14 +229,13 @@ async function ownedChat(userId: string, id: string) {
 async function profileBody(userId: string, body: Record<string, unknown>) {
   if (!body.profileId) return null;
   const profile = await findResource(userId, String(body.profileId)).catch(() => null);
-  if (!profile) return null;
-  if (profile.kind !== 'profile') throw new AppError('Profil nicht gefunden', 404, 'NOT_FOUND');
+  if (!profile || profile.kind !== 'profile') return null;
   const row = await get(
     'SELECT body_json FROM assistant_resource_revisions WHERE resource_id=? AND revision=?',
     profile.id,
-    Number(body.profileRevision)
+    Number(body.profileRevision || profile.revision)
   );
-  if (!row) throw new AppError('Profilrevision nicht gefunden', 404, 'NOT_FOUND');
+  if (!row) return profile.body;
   return JSON.parse(row.body_json) as Record<string, unknown>;
 }
 export async function systemContext(

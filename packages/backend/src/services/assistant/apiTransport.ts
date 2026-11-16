@@ -448,6 +448,19 @@ export async function streamApiChat(
       ),
     });
   let response = await post();
+  const fallbackMistralKey =
+    endpoint.id === 'mistral'
+      ? process.env.MISTRAL_VOICE_API_KEY?.trim() || process.env.MISTRAL_API_KEY?.trim()
+      : undefined;
+  if (
+    (response.status === 401 || response.status === 402) &&
+    fallbackMistralKey &&
+    headers.authorization !== `Bearer ${fallbackMistralKey}`
+  ) {
+    await response.body?.cancel();
+    headers.authorization = `Bearer ${fallbackMistralKey}`;
+    response = await post();
+  }
   let detail = '';
   if (!response.ok) {
     detail = await upstreamError(response, endpoint.key);

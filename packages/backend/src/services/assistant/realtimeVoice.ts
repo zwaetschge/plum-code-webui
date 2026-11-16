@@ -221,26 +221,28 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
       String(socket.handshake.auth.model ?? '') || undefined
     );
     engine = connection.engine;
-    const chat = chatId
-      ? await findResource(userId, chatId)
-      : await createResource(userId, 'api-chat', 'Sprachgespräch', {
-          providerId: String(
-            socket.handshake.auth.providerId || (engine === 'gemini' ? 'google' : 'openai')
-          ),
-          model: String(
-            socket.handshake.auth.chatModel ||
-              (engine === 'gemini' ? 'gemini-3.8-flash' : connection.model)
-          ),
-          ...(socket.handshake.auth.profileId
-            ? { profileId: String(socket.handshake.auth.profileId) }
-            : {}),
-          projectId: socket.handshake.auth.projectId
-            ? String(socket.handshake.auth.projectId)
-            : null,
-          temporary: Boolean(socket.handshake.auth.temporary),
-          sourceIds: [],
-        });
-    if (!chatId) {
+    const existingChat = chatId ? await findResource(userId, chatId).catch(() => null) : null;
+    const chat =
+      existingChat && existingChat.kind === 'api-chat'
+        ? existingChat
+        : await createResource(userId, 'api-chat', 'Sprachgespräch', {
+            providerId: String(
+              socket.handshake.auth.providerId || (engine === 'gemini' ? 'google' : 'openai')
+            ),
+            model: String(
+              socket.handshake.auth.chatModel ||
+                (engine === 'gemini' ? 'gemini-3.8-flash' : connection.model)
+            ),
+            ...(socket.handshake.auth.profileId
+              ? { profileId: String(socket.handshake.auth.profileId) }
+              : {}),
+            projectId: socket.handshake.auth.projectId
+              ? String(socket.handshake.auth.projectId)
+              : null,
+            temporary: Boolean(socket.handshake.auth.temporary),
+            sourceIds: [],
+          });
+    if (!existingChat || existingChat.kind !== 'api-chat') {
       chatId = chat.id;
       autoCreatedChat = true;
     }
@@ -265,8 +267,8 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
       }
     const ids = [...((chat.body.sourceIds ?? []) as string[])];
     if (context.profileId) {
-      const profile = await findResource(userId, String(context.profileId));
-      ids.push(...((profile.body.sourceIds ?? []) as string[]));
+      const profile = await findResource(userId, String(context.profileId)).catch(() => null);
+      if (profile) ids.push(...((profile.body.sourceIds ?? []) as string[]));
     }
     if (context.projectId) {
       const projectSources = await all(
@@ -282,8 +284,8 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
           });
     }
     for (const id of ids) {
-      const source = await findResource(userId, id);
-      if (!versions.has(id)) versions.set(id, { id, revision: source.revision });
+      const source = await findResource(userId, id).catch(() => null);
+      if (source && !versions.has(id)) versions.set(id, { id, revision: source.revision });
     }
     const documentVersions = [...versions.values()].slice(0, 20);
     let sourceEvidence: Awaited<ReturnType<typeof taskSourceContext>> = [];

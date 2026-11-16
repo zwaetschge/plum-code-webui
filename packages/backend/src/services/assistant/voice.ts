@@ -248,7 +248,11 @@ async function mistralSpeech(userId: string, voiceId: string, text: string) {
     response = await request(activeVoice, activeKey);
   }
   const fallbackVoiceKey = process.env.MISTRAL_VOICE_API_KEY?.trim();
-  if (response.status === 402 && fallbackVoiceKey && fallbackVoiceKey !== activeKey) {
+  if (
+    (response.status === 401 || response.status === 402) &&
+    fallbackVoiceKey &&
+    fallbackVoiceKey !== activeKey
+  ) {
     await response.body?.cancel();
     activeKey = fallbackVoiceKey;
     response = await request(activeVoice, activeKey);
