@@ -33,7 +33,7 @@ type RealtimeConnection =
 
 async function googleKey(userId: string): Promise<string> {
   const provider = (await readModelProvidersForUser(userId)).find(
-    (p) => p.id === 'google' && p.enabled && p.apiKey
+    (p) => p.id === 'google' && p.apiKey
   );
   // The Live protocol is Google's own. Never send this key to another host.
   if (
@@ -41,7 +41,14 @@ async function googleKey(userId: string): Promise<string> {
     new URL(provider.baseUrl).origin !== 'https://generativelanguage.googleapis.com'
   )
     return '';
-  return provider ? safeDecrypt(provider.apiKey) || '' : '';
+  const decrypted = provider ? safeDecrypt(provider.apiKey) || '' : '';
+  if (decrypted) return decrypted;
+  return (
+    process.env.GEMINI_API_KEY?.trim() ||
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim() ||
+    process.env.GOOGLE_API_KEY?.trim() ||
+    ''
+  );
 }
 
 /** Which live engines this account can use; Gemini first. */

@@ -54,8 +54,14 @@ export function speechKeyFor(
 async function mistralKey(userId: string): Promise<string | null> {
   const providers = await readModelProvidersForUser(userId);
   const mistral = providers.find((provider) => provider.id === 'mistral');
-  if (!mistral?.enabled || !mistral.apiKey) return null;
-  return speechKeyFor(safeDecrypt(mistral.apiKey) || null);
+  if (mistral?.apiKey) {
+    const decrypted = safeDecrypt(mistral.apiKey) || null;
+    const resolved = speechKeyFor(decrypted);
+    if (resolved && (mistral.enabled || resolved === process.env.MISTRAL_VOICE_API_KEY?.trim())) {
+      return resolved;
+    }
+  }
+  return process.env.MISTRAL_VOICE_API_KEY?.trim() || null;
 }
 
 export interface MistralSpeechFailure {
@@ -216,10 +222,10 @@ async function mistralSpeech(userId: string, voiceId: string, text: string) {
       409,
       'VOICE_NOT_CONFIGURED'
     );
-  const request = (voice: string) =>
+  const request = (voice: string, bearer: string = key) =>
     fetch(`${MISTRAL_API}/v1/audio/speech`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: MISTRAL_TTS_MODEL,
         input: text,
@@ -231,12 +237,21 @@ async function mistralSpeech(userId: string, voiceId: string, text: string) {
     }).catch(() => {
       throw new AppError('Mistral ist nicht erreichbar', 503, 'VOICE_UNAVAILABLE');
     });
-  let response = await request(voiceId);
+  let activeVoice = voiceId;
+  let activeKey = key;
+  let response = await request(activeVoice, activeKey);
   // A stored voice from the retired v1 list (e.g. "gb_jane_neutral") no longer
   // exists: speak with Heidi instead of failing the whole voice conversation.
-  if (response.status === 400 && voiceId !== MISTRAL_GERMAN_VOICE.id) {
+  if (response.status === 400 && activeVoice !== MISTRAL_GERMAN_VOICE.id) {
     await response.body?.cancel();
-    response = await request(MISTRAL_GERMAN_VOICE.id);
+    activeVoice = MISTRAL_GERMAN_VOICE.id;
+    response = await request(activeVoice, activeKey);
+  }
+  const fallbackVoiceKey = process.env.MISTRAL_VOICE_API_KEY?.trim();
+  if (response.status === 402 && fallbackVoiceKey && fallbackVoiceKey !== activeKey) {
+    await response.body?.cancel();
+    activeKey = fallbackVoiceKey;
+    response = await request(activeVoice, activeKey);
   }
   if (!response.ok) {
     const refusal = (await response
@@ -306,9 +321,17 @@ export const GEMINI_VOICES: Array<[name: string, character: string]> = [
 
 async function geminiKey(userId: string): Promise<string | null> {
   const providers = await readModelProvidersForUser(userId);
-  const google = providers.find((provider) => provider.id === 'google');
-  if (!google?.enabled || !google.apiKey) return null;
-  return safeDecrypt(google.apiKey) || null;
+  const google = providers.find((provider) => provider.id === 'google' && provider.apiKey);
+  if (google?.apiKey) {
+    const decrypted = safeDecrypt(google.apiKey);
+    if (decrypted) return decrypted;
+  }
+  return (
+    process.env.GEMINI_API_KEY?.trim() ||
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim() ||
+    process.env.GOOGLE_API_KEY?.trim() ||
+    null
+  );
 }
 
 async function geminiVoices(userId: string) {
@@ -457,19 +480,19 @@ async function voiceJson(response: Response): Promise<Record<string, unknown> | 
 }
 export async function assistantVoices(userId: string) {
   // OmniVoice may be down while Mistral still works (and vice versa), so neither blocks the other.
-  const omni = await call(userId, '/api/voices')
-    .then(async (response) => {
-      const data = await voiceJson(response);
-      const voices = Array.isArray(data) ? data : ((data as { voices?: unknown[] }).voices ?? []);
-      return voices.filter(
-        (voice) =>
-          typeof voice === 'object' &&
-          voice !== null &&
-          (voice as { engine?: string }).engine === 'omnivoice'
-      );
-    })
-    .catch(() => null);
-  const [mistral, gemini] = await Promise.all([
+  const [omni, mistral, gemini] = await Promise.all([
+    call(userId, '/api/voices', { signal: AbortSignal.timeout(5000) })
+      .then(async (response) => {
+        const data = await voiceJson(response);
+        const voices = Array.isArray(data) ? data : ((data as { voices?: unknown[] }).voices ?? []);
+        return voices.filter(
+          (voice) =>
+            typeof voice === 'object' &&
+            voice !== null &&
+            (voice as { engine?: string }).engine === 'omnivoice'
+        );
+      })
+      .catch(() => null),
     mistralVoices(userId).catch(() => []),
     geminiVoices(userId).catch(() => []),
   ]);

@@ -751,7 +751,8 @@ internal fun AssistantVoiceMode(
                                     }
                                 }
                                 client.connect()
-                                readyFlag.get() to ended.await()
+                                val endReason = ended.await()
+                                readyFlag.get() to endReason
                             } finally {
                                 liveInterrupt.set(null)
                                 livePause.set(null)
