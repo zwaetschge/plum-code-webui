@@ -132,8 +132,9 @@ assert.match(limits, /USAGE_PROVIDER_LOGO[\s\S]{0,400}vibe: 'vibe',/);
 // No upstream quota API for either Mistral allowance, so neither has history.
 assert.match(limits, /HISTORY_PROVIDERS[\s\S]{0,240}provider !== 'vibe'/);
 // A stored tracker choice must not hide a provider that joined later.
-assert.match(limits, /USAGE_TRACKERS_STORAGE_KEY = 'plum:analytics:usage-limit-trackers:v5'/);
-assert.match(limits, /ADDED_SINCE_V4: UsageLimitTracker\[\] = \['vibe'\]/);
+assert.match(limits, /USAGE_TRACKERS_STORAGE_KEY = 'plum:analytics:usage-limit-trackers:v6'/);
+assert.match(limits, /ADDED_SINCE_V5: UsageLimitTracker\[\] = \['gemini'\]/);
+assert.match(limits, /ADDED_SINCE_V4: UsageLimitTracker\[\] = \['vibe', 'gemini'\]/);
 assert.match(limitsCard, /api\/usage\/plan\/vibe/);
 assert.match(limitsCard, /provider === 'vibe' \? 'vibe' : undefined/);
 assert.match(sessions, /Vibe: 'vibe',/);
