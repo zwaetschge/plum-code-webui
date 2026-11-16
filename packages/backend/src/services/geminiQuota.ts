@@ -231,13 +231,18 @@ export async function getGeminiQuota(): Promise<{
 }
 
 function toWindow(window: GeminiQuotaWindow | null) {
-  return window
-    ? {
-        utilization: window.utilization,
-        resetsAt: window.resetsAt,
-        windowSeconds: window.windowSeconds,
-      }
-    : null;
+  if (!window) return null;
+  const whole =
+    window.utilization >= 100
+      ? 100
+      : window.utilization > 0
+        ? Math.min(99, Math.round(window.utilization))
+        : 0;
+  return {
+    utilization: whole,
+    resetsAt: window.resetsAt,
+    windowSeconds: window.windowSeconds,
+  };
 }
 
 /** `/api/usage/limits?provider=gemini`, in the shared limits shape. */

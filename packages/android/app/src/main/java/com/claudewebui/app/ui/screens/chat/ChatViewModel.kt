@@ -356,7 +356,7 @@ class ChatViewModel(
     /** Reload the quota whenever the session's provider or routed Pi model changes. */
     private fun observeProviderLimits() {
         session
-            .mapNotNull { s -> s?.let { resolveUsageLimitProviderId(it.cliProvider, it.runtime?.model ?: it.cliModel) } }
+            .mapNotNull { s -> s?.let { resolveUsageLimitProviderId(it.cliProvider, it.cliModel) } }
             .distinctUntilChanged()
             .onEach { loadProviderLimits() }
             .launchIn(viewModelScope)
@@ -385,7 +385,7 @@ class ChatViewModel(
         val currentSession = session.value ?: return
         val providerId = resolveUsageLimitProviderId(
             currentSession.cliProvider,
-            currentSession.runtime?.model ?: currentSession.cliModel,
+            currentSession.cliModel,
         ) ?: run {
             _uiState.update { it.copy(providerLimits = null) }
             return

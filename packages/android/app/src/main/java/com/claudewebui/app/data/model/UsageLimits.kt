@@ -1,6 +1,39 @@
 package com.claudewebui.app.data.model
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlin.math.roundToInt
+
+/**
+ * Accepts both integer and fractional percentages (e.g. Gemini quota 7.25)
+ * from `/api/usage/limits` without failing strict `Int` deserialization.
+ */
+object RoundingIntSerializer : KSerializer<Int> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("RoundingInt", PrimitiveKind.INT)
+
+    override fun deserialize(decoder: Decoder): Int {
+        if (decoder is JsonDecoder) {
+            val prim = decoder.decodeJsonElement().jsonPrimitive
+            prim.intOrNull?.let { return it }
+            prim.doubleOrNull?.let { return it.roundToInt() }
+        }
+        return runCatching { decoder.decodeInt() }.getOrDefault(0)
+    }
+
+    override fun serialize(encoder: Encoder, value: Int) {
+        encoder.encodeInt(value)
+    }
+}
 
 /**
  * Models for `GET /api/usage/limits?provider=<id>` — live account quota straight
@@ -14,6 +47,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class UsageLimitWindow(
+    @Serializable(with = RoundingIntSerializer::class)
     val utilization: Int = 0,
     val resetsAt: String? = null,
     val windowSeconds: Long? = null,
@@ -26,6 +60,7 @@ data class UsageLimitWindow(
 @Serializable
 data class AdditionalUsageLimit(
     val name: String,
+    @Serializable(with = RoundingIntSerializer::class)
     val utilization: Int = 0,
     val resetsAt: String? = null,
     val windowSeconds: Long? = null,
