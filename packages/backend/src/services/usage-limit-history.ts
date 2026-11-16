@@ -91,12 +91,14 @@ function metricLabel(provider: TrackedUsageLimitProvider, key: string, fallback?
     if (provider === 'claude') return 'Session';
     if (provider === 'zai') return '5h · Tokens';
     if (provider === 'kimi') return '5h · Coding Plan';
+    if (provider === 'gemini') return 'Gemini · 5 Std.';
     return '5h · Session';
   }
   if (key === 'seven_day') {
     if (provider === 'claude') return 'Weekly · All';
     if (provider === 'zai') return 'Weekly · Tokens';
     if (provider === 'kimi') return 'Weekly · Coding Plan';
+    if (provider === 'gemini') return 'Gemini · Woche';
     return 'Weekly · Total';
   }
   if (key === 'seven_day_sonnet') return 'Weekly · Sonnet';

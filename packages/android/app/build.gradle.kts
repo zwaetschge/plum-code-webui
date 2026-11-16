@@ -79,8 +79,8 @@ android {
         applicationId = "com.claudewebui.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 77
-        versionName = "1.9.25"
+        versionCode = 78
+        versionName = "1.9.26"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

@@ -87,21 +87,23 @@ export function parseAgyUsageScreen(screen: string, now = Date.now()): GeminiQuo
   const start = text.search(/Models\s*&\s*Quota/i);
   const body = start >= 0 ? text.slice(start) : text;
   const headings = [...body.matchAll(/\b([A-Z][A-Z0-9 ,&]*MODELS)\b/g)];
-  const groups: GeminiQuotaGroup[] = [];
-  const seen = new Set<string>();
+  const byName = new Map<string, GeminiQuotaGroup>();
   headings.forEach((heading, index) => {
     const name = heading[1]!.trim();
-    if (seen.has(name)) return; // the TUI repaints; the first full block counts
     const from = heading.index! + heading[0].length;
     const to = headings[index + 1]?.index ?? body.length;
     const block = body.slice(from, to);
     const fiveHour = parseWindow(block, 'Five Hour Limit', FIVE_HOURS, now);
     const weekly = parseWindow(block, 'Weekly Limit', WEEK, now);
     if (!fiveHour && !weekly) return;
-    seen.add(name);
-    groups.push({ name, fiveHour, weekly });
+    const prev = byName.get(name);
+    byName.set(name, {
+      name,
+      fiveHour: fiveHour ?? prev?.fiveHour ?? null,
+      weekly: weekly ?? prev?.weekly ?? null,
+    });
   });
-  return groups;
+  return [...byName.values()];
 }
 
 export function isGeminiQuotaAvailable(): boolean {
@@ -168,13 +170,13 @@ function readAgyUsageScreen(): Promise<string> {
         return;
       }
       if (typed) {
-        const after = plain.slice(plain.search(/Models\s*&\s*Quota/i));
+        const groups = parseAgyUsageScreen(output);
         if (
-          /Models\s*&\s*Quota/i.test(plain) &&
-          (after.match(/Five Hour Limit/gi)?.length ?? 0) >= 2
+          groups.length >= 2 &&
+          groups.every((group) => group.fiveHour !== null && group.weekly !== null)
         ) {
-          // Let the last bar finish painting.
-          setTimeout(() => finish(null), 800);
+          // Both pools (Gemini + Claude/GPT) and both windows (5h + Weekly) are present.
+          setTimeout(() => finish(null), 400);
         }
       }
     });

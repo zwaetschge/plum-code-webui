@@ -74,6 +74,7 @@ export function RealtimeVoice({
     context?: AudioContext;
     input?: ScriptProcessorNode;
     output?: AudioBufferSourceNode[];
+    interrupt?: () => void;
   }>({});
   useEffect(() => {
     if (!open) return;
@@ -98,6 +99,14 @@ export function RealtimeVoice({
           /* already ended */
         }
       next = 0;
+    };
+    resources.current.interrupt = () => {
+      clear();
+      loud.current = 0;
+      resources.current.socket?.emit('interrupt');
+      setAnswer('');
+      setStatus('Hört zu');
+      setPhase('listening');
     };
     const connect = async () => {
       try {
@@ -160,18 +169,24 @@ export function RealtimeVoice({
             input.onaudioprocess = (e) => {
               if (!active || media.getAudioTracks()[0]?.enabled === false) return;
               const samples = e.inputBuffer.getChannelData(0),
-                ratio = context.sampleRate / 24000;
-              let energy = 0;
-              for (const sample of samples) energy += sample * sample;
-              loud.current = Math.min(1, Math.sqrt(energy / samples.length) * 6);
-              const bytes = new Uint8Array(Math.floor(samples.length / ratio) * 2),
-                view = new DataView(bytes.buffer);
-              for (let i = 0; i < bytes.length / 2; i++)
-                view.setInt16(
-                  i * 2,
-                  Math.max(-32768, Math.min(32767, samples[Math.floor(i * ratio)]! * 32767)),
-                  true
-                );
+                ratio = context.sampleRate / 24000,
+                bytes = new Uint8Array(Math.floor(samples.length / ratio) * 2),
+                botSpeaking = pending.length > 0 || context.currentTime < next + 0.45;
+              // Gate loudspeaker echo while the bot is speaking (plus 450 ms room tail):
+              // sending digital silence keeps the stream clock alive without triggering
+              // server-side VAD on the speaker's own voice.
+              if (!botSpeaking) {
+                let energy = 0;
+                for (const sample of samples) energy += sample * sample;
+                loud.current = Math.min(1, Math.sqrt(energy / samples.length) * 6);
+                const view = new DataView(bytes.buffer);
+                for (let i = 0; i < bytes.length / 2; i++)
+                  view.setInt16(
+                    i * 2,
+                    Math.max(-32768, Math.min(32767, samples[Math.floor(i * ratio)]! * 32767)),
+                    true
+                  );
+              }
               let binary = '';
               for (const b of bytes) binary += String.fromCharCode(b);
               socket.emit('audio', btoa(binary));
@@ -197,6 +212,11 @@ export function RealtimeVoice({
           source.onended = () => {
             const i = pending.indexOf(source);
             if (i >= 0) pending.splice(i, 1);
+            if (pending.length === 0 && active) {
+              loud.current = 0;
+              setStatus('Hört zu');
+              setPhase('listening');
+            }
           };
           next = Math.max(next, context.currentTime + 0.02);
           source.start(next);
@@ -208,6 +228,7 @@ export function RealtimeVoice({
           setPhase('speaking');
         });
         socket.on('speech', () => {
+          if (pending.length > 0 || context.currentTime < next + 0.45) return;
           clear();
           setAnswer('');
           setStatus('Hört zu');
@@ -290,6 +311,11 @@ export function RealtimeVoice({
             </p>
           )}
           <div className="flex gap-2">
+            {phase === 'speaking' && (
+              <Button variant="secondary" onClick={() => resources.current.interrupt?.()}>
+                Unterbrechen
+              </Button>
+            )}
             <Button
               variant="outline"
               disabled={!!error}

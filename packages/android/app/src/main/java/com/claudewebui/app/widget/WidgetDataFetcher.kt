@@ -168,9 +168,17 @@ object WidgetDataFetcher {
                 }
                 fun reset(iso: String?) = WidgetLimits.parseResetMs(iso)
                 buildList {
-                    data.fiveHour?.let { add(WLimit(provider.label, "5h", it.utilization, color, reset(it.resetsAt))) }
+                    val isGeminiDual = provider == UsageLimitProvider.GEMINI && data.additional.isNotEmpty()
+                    data.fiveHour?.let {
+                        val winLabel = if (isGeminiDual) "Gemini · 5h" else "5h"
+                        add(WLimit(provider.label, winLabel, it.utilization, color, reset(it.resetsAt)))
+                    }
                     data.sevenDay?.let {
-                        val window = if (provider.isMonthlyPlan) "Month" else "Weekly"
+                        val window = when {
+                            isGeminiDual -> "Gemini · Weekly"
+                            provider.isMonthlyPlan -> "Month"
+                            else -> "Weekly"
+                        }
                         // The Mistral ledgers carry their billing month end on
                         // the plan, not on the window.
                         val resetsAt = it.resetsAt ?: data.planUsage?.periodEnd?.takeIf { provider.isMonthlyPlan }
@@ -178,6 +186,11 @@ object WidgetDataFetcher {
                     }
                     data.sevenDaySonnet?.let {
                         add(WLimit(provider.label, "Weekly Sonnet", it.utilization, color, reset(it.resetsAt)))
+                    }
+                    if (isGeminiDual) {
+                        data.additional.forEach { extra ->
+                            add(WLimit(provider.label, extra.name, extra.utilization, color, reset(extra.resetsAt)))
+                        }
                     }
                 }
             }

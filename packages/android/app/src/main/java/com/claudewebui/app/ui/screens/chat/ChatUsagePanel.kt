@@ -109,18 +109,33 @@ internal fun UsageBanner(usage: UsageData?, session: Session?, limits: UsageLimi
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(0.9f),
             )
+            val isDualPool = (limits?.additional?.size ?: 0) >= 2
             val windows = buildList {
-                limits?.fiveHour?.let { add("5h" to it) }
+                limits?.fiveHour?.let { add((if (isDualPool) "Gem 5h" else "5h") to it) }
                 limits?.sevenDay?.let {
                     // Vibe reports its billing month in the long slot, exactly
                     // like the Mistral API plan; labelling it "Week" would
                     // promise a reset that does not happen for another month.
-                    val label = if (session?.cliProvider == CLIProvider.VIBE) {
-                        stringResource(R.string.analytics_window_month)
-                    } else {
-                        stringResource(R.string.chat_week)
+                    val label = when {
+                        isDualPool -> "Gem Wk"
+                        session?.cliProvider == CLIProvider.VIBE -> stringResource(R.string.analytics_window_month)
+                        else -> stringResource(R.string.chat_week)
                     }
                     add(label to it)
+                }
+                limits?.additional?.forEachIndexed { idx, extra ->
+                    val shortLabel = when {
+                        isDualPool && idx == 0 -> "C+G 5h"
+                        isDualPool && idx == 1 -> "C+G Wk"
+                        else -> extra.name
+                    }
+                    add(
+                        shortLabel to com.claudewebui.app.data.model.UsageLimitWindow(
+                            utilization = extra.utilization,
+                            resetsAt = extra.resetsAt,
+                            windowSeconds = extra.windowSeconds,
+                        ),
+                    )
                 }
             }
             if (windows.isEmpty()) {

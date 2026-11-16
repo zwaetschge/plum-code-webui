@@ -353,25 +353,46 @@ class ChatViewModel(
     // Provider account limits
     // ========================================================================
 
-    /** Reload the quota whenever the session's provider appears or changes. */
+    /** Reload the quota whenever the session's provider or routed Pi model changes. */
     private fun observeProviderLimits() {
         session
-            .mapNotNull { it?.cliProvider }
+            .mapNotNull { s -> s?.let { resolveUsageLimitProviderId(it.cliProvider, it.runtime?.model ?: it.cliModel) } }
             .distinctUntilChanged()
             .onEach { loadProviderLimits() }
             .launchIn(viewModelScope)
     }
 
+    private fun resolveUsageLimitProviderId(cliProvider: com.claudewebui.app.data.model.CLIProvider, rawModel: String?): String? {
+        if (cliProvider != com.claudewebui.app.data.model.CLIProvider.PI) {
+            return cliProvider.name.lowercase()
+        }
+        val model = rawModel?.trim()?.lowercase().orEmpty()
+        return when {
+            model.startsWith("antigravity/") -> "gemini"
+            model.startsWith("alibaba-token-plan/") -> "alibaba"
+            model.startsWith("mistral/") -> "mistral"
+            model.startsWith("z-ai/") || model.startsWith("zai/") || model.startsWith("glm-") -> "zai"
+            else -> null
+        }
+    }
+
     /**
      * Live account quota (5h/weekly windows) of the active provider. Providers
-     * without an account of their own (Pi) answer `supported: false`
+     * without an account of their own (unrouted Pi) answer `supported: false`
      * and the row simply stays hidden.
      */
     fun loadProviderLimits() {
-        val provider = session.value?.cliProvider ?: return
+        val currentSession = session.value ?: return
+        val providerId = resolveUsageLimitProviderId(
+            currentSession.cliProvider,
+            currentSession.runtime?.model ?: currentSession.cliModel,
+        ) ?: run {
+            _uiState.update { it.copy(providerLimits = null) }
+            return
+        }
         limitsJob?.cancel()
         limitsJob = viewModelScope.launch {
-            val response = runCatching { api.getUsageLimits(provider.name.lowercase()) }.getOrNull()
+            val response = runCatching { api.getUsageLimits(providerId) }.getOrNull()
             // An unreachable endpoint says nothing about the account — keep
             // whatever was shown rather than blanking the row.
             if (response != null) {

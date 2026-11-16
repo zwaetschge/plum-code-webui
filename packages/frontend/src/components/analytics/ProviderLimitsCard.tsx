@@ -160,13 +160,20 @@ export function ProviderLimitsCard({
   );
 }
 
+function windowLabel(window: LimitWindowView): string {
+  return window.subtitle ? `${window.title} (${window.subtitle})` : window.title;
+}
+
 function LimitTile({ entry }: { entry: ProviderLimitEntry }) {
   const { tracker, provider, data, error } = entry;
   const color = USAGE_PROVIDER_COLORS[provider];
   const windows = limitWindows(provider, data);
   // The window closest to its cap is the one that decides whether work stops.
   const binding = [...windows].sort((a, b) => b.utilization - a.utilization)[0];
-  const others = windows.filter((window) => window !== binding).slice(0, 2);
+  const others = windows.filter((window) => window !== binding).slice(0, 3);
+  const isDualPool = provider === 'gemini' && windows.length >= 4;
+  const geminiPool = isDualPool ? windows.slice(0, 2) : [];
+  const claudeGptPool = isDualPool ? windows.slice(2, 4) : [];
 
   return (
     <div className="analytics-limit-tile" style={{ '--limit-color': color } as CSSProperties}>
@@ -175,11 +182,48 @@ function LimitTile({ entry }: { entry: ProviderLimitEntry }) {
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{USAGE_PROVIDER_LABELS[provider]}</p>
           <p className="truncate text-[11px] text-muted-foreground">
-            {binding ? (formatUsage(binding) ?? binding.title) : formatSource(data.source)}
+            {isDualPool
+              ? '2 Pools · Gemini & Claude + GPT'
+              : binding
+                ? (formatUsage(binding) ?? windowLabel(binding))
+                : formatSource(data.source)}
           </p>
         </div>
       </div>
-      {binding ? (
+      {isDualPool ? (
+        <div className="mt-2.5 space-y-2">
+          {[
+            { label: 'Gemini', items: geminiPool },
+            { label: 'Claude + GPT', items: claudeGptPool },
+          ].map((pool) => {
+            const top = [...pool.items].sort((a, b) => b.utilization - a.utilization)[0];
+            if (!top) return null;
+            const five = pool.items[0];
+            const week = pool.items[1];
+            return (
+              <div key={pool.label} className="space-y-1">
+                <div className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="font-medium text-foreground/90">{pool.label}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {five ? `5h ${Math.round(five.utilization)}%` : ''}
+                    {five && week ? ' · ' : ''}
+                    {week ? `Woche ${Math.round(week.utilization)}%` : ''}
+                  </span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${Math.min(100, Math.max(top.utilization, 1))}%`,
+                      backgroundColor: barColor(top.utilization, color),
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : binding ? (
         <>
           <div className="mt-3 flex items-center gap-2.5">
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
@@ -196,9 +240,11 @@ function LimitTile({ entry }: { entry: ProviderLimitEntry }) {
             </span>
           </div>
           <p className="mt-2 truncate text-[11px] text-muted-foreground">
-            {binding.resetsAt ? `Resets ${formatResetDelta(binding.resetsAt)}` : binding.title}
+            {binding.resetsAt
+              ? `Resets ${formatResetDelta(binding.resetsAt)}`
+              : windowLabel(binding)}
             {others
-              .map((window) => ` · ${window.title} ${Math.round(window.utilization)}%`)
+              .map((window) => ` · ${windowLabel(window)} ${Math.round(window.utilization)}%`)
               .join('')}
           </p>
         </>

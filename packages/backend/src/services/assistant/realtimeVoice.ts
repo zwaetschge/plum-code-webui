@@ -132,7 +132,8 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
   let engine: 'openai' | 'gemini' = 'openai';
   let chain = Promise.resolve(),
     inputId = '',
-    activeResponse = '';
+    activeResponse = '',
+    geminiMutedTurn = false;
   const transcripts = new Map<string, string>();
   const responses = new Map<string, { inputId: string; text: string; turnId?: string }>();
   let savePending: () => Promise<void> = async () => {};
@@ -200,7 +201,10 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
     );
   });
   socket.on('interrupt', () => {
-    // Gemini interrupts itself when it hears the user (server-side activity detection).
+    if (engine === 'gemini') {
+      geminiMutedTurn = true;
+      return;
+    }
     if (engine === 'openai' && upstream?.readyState === WebSocket.OPEN && activeResponse)
       upstream.send(JSON.stringify({ type: 'response.cancel', response_id: activeResponse }));
   });
@@ -587,16 +591,22 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
           if (message.voiceActivity?.type === 'ACTIVITY_START') socket.emit('speech');
           const content = message.serverContent;
           if (content) {
-            if (content.interrupted) socket.emit('speech');
-            for (const part of content.modelTurn?.parts ?? [])
-              if (part.inlineData?.data) socket.emit('audio', part.inlineData.data);
+            if (content.interrupted) {
+              geminiMutedTurn = false;
+              socket.emit('speech');
+            }
             if (content.inputTranscription?.text) {
+              geminiMutedTurn = false;
               heard = (heard + content.inputTranscription.text).slice(0, 20000);
               socket.emit('transcript', { role: 'user', text: heard.trim() });
             }
-            if (content.outputTranscription?.text) {
-              said = (said + content.outputTranscription.text).slice(0, 50000);
-              socket.emit('transcript', { role: 'assistant', text: said.trim() });
+            if (!geminiMutedTurn) {
+              for (const part of content.modelTurn?.parts ?? [])
+                if (part.inlineData?.data) socket.emit('audio', part.inlineData.data);
+              if (content.outputTranscription?.text) {
+                said = (said + content.outputTranscription.text).slice(0, 50000);
+                socket.emit('transcript', { role: 'assistant', text: said.trim() });
+              }
             }
           }
           if (message.usageMetadata) {
@@ -607,7 +617,10 @@ async function connectVoice(socket: Socket, connectUpstream: UpstreamFactory) {
             usage.cached += Number(meta.cachedContentTokenCount ?? 0);
           }
           const status = content?.interactionStatus ?? message.interactionStatus;
-          if (content?.turnComplete && status !== 'IN_PROGRESS') finishTurn();
+          if (content?.turnComplete && status !== 'IN_PROGRESS') {
+            geminiMutedTurn = false;
+            finishTurn();
+          }
           if (message.toolCall?.functionCalls?.length)
             void (async () => {
               const calls = message.toolCall.functionCalls as Array<{

@@ -79,6 +79,7 @@ import java.io.File
 import java.net.URI
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -530,8 +531,9 @@ internal fun AssistantVoiceMode(
                             val scope = this
                             val endpoint = com.claudewebui.app.core.network.socketEndpoint(requireNotNull(TokenStore.getServerUrl()))
                             val token = requireNotNull(TokenStore.getToken())
-                            val output = Channel<Pair<Int, ByteArray>>(64)
+                            val output = Channel<Pair<Int, ByteArray>>(Channel.UNLIMITED)
                             val generation = AtomicInteger(0)
+                            val speakingUntilMs = AtomicLong(0L)
                             val readyFlag = AtomicBoolean(false)
                             val muteFlag = AtomicBoolean(paused)
                             val ended = CompletableDeferred<String>()
@@ -539,6 +541,10 @@ internal fun AssistantVoiceMode(
                             val recordRef = AtomicReference<AudioRecord?>()
                             val trackRef = AtomicReference<AudioTrack?>()
                             val jobs = mutableListOf<Job>()
+                            val audioManager = context.getSystemService(AudioManager::class.java)
+                            val prevMode = audioManager?.mode ?: AudioManager.MODE_NORMAL
+                            @Suppress("DEPRECATION")
+                            val prevSpeaker = audioManager?.isSpeakerphoneOn ?: false
                             var echo: AcousticEchoCanceler? = null
                             var suppressor: NoiseSuppressor? = null
                             try {
@@ -555,6 +561,7 @@ internal fun AssistantVoiceMode(
                                 socketRef.set(client)
                                 val flushOutput = {
                                     generation.incrementAndGet()
+                                    speakingUntilMs.set(0L)
                                     runCatching { trackRef.get()?.apply { pause(); flush(); play() } }
                                     speakLevel.floatValue = 0f
                                 }
@@ -592,10 +599,17 @@ internal fun AssistantVoiceMode(
                                     }
                                     jobs += scope.launch(Dispatchers.IO) {
                                         try {
+                                            runCatching {
+                                                audioManager?.mode = AudioManager.MODE_IN_COMMUNICATION
+                                                if (!hasExternalAudioOutput(audioManager)) {
+                                                    @Suppress("DEPRECATION")
+                                                    audioManager?.isSpeakerphoneOn = true
+                                                }
+                                            }
                                             val outRate = 24000
                                             val minTrack = AudioTrack.getMinBufferSize(outRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
                                             val audio = AudioTrack.Builder()
-                                                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                                                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
                                                 .setAudioFormat(AudioFormat.Builder().setSampleRate(outRate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
                                                 .setBufferSizeInBytes(max(minTrack * 4, outRate * 2))
                                                 .setTransferMode(AudioTrack.MODE_STREAM)
@@ -618,9 +632,20 @@ internal fun AssistantVoiceMode(
                                             input.startRecording()
                                             jobs += scope.launch(Dispatchers.IO) {
                                                 val samples = ShortArray(recRate / 10)
+                                                val silent24 = ByteArray((recRate / 10) * 2)
+                                                val silent16 = ByteArray(((recRate / 10) * 3 / 2) * 2)
                                                 while (isActive) {
                                                     val n = input.read(samples, 0, samples.size)
                                                     if (n <= 0) break
+                                                    val botSpeaking = System.currentTimeMillis() < speakingUntilMs.get()
+                                                    if (botSpeaking) {
+                                                        micLevel.floatValue = 0f
+                                                        if (!muteFlag.get() && TokenStore.assistantOwnerKey() == owner) {
+                                                            val silent = if (recRate == 24000) silent24 else silent16
+                                                            client.emit("audio", Base64.encodeToString(silent, Base64.NO_WRAP))
+                                                        }
+                                                        continue
+                                                    }
                                                     var sum = 0.0
                                                     for (i in 0 until n) sum += samples[i].toDouble() * samples[i]
                                                     val rms = sqrt(sum / n).toFloat()
@@ -664,12 +689,19 @@ internal fun AssistantVoiceMode(
                                                         }
                                                         speakLevel.floatValue = min(1f, sqrt(sum / (count / 2)).toFloat() / 6000f)
                                                         audio.write(bytes, at, count, AudioTrack.WRITE_BLOCKING)
+                                                        speakingUntilMs.updateAndGet { max(it, System.currentTimeMillis() + 500L) }
                                                         at += count
                                                     }
                                                     if (output.isEmpty) {
                                                         speakLevel.floatValue = 0f
-                                                        withContext(Dispatchers.Main) {
-                                                            if (phase == VoicePhase.Speaking) phase = if (muteFlag.get()) VoicePhase.Paused else VoicePhase.Listening
+                                                        val remainMs = speakingUntilMs.get() - 500L - System.currentTimeMillis()
+                                                        if (remainMs > 0L && epoch == generation.get()) {
+                                                            delay(min(remainMs, 1500L))
+                                                        }
+                                                        if (output.isEmpty && epoch == generation.get()) {
+                                                            withContext(Dispatchers.Main) {
+                                                                if (phase == VoicePhase.Speaking) phase = if (muteFlag.get()) VoicePhase.Paused else VoicePhase.Listening
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -682,11 +714,16 @@ internal fun AssistantVoiceMode(
                                 client.on("audio") { args ->
                                     runCatching {
                                         val bytes = Base64.decode(args.first().toString(), Base64.DEFAULT)
+                                        val now = System.currentTimeMillis()
+                                        val base = max(now, speakingUntilMs.get() - 500L)
+                                        val durationMs = (bytes.size.toLong() * 1000L) / 48000L
+                                        speakingUntilMs.set(base + durationMs + 500L)
                                         output.trySend(generation.get() to bytes)
                                         scope.launch(Dispatchers.Main) { if (!muteFlag.get()) phase = VoicePhase.Speaking }
                                     }
                                 }
                                 client.on("speech") {
+                                    if (System.currentTimeMillis() < speakingUntilMs.get()) return@on
                                     flushOutput()
                                     scope.launch(Dispatchers.Main) {
                                         caption = ""
@@ -725,6 +762,11 @@ internal fun AssistantVoiceMode(
                                 echo?.release(); suppressor?.release()
                                 output.close(); jobs.forEach { it.cancel() }
                                 runCatching { trackRef.getAndSet(null)?.apply { pause(); flush(); release() } }
+                                runCatching {
+                                    @Suppress("DEPRECATION")
+                                    audioManager?.isSpeakerphoneOn = prevSpeaker
+                                    audioManager?.mode = prevMode
+                                }
                             }
                         }
                     } ?: continue

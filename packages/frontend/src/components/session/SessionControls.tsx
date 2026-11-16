@@ -33,6 +33,7 @@ interface UsageLimitData {
   fiveHour: { utilization: number; resetsAt: string | null } | null;
   sevenDay: { utilization: number; resetsAt: string | null } | null;
   sevenDaySonnet: { utilization: number; resetsAt: string | null } | null;
+  additional?: Array<{ name: string; utilization: number; resetsAt: string | null }>;
 }
 
 interface UsageLimitsResponse {
@@ -314,6 +315,14 @@ export function ContextPopover({
         resetsAt: usageLimits.sevenDaySonnet.resetsAt,
       });
     }
+    for (const extra of usageLimits.additional ?? []) {
+      limitBars.push({
+        key: `extra-${extra.name}`,
+        label: extra.name,
+        value: extra.utilization,
+        resetsAt: extra.resetsAt,
+      });
+    }
   }
 
   // Plan-period providers (a prepaid allotment, a monthly budget) have no
@@ -322,6 +331,10 @@ export function ContextPopover({
     resolvedUsageProvider !== 'alibaba' &&
     resolvedUsageProvider !== 'mistral' &&
     resolvedUsageProvider !== 'vibe';
+  const isAntigravityDualPool =
+    resolvedUsageProvider === 'gemini' && (usageLimits?.additional?.length ?? 0) >= 2;
+  const extraFiveHour = isAntigravityDualPool ? (usageLimits?.additional?.[0] ?? null) : null;
+  const extraWeekly = isAntigravityDualPool ? (usageLimits?.additional?.[1] ?? null) : null;
   const sidebarMeters = [
     ...(labels && providerShortLabel
       ? [
@@ -329,23 +342,49 @@ export function ContextPopover({
             ? [
                 {
                   key: 'five-hour',
-                  label: labels.session.title,
+                  label: isAntigravityDualPool ? 'Gem 5h' : labels.session.title,
                   value: usageLimits?.fiveHour?.utilization ?? null,
-                  title: `${providerShortLabel} ${labels.session.title} limit`,
+                  title: `${providerShortLabel} ${labels.session.title}${labels.session.subtitle ? ` (${labels.session.subtitle})` : ''} limit`,
                   tone: 'session',
                 },
               ]
             : []),
           {
             key: 'weekly',
-            label: hasShortWindow ? 'Weekly' : (labels.weeklyAll?.title ?? 'Weekly'),
+            label: isAntigravityDualPool
+              ? 'Gem Wk'
+              : hasShortWindow
+                ? 'Weekly'
+                : (labels.weeklyAll?.title ?? 'Weekly'),
             value:
               usageLimits?.sevenDay?.utilization ??
               usageLimits?.sevenDaySonnet?.utilization ??
               null,
-            title: `${providerShortLabel} ${hasShortWindow ? 'weekly' : (labels.weeklyAll?.title ?? 'weekly').toLowerCase()} limit`,
+            title: `${providerShortLabel} ${hasShortWindow ? 'weekly' : (labels.weeklyAll?.title ?? 'weekly').toLowerCase()}${labels.weeklyAll?.subtitle ? ` (${labels.weeklyAll.subtitle})` : ''} limit`,
             tone: 'weekly',
           },
+          ...(extraFiveHour
+            ? [
+                {
+                  key: 'extra-five-hour',
+                  label: 'C+G 5h',
+                  value: extraFiveHour.utilization,
+                  title: extraFiveHour.name,
+                  tone: 'session',
+                },
+              ]
+            : []),
+          ...(extraWeekly
+            ? [
+                {
+                  key: 'extra-weekly',
+                  label: 'C+G Wk',
+                  value: extraWeekly.utilization,
+                  title: extraWeekly.name,
+                  tone: 'weekly',
+                },
+              ]
+            : []),
         ]
       : []),
     {

@@ -342,10 +342,17 @@ class AnalyticsViewModel(
         }
 
         val windows = buildList {
-            data.fiveHour?.let { add(ProviderLimitWindow("5-hour", it.utilization, it.resetsAt)) }
+            data.fiveHour?.let {
+                val label = if (provider == UsageLimitProvider.GEMINI) "Gemini · 5 Std." else "5-hour"
+                add(ProviderLimitWindow(label, it.utilization, it.resetsAt))
+            }
             data.sevenDay?.let {
                 // The Mistral plan ledgers measure a billing month, not a week.
-                val label = if (provider.isMonthlyPlan) "Monthly" else "Weekly"
+                val label = when {
+                    provider == UsageLimitProvider.GEMINI -> "Gemini · Woche"
+                    provider.isMonthlyPlan -> "Monthly"
+                    else -> "Weekly"
+                }
                 add(ProviderLimitWindow(label, it.utilization, it.resetsAt))
             }
             data.sevenDaySonnet?.let {
